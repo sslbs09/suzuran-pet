@@ -29,6 +29,14 @@ jobs:
       - name: 打包桌宠（electron-packager）
         run: npm run dist
 
+      - name: 精简语言包（只留中文/英文）
+        shell: pwsh
+        run: |
+          $folder = Get-ChildItem dist | Select-Object -First 1
+          Get-ChildItem "$($folder.FullName)\locales" -Filter "*.pak" |
+            Where-Object { $_.Name -notin @("zh-CN.pak", "en-US.pak") } |
+            Remove-Item -Force
+
       - name: 压缩为 zip
         shell: pwsh
         run: |
