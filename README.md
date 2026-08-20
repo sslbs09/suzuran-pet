@@ -1,6 +1,7 @@
 # 苏苏洛桌宠 · 1.0 正式版（SuzuranPet）
 
 Q 版狐狸医师桌宠：悬浮在桌面上，日常聊天陪伴。**免安装、绿色版**——解压后双击 exe 即用，无需 Node / Python（不开语音时）。
+感谢https://github.com/High-Logic/Genie/tree/master的开源。
 
 ## 快速开始
 
@@ -19,7 +20,7 @@ Q 版狐狸医师桌宠：悬浮在桌面上，日常聊天陪伴。**免安装�
 | Kimi（月之暗面） | `https://api.moonshot.cn/v1` | 长上下文 |
 | OpenAI | `https://api.openai.com/v1` | 需科学上网 |
 | 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4` | 国产免费额度 |
-| 阿里云百炼 Qwen | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 国产 |
+| 阿里云百炼 Qwen | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 国产多模型体验 |
 | 硅基流动 | `https://api.siliconflow.cn/v1` | 聚合多家模型 |
 | Ollama（本地） | `http://localhost:11434/v1` | 免费、不联网，无需 Key |
 | Anthropic Claude | `https://api.anthropic.com` | 协议类型选 Anthropic |
