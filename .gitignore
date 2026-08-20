@@ -1,0 +1,18 @@
+# 依赖与构建产物
+node_modules/
+dist/
+
+# 运行数据
+data/
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 运行时备份（首次打开表情管理时自动生成）
+renderer/sprites/default/
+
+# 本地环境
+.env
+.env.local

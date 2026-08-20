@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>苏苏洛使用说明</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: linear-gradient(160deg, #fdf8f2 0%, #eef6fc 100%);
+    color: #44505c;
+    padding: 22px 26px 26px;
+    line-height: 1.7;
+    font-size: 13px;
+  }
+  h1 {
+    font-size: 20px;
+    color: #7aa9c9;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .sub { color: #9ab3c6; font-size: 12px; margin-bottom: 16px; }
+  h2 {
+    font-size: 14px;
+    color: #5f8db0;
+    margin: 16px 0 6px;
+    padding-left: 8px;
+    border-left: 3px solid #8ec7e8;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  td {
+    padding: 5px 8px;
+    border-bottom: 1px dashed #d8e6f0;
+    vertical-align: top;
+  }
+  td.k { width: 42%; color: #5f8db0; font-weight: 600; white-space: nowrap; }
+  .tag {
+    display: inline-block;
+    background: #eaf5fc;
+    color: #4a7ea6;
+    border-radius: 4px;
+    padding: 0 5px;
+    font-size: 12px;
+    margin-right: 4px;
+  }
+  .note {
+    background: #fff8ec;
+    border: 1px solid #f0dfc0;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: #8a6d3b;
+    margin-top: 14px;
+  }
+  .foot { text-align: center; color: #a8bfcf; font-size: 11px; margin-top: 18px; }
+</style>
+</head>
+<body>
+  <h1>🦊 苏苏洛 · 使用说明</h1>
+  <div class="sub">罗德岛医疗干员 · 你的专属桌宠（分享版）</div>
+
+  <h2>快速开始（三步）</h2>
+  <table>
+    <tr><td class="k">1. 右键托盘图标</td><td>「⚙️ 设置」→ 选择服务商（DeepSeek / Kimi / OpenAI / 本地 Ollama…）→ 填写 API Key →「测试连接」→「保存」</td></tr>
+    <tr><td class="k">2. 设置称呼</td><td>在设置里把「桌宠对你的称呼」改成你喜欢的名字（人设里会自动替换）</td></tr>
+    <tr><td class="k">3. 开始聊天</td><td>单击小狐狸弹出输入框，回车发送；想改人设就打开「⚙️ 设置」→「人设」直接编辑</td></tr>
+  </table>
+
+  <h2>日常操作</h2>
+  <table>
+    <tr><td class="k">单击小狐狸</td><td>打开 / 关闭输入栏（聊天框）</td></tr>
+    <tr><td class="k">按住拖动</td><td>移动桌宠（对话框跟随）</td></tr>
+    <tr><td class="k">右键小狐狸</td><td>隐藏到托盘（<span class="tag">Alt+Shift+S</span> 全局隐藏/显示）</td></tr>
+    <tr><td class="k">透明区域</td><td>点击穿透，完全不影响其他应用操作</td></tr>
+    <tr><td class="k">托盘图标</td><td>单击隐藏/显示；右键有「设置 / 使用说明 / 语音部署与训练 / 重载人设 / 退出」</td></tr>
+  </table>
+
+  <h2>聊天</h2>
+  <table>
+    <tr><td class="k">直接输入文字</td><td>日常聊天，苏苏洛用罗德岛医师口吻回你</td></tr>
+    <tr><td class="k"><span class="tag">■</span> 停止按钮</td><td>中断当前回复</td></tr>
+    <tr><td class="k">聊天记忆</td><td>自动记住最近若干轮对话（可在设置里调整）</td></tr>
+  </table>
+
+  <h2>语音（可选，默认关闭）</h2>
+  <table>
+    <tr><td class="k">默认状态</td><td>语音关闭，桌宠用文字气泡交流，无需任何额外安装</td></tr>
+    <tr><td class="k">想开语音？</td><td>托盘 →「🎤 语音部署与训练」打开指南，按方案选一个（系统语音零配置 / edge-tts / 本地克隆音色 / 百炼 CosyVoice）</td></tr>
+    <tr><td class="k">🔊/🔇 按钮</td><td>输入栏右侧一键开关语音</td></tr>
+  </table>
+
+  <div class="note">💡 小提示：没配 API Key 时首次启动会自动弹出设置窗口；换肤/改人设都不需要重启，托盘「重载人设」立即生效。</div>
+  <div class="foot">—— 苏苏洛桌宠 · 分享版 ——</div>
+</body>
+</html>

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>苏苏洛 · 音色克隆训练指南</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: linear-gradient(160deg, #fdf8f2 0%, #eef6fc 100%);
+    color: #44505c;
+    padding: 26px 34px 40px;
+    line-height: 1.8;
+    font-size: 14px;
+    max-width: 860px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 22px; color: #7aa9c9; margin-bottom: 4px; }
+  .sub { color: #9ab3c6; font-size: 13px; margin-bottom: 18px; }
+  h2 { font-size: 17px; color: #5f8db0; margin: 26px 0 10px; padding-left: 10px; border-left: 4px solid #8ec7e8; }
+  h3 { font-size: 15px; color: #6b96b5; margin: 16px 0 6px; }
+  .card { background: #fff; border: 1px solid #e3eef6; border-radius: 12px; padding: 16px 20px; margin-bottom: 14px; }
+  .tag { display: inline-block; background: #eaf5fc; color: #4a7ea6; border-radius: 5px; padding: 1px 8px; font-size: 12px; margin-right: 6px; }
+  .tag.green { background: #e8f7ec; color: #3c8a55; }
+  .tag.orange { background: #fff4e5; color: #b57a24; }
+  code, .code { background: #eef3f7; padding: 1px 6px; border-radius: 4px; font-family: Consolas, "Microsoft YaHei", monospace; font-size: 13px; }
+  pre { background: #26323e; color: #d8e6f0; border-radius: 8px; padding: 12px 16px; overflow-x: auto; margin: 8px 0; font-family: Consolas, monospace; font-size: 12.5px; line-height: 1.6; }
+  ol, ul { padding-left: 22px; }
+  li { margin-bottom: 4px; }
+  .note { background: #fff8ec; border: 1px solid #f0dfc0; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #8a6d3b; margin-top: 10px; }
+  .foot { text-align: center; color: #a8bfcf; font-size: 12px; margin-top: 30px; }
+</style>
+</head>
+<body>
+  <h1>🧪 音色克隆训练指南</h1>
+  <div class="sub">想让苏苏洛（或任意角色）的声音更像原声？两条路：零样本克隆（快）或微调训练（精）。</div>
+
+  <h2>先弄清：谁负责什么</h2>
+  <div class="card">
+    <p>本桌宠的本地语音用 <b>Genie</b> 推理（基于开源项目 <b>GPT-SoVITS V2</b> 的轻量 CPU 引擎）。</p>
+    <ul>
+      <li><b>Genie</b>：负责加载模型、参考音频克隆、把 GPT-SoVITS 的 PyTorch 模型转成 ONNX、提供 API。</li>
+      <li><b>GPT-SoVITS</b>：负责「训练」——用你自己的音频数据微调出更贴合的音色模型。</li>
+      <li>训练产出的 <code>.pth</code> + <code>.ckpt</code> 用 Genie 的 <code>convert_to_onnx</code> 转成 ONNX 后即可使用。</li>
+    </ul>
+  </div>
+
+  <h2>路线 A：零样本克隆（最简单，几分钟）</h2>
+  <div class="card">
+    <span class="tag green">无需训练</span>
+    <p>💡 <b>程序内一键完成：</b>托盘 →「🎙️ 音色克隆与训练」窗口 → 选参考音频、填原文 →「试听」→「应用音色」即可，下面步骤交给程序处理。</p>
+    <ol>
+      <li>准备一段 <b>3~10 秒</b>的干净人声 wav：单人、无背景音乐、无杂音、语速正常（本指南 <code>example_audio\</code> 里有一份苏苏洛示例）</li>
+      <li>把音频放到 <code>E:\GenieTTS\ref\ref_sussurro.wav</code></li>
+      <li>把这段音频的<b>逐字原文</b>填到 <code>E:\GenieTTS\config.json</code> 的 <code>refText</code>（必须一字不差，越准越像）</li>
+      <li>重启服务器即可</li>
+    </ol>
+    <div class="note">原理：GPT-SoVITS 用参考音频的声纹 + 情感来「模仿」说话。参考音频越干净、越接近日常说话，效果越好。<br>
+    这是最常用的方式，绝大多数需求（包括苏苏洛本音）用这个就够了。</div>
+  </div>
+
+  <h2>路线 B：微调训练（更像、更稳，需要几小时）</h2>
+  <div class="card">
+    <span class="tag orange">需要 GPU 更好，CPU 也能训（慢）</span>
+    <h3>第 1 步：准备训练数据</h3>
+    <ol>
+      <li>收集目标角色的音频，切成 <b>3~10 秒</b>一段，建议 <b>30 条以上</b>（越多越像），wav/mp3 均可</li>
+      <li>给每段配好<b>逐字文本</b>（务必准确！）</li>
+      <li>建议先做降噪、去 BGM、统一响度（可用 <a href="https://www.audacityteam.org/">Audacity</a>）</li>
+    </ol>
+    <h3>第 2 步：用 GPT-SoVITS 训练</h3>
+    <ol>
+      <li>下载 GPT-SoVITS：<a href="https://github.com/RVC-Boss/GPT-SoVITS">github.com/RVC-Boss/GPT-SoVITS</a>（官方有整合包和 WebUI，按 README 启动）</li>
+      <li>在 WebUI 里：<b>① 数据标注</b>导入音频+文本 → <b>② 语音切分</b>（若未切）→ <b>③ 训练 SoVITS</b> 与 <b>④ 训练 GPT</b>（V2 模型，建议各训到 loss 不再明显下降）</li>
+      <li>训练完导出：SoVITS 模型 <code>xxx.pth</code> + GPT 模型 <code>xxx.ckpt</code></li>
+    </ol>
+    <h3>第 3 步：转 ONNX（用 Genie）</h3>
+    <p>先装 torch（转模型需要）：</p>
+    <pre>E:\GenieTTS\venv\Scripts\pip install torch --index-url https://download.pytorch.org/whl/cpu</pre>
+    <p>再写个小脚本转换：</p>
+    <pre>import os
+os.environ["GENIE_DATA_DIR"] = r"E:\GenieTTS\GenieData"
+import genie_tts as genie
+
+genie.convert_to_onnx(
+    torch_pth_path=r"E:\GenieTTS\my_model\你的角色.pth",   # SoVITS 模型
+    torch_ckpt_path=r"E:\GenieTTS\my_model\你的角色.ckpt", # GPT 模型
+    output_dir=r"E:\GenieTTS\my_model\onnx",               # 输出的 ONNX 目录
+)
+print("转换完成，输出在", r"E:\GenieTTS\my_model\onnx")</pre>
+    <h3>第 4 步：让服务器用你的模型</h3>
+    <p>编辑 <code>E:\GenieTTS\config.json</code>：</p>
+    <pre>{
+  "character": "sussurro",
+  "language": "Chinese",
+  "modelDir": "E:\\GenieTTS\\my_model\\onnx",   ← 指向转换出的 ONNX 目录
+  "refAudio": "E:\\GenieTTS\\ref\\ref_sussurro.wav",
+  "refText": "参考音频原文",
+  "hfEndpoint": "https://hf-mirror.com"
+}</pre>
+    <p>重启服务器即可（模型目录里需含 <code>t2s_encoder_fp32.onnx</code>、<code>vits_fp32.onnx</code> 等文件，Genie 会自动校验）。</p>
+    <div class="note">⚠ 语言模型（GPT 部分）训练语料多来自通用数据，只微调少量你自己的音频也能明显提升相似度。训得越久越像，但别过拟合到只会说训练集的句子。</div>
+  </div>
+
+  <h2>训练数据质量建议</h2>
+  <ul>
+    <li>每条 3~10 秒，短而清晰 &gt; 长而杂乱</li>
+    <li>覆盖不同语气（陈述、疑问、感叹、轻笑）效果更好</li>
+    <li>文本必须与音频逐字对应，这是相似度最重要的因素</li>
+    <li>避免重音、耳语、夸张语气（会污染音色）</li>
+  </ul>
+
+  <div class="foot">—— 苏苏洛桌宠 · 音色克隆训练指南 v1（GPT-SoVITS V2 + Genie）——</div>
+</body>
+</html>

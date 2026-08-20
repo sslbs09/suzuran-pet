@@ -1,0 +1,68 @@
+/* 苏苏洛设置窗口样式 */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  background: linear-gradient(160deg, #fdf8f2 0%, #eef6fc 100%);
+  color: #44505c;
+  padding: 18px 22px 28px;
+  line-height: 1.6;
+  font-size: 13px;
+}
+header { margin-bottom: 6px; }
+h1 { font-size: 19px; color: #7aa9c9; display: flex; align-items: center; gap: 8px; }
+.sub { color: #9ab3c6; font-size: 12px; margin: 2px 0 10px; }
+section {
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid #e3eef6;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+h2 {
+  font-size: 14px;
+  color: #5f8db0;
+  margin-bottom: 10px;
+  padding-left: 8px;
+  border-left: 3px solid #8ec7e8;
+}
+.row { display: flex; gap: 12px; margin-bottom: 10px; align-items: flex-end; flex-wrap: wrap; }
+.col { display: flex; flex-direction: column; gap: 4px; min-width: 130px; }
+.col.grow { flex: 1; }
+.col span { font-size: 12px; color: #6b8296; }
+input, select, textarea {
+  padding: 6px 8px;
+  border: 1px solid #d4e2ec;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #3a4652;
+  background: #fff;
+  width: 100%;
+}
+input:focus, select:focus, textarea:focus { outline: none; border-color: #8ec7e8; }
+textarea { resize: vertical; font-family: Consolas, "Microsoft YaHei", monospace; line-height: 1.5; }
+.keybox { display: flex; gap: 4px; }
+.keybox input { flex: 1; }
+.keybox .mini { width: 34px; flex: 0 0 34px; }
+button {
+  padding: 7px 14px;
+  border: 1px solid #cfe0ec;
+  border-radius: 7px;
+  background: #fff;
+  color: #4a7ea6;
+  cursor: pointer;
+  font-size: 13px;
+}
+button:hover { background: #eef7fd; }
+button.primary { background: #5f9fc9; border-color: #5f9fc9; color: #fff; }
+button.primary:hover { background: #4e8fb8; }
+button.danger { color: #c06a6a; border-color: #eccfcf; }
+button.danger:hover { background: #fdf0f0; }
+.actions { align-items: center; margin-top: 12px; margin-bottom: 0; }
+.result { font-size: 12px; color: #7f9ab0; }
+.result.ok { color: #4c9a6e; }
+.result.err { color: #c06a6a; }
+.hint { font-size: 12px; color: #8a9bad; margin-top: 8px; }
+.hint code { background: #eef3f7; padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+.foot { text-align: center; color: #a8bfcf; font-size: 11px; margin-top: 6px; }
+#genie-fields { display: none; }
+#genie-fields.show { display: block; }

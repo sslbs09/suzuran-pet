@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: file:; media-src 'self' data: blob:">
+<title>苏苏洛桌宠</title>
+<link rel="stylesheet" href="pet.css" />
+</head>
+<body>
+<div class="pet-root">
+  <!-- 对话气泡 -->
+  <div id="bubble" class="bubble hidden">
+    <button id="btn-zoom" class="btn btn-zoom" title="放大/还原对话框">⤢</button>
+    <div id="bubble-text"></div>
+    <div id="thinking-dots" class="thinking hidden"><span>.</span><span>.</span><span>.</span></div>
+  </div>
+
+  <!-- 桌宠形象（GIF 表情） -->
+  <div id="pet" class="pet">
+    <img id="sprite" src="sprites/user/idle1.gif" alt="苏苏洛" draggable="false" />
+  </div>
+
+  <!-- 输入栏 -->
+  <div id="input-bar" class="input-bar hidden">
+    <span id="mode-chip" class="mode-chip" title="点击切换模式">💬</span>
+    <input id="input" type="text" placeholder="和苏苏洛说点什么…" autocomplete="off" />
+    <button id="btn-stop" class="btn hidden" title="停止">■</button>
+    <button id="btn-tts" class="btn btn-tts" title="语音开关">🔊</button>
+    <button id="btn-send" class="btn">➤</button>
+  </div>
+</div>
+<script src="pet.js"></script>
+</body>
+</html>

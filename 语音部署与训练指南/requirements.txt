@@ -1,0 +1,3 @@
+# Genie TTS 服务器依赖（本地克隆音色用）
+# 安装：python -m venv venv 后，用 venv 的 pip 执行
+genie-tts>=2.0

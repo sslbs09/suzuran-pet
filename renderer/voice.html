@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; media-src 'self' data: blob:">
+<title>苏苏洛 · 音色克隆与训练</title>
+<link rel="stylesheet" href="settings.css" />
+<style>
+  .status-card {
+    border-radius: 10px; padding: 10px 14px; font-size: 13px; margin-bottom: 12px;
+  }
+  .status-card.ok { background: #e8f7ec; border: 1px solid #bfe6c9; color: #3c8a55; }
+  .status-card.no { background: #fdf0f0; border: 1px solid #f0d0d0; color: #b04a4a; }
+  .file-row { display: flex; gap: 8px; align-items: center; }
+  .file-path {
+    flex: 1; background: #f4f8fb; border: 1px dashed #c4d8e6; border-radius: 6px;
+    padding: 6px 10px; font-size: 12px; color: #5f7180; word-break: break-all;
+  }
+  .small { font-size: 12px; color: #8a9bad; }
+  .disabled { opacity: 0.45; pointer-events: none; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>🎙️ 音色克隆与训练</h1>
+    <div class="sub">用一段参考音频，直接生成（克隆）苏苏洛音色 —— 全界面操作，不用碰命令行</div>
+  </header>
+
+  <!-- 部署状态 -->
+  <div id="status-card" class="status-card no">正在检查本地 Genie 语音部署状态…</div>
+
+  <section>
+    <h2>① 快速克隆（零样本训练，推荐）</h2>
+    <p class="hint">原理：GPT-SoVITS 会模仿参考音频的音色与语气。参考音频越干净、越像日常说话，克隆效果越好。<b>3~10 秒、单人、无背景音乐</b>的 wav 最佳。</p>
+
+    <div id="clone-form">
+      <div class="row">
+        <label class="col grow">
+          <span>参考音频文件</span>
+          <div class="file-row">
+            <button id="btn-pick" type="button" class="primary">📂 选择音频…</button>
+            <div id="file-path" class="file-path">未选择（示例音频：语音部署与训练指南\example_audio\ref_sussurro.wav）</div>
+          </div>
+        </label>
+      </div>
+      <div class="row">
+        <label class="col grow">
+          <span>参考音频原文（必须与音频逐字一致）</span>
+          <textarea id="ref-text" rows="3" spellcheck="false" placeholder="例：你好呀，新手星，我是苏苏洛，罗德岛的医疗干员。今天也要好好休息哦。"></textarea>
+        </label>
+      </div>
+      <div class="row">
+        <label class="col grow">
+          <span>试听内容（用上面的音色合成，先听再应用）</span>
+          <input id="preview-text" type="text" value="你好呀，我是苏苏洛。今天也要好好休息哦，不许熬夜。" />
+        </label>
+      </div>
+      <div class="row actions">
+        <button id="btn-preview" type="button" class="primary">🔊 试听音色</button>
+        <button id="btn-apply" type="button" class="primary">✅ 应用音色（完成克隆）</button>
+        <span id="result" class="result"></span>
+      </div>
+      <p class="small">「应用音色」会把参考音频设为服务器的默认音色并保存，之后桌宠说话就用这个声音；随时可以换。</p>
+    </div>
+    <div id="not-deployed" class="note" style="display:none;">
+      ⚠ 本地 Genie 语音尚未部署。请先按下方「打开部署指南」完成部署（装 Python → 装 genie-tts → 下载模型），
+      再回到这里一键克隆音色。
+    </div>
+  </section>
+
+  <section>
+    <h2>② 完整微调训练（进阶，更精细）</h2>
+    <p class="hint">如果零样本克隆还不够像，可以用自己的大量音频做 GPT-SoVITS 微调训练，再转成 ONNX 给桌宠用。
+    需要 GPU（或耐心），步骤见训练指南。</p>
+    <div class="row actions">
+      <button id="btn-guide" type="button">📖 打开训练指南</button>
+      <button id="btn-overview" type="button">📖 部署总览</button>
+    </div>
+  </section>
+
+  <p class="foot">苏苏洛桌宠 · 音色克隆与训练</p>
+
+<script src="voice.js"></script>
+</body>
+</html>

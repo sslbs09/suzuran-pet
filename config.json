@@ -1,0 +1,154 @@
+{
+  "pet": {
+    "name": "苏苏洛"
+  },
+  "moods": [
+    {
+      "name": "idle1",
+      "label": "待机1",
+      "emotion": false
+    },
+    {
+      "name": "idle2",
+      "label": "待机2",
+      "emotion": false
+    },
+    {
+      "name": "idle3",
+      "label": "发呆",
+      "emotion": true
+    },
+    {
+      "name": "idle4",
+      "label": "喝饮料",
+      "emotion": true
+    },
+    {
+      "name": "idle5",
+      "label": "送花",
+      "emotion": true
+    },
+    {
+      "name": "idle6",
+      "label": "手工",
+      "emotion": true
+    },
+    {
+      "name": "idle7",
+      "label": "展示",
+      "emotion": true
+    },
+    {
+      "name": "happy",
+      "label": "开心",
+      "emotion": true
+    },
+    {
+      "name": "wow",
+      "label": "惊喜",
+      "emotion": true
+    },
+    {
+      "name": "think",
+      "label": "思考",
+      "emotion": true
+    },
+    {
+      "name": "wave",
+      "label": "挥手",
+      "emotion": true
+    },
+    {
+      "name": "angry",
+      "label": "生气",
+      "emotion": true
+    },
+    {
+      "name": "cry",
+      "label": "委屈",
+      "emotion": true
+    },
+    {
+      "name": "sleep",
+      "label": "睡觉",
+      "emotion": true
+    },
+    {
+      "name": "kiss",
+      "label": "飞吻",
+      "emotion": true
+    },
+    {
+      "name": "work",
+      "label": "工作",
+      "emotion": true
+    },
+    {
+      "name": "tsundere",
+      "label": "傲娇",
+      "emotion": true
+    },
+    {
+      "name": "surprised",
+      "label": "惊讶",
+      "emotion": true
+    },
+    {
+      "name": "dizzy",
+      "label": "晕",
+      "emotion": true
+    }
+  ],
+  "zcodeCli": "",
+  "workspace": "",
+  "zcodeEnabled": false,
+  "chat": {
+    "apiType": "openai",
+    "baseUrl": "https://api.deepseek.com/v1",
+    "model": "deepseek-chat",
+    "apiKey": "",
+    "userName": "主人",
+    "temperature": 0.85,
+    "maxTokens": 800,
+    "maxHistoryTurns": 20
+  },
+  "window": {
+    "x": null,
+    "y": null,
+    "width": 260,
+    "height": 200
+  },
+  "firstRun": true,
+  "tts": {
+    "enabled": false,
+    "voice": "",
+    "rate": 0.9,
+    "pitch": 1.1
+  },
+  "ttsCloud": {
+    "enabled": false,
+    "voice": "zh-CN-XiaoxiaoNeural",
+    "rate": "+8%",
+    "pitch": "+0Hz"
+  },
+  "ttsCosy": {
+    "enabled": false,
+    "apiKey": "",
+    "model": "cosyvoice-v3.5-plus",
+    "voice": "",
+    "rate": 1,
+    "pitch": 1,
+    "volume": 100
+  },
+  "ttsGenie": {
+    "enabled": false,
+    "server": "http://127.0.0.1:9881",
+    "python": "",
+    "serverScript": "",
+    "refAudio": "",
+    "refText": "",
+    "startTimeout": 240000
+  },
+  "hotkey": "Alt+Shift+S",
+  "startHidden": false
+}

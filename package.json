@@ -1,0 +1,23 @@
+{
+  "name": "suzuran-pet",
+  "productName": "苏苏洛桌宠",
+  "version": "1.1.0",
+  "description": "苏苏洛桌宠分享版 - Q版狐狸医师桌宠：日常聊天陪伴，可配置任意 API 与人设",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-packager . --platform=win32 --arch=x64 --out=dist --asar=false --icon=icon.ico --overwrite --prune=true",
+    "test:chat": "node src/chat-client.js --test",
+    "test:zcode": "node src/zcode-client.js --test",
+    "test:router": "node src/router.js --test",
+    "gen:icon": "node scripts/gen-icon-ico.js"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^43.3.0",
+    "electron-packager": "^17.1.2"
+  },
+  "dependencies": {
+    "omggif": "^1.0.10"
+  }
+}
