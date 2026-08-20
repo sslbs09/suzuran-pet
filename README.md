@@ -1,7 +1,7 @@
 # 苏苏洛桌宠 · 1.0 正式版（SuzuranPet）
 
 Q 版狐狸医师桌宠：悬浮在桌面上，日常聊天陪伴。**免安装、绿色版**——解压后双击 exe 即用，无需 Node / Python（不开语音时）。
-感谢https://github.com/High-Logic/Genie/tree/master的开源。
+感谢https://github.com/High-Logic/Genie/tree/master 的开源。
 
 ## 快速开始
 
