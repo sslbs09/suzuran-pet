@@ -1,5 +1,5 @@
 # Build & 自动发布 Release
-# 打 tag（如 v1.0.1）推送后：自动打包 Windows 免安装版并上传到 Releases
+# 打正式版本 tag（如 v1.0.0）推送后：自动打包 Windows 免安装版并上传到 Releases
 name: Build & Release
 
 on:
@@ -42,8 +42,8 @@ jobs:
         run: |
           $folder = Get-ChildItem dist | Select-Object -First 1
           if (-not $folder) { Write-Error "dist 目录为空"; exit 1 }
-          Compress-Archive -Path $folder.FullName -DestinationPath "SuzuranPet-$env:GITHUB_REF_NAME-win32-x64.zip" -Force
-          Write-Host "已生成: SuzuranPet-$env:GITHUB_REF_NAME-win32-x64.zip"
+          Compress-Archive -Path $folder.FullName -DestinationPath "SuzuranPet-1.0.0-win32-x64.zip" -Force
+          Write-Host "已生成: SuzuranPet-1.0.0-win32-x64.zip"
 
       - name: 上传到 GitHub Releases
         uses: softprops/action-gh-release@v2

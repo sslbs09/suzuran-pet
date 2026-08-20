@@ -33,7 +33,7 @@ function idleNames() { return MOODS.filter((m) => !m.emotion).map((m) => m.name)
 let busy = false;
 let currentMode = "chat";
 let forcedMode = "auto";
-let zcodeEnabled = false; // 任务模式是否可用（分享版默认关）
+let zcodeEnabled = false; // 任务模式是否可用（默认关闭）
 let agreed = true;        // 是否已同意使用条款
 let replyBuffer = "";
 let revealTimer = null;

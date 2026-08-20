@@ -2,6 +2,7 @@
   "pet": {
     "name": "苏苏洛"
   },
+  "agreed": false,
   "moods": [
     {
       "name": "idle1",
@@ -99,6 +100,11 @@
       "emotion": true
     }
   ],
+  "agentApi": {
+    "enabled": true,
+    "port": 8765,
+    "invokeWord": ""
+  },
   "zcodeCli": "",
   "workspace": "",
   "zcodeEnabled": false,
@@ -113,10 +119,11 @@
     "maxHistoryTurns": 20
   },
   "window": {
-    "x": null,
-    "y": null,
+    "x": 638,
+    "y": 356,
     "width": 260,
-    "height": 200
+    "height": 200,
+    "scale": 1.0
   },
   "firstRun": true,
   "tts": {

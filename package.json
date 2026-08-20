@@ -1,12 +1,14 @@
 {
   "name": "suzuran-pet",
-  "productName": "苏苏洛桌宠",
-  "version": "1.1.0",
-  "description": "苏苏洛桌宠分享版 - Q版狐狸医师桌宠：日常聊天陪伴，可配置任意 API 与人设",
+  "productName": "苏苏洛桌宠 1.0 正式版",
+  "version": "1.0.0",
+  "description": "苏苏洛桌宠 1.0 正式版 - 可配置 API、人设、情绪与本地语音",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "dist": "electron-packager . --platform=win32 --arch=x64 --out=dist --asar=false --icon=icon.ico --overwrite --prune=true",
+    "lint": "eslint .",
+    "lint:md": "markdownlint-cli2 README.md",
     "test:chat": "node src/chat-client.js --test",
     "test:zcode": "node src/zcode-client.js --test",
     "test:router": "node src/router.js --test",
@@ -15,7 +17,10 @@
   "license": "SEE LICENSE IN LICENSE",
   "devDependencies": {
     "electron": "^43.3.0",
-    "electron-packager": "^17.1.2"
+    "electron-packager": "^17.1.2",
+    "eslint": "^10.8.1",
+    "globals": "^17.11.0",
+    "markdownlint-cli2": "^0.23.2"
   },
   "dependencies": {
     "omggif": "^1.0.10"
