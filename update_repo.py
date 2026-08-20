@@ -14,7 +14,7 @@ OWNER = "sslbs09"
 REPO = "suzuran-pet"
 ROOT = r"E:\SuzuranPetGit"
 API = f"https://api.github.com/repos/{OWNER}/{REPO}"
-EXCLUDE_DIRS = {".git", "node_modules", "dist", "data", "sprites", "default", "__pycache__"}
+EXCLUDE_DIRS = {".git", "node_modules", "dist", "data", "__pycache__"}
 SKIP_PATTERNS = (".pyc",)
 
 
