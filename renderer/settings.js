@@ -65,6 +65,11 @@ async function toast(msg) {
 
   $("hotkey").value = S.hotkey || "Alt+Shift+S";
   $("start-hidden").value = String(!!S.startHidden);
+  $("pet-scale").value = String(S.scale || 1);
+  const aa = S.agentApi || {};
+  $("agent-enabled").value = String(aa.enabled !== false);
+  $("agent-port").value = aa.port || 8765;
+  $("agent-word").value = aa.invokeWord || "";
 })();
 
 /* ---------- 预设 ---------- */
@@ -184,12 +189,24 @@ $("btn-open-studio").addEventListener("click", () => window.petAPI.openVoiceStud
 
 /* ---------- 其他 ---------- */
 $("btn-save-other").addEventListener("click", async () => {
+  const scale = parseFloat($("pet-scale").value) || 1;
   const r = await window.petAPI.saveSettings({
     hotkey: $("hotkey").value.trim() || "Alt+Shift+S",
-    startHidden: $("start-hidden").value === "true"
+    startHidden: $("start-hidden").value === "true",
+    window: { scale },
+    agentApi: {
+      enabled: $("agent-enabled").value === "true",
+      port: parseInt($("agent-port").value, 10) || 8765,
+      invokeWord: $("agent-word").value.trim()
+    }
   });
-  setResult($("other-result"), r === true ? "✅ 已保存（热键重启后生效）" : "❌ 保存失败", r === true);
+  // 立即应用桌宠大小（不等重启）
+  if (r === true) await window.petAPI.setScale(scale);
+  setResult($("other-result"), r === true ? "✅ 已保存（热键/Agent 端口重启后生效）" : "❌ 保存失败", r === true);
 });
+
+$("btn-open-terms").addEventListener("click", () => window.petAPI.openTerms());
+
 
 $("btn-open-config").addEventListener("click", () => window.petAPI.openConfig());
 

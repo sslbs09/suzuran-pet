@@ -34,6 +34,7 @@ let busy = false;
 let currentMode = "chat";
 let forcedMode = "auto";
 let zcodeEnabled = false; // 任务模式是否可用（分享版默认关）
+let agreed = true;        // 是否已同意使用条款
 let replyBuffer = "";
 let revealTimer = null;
 let typing = false;
@@ -121,6 +122,10 @@ function hideThinking() {
 async function send() {
   const text = inputEl.value.trim();
   if (!text || busy) return;
+  if (!agreed) {
+    toast("请先阅读并同意《使用条款与隐私政策》");
+    return;
+  }
   inputEl.value = "";
   replyBuffer = "";
   wake();
@@ -434,6 +439,25 @@ window.petAPI.onRateChanged((v) => {
   ttsConfig.rate = v;
 });
 
+// 桌宠大小缩放（CSS zoom 整体缩放，窗口由主进程同步调整）
+function applyScale(s) {
+  const v = Math.max(0.6, Math.min(2.0, parseFloat(s) || 1.0));
+  document.body.style.zoom = String(v);
+}
+window.petAPI.onScaleChanged((v) => applyScale(v));
+
+// 条款未同意：提示气泡并保持不可用
+window.petAPI.onTermsPending(() => {
+  agreed = false;
+  showBubble();
+  bubbleEl.classList.add("error");
+  bubbleText.textContent = "初次使用请先阅读并同意《使用条款与隐私政策》（已弹出窗口），同意后才能开始聊天哦 🩺";
+});
+window.petAPI.onTermsAgreed(() => {
+  agreed = true;
+  hideBubble();
+});
+
 /* ---------- 拖拽（手动，区分点击） ---------- */
 let dragState = null;
 petEl.addEventListener("mousedown", (e) => {
@@ -482,7 +506,9 @@ document.addEventListener("mousemove", (e) => {
   const state = await window.petAPI.getState();
   forcedMode = state.forcedMode || "auto";
   zcodeEnabled = !!state.zcodeEnabled;
+  if (typeof state.agreed === "boolean") agreed = state.agreed;
   if (Array.isArray(state.moods) && state.moods.length) MOODS = state.moods;
+  if (state.scale) applyScale(state.scale);
   if (state.tts) ttsConfig = { ...ttsConfig, ...state.tts };
   if (state.ttsCloud) ttsCloudOn = !!state.ttsCloud.enabled;
   if (state.winSize) winSize = state.winSize;
@@ -490,6 +516,13 @@ document.addEventListener("mousemove", (e) => {
   updateChip();
   updateTtsButton();
   initTts();
+
+  if (!agreed) {
+    showBubble();
+    bubbleEl.classList.add("error");
+    bubbleText.textContent = "初次使用请先阅读并同意《使用条款与隐私政策》（已弹出窗口），同意后才能开始聊天哦 🩺";
+    return;
+  }
 
   if (!state.keyReady) {
     showBubble();

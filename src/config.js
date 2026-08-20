@@ -41,7 +41,13 @@ const DEFAULT_MOODS = [
 
 const DEFAULTS = {
   pet: { name: "苏苏洛" },                  // 桌宠名字（人设占位符 {{petName}}）
+  agreed: false,                            // 是否已同意《使用条款与隐私政策》（不同意无法使用）
   moods: DEFAULT_MOODS,                     // 情绪表：name=文件名，label=情绪词（≤5字，模型按它选），emotion=true 才会进模型情绪词表
+  agentApi: {                               // 本地 Agent 调用接口（仅 127.0.0.1）
+    enabled: true,
+    port: 8765,
+    invokeWord: ""                          // 自定义调用词：非空时 /chat 要求消息以该词开头
+  },
   zcodeCli: "",                             // 空 → 自动探测（分享版默认关闭）
   workspace: DEFAULT_WORKSPACE,
   zcodeEnabled: false,                      // 任务模式开关（分享版默认关）
@@ -55,7 +61,7 @@ const DEFAULTS = {
     maxTokens: 800,
     maxHistoryTurns: 20
   },
-  window: { x: null, y: null, width: 260, height: 200 },
+  window: { x: null, y: null, width: 260, height: 200, scale: 1.0 }, // scale：桌宠显示大小（0.6~2.0）
   firstRun: true,                           // 首次启动自动弹设置引导
   tts: { enabled: false, voice: "", rate: 0.9, pitch: 1.1 }, // 语音总开关（默认关）；rate=语速（<1 慢 >1 快）
   ttsCloud: { // edge-tts 云端语音（需安装 Python + edge-tts；失败自动回退系统语音）

@@ -167,6 +167,19 @@
     <h2>④ 其他</h2>
     <div class="row">
       <label class="col">
+        <span>桌宠大小</span>
+        <select id="pet-scale">
+          <option value="0.6">60%</option>
+          <option value="0.75">75%</option>
+          <option value="0.9">90%</option>
+          <option value="1">100%（默认）</option>
+          <option value="1.1">110%</option>
+          <option value="1.25">125%</option>
+          <option value="1.5">150%</option>
+          <option value="1.8">180%</option>
+        </select>
+      </label>
+      <label class="col">
         <span>全局热键（隐藏/显示）</span>
         <input id="hotkey" type="text" placeholder="Alt+Shift+S" />
       </label>
@@ -178,8 +191,27 @@
         </select>
       </label>
     </div>
+    <div class="row">
+      <label class="col">
+        <span>Agent 接口（其他 agent 调用）</span>
+        <select id="agent-enabled">
+          <option value="true">开（仅本机 127.0.0.1）</option>
+          <option value="false">关</option>
+        </select>
+      </label>
+      <label class="col">
+        <span>端口</span>
+        <input id="agent-port" type="number" min="1" max="65535" placeholder="8765" />
+      </label>
+      <label class="col grow">
+        <span>自定义调用词（非空时 /chat 需以该词开头，如「苏苏洛」）</span>
+        <input id="agent-word" type="text" maxlength="20" placeholder="留空 = 无需调用词" />
+      </label>
+    </div>
+    <p class="hint">其他 agent / 脚本可调用：<code>POST http://127.0.0.1:8765/chat</code>，请求体 <code>{"text":"苏苏洛 帮我…"}</code>；<code>GET /health</code> 查状态。仅监听本机，不对局域网开放。</p>
     <div class="row actions">
       <button id="btn-save-other" type="button" class="primary">💾 保存</button>
+      <button id="btn-open-terms" type="button">📄 使用条款与隐私政策</button>
       <button id="btn-open-config" type="button">📄 打开 config.json</button>
       <button id="btn-clear-history" type="button" class="danger">🗑 清除聊天记录</button>
       <span id="other-result" class="result"></span>
