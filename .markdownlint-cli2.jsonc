@@ -1,0 +1,11 @@
+// markdownlint 配置（轻量：只查 README，宽松格式规则，重点保留结构/链接类）
+{
+  "config": {
+    "MD013": false,
+    "MD024": false,
+    "MD033": false,
+    "MD036": false,
+    "MD041": false,
+    "MD012": false
+  }
+}

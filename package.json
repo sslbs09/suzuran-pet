@@ -7,6 +7,8 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-packager . --platform=win32 --arch=x64 --out=dist --asar=false --icon=icon.ico --overwrite --prune=true",
+    "lint": "eslint .",
+    "lint:md": "markdownlint-cli2 README.md",
     "test:chat": "node src/chat-client.js --test",
     "test:zcode": "node src/zcode-client.js --test",
     "test:router": "node src/router.js --test",
@@ -15,7 +17,10 @@
   "license": "MIT",
   "devDependencies": {
     "electron": "^43.3.0",
-    "electron-packager": "^17.1.2"
+    "electron-packager": "^17.1.2",
+    "eslint": "^10.8.1",
+    "globals": "^17.11.0",
+    "markdownlint-cli2": "^0.23.2"
   },
   "dependencies": {
     "omggif": "^1.0.10"

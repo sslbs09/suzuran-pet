@@ -1,0 +1,25 @@
+# Markdown 文档检查：校验 README 的格式 / 链接（轻量）
+name: Docs (markdownlint)
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  md-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: markdownlint 检查
+        run: npm run lint:md

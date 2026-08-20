@@ -39,7 +39,7 @@ node scripts/gen-icon-ico.js  # 重新生成多尺寸图标
 
 ## 📁 目录
 
-```
+```text
 ├── main.js / preload.js      # Electron 主进程 & 安全桥
 ├── config.json               # 配置（API/情绪表/语速/热键等）
 ├── persona.md                # 人格设定（可编辑，{{userName}} 占位符）

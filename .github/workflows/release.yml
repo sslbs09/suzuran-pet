@@ -1,0 +1,44 @@
+# Build & 自动发布 Release
+# 打 tag（如 v1.0.1）推送后：自动打包 Windows 免安装版并上传到 Releases
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 打包桌宠（electron-packager）
+        run: npm run dist
+
+      - name: 压缩为 zip
+        shell: pwsh
+        run: |
+          $folder = Get-ChildItem dist | Select-Object -First 1
+          if (-not $folder) { Write-Error "dist 目录为空"; exit 1 }
+          Compress-Archive -Path $folder.FullName -DestinationPath "SuzuranPet-$env:GITHUB_REF_NAME-win32-x64.zip" -Force
+          Write-Host "已生成: SuzuranPet-$env:GITHUB_REF_NAME-win32-x64.zip"
+
+      - name: 上传到 GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "SuzuranPet-*.zip"
+          generate_release_notes: true
