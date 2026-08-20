@@ -1,70 +1,66 @@
-# 🦊 苏苏洛桌宠（SuzuranPet）
+# 苏苏洛桌宠 · 分享版（SuzuranPet Share）
 
-> Q 版狐狸医师桌宠 —— 悬浮在桌面上的日常陪伴。
-> 可配置任意 OpenAI 兼容 / Anthropic API，人设可编辑，AI 自动选情绪表现，本地语音克隆（可选）。
+Q 版狐狸医师桌宠：悬浮在桌面上，日常聊天陪伴。**免安装、绿色版**——解压后双击 exe 即用，无需 Node / Python（不开语音时）。
 
-![Platform](https://img.shields.io/badge/platform-Windows-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Tech](https://img.shields.io/badge/tech-Electron%20%2B%20Node.js-9cf)
+## 快速开始
 
-## ✨ 功能
+1. 解压整个文件夹（建议放在桌面或喜欢的位置）
+2. 双击 `苏苏洛桌宠.exe`
+3. 首次启动会自动弹出「⚙️ 设置」：
+   - **① 聊天 API**：选服务商（DeepSeek / Kimi / OpenAI / GLM / Qwen / 本地 Ollama…）→ 填 API Key →「测试连接」→「保存」
+   - 把「桌宠对你的称呼」改成你的名字（人设会自动用这个名字）
+4. 单击小狐狸 → 输入框 → 回车，开始聊天
 
-- **桌宠本体**：透明无边框、置顶、可拖动、点击穿透不挡操作；19 个 GIF 表情（开心/生气/委屈/睡觉/傲娇…）
-- **AI 自动选情绪**：回复时由大模型理解对话内容，自动在情绪词表中选最贴切的情绪来表现（自定义情绪词也支持）
-- **可配置任意 API**：DeepSeek / Kimi / OpenAI / GLM / 阿里百炼 / 硅基流动 / 本地 Ollama / Anthropic，一键「测试连接」+「获取模型列表」自动读取端口可用模型
-- **人设自由编辑**：内置设置窗口直接改人设文本（`{{userName}}` 占位符自动替换称呼），随时恢复默认
-- **表情管理**：每个情绪独立格子，可换 GIF、可改名字（≤5 字）、可增删自定义情绪（≤30 个）、待机/情绪用途一键切换
-- **语音可选**：默认关闭零安装；想开语音按「语音部署与训练指南」选择 —— 系统语音 / edge-tts / 本地 Genie 克隆音色 / 百炼 CosyVoice；语速可调
-- **本地音色克隆**：程序内「音色克隆与训练」窗口，选参考音频 → 试听 → 一键应用，不用命令行
+## 支持的服务商
 
-## 🚀 快速开始（普通用户）
+| 服务商 | baseUrl | 说明 |
+|---|---|---|
+| DeepSeek | `https://api.deepseek.com/v1` | 便宜好用，推荐 |
+| Kimi（月之暗面） | `https://api.moonshot.cn/v1` | 长上下文 |
+| OpenAI | `https://api.openai.com/v1` | 需科学上网 |
+| 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4` | 国产免费额度 |
+| 阿里云百炼 Qwen | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 国产 |
+| 硅基流动 | `https://api.siliconflow.cn/v1` | 聚合多家模型 |
+| Ollama（本地） | `http://localhost:11434/v1` | 免费、不联网，无需 Key |
+| Anthropic Claude | `https://api.anthropic.com` | 协议类型选 Anthropic |
 
-1. **源码运行**：`npm install && npm start`（需 Node.js）
-2. **打包运行**：`npm run dist` 后运行 `dist/苏苏洛桌宠-win32-x64/苏苏洛桌宠.exe`（需 electron-packager）
-3. 首次启动自动弹出设置：选服务商 → 填 API Key →「测试连接」→ 保存；把「桌宠对你的称呼」改成你的名字
-4. 单击小狐狸打开输入框，回车开始聊天
+> 只要是 OpenAI 兼容接口，都能在「自定义」里填 baseUrl + 模型名直接用。
 
-> 托盘右键：⚙️ 设置 / 🎨 表情管理 / 🎙️ 音色克隆与训练 / 🎤 语音部署与训练 / 语速 / 退出
+## 换人设
 
-## 🔧 开发
+- 托盘图标右键 →「⚙️ 设置」→「② 人设」直接编辑，保存立即生效
+- 人设文本里 `{{userName}}` 会自动替换成你在设置里填的称呼
+- 「恢复默认人设」可随时还原
 
-```bash
-npm install          # 安装依赖（electron + omggif）
-npm start            # 启动桌宠
-npm run dist         # electron-packager 打包（win32 x64，asar=false）
-npm run test:chat    # 聊天链路冒烟
-npm run test:router  # 路由判定测试
-node scripts/gen-icon-ico.js  # 重新生成多尺寸图标
+## 语音（可选）
+
+默认关闭、零安装。想开语音：
+托盘右键 →「🎤 语音部署与训练」打开指南文件夹，四种方案任选：
+
+1. **系统自带语音**：零配置
+2. **edge-tts 云端**：装 Python 后 `pip install edge-tts`
+3. **本地克隆音色（Genie / GPT-SoVITS）**：按指南部署后，直接在程序里「🎙️ 音色克隆与训练」窗口选音频 → 试听 → 一键应用，即可克隆出任意音色（含苏苏洛）
+4. **百炼 CosyVoice**：填 API Key + 音色 ID
+
+## 换皮肤 & 自定义情绪
+
+- 托盘右键 →「🎨 表情管理」：每个情绪（开心/思考/生气/睡觉…）单独一个格子，点「选择 GIF」填入自己的表情，随时可「恢复默认」
+- **自定义情绪**：没有想要的？在表情管理里自己加（≤5 个字，最多 30 个，如「摸鱼」「干饭」），再给它选个 GIF
+- AI 会在回复时自动理解对话、选择最贴切的情绪来表现（比如你喊困，她就用「睡觉」表情）
+
+## 常见问题
+
+- **双击没反应 / SmartScreen 拦截**：未签名程序首次运行点「更多信息」→「仍要运行」
+- **提示没配 API Key**：托盘 → 设置 → 填 Key → 测试连接
+- **聊天没反应**：看是不是输入框没打开（单击小狐狸）；或 API 欠费/模型名不对
+- **想开任务模式（/zcode 前缀操控电脑）**：需要另装 ZCode，然后在 `config.json` 里把 `zcodeEnabled` 改为 `true` 并填 `zcodeCli` 路径（默认关闭）
+
+## 目录说明
+
 ```
-
-技术栈：Electron（主进程 `main.js` + 渲染层 `renderer/`），`contextIsolation` 开启、`nodeIntegration` 关闭；聊天走 OpenAI 兼容 / Anthropic 流式协议；本地语音由 `语音部署与训练指南/genie_tts_server.py`（Genie/GPT-SoVITS）提供。
-
-## 📁 目录
-
-```text
-├── main.js / preload.js      # Electron 主进程 & 安全桥
-├── config.json               # 配置（API/情绪表/语速/热键等）
-├── persona.md                # 人格设定（可编辑，{{userName}} 占位符）
-├── src/
-│   ├── chat-client.js        # 多协议聊天（OpenAI 兼容 + Anthropic，情绪标注解析）
-│   ├── router.js             # 混合路由（任务模式默认关）
-│   ├── config.js             # 配置加载/保存（自动探测的 Key 不落盘）
-│   └── history.js            # 会话记忆
-├── renderer/
-│   ├── index.html / pet.js   # 桌宠窗口（GIF 表情 + 气泡 + 输入栏）
-│   ├── settings.*            # 设置窗口（API/人设/语音/其他）
-│   ├── moods.*               # 表情管理窗口（换 GIF/改名/自定义情绪）
-│   ├── voice.*               # 音色克隆与训练窗口
-│   └── sprites/user/         # 表情 GIF（同名替换即换肤）
-├── 语音部署与训练指南/       # 语音方案部署 + 音色克隆训练教程
-└── 使用说明.html             # 给朋友的入门文档
+苏苏洛桌宠-分享版\
+├── 苏苏洛桌宠.exe          ← 主程序（双击运行）
+├── 使用说明.html            ← 给朋友看的入门文档（就是这份的网页版）
+├── 语音部署与训练指南\      ← 语音方案部署 + 音色克隆训练教程
+└── resources\app\          ← 程序本体（config.json / persona.md 在这里面，可直接改）
 ```
-
-## 🛡 安全说明
-
-- 项目不内置任何 API Key / 密码；配置文件 `config.json` 中的密钥留空，由用户自行填写
-- 自动探测到的本机密钥**不会写回配置文件**（`src/config.js` 有防护）
-- 本地语音服务器只监听 `127.0.0.1`，不对局域网/公网开放
-- 渲染进程隔离（contextIsolation），主进程与页面通过白名单 IPC 通信
-
-## 📄 License
-
-[MIT](./LICENSE)

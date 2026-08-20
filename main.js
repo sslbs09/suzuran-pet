@@ -8,6 +8,7 @@
 
 const { app, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, screen, dialog } = require("electron");
 const { spawn } = require("child_process");
+const http = require("http");
 const path = require("path");
 const fs = require("fs");
 
@@ -25,6 +26,8 @@ let helpWin = null; // 使用说明窗口
 let settingsWin = null; // 设置窗口
 let voiceWin = null; // 音色克隆与训练窗口
 let moodWin = null; // 表情管理窗口
+let termsWin = null; // 使用条款确认窗口
+let agentApiAbort = null; // Agent 接口当前请求的中止控制器
 let activeReq = null; // { id, abort }
 let forcedMode = "auto"; // auto | chat | zcode
 let personaCache = config.getPersonaText();
@@ -51,8 +54,9 @@ function toggleWindow() {
 /* ---------- 窗口 ---------- */
 function createWindow() {
   const cfg = config.getConfig();
-  const w = cfg.window.width || 260;
-  const h = cfg.window.height || 200;
+  const scale = clampScale(cfg.window.scale);
+  const w = Math.round((cfg.window.width || 260) * scale);
+  const h = Math.round((cfg.window.height || 200) * scale);
 
   win = new BrowserWindow({
     width: w,
@@ -139,6 +143,7 @@ function refreshTrayMenu() {
     : "模式：自动路由";
   const ttsOn = !!(cfg.tts || {}).enabled;
   const rate = (cfg.tts || {}).rate || 0.9;
+  const scale = clampScale((cfg.window || {}).scale);
   const items = [
     { label: isWindowVisible() ? "隐藏桌宠" : "显示桌宠", click: () => toggleWindow() },
     { type: "separator" },
@@ -158,6 +163,11 @@ function refreshTrayMenu() {
     { label: "稍慢（0.9）", type: "radio", checked: rate > 0.85 && rate <= 0.95, click: () => setRate(0.9) },
     { label: "正常（1.0）", type: "radio", checked: rate > 0.95 && rate < 1.1, click: () => setRate(1.0) },
     { label: "较快（1.1）", type: "radio", checked: rate >= 1.1, click: () => setRate(1.1) },
+    { label: "🔍 大小：当前 " + (scale <= 0.8 ? "小" : scale >= 1.6 ? "特大" : scale >= 1.2 ? "大" : "标准"), enabled: false },
+    { label: "小（75%）", type: "radio", checked: scale <= 0.8, click: () => setScale(0.75) },
+    { label: "标准（100%）", type: "radio", checked: scale > 0.8 && scale < 1.2, click: () => setScale(1.0) },
+    { label: "大（125%）", type: "radio", checked: scale >= 1.2 && scale < 1.6, click: () => setScale(1.25) },
+    { label: "特大（150%）", type: "radio", checked: scale >= 1.6, click: () => setScale(1.5) },
     { type: "separator" },
     { label: "⚙️ 设置", click: () => openSettings() },
     { label: "🎨 表情管理", click: () => openMoodManager() },
@@ -419,6 +429,138 @@ ipcMain.handle("pet:set-mood-type", (_e, { name, emotion }) => {
   }
 });
 
+/* ---------- 使用条款强制确认 ---------- */
+function openTerms() {
+  if (termsWin && !termsWin.isDestroyed()) { termsWin.focus(); return; }
+  termsWin = new BrowserWindow({
+    width: 660,
+    height: 760,
+    title: "苏苏洛 · 使用条款与隐私政策",
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(config.APP_DIR, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  termsWin.setMenuBarVisibility(false);
+  termsWin.loadFile(path.join(config.APP_DIR, "renderer", "terms.html"));
+  termsWin.on("closed", () => { termsWin = null; });
+}
+
+ipcMain.handle("pet:agree-terms", () => {
+  config.saveConfig({ agreed: true });
+  refreshTrayMenu();
+  sendToRenderer("pet:terms-agreed");
+  // 同意后：首次运行且无 Key → 自动打开设置引导
+  const cfg = config.getConfig(true);
+  if (cfg.firstRun) {
+    config.saveConfig({ firstRun: false });
+    if (!cfg.chat.apiKey) {
+      setTimeout(() => {
+        openSettings();
+        sendToRenderer("pet:toast", "首次使用：请在设置里填写 API Key 与称呼 💕");
+      }, 800);
+    }
+  }
+  return true;
+});
+
+ipcMain.handle("pet:refuse-terms", () => {
+  quitting = true;
+  app.quit();
+  return true;
+});
+ipcMain.handle("pet:open-terms", () => { openTerms(); return true; });
+
+/* ---------- 桌宠大小缩放 ---------- */
+function clampScale(s) {
+  return Math.max(0.6, Math.min(2.0, parseFloat(s) || 1.0));
+}
+
+function setScale(scale) {
+  const s = clampScale(scale);
+  config.saveConfig({ window: { scale: s } });
+  if (win && !win.isDestroyed()) {
+    const cfg = config.getConfig();
+    const ws = Math.round((cfg.window.width || 260) * s);
+    const hs = Math.round((cfg.window.height || 200) * s);
+    win.setSize(ws, hs);
+    try {
+      const wa = screen.getDisplayMatching(win.getBounds()).workArea;
+      const [x, y] = win.getPosition();
+      win.setPosition(Math.min(Math.max(x, wa.x), wa.x + wa.width - ws),
+                      Math.min(Math.max(y, wa.y), wa.y + wa.height - hs));
+    } catch { /* 忽略 */ }
+  }
+  refreshTrayMenu();
+  sendToRenderer("pet:scale-changed", s);
+}
+ipcMain.handle("pet:set-scale", (_e, scale) => { setScale(scale); return true; });
+
+/* ---------- 本地 Agent 调用接口（其他 agent / 脚本可调用，仅 127.0.0.1） ---------- */
+function startAgentApi() {
+  const a = config.getConfig().agentApi || {};
+  if (!a.enabled) return;
+  const port = Math.max(1, Math.min(65535, parseInt(a.port, 10) || 8765));
+  const server = http.createServer(async (req, res) => {
+    const send = (code, obj) => {
+      const body = JSON.stringify(obj);
+      res.writeHead(code, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(body) });
+      res.end(body);
+    };
+    try {
+      if (req.method === "GET" && req.url.startsWith("/health")) {
+        const cfg = config.getConfig();
+        send(200, { ok: true, name: (cfg.pet || {}).name || "苏苏洛", agreed: !!cfg.agreed, invokeWord: (cfg.agentApi || {}).invokeWord || "" });
+        return;
+      }
+      if (req.method === "POST" && req.url.startsWith("/chat")) {
+        if (!config.getConfig().agreed) { send(403, { ok: false, error: "请先同意《使用条款与隐私政策》" }); return; }
+        let raw = "";
+        for await (const chunk of req) raw += chunk;
+        let body = {};
+        try { body = JSON.parse(raw || "{}"); } catch { send(400, { ok: false, error: "invalid json" }); return; }
+        let text = String(body.text || "").trim();
+        const a2 = config.getConfig().agentApi || {};
+        if (a2.invokeWord) {
+          const w = String(a2.invokeWord).trim();
+          if (!text.startsWith(w)) { send(400, { ok: false, error: "消息需以调用词「" + w + "」开头" }); return; }
+          text = text.slice(w.length).trim();
+        }
+        if (!text) { send(400, { ok: false, error: "text 不能为空" }); return; }
+        const abort = new AbortController();
+        agentApiAbort = abort;
+        try {
+          const r = await chatClient.chat({
+            persona: personaCache || config.getPersonaText(),
+            history: history.recent("chat", config.getConfig().chat.maxHistoryTurns || 10),
+            text,
+            signal: abort.signal,
+            onChunk: () => {}
+          });
+          history.append({ ts: Date.now(), mode: "chat", role: "user", content: text });
+          history.append({ ts: Date.now(), mode: "chat", role: "assistant", content: r.text });
+          send(200, { ok: true, reply: r.text, emotion: r.emotion || "" });
+        } finally {
+          if (agentApiAbort === abort) agentApiAbort = null;
+        }
+        return;
+      }
+      if (req.method === "POST" && req.url.startsWith("/stop")) {
+        if (agentApiAbort) agentApiAbort.abort();
+        send(200, { ok: true });
+        return;
+      }
+      send(404, { ok: false, error: "not found" });
+    } catch (e) {
+      send(500, { ok: false, error: String(e.message || e) });
+    }
+  });
+  server.on("error", (e) => console.error("[SuzuranPet] Agent 接口启动失败:", e.message));
+  server.listen(port, "127.0.0.1", () => console.log("[SuzuranPet] Agent 接口已启动 http://127.0.0.1:" + port));
+}
+
 /* ---------- 音色克隆与训练窗口 ---------- */
 function openVoiceStudio() {
   if (voiceWin && !voiceWin.isDestroyed()) { voiceWin.focus(); return; }
@@ -577,6 +719,10 @@ function savePosSafe() {
 
 /* ---------- 对话核心 ---------- */
 async function handleAsk(sender, { id, text }) {
+  if (!config.getConfig().agreed) {
+    sender.send("pet:error", { id, message: "请先阅读并同意《使用条款与隐私政策》后使用" });
+    return;
+  }
   if (activeReq) {
     sender.send("pet:error", { id, message: "上一句还没说完哦，先让我把话讲完？(可以先点停止)" });
     return;
@@ -648,6 +794,9 @@ ipcMain.handle("pet:get-state", () => {
     petName: (cfg.pet && cfg.pet.name) || "苏苏洛",
     userName: (cfg.chat && cfg.chat.userName) || "主人",
     moods: getMoodList(),
+    agreed: !!cfg.agreed,
+    scale: cfg.window.scale || 1.0,
+    agentApi: cfg.agentApi,
     firstRun: !!cfg.firstRun,
     workspace: cfg.workspace,
     tts: cfg.tts || { enabled: false, voice: "", rate: 0.95, pitch: 1.1 },
@@ -685,6 +834,9 @@ ipcMain.handle("pet:get-settings", () => {
     ttsGenie: cfg.ttsGenie,
     zcodeEnabled: !!cfg.zcodeEnabled,
     zcodeCli: cfg.zcodeCli,
+    agreed: !!cfg.agreed,
+    scale: cfg.window.scale || 1.0,
+    agentApi: cfg.agentApi,
     hotkey: cfg.hotkey,
     startHidden: !!cfg.startHidden,
     persona: config.getPersonaText(),
@@ -995,9 +1147,18 @@ if (!gotLock) {
       logTts("genie", "声音关闭，跳过服务器预热");
     }
 
-    // 首次启动：无 API Key 时自动打开设置引导
+    // 使用条款强制确认：未同意 → 弹条款窗口，桌宠/聊天/Agent 均不可用
     const _cfg = config.getConfig();
-    if (_cfg.firstRun) {
+    if (!_cfg.agreed) {
+      setTimeout(() => openTerms(), 600);
+      sendToRenderer("pet:terms-pending");
+    }
+
+    // 本地 Agent 调用接口（其他 agent / 脚本可调用，仅 127.0.0.1）
+    startAgentApi();
+
+    // 首次启动：已同意条款且无 API Key 时自动打开设置引导
+    if (_cfg.agreed && _cfg.firstRun) {
       config.saveConfig({ firstRun: false });
       if (!_cfg.chat.apiKey) {
         setTimeout(() => {

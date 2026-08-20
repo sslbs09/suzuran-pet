@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:">
+<title>苏苏洛 · 使用条款与隐私政策</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: linear-gradient(160deg, #fdf8f2 0%, #eef6fc 100%);
+    color: #44505c;
+    line-height: 1.8;
+    font-size: 13.5px;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+  .terms-head {
+    background: #5f9fc9;
+    color: #fff;
+    padding: 14px 22px;
+  }
+  .terms-head h1 { font-size: 17px; }
+  .terms-head .sub { font-size: 12px; opacity: 0.85; margin-top: 2px; }
+  .terms-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 18px 24px;
+  }
+  .terms-body h2 { font-size: 14.5px; color: #5f8db0; margin: 16px 0 6px; padding-left: 8px; border-left: 3px solid #8ec7e8; }
+  .terms-body h2:first-child { margin-top: 0; }
+  .terms-body p, .terms-body li { margin-bottom: 5px; }
+  .terms-body ul { padding-left: 22px; }
+  .terms-body b { color: #b04a4a; }
+  .terms-foot {
+    padding: 14px 24px;
+    background: #fff;
+    border-top: 1px solid #e3eef6;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    justify-content: center;
+  }
+  .terms-foot button {
+    padding: 10px 30px;
+    border-radius: 8px;
+    font-size: 14px;
+    cursor: pointer;
+    border: 1px solid #cfe0ec;
+    background: #fff;
+    color: #4a7ea6;
+  }
+  .terms-foot button.agree { background: #5f9fc9; border-color: #5f9fc9; color: #fff; }
+  .terms-foot button.agree:hover { background: #4e8fb8; }
+  .terms-foot button.refuse:hover { background: #fdf0f0; color: #c06a6a; }
+  .terms-foot .hint { font-size: 12px; color: #9ab3c6; }
+</style>
+</head>
+<body>
+  <div class="terms-head">
+    <h1>🦊 苏苏洛桌宠 · 使用条款与隐私政策</h1>
+    <div class="sub">版本 v1.0（2026-08-20）· 联系方式：1598184627@qq.com</div>
+  </div>
+
+  <div class="terms-body">
+    <p><b>重要提示：使用本软件前，请仔细阅读并确认以下条款。点击下方「同意」即视为您已阅读、理解并同意本条款的全部内容。若您不同意，请点击「拒绝」退出本软件。</b></p>
+
+    <h2>1. 服务说明</h2>
+    <p>1.1 本软件是一款<b>本地运行</b>的桌面宠物程序（Electron 应用），主要功能包括：桌面陪伴聊天、表情展示、可选语音合成等。</p>
+    <p>1.2 本软件为<b>开源软件</b>，源代码公开可供学习、研究、个人使用，但<b>禁止商用</b>（详见第 6 条）。</p>
+    <p>1.3 聊天功能需要您自行配置<b>第三方大模型 API 服务</b>（如 DeepSeek、OpenAI、Kimi、GLM、阿里百炼、本地 Ollama 等）才能使用，本软件本身不提供模型服务。</p>
+
+    <h2>2. 用户权利与责任</h2>
+    <ul>
+      <li>您有权在遵守本条款的前提下，个人使用、学习、修改本软件源码。</li>
+      <li>您承诺遵守法律法规，<b>不得</b>利用本软件从事违法、侵权、危害网络安全的活动（传播恶意程序、网络攻击、侵犯隐私、制作违法内容等）；</li>
+      <li><b>不得将本软件用于商业用途</b>（销售、出租、作为商业服务一部分、商业场景部署等）；</li>
+      <li>不得利用本软件骚扰、攻击他人或干扰其他系统；您自行配置的 API Key 由您本人保管并负责。</li>
+      <li>未成年人应在监护人指导下使用。</li>
+    </ul>
+
+    <h2>3. 隐私政策（详见 PRIVACY.md）</h2>
+    <ul>
+      <li><b>本地数据</b>：配置（含 API Key）、聊天记录、表情设置等数据<b>仅存储于您自己的电脑</b>，本软件<b>不收集、不上传</b>任何个人信息。</li>
+      <li><b>对话内容</b>：聊天内容仅发送到<b>您本人配置的第三方 API 服务商</b>用于生成回复，开发者不会获取、存储您的对话内容。</li>
+      <li><b>语音</b>：本地克隆音色全程本地运行；edge-tts / 百炼 CosyVoice 等云端语音会把待合成文本发送到相应服务商；系统语音完全本地。</li>
+    </ul>
+
+    <h2>4. 免责声明（详见 DISCLAIMER.md）</h2>
+    <p>4.1 本软件按"<b>现状</b>"（AS IS）提供，不作任何明示或默示的担保。</p>
+    <p>4.2 <b>AI 生成内容免责</b>：桌宠回复由您配置的第三方大模型生成，仅供娱乐与参考，<b>不构成任何专业建议</b>，请勿用于重要决策。</p>
+    <p>4.3 <b>第三方 API 免责</b>：聊天与部分语音功能依赖第三方服务商，其服务中断、故障、收费、数据政策均由服务商负责。</p>
+    <p>4.4 开发者不对因您未按说明使用、配置错误、网络问题、第三方异常、不可抗力、修改源码导致的损失承担责任。</p>
+
+    <h2>5. 条款变更</h2>
+    <p>开发者可能根据法律法规与功能更新修订本条款，修订后随软件更新发布并在软件内展示；您继续使用即视为接受更新后的条款。</p>
+
+    <h2>6. 知识产权与许可</h2>
+    <p>6.1 本软件源码以「<b>开源但禁止商用</b>」的许可发布（详见 LICENSE）：允许个人学习、研究、修改与传播（须保留版权与许可声明），<b>禁止任何形式的商业使用</b>。</p>
+    <p>6.2 所用第三方开源项目（Electron、GPT-SoVITS、Genie、electron-packager 等）遵循各自开源许可。</p>
+    <p>6.3 内置角色形象与表情素材版权归原作者所有，仅供个人使用。</p>
+  </div>
+
+  <div class="terms-foot">
+    <button id="btn-refuse" class="refuse">✖ 拒绝（退出）</button>
+    <button id="btn-agree" class="agree">✔ 同意并开始使用</button>
+    <span class="hint">点「同意」即确认接受全部条款</span>
+  </div>
+
+<script src="terms.js"></script>
+</body>
+</html>
