@@ -92,8 +92,8 @@ const DEFAULTS = {
   ttsGsv: { // 日语语音引擎（GPT-SoVITS v2ProPlus 本地推理，配合 speakJa 日语模式；无日语 G2P 的 Genie 说不了日语）
     enabled: true,
     server: "http://127.0.0.1:9880",
-    python: "",          // 如 E:\GSV-training\GPT-SoVITS-v2pro-20250604\runtime\python.exe
-    serverScript: "",    // 如 E:\GSV-training\GPT-SoVITS-v2pro-20250604\api.py
+    python: "",          // 如 D:\GPT-SoVITS\runtime\python.exe
+    serverScript: "",    // 如 D:\GPT-SoVITS\api.py
     sovitsPath: "",      // 训练好的 SoVITS 模型 .pth
     gptPath: "",         // 训练好的 GPT 模型 .ckpt
     refAudio: "",        // 日语参考音频（3~10s 干净人声）
