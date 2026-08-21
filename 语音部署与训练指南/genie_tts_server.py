@@ -46,6 +46,7 @@ lock = threading.Lock()
 FAIL_MSG = ""
 CHARACTER = "sussurro"   # 当前加载的角色名（服务器自己记录，genie_tts 未导出 context）
 LANGUAGE = "Chinese"
+LAST_REF_AUDIO = ""      # 当前已应用的参考音频路径（避免每次 /tts 重复 set_reference_audio 导致合成劣化）
 
 
 def log(msg):
@@ -158,7 +159,7 @@ def provision(cfg):
 
 # ---------------------------------------------------------------- 引擎
 def init_engine(cfg, model_dir):
-    global engine, engine_ready, FAIL_MSG, CHARACTER, LANGUAGE
+    global engine, engine_ready, FAIL_MSG, CHARACTER, LANGUAGE, LAST_REF_AUDIO
     # 必须在 import genie_tts 之前设好 GENIE_DATA_DIR，且目录已存在（跳过交互式询问）
     os.environ["GENIE_DATA_DIR"] = str(DATA_DIR / "GenieData")
     os.chdir(DATA_DIR)  # 兼容库内 CWD 相对路径
@@ -182,6 +183,7 @@ def init_engine(cfg, model_dir):
             audio_text=ref_text,
             language=LANGUAGE,
         )
+        LAST_REF_AUDIO = ref_audio
         log(f"参考音频已设置: {ref_audio}")
     else:
         log("⚠ 参考音频缺失（" + str(ref_audio) + "），克隆音色将使用角色默认")
@@ -272,16 +274,18 @@ class Handler(BaseHTTPRequestHandler):
             text = text[:500]
             genie = engine
             with lock:
-                # 允许每次请求覆盖参考音频（主进程配置优先）
+                # 仅当请求携带与当前不同的参考音频时才切换（试听用）；重复设置会导致合成劣化
                 ref_audio = (body.get("ref_audio") or "").strip()
                 ref_text = (body.get("ref_text") or "").strip()
-                if ref_audio and os.path.exists(ref_audio):
+                if ref_audio and os.path.exists(ref_audio) and ref_audio != LAST_REF_AUDIO:
                     genie.set_reference_audio(
                         character_name=CHARACTER,
                         audio_path=ref_audio,
                         audio_text=ref_text,
                         language=LANGUAGE,
                     )
+                    LAST_REF_AUDIO = ref_audio
+                    log("参考音频已切换: " + ref_audio)
                 tmp = tempfile.mktemp(suffix=".wav")
                 try:
                     genie.tts(

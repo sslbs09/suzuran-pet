@@ -1074,22 +1074,40 @@ async function ensureGenieServer(q) {
   return false;
 }
 
-/** 调本地服务器合成克隆音色；返回 base64，失败返回空 */
+/** 调本地服务器合成克隆音色；返回 base64，失败返回空。
+ *  引擎长时间运行后会劣化（输出极短碎片），检测到就自动重启服务再试一次。 */
 async function genieTts(q, clean) {
   const base = String(q.server || "").replace(/\/+$/, "");
-  try {
+  const callOnce = async () => {
     const resp = await fetch(base + "/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: clean }),
+      body: JSON.stringify({
+        text: clean,
+        ref_audio: q.refAudio || "",
+        ref_text: q.refText || ""
+      }),
       signal: AbortSignal.timeout(120000)
     });
     if (!resp.ok) {
       const t = (await resp.text()).slice(0, 200);
       logTts("genie", "HTTP " + resp.status + ": " + t);
-      return "";
+      return null;
     }
-    const buf = Buffer.from(await resp.arrayBuffer());
+    return Buffer.from(await resp.arrayBuffer());
+  };
+  try {
+    let buf = await callOnce();
+    if (buf === null) return "";
+    // 劣化自愈：文本不短但音频极小（<60KB）→ 重启 Genie 服务后重试一次
+    if (buf.length < 60000 && clean.length > 6) {
+      logTts("genie", `疑似引擎劣化（${buf.length}B / 文本${clean.length}字）→ 重启服务重试`);
+      shutdownGenieServer();
+      const up = await ensureGenieServer(q);
+      if (!up) return "";
+      buf = await callOnce();
+      if (buf === null) return "";
+    }
     if (buf.length < 100) { logTts("genie", "返回过短"); return ""; }
     return buf.toString("base64");
   } catch (e) {
