@@ -208,10 +208,19 @@ function speakSystem(clean) {
   }
 }
 
+// 防重复保险：同一句文本在 10 秒内不重复播放（无论触发源，避免“同一句反复说”）
+let lastSpoken = { text: "", ts: 0 };
+
 async function speak(text) {
   if (!ttsConfig.enabled) return;
   const clean = stripForSpeech(text);
   if (!clean) return;
+  const now = Date.now();
+  if (clean === lastSpoken.text && now - lastSpoken.ts < 10000) {
+    window.petAPI.playback("重复文本已跳过: " + clean.slice(0, 30));
+    return;
+  }
+  lastSpoken = { text: clean, ts: now };
   // 优先云端语音（百炼克隆 / edge-tts）
   if (ttsCloudOn) {
     try {
@@ -534,8 +543,8 @@ document.addEventListener("mousemove", (e) => {
   setMood("idle");
   resetSleepTimer();
 
-  // 开场白（气泡 + 语音）
-  if (state.personaOpening) {
+  // 开场白（气泡 + 语音；可在设置里关闭「启动问候」）
+  if (state.greetingOnStart !== false && state.personaOpening) {
     showBubble();
     bubbleText.textContent = state.personaOpening;
     speak(state.personaOpening);

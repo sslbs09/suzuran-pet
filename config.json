@@ -157,6 +157,18 @@
     "speakJa": false,
     "startTimeout": 240000
   },
+  "ttsGsv": {
+    "enabled": true,
+    "server": "http://127.0.0.1:9880",
+    "python": "",
+    "serverScript": "",
+    "sovitsPath": "",
+    "gptPath": "",
+    "refAudio": "",
+    "refText": "",
+    "startTimeout": 240000
+  },
   "hotkey": "Alt+Shift+S",
-  "startHidden": false
+  "startHidden": false,
+  "greetingOnStart": true
 }

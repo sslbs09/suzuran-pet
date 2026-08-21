@@ -819,6 +819,7 @@ ipcMain.handle("pet:get-state", () => {
   const cfg = config.getConfig();
   return {
     personaOpening: openingLine(personaCache),
+    greetingOnStart: cfg.greetingOnStart !== false,
     forcedMode,
     keyReady: !!cfg.chat.apiKey,
     keySource: cfg._keySource,
@@ -833,7 +834,7 @@ ipcMain.handle("pet:get-state", () => {
     firstRun: !!cfg.firstRun,
     workspace: cfg.workspace,
     tts: cfg.tts || { enabled: false, voice: "", rate: 0.95, pitch: 1.1 },
-    ttsCloud: { enabled: !!(cfg.ttsCloud?.enabled || cfg.ttsCosy?.enabled) },
+    ttsCloud: { enabled: !!(cfg.ttsCloud?.enabled || cfg.ttsCosy?.enabled || cfg.ttsGenie?.enabled) },
     winSize: { width: cfg.window.width || 170, height: cfg.window.height || 260 },
     hasUserSprite: fs.existsSync(path.join(config.APP_DIR, "renderer", "sprites", "user", "sprite.png"))
   };
@@ -973,12 +974,28 @@ ipcMain.handle("pet:tts-clone", async (_e, text) => {
     const cfg = config.getConfig();
     const clean = String(text || "").slice(0, 200);
     const q = cfg.ttsGenie || {};
-    // 日语语音模式（speakJa）：先把中文翻译成日语，再用日语微调音色说话；文字/聊天保持中文
+    // 日语语音模式（speakJa）：先把中文翻译成日语，再用 GPT-SoVITS（ttsGsv）日语微调音色说话；文字/聊天保持中文
     let ttsText = clean;
+    let jaText = "";
     if (q.speakJa) {
       const ja = await translateToJa(clean);
-      if (ja) { ttsText = ja; logTts("ja", "翻译: " + clean + " → " + ja); }
+      if (ja) { jaText = ja; ttsText = ja; logTts("ja", "翻译: " + clean + " → " + ja); }
       else logTts("ja", "翻译失败，退回中文合成");
+    }
+    if (jaText) {
+      // 日语模式：优先本地 GPT-SoVITS 日语合成（苏苏洛音色）
+      const g = cfg.ttsGsv || {};
+      if (g.enabled) {
+        const up = await ensureGsvServer(g);
+        if (up) {
+          const b64 = await gsvTtsJa(g, jaText);
+          if (b64) { logTts("route", "gsv-ja ok len=" + b64.length); return b64; }
+          logTts("route", "gsv-ja 失败 → 回退中文链路");
+        } else {
+          logTts("route", "gsv-ja 服务不可用 → 回退中文链路");
+        }
+      }
+      ttsText = clean; // 日语服务不可用 → 退回中文合成
     }
     if (q.enabled) {
       const up = await ensureGenieServer(q);
@@ -1064,11 +1081,7 @@ async function genieTts(q, clean) {
     const resp = await fetch(base + "/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        text: clean,
-        ref_audio: q.refAudio || "",
-        ref_text: q.refText || ""
-      }),
+      body: JSON.stringify({ text: clean }),
       signal: AbortSignal.timeout(120000)
     });
     if (!resp.ok) {
@@ -1085,37 +1098,113 @@ async function genieTts(q, clean) {
   }
 }
 
-/* ---------- 中日翻译（日语语音模式） ---------- */
-/** 把中文翻译成自然口语的日语；失败返回空串（调用方回退中文合成） */
-async function translateToJa(text) {
+/* ---------- 本地 GPT-SoVITS 日语 TTS（ttsGsv，配合 speakJa 日语模式） ---------- */
+let gsvServerChecked = false;
+let gsvServerUp = false;
+
+/** 确保 GPT-SoVITS 日语推理服务器在运行（端口 9880）；返回是否可用 */
+async function ensureGsvServer(g) {
+  if (gsvServerChecked) return gsvServerUp;
+  gsvServerChecked = true;
+  const base = String(g.server || "").replace(/\/+$/, "");
+  const alive = async () => {
+    try {
+      const r = await fetch(base + "/set_model", { signal: AbortSignal.timeout(2000) });
+      return r.status === 400 || r.ok; // 服务器在线即返回 400/200
+    } catch { return false; }
+  };
+  if (await alive()) { gsvServerUp = true; logTts("gsv", "服务器已在运行"); return true; }
+  if (!g.python || !g.serverScript) {
+    logTts("gsv", "配置不完整（python/serverScript）");
+    return false;
+  }
+  logTts("gsv", "服务器未运行，尝试拉起...");
   try {
-    const cfg = config.getConfig();
-    const c = cfg.chat || {};
-    if (!c.apiKey || !c.baseUrl || String(c.apiType || "openai") === "anthropic") return "";
-    const base = String(c.baseUrl || "").replace(/\/+$/, "");
-    const resp = await fetch(base + "/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + c.apiKey },
-      body: JSON.stringify({
-        model: c.model || "deepseek-chat",
-        messages: [
-          { role: "system", content: "你是中日翻译器。把用户输入的中文翻译成自然流畅、口语化的日语。只输出译文本身，不要任何解释、引号或多余内容。" },
-          { role: "user", content: String(text || "").slice(0, 200) }
-        ],
-        temperature: 0.3,
-        max_tokens: 300,
-        stream: false
-      }),
-      signal: AbortSignal.timeout(30000)
-    });
-    if (!resp.ok) return "";
-    const j = await resp.json();
-    const out = String((j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || "").trim();
-    return out && out.length > 0 && out.length < 400 ? out : "";
+    const args = [
+      g.serverScript,
+      "-s", g.sovitsPath,
+      "-g", g.gptPath,
+      "-dr", g.refAudio,
+      "-dt", g.refText,
+      "-dl", "ja",
+      "-a", "127.0.0.1",
+      "-p", String(new URL(base).port || 9880),
+      "-hp"
+    ];
+    const child = spawn(g.python, args, { detached: true, windowsHide: true, stdio: "ignore" });
+    child.unref();
   } catch (e) {
-    logTts("ja", "翻译异常: " + (e && e.message || e));
+    logTts("gsv", "拉起失败: " + (e && e.message || e));
+    return false;
+  }
+  const deadline = Date.now() + (g.startTimeout || 240000);
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 3000));
+    if (await alive()) { gsvServerUp = true; logTts("gsv", "服务器就绪"); return true; }
+  }
+  logTts("gsv", "等待超时");
+  return false;
+}
+
+/** 调 GPT-SoVITS 服务器合成日语；返回 base64，失败返回空 */
+async function gsvTtsJa(g, text) {
+  const base = String(g.server || "").replace(/\/+$/, "");
+  try {
+    const params = new URLSearchParams({ text: String(text || "").slice(0, 300), text_language: "ja" });
+    const resp = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(120000) });
+    if (!resp.ok) {
+      logTts("gsv", "HTTP " + resp.status);
+      return "";
+    }
+    const buf = Buffer.from(await resp.arrayBuffer());
+    if (buf.length < 100) { logTts("gsv", "返回过短"); return ""; }
+    return buf.toString("base64");
+  } catch (e) {
+    logTts("gsv", "请求失败: " + (e && e.message || e));
     return "";
   }
+}
+
+/* ---------- 中日翻译（日语语音模式） ---------- */
+/** 把中文翻译成自然口语的日语；失败/空结果自动重试一次；全部失败返回空串（调用方回退中文合成） */
+async function translateToJa(text) {
+  const cfg = config.getConfig();
+  const c = cfg.chat || {};
+  if (!c.apiKey || !c.baseUrl || String(c.apiType || "openai") === "anthropic") return "";
+  const base = String(c.baseUrl || "").replace(/\/+$/, "");
+  const sys = "你是中日翻译器。把用户输入的中文翻译成自然流畅、口语化的日语。只输出译文本身，不要任何解释、引号或多余内容。";
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const resp = await fetch(base + "/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + c.apiKey },
+        body: JSON.stringify({
+          model: c.model || "deepseek-chat",
+          messages: [
+            { role: "system", content: sys },
+            { role: "user", content: String(text || "").slice(0, 200) }
+          ],
+          temperature: 0.3,
+          max_tokens: 300,
+          stream: false
+        }),
+        signal: AbortSignal.timeout(45000)
+      });
+      if (!resp.ok) {
+        const t = (await resp.text()).slice(0, 120);
+        logTts("ja", "翻译 HTTP " + resp.status + (attempt < 2 ? "，重试" : "") + ": " + t);
+      } else {
+        const j = await resp.json();
+        const out = String((j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || "").trim();
+        if (out && out.length > 0 && out.length < 400) return out;
+        logTts("ja", "翻译返回为空" + (attempt < 2 ? "，重试" : ""));
+      }
+    } catch (e) {
+      logTts("ja", "翻译异常(" + attempt + "): " + (e && e.message || e));
+    }
+    if (attempt < 2) await new Promise((r) => setTimeout(r, 1200));
+  }
+  return "";
 }
 
 /* ---------- 云端语音合成助手 ---------- */

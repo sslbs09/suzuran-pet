@@ -58,6 +58,7 @@ async function toast(msg) {
   $("genie-ref-audio").value = genie.refAudio || "";
   $("genie-ref-text").value = genie.refText || "";
   $("genie-speak-ja").checked = !!genie.speakJa;
+  $("greeting-on-start").checked = S.greetingOnStart !== false;
   // 语音方案推断
   let plan = "system";
   if (genie.enabled) plan = "genie";
@@ -172,6 +173,7 @@ $("btn-save-voice").addEventListener("click", async () => {
   const enabled = $("tts-enabled").value === "true";
   const plan = $("tts-plan").value;
   const patch = {
+    greetingOnStart: $("greeting-on-start").checked,
     tts: { enabled, rate: parseFloat($("tts-rate").value) || 0.9 },
     ttsGenie: {
       enabled: plan === "genie",

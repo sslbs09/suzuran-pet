@@ -89,8 +89,20 @@ const DEFAULTS = {
     speakJa: false,      // 日语语音模式：界面文字保持中文，说话时先翻译成日语（配合本地日语微调音色）
     startTimeout: 240000
   },
+  ttsGsv: { // 日语语音引擎（GPT-SoVITS v2ProPlus 本地推理，配合 speakJa 日语模式；无日语 G2P 的 Genie 说不了日语）
+    enabled: true,
+    server: "http://127.0.0.1:9880",
+    python: "",          // 如 E:\GSV-training\GPT-SoVITS-v2pro-20250604\runtime\python.exe
+    serverScript: "",    // 如 E:\GSV-training\GPT-SoVITS-v2pro-20250604\api.py
+    sovitsPath: "",      // 训练好的 SoVITS 模型 .pth
+    gptPath: "",         // 训练好的 GPT 模型 .ckpt
+    refAudio: "",        // 日语参考音频（3~10s 干净人声）
+    refText: "",         // 参考音频的日语原文
+    startTimeout: 240000
+  },
   hotkey: "Alt+Shift+S",
   startHidden: false,
+  greetingOnStart: true, // 启动时自动问候（气泡 + 语音），可在设置里关闭,
   uiLang: "zh" // 界面语言：zh=中文 | en=English | ja=日本語（聊天内容始终为中文）
 };
 
