@@ -983,13 +983,23 @@ ipcMain.handle("pet:tts-clone", async (_e, text) => {
       else logTts("ja", "翻译失败，退回中文合成");
     }
     if (jaText) {
-      // 日语模式：优先本地 GPT-SoVITS 日语合成（苏苏洛音色）
+      // 日语模式：优先本地 GPT-SoVITS 日语合成（苏苏洛音色）。
+      // 微调模型一次只能生成一句，因此按句切分逐句合成后拼接，保证完整读完回复。
       const g = cfg.ttsGsv || {};
       if (g.enabled) {
         const up = await ensureGsvServer(g);
         if (up) {
-          const b64 = await gsvTtsJa(g, jaText);
-          if (b64) { logTts("route", "gsv-ja ok len=" + b64.length); return b64; }
+          const sents = splitJaSentences(jaText);
+          const parts = [];
+          for (const s of sents) {
+            const b64 = await gsvTtsJa(g, s);
+            if (b64) parts.push(b64);
+            else logTts("gsv", "单句失败（跳过）: " + String(s).slice(0, 30));
+          }
+          if (parts.length) {
+            const merged = parts.length === 1 ? parts[0] : mergeWavBase64(parts);
+            if (merged) { logTts("route", `gsv-ja ok ${parts.length}/${sents.length}句 len=${merged.length}`); return merged; }
+          }
           logTts("route", "gsv-ja 失败 → 回退中文链路");
         } else {
           logTts("route", "gsv-ja 服务不可用 → 回退中文链路");
@@ -1180,6 +1190,48 @@ async function gsvTtsJa(g, text) {
   } catch (e) {
     logTts("gsv", "请求失败: " + (e && e.message || e));
     return "";
+  }
+}
+
+/** 日语文本按句切分（保留标点），最多 10 句 */
+function splitJaSentences(text) {
+  const parts = String(text || "").split(/(?<=[。！？…\n])/).map((s) => s.trim()).filter(Boolean);
+  if (parts.length <= 10) return parts;
+  const head = parts.slice(0, 9);
+  head.push(parts.slice(9).join(""));
+  return head;
+}
+
+/** 把多段相同参数的 base64 WAV 拼接成单一 WAV */
+function mergeWavBase64(list) {
+  try {
+    const datas = [];
+    let fmt = null;
+    for (const b64 of list) {
+      const buf = Buffer.from(b64, "base64");
+      if (buf.length < 44 || buf.toString("ascii", 0, 4) !== "RIFF") continue;
+      let off = 12;
+      while (off + 8 <= buf.length) {
+        const id = buf.toString("ascii", off, off + 4);
+        const size = Math.min(buf.readUInt32LE(off + 4), buf.length - off - 8);
+        if (id === "fmt " && !fmt) fmt = Buffer.from(buf.subarray(off + 8, off + 8 + size));
+        if (id === "data") { datas.push(buf.subarray(off + 8, off + 8 + size)); break; }
+        off += 8 + size + (size % 2);
+      }
+    }
+    if (!datas.length || !fmt || fmt.length < 16) return null;
+    const pcm = Buffer.concat(datas);
+    const out = Buffer.alloc(44 + pcm.length);
+    out.write("RIFF", 0, "ascii"); out.write("WAVE", 8, "ascii");
+    out.writeUInt32LE(36 + pcm.length, 4);
+    out.write("fmt ", 12, "ascii"); out.writeUInt32LE(16, 16);
+    fmt.copy(out, 20, 0, 16);
+    out.write("data", 36, "ascii"); out.writeUInt32LE(pcm.length, 40);
+    pcm.copy(out, 44);
+    return out.toString("base64");
+  } catch (e) {
+    logTts("gsv", "合并失败: " + (e && e.message || e));
+    return null;
   }
 }
 
