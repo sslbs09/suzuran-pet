@@ -39,7 +39,7 @@ export default [
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "script",
-      globals: { ...globals.browser, ...globals.es2021 }
+      globals: { ...globals.browser, ...globals.es2021, I18N: "readonly" }
     },
     rules: sharedRules
   }

@@ -1,7 +1,7 @@
-# 苏苏洛桌宠 · 1.0 正式版（SuzuranPet）
+# 苏苏洛桌宠 · 1.1 正式版（SuzuranPet）
 
-Q 版狐狸医师桌宠：悬浮在桌面上，日常聊天陪伴。**免安装、绿色版**——解压后双击 exe 即用，无需 Node / Python（不开语音时）。
-感谢https://github.com/High-Logic/Genie/tree/master 的开源。
+Q 版狐狸医师桌宠：悬浮在桌面上，日常聊天陪伴。**免安装、绿色版**——解压后双击 exe 即用，无需 Node / Python（不开语音时）。1.1 新增：本地 GPT-SoVITS 微调音色接入、「日语语音模式」（界面文字保持中文、说话翻译成日语）、界面语言中/英/日可切换。
+感谢 <https://github.com/High-Logic/Genie/tree/master> 的开源。
 
 ## 快速开始
 
