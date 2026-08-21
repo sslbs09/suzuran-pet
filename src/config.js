@@ -86,10 +86,12 @@ const DEFAULTS = {
     serverScript: "",    // 如 E:\GenieTTS\genie_tts_server.py
     refAudio: "",        // 克隆参考音频（空 = 服务器默认）
     refText: "",         // 参考音频的原文
+    speakJa: false,      // 日语语音模式：界面文字保持中文，说话时先翻译成日语（配合本地日语微调音色）
     startTimeout: 240000
   },
   hotkey: "Alt+Shift+S",
-  startHidden: false
+  startHidden: false,
+  uiLang: "zh" // 界面语言：zh=中文 | en=English | ja=日本語（聊天内容始终为中文）
 };
 
 let cache = null;

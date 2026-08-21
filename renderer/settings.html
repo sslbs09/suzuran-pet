@@ -8,16 +8,16 @@
 </head>
 <body>
   <header>
-    <h1>🦊 苏苏洛 · 设置</h1>
+    <h1 data-i18n="set.title">🦊 苏苏洛 · 设置</h1>
     <div class="sub" id="key-source">—</div>
   </header>
 
   <!-- ============ 1. 聊天 API ============ -->
   <section>
-    <h2>① 聊天 API</h2>
+    <h2 data-i18n="set.api">① 聊天 API</h2>
     <div class="row">
       <label class="col">
-        <span>服务商预设</span>
+        <span data-i18n="set.preset">服务商预设</span>
         <select id="preset">
           <option value="deepseek">DeepSeek（深度求索）</option>
           <option value="openai">OpenAI</option>
@@ -27,11 +27,11 @@
           <option value="siliconflow">硅基流动 SiliconFlow</option>
           <option value="ollama">Ollama（本地免费）</option>
           <option value="anthropic">Anthropic Claude</option>
-          <option value="custom">自定义</option>
+          <option value="custom" data-i18n="set.custom">自定义</option>
         </select>
       </label>
       <label class="col">
-        <span>协议类型</span>
+        <span data-i18n="set.protocol">协议类型</span>
         <select id="api-type">
           <option value="openai">OpenAI 兼容</option>
           <option value="anthropic">Anthropic</option>
@@ -40,134 +40,148 @@
     </div>
     <div class="row">
       <label class="col grow">
-        <span>API 地址 baseUrl</span>
+        <span data-i18n="set.baseUrl">API 地址 baseUrl</span>
         <input id="base-url" type="text" placeholder="https://api.deepseek.com/v1" />
       </label>
       <label class="col">
-        <span>模型 model</span>
+        <span data-i18n="set.model">模型 model</span>
         <input id="model" type="text" list="model-suggestions" placeholder="deepseek-chat" />
         <datalist id="model-suggestions"></datalist>
       </label>
       <label class="col">
-        <span>自动读取可用模型</span>
-        <button id="btn-list-models" type="button" class="primary">🔍 获取模型列表</button>
+        <span data-i18n="set.listModels">自动读取可用模型</span>
+        <button id="btn-list-models" type="button" class="primary" data-i18n="set.listModelsBtn">🔍 获取模型列表</button>
       </label>
     </div>
     <div id="model-pick-row" class="row" style="display:none;">
       <label class="col grow">
-        <span>选择模型（选完自动填入上方）</span>
+        <span data-i18n="set.pickModel">选择模型（选完自动填入上方）</span>
         <select id="model-pick"></select>
       </label>
       <span id="model-result" class="result"></span>
     </div>
     <div class="row">
       <label class="col grow">
-        <span>API Key</span>
+        <span data-i18n="set.apiKey">API Key</span>
         <div class="keybox">
           <input id="api-key" type="password" placeholder="sk-…（Ollama 本地可留空）" />
-          <button id="btn-toggle-key" type="button" class="mini" title="显示/隐藏">👁</button>
+          <button id="btn-toggle-key" type="button" class="mini" title="显示/隐藏" data-i18n-title="set.keyToggleTitle">👁</button>
         </div>
       </label>
       <label class="col">
-        <span>桌宠对你的称呼</span>
+        <span data-i18n="set.userName">桌宠对你的称呼</span>
         <input id="user-name" type="text" placeholder="主人" />
       </label>
     </div>
     <div class="row">
       <label class="col">
-        <span>温度 temperature</span>
+        <span data-i18n="set.temperature">温度 temperature</span>
         <input id="temperature" type="number" step="0.05" min="0" max="2" />
       </label>
       <label class="col">
-        <span>最大回复字数 maxTokens</span>
+        <span data-i18n="set.maxTokens">最大回复字数 maxTokens</span>
         <input id="max-tokens" type="number" step="50" min="50" />
       </label>
       <label class="col">
-        <span>记忆轮数（最近 N 轮）</span>
+        <span data-i18n="set.historyTurns">记忆轮数（最近 N 轮）</span>
         <input id="max-history" type="number" step="2" min="2" max="60" />
       </label>
     </div>
     <div class="row actions">
-      <button id="btn-test" type="button" class="primary">🔌 测试连接</button>
-      <button id="btn-save-api" type="button" class="primary">💾 保存 API 设置</button>
+      <button id="btn-test" type="button" class="primary" data-i18n="set.testConn">🔌 测试连接</button>
+      <button id="btn-save-api" type="button" class="primary" data-i18n="set.saveApi">💾 保存 API 设置</button>
       <span id="test-result" class="result"></span>
     </div>
-    <p class="hint">Ollama 本地模型无需 Key（地址填 <code>http://localhost:11434/v1</code>）；其他服务商按各自的 OpenAI 兼容地址填写。</p>
+    <p class="hint" data-i18n="set.ollamaHint">Ollama 本地模型无需 Key（地址填 <code>http://localhost:11434/v1</code>）；其他服务商按各自的 OpenAI 兼容地址填写。</p>
   </section>
 
   <!-- ============ 2. 人设 ============ -->
   <section>
-    <h2>② 人设（角色设定）</h2>
-    <p class="hint">编辑下方内容即可自定义角色。占位符 <code>{{userName}}</code> 会自动替换成上面填的称呼，<code>{{petName}}</code> 替换成桌宠名字。保存后立即生效。</p>
+    <h2 data-i18n="set.persona">② 人设（角色设定）</h2>
+    <p class="hint" data-i18n="set.personaHint">编辑下方内容即可自定义角色。占位符 <code>{{userName}}</code> 会自动替换成上面填的称呼，<code>{{petName}}</code> 替换成桌宠名字。保存后立即生效。</p>
     <textarea id="persona" rows="12" spellcheck="false" placeholder="# 人格设定…"></textarea>
     <div class="row actions">
-      <button id="btn-save-persona" type="button" class="primary">💾 保存并生效</button>
-      <button id="btn-reset-persona" type="button">↩ 恢复默认人设</button>
+      <button id="btn-save-persona" type="button" class="primary" data-i18n="set.savePersona">💾 保存并生效</button>
+      <button id="btn-reset-persona" type="button" data-i18n="set.resetPersona">↩ 恢复默认人设</button>
       <span id="persona-result" class="result"></span>
     </div>
   </section>
 
   <!-- ============ 3. 语音 ============ -->
   <section>
-    <h2>③ 语音（可选，默认关闭）</h2>
+    <h2 data-i18n="set.voice">③ 语音（可选，默认关闭）</h2>
     <div class="row">
       <label class="col">
-        <span>语音总开关</span>
+        <span data-i18n="set.ttsEnabled">语音总开关</span>
         <select id="tts-enabled">
-          <option value="false">🔇 关闭（默认，推荐）</option>
+          <option value="false" data-i18n="set.voiceOffOpt">🔇 关闭（默认，推荐）</option>
           <option value="true">🔊 开启</option>
         </select>
       </label>
       <label class="col">
-        <span>语音方案（开启后生效）</span>
+        <span data-i18n="set.ttsPlan">语音方案（开启后生效）</span>
         <select id="tts-plan">
-          <option value="system">系统自带语音（零配置）</option>
-          <option value="edge">edge-tts 云端（需 Python）</option>
-          <option value="genie">本地克隆音色 Genie（需部署）</option>
-          <option value="cosy">百炼 CosyVoice（需 API Key）</option>
+          <option value="system" data-i18n="set.planSystem">系统自带语音（零配置）</option>
+          <option value="edge" data-i18n="set.planEdge">edge-tts 云端（需 Python）</option>
+          <option value="genie" data-i18n="set.planGenie">本地克隆音色 Genie（需部署）</option>
+          <option value="cosy" data-i18n="set.planCosy">百炼 CosyVoice（需 API Key）</option>
         </select>
       </label>
       <label class="col">
-        <span>语速（越小越慢，0.6~1.5）</span>
+        <span data-i18n="set.rate">语速（越小越慢，0.6~1.5）</span>
         <input id="tts-rate" type="number" step="0.05" min="0.6" max="1.5" />
       </label>
     </div>
     <div id="genie-fields">
       <div class="row">
         <label class="col grow">
-          <span>Python 路径（pythonw.exe）</span>
+          <span data-i18n="set.pythonPath">Python 路径（pythonw.exe）</span>
           <input id="genie-python" type="text" placeholder="E:\GenieTTS\venv\Scripts\pythonw.exe" />
         </label>
         <label class="col grow">
-          <span>服务器脚本 genie_tts_server.py</span>
+          <span data-i18n="set.serverScript">服务器脚本 genie_tts_server.py</span>
           <input id="genie-script" type="text" placeholder="E:\GenieTTS\genie_tts_server.py" />
         </label>
       </div>
       <div class="row">
         <label class="col grow">
-          <span>参考音频（克隆音色，可留空用默认）</span>
+          <span data-i18n="set.refAudio">参考音频（克隆音色，可留空用默认）</span>
           <input id="genie-ref-audio" type="text" placeholder="E:\GenieTTS\ref\ref_sussurro.wav" />
         </label>
         <label class="col grow">
-          <span>参考音频原文</span>
+          <span data-i18n="set.refText">参考音频原文</span>
           <input id="genie-ref-text" type="text" placeholder="参考音频对应的文字" />
+        </label>
+      </div>
+      <div class="row">
+        <label class="col">
+          <input id="genie-speak-ja" type="checkbox" />
+          <span data-i18n="set.speakJa">🗣 日语语音模式：界面文字保持中文，说话先翻译成日语（配合本地日语微调音色）</span>
         </label>
       </div>
     </div>
     <div class="row actions">
-      <button id="btn-save-voice" type="button" class="primary">💾 保存语音设置</button>
-      <button id="btn-open-studio" type="button">🎙️ 音色克隆与训练</button>
-      <button id="btn-open-guide" type="button">📖 语音部署与训练指南</button>
+      <button id="btn-save-voice" type="button" class="primary" data-i18n="set.saveVoice">💾 保存语音设置</button>
+      <button id="btn-open-studio" type="button" data-i18n="set.openStudio">🎙️ 音色克隆与训练</button>
+      <button id="btn-open-guide" type="button" data-i18n="set.openGuide">📖 语音部署与训练指南</button>
       <span id="voice-result" class="result"></span>
     </div>
   </section>
 
   <!-- ============ 4. 其他 ============ -->
   <section>
-    <h2>④ 其他</h2>
+    <h2 data-i18n="set.other">④ 其他</h2>
     <div class="row">
       <label class="col">
-        <span>桌宠大小</span>
+        <span data-i18n="set.uiLang">界面语言（聊天内容始终为中文）</span>
+        <select id="ui-lang">
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+          <option value="ja">日本語</option>
+        </select>
+      </label>
+      <label class="col">
+        <span data-i18n="set.petSize">桌宠大小</span>
         <select id="pet-scale">
           <option value="0.6">60%</option>
           <option value="0.75">75%</option>
@@ -180,11 +194,11 @@
         </select>
       </label>
       <label class="col">
-        <span>全局热键（隐藏/显示）</span>
+        <span data-i18n="set.hotkey">全局热键（隐藏/显示）</span>
         <input id="hotkey" type="text" placeholder="Alt+Shift+S" />
       </label>
       <label class="col">
-        <span>启动即隐藏到托盘</span>
+        <span data-i18n="set.startHidden">启动即隐藏到托盘</span>
         <select id="start-hidden">
           <option value="false">否</option>
           <option value="true">是</option>
@@ -193,33 +207,34 @@
     </div>
     <div class="row">
       <label class="col">
-        <span>Agent 接口（其他 agent 调用）</span>
+        <span data-i18n="set.agentApi">Agent 接口（其他 agent 调用）</span>
         <select id="agent-enabled">
-          <option value="true">开（仅本机 127.0.0.1）</option>
-          <option value="false">关</option>
+          <option value="true" data-i18n="set.agentOn">开（仅本机 127.0.0.1）</option>
+          <option value="false" data-i18n="set.agentOff">关</option>
         </select>
       </label>
       <label class="col">
-        <span>端口</span>
+        <span data-i18n="set.agentPort">端口</span>
         <input id="agent-port" type="number" min="1" max="65535" placeholder="8765" />
       </label>
       <label class="col grow">
-        <span>自定义调用词（非空时 /chat 需以该词开头，如「苏苏洛」）</span>
+        <span data-i18n="set.agentWord">自定义调用词（非空时 /chat 需以该词开头，如「苏苏洛」）</span>
         <input id="agent-word" type="text" maxlength="20" placeholder="留空 = 无需调用词" />
       </label>
     </div>
-    <p class="hint">其他 agent / 脚本可调用：<code>POST http://127.0.0.1:8765/chat</code>，请求体 <code>{"text":"苏苏洛 帮我…"}</code>；<code>GET /health</code> 查状态。仅监听本机，不对局域网开放。</p>
+    <p class="hint" data-i18n="set.agentHint">其他 agent / 脚本可调用：<code>POST http://127.0.0.1:8765/chat</code>，请求体 <code>{"text":"苏苏洛 帮我…"}</code>；<code>GET /health</code> 查状态。仅监听本机，不对局域网开放。</p>
     <div class="row actions">
-      <button id="btn-save-other" type="button" class="primary">💾 保存</button>
-      <button id="btn-open-terms" type="button">📄 使用条款与隐私政策</button>
-      <button id="btn-open-config" type="button">📄 打开 config.json</button>
-      <button id="btn-clear-history" type="button" class="danger">🗑 清除聊天记录</button>
+      <button id="btn-save-other" type="button" class="primary" data-i18n="set.save">💾 保存</button>
+      <button id="btn-open-terms" type="button" data-i18n="set.openTerms">📄 使用条款与隐私政策</button>
+      <button id="btn-open-config" type="button" data-i18n="set.openConfigFile">📄 打开 config.json</button>
+      <button id="btn-clear-history" type="button" class="danger" data-i18n="set.clearHistory">🗑 清除聊天记录</button>
       <span id="other-result" class="result"></span>
     </div>
-    <p class="hint">任务模式（/zcode 前缀操控电脑）默认关闭：想开启请打开 config.json，把 <code>zcodeEnabled</code> 改为 <code>true</code> 并配置 <code>zcodeCli</code> 路径（需自行安装 ZCode）。</p>
-    <p class="foot" id="version">苏苏洛桌宠 · 1.0 正式版</p>
+    <p class="hint" data-i18n="set.taskHint">任务模式（/zcode 前缀操控电脑）默认关闭：想开启请打开 config.json，把 <code>zcodeEnabled</code> 改为 <code>true</code> 并配置 <code>zcodeCli</code> 路径（需自行安装 ZCode）。</p>
+    <p class="foot" id="version" data-i18n="set.version">苏苏洛桌宠 · 1.1 正式版</p>
   </section>
 
+<script src="i18n.js"></script>
 <script src="settings.js"></script>
 </body>
 </html>

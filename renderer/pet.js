@@ -123,7 +123,7 @@ async function send() {
   const text = inputEl.value.trim();
   if (!text || busy) return;
   if (!agreed) {
-    toast("请先阅读并同意《使用条款与隐私政策》");
+    toast(I18N.t("pet.termsToast"));
     return;
   }
   inputEl.value = "";

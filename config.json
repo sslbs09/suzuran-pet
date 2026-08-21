@@ -154,6 +154,7 @@
     "serverScript": "",
     "refAudio": "",
     "refText": "",
+    "speakJa": false,
     "startTimeout": 240000
   },
   "hotkey": "Alt+Shift+S",

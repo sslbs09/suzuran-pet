@@ -3,10 +3,12 @@
  * - 读取/保存 config（IPC pet:get-settings / pet:save-settings）
  * - 人设编辑保存 / 恢复默认（pet:save-persona / pet:reset-persona）
  * - 测试连接（pet:test-chat）
+ * - 界面语言切换（pet:set-ui-lang，中/英/日）
  */
 "use strict";
 
 const $ = (id) => document.getElementById(id);
+const L = (key) => (window.I18N && I18N.t(key)) || key; // 国际化动态文案
 
 const PRESETS = {
   deepseek:     { apiType: "openai",    baseUrl: "https://api.deepseek.com/v1",                model: "deepseek-chat" },
@@ -35,7 +37,7 @@ async function toast(msg) {
 (async function init() {
   S = await window.petAPI.getSettings();
   document.getElementById("key-source").textContent =
-    "API Key 状态：" + (S.keySource || "未知");
+    L("set.keyStatus") + (S.keySource || L("set.unknown"));
 
   $("api-type").value = S.chat.apiType || "openai";
   $("base-url").value = S.chat.baseUrl || "";
@@ -55,6 +57,7 @@ async function toast(msg) {
   $("genie-script").value = genie.serverScript || "";
   $("genie-ref-audio").value = genie.refAudio || "";
   $("genie-ref-text").value = genie.refText || "";
+  $("genie-speak-ja").checked = !!genie.speakJa;
   // 语音方案推断
   let plan = "system";
   if (genie.enabled) plan = "genie";
@@ -63,6 +66,7 @@ async function toast(msg) {
   $("tts-plan").value = plan;
   toggleGenieFields();
 
+  $("ui-lang").value = S.uiLang || "zh";
   $("hotkey").value = S.hotkey || "Alt+Shift+S";
   $("start-hidden").value = String(!!S.startHidden);
   $("pet-scale").value = String(S.scale || 1);
@@ -105,7 +109,7 @@ $("btn-toggle-key").addEventListener("click", () => {
 
 $("btn-test").addEventListener("click", async () => {
   const c = readChat().chat;
-  setResult($("test-result"), "测试中…");
+  setResult($("test-result"), L("set.testing"));
   const r = await window.petAPI.testChat(c);
   setResult($("test-result"), r.message, r.ok);
 });
@@ -113,48 +117,48 @@ $("btn-test").addEventListener("click", async () => {
 /* ---------- 自动读取模型列表 ---------- */
 $("btn-list-models").addEventListener("click", async () => {
   const c = readChat().chat;
-  setResult($("model-result"), "读取中…");
+  setResult($("model-result"), L("set.testing"));
   const r = await window.petAPI.listModels(c);
   if (!r.ok) {
-    setResult($("model-result"), "获取失败：" + r.message, false);
+    setResult($("model-result"), L("set.modelFail") + r.message, false);
     return;
   }
   const pick = $("model-pick");
   pick.innerHTML = r.models.map((m) => `<option value="${m.replace(/"/g, "&quot;")}">${m}</option>`).join("");
   $("model-pick-row").style.display = "flex";
   pick.value = r.models.includes(c.model) ? c.model : (r.models[0] || "");
-  setResult($("model-result"), `✅ 已读取 ${r.count} 个模型，选一个填入`, true);
+  setResult($("model-result"), L("set.modelOkPrefix") + r.count + L("set.modelOkSuffix"), true);
 });
 
 $("model-pick").addEventListener("change", () => {
   const v = $("model-pick").value;
   if (v) {
     $("model").value = v;
-    setResult($("model-result"), `已选择：${v}`, true);
+    setResult($("model-result"), L("set.modelPicked") + v, true);
   }
 });
 
 $("btn-save-api").addEventListener("click", async () => {
   const patch = readChat();
   const r = await window.petAPI.saveSettings(patch);
-  if (r === true) { setResult($("test-result"), "✅ API 设置已保存", true); }
-  else { setResult($("test-result"), "保存失败: " + (r && r.message || "未知错误"), false); }
+  if (r === true) { setResult($("test-result"), L("set.apiSaved"), true); }
+  else { setResult($("test-result"), L("set.saveFailed") + (r && r.message || L("set.unknown")), false); }
 });
 
 /* ---------- 人设 ---------- */
 $("btn-save-persona").addEventListener("click", async () => {
   const ok = await window.petAPI.savePersona($("persona").value);
-  setResult($("persona-result"), ok ? "✅ 人设已保存并生效" : "❌ 保存失败", ok);
+  setResult($("persona-result"), ok ? L("set.personaSaved") : L("set.personaSaveFail"), ok);
 });
 
 $("btn-reset-persona").addEventListener("click", async () => {
-  if (!confirm("确定恢复默认人设？当前编辑内容会被覆盖。")) return;
+  if (!confirm(L("set.confirmReset"))) return;
   const r = await window.petAPI.resetPersona();
   if (r.ok) {
     $("persona").value = r.persona;
-    setResult($("persona-result"), "✅ 已恢复默认人设", true);
+    setResult($("persona-result"), L("set.personaReset"), true);
   } else {
-    setResult($("persona-result"), "❌ " + (r.message || "恢复失败"), false);
+    setResult($("persona-result"), "❌ " + (r.message || L("set.personaResetFail")), false);
   }
 });
 
@@ -174,23 +178,30 @@ $("btn-save-voice").addEventListener("click", async () => {
       python: $("genie-python").value.trim(),
       serverScript: $("genie-script").value.trim(),
       refAudio: $("genie-ref-audio").value.trim(),
-      refText: $("genie-ref-text").value.trim()
+      refText: $("genie-ref-text").value.trim(),
+      speakJa: $("genie-speak-ja").checked
     },
     ttsCloud: { enabled: plan === "edge" },
     ttsCosy: { enabled: plan === "cosy" }
   };
   const r = await window.petAPI.saveSettings(patch);
-  setResult($("voice-result"), r === true ? "✅ 语音设置已保存" : "❌ 保存失败", r === true);
+  setResult($("voice-result"), r === true ? L("set.voiceSaved") : L("set.voiceSaveFail"), r === true);
 });
 
 $("btn-open-guide").addEventListener("click", () => window.petAPI.openTtsGuide());
 
 $("btn-open-studio").addEventListener("click", () => window.petAPI.openVoiceStudio());
 
+/* ---------- 界面语言（即时切换） ---------- */
+$("ui-lang").addEventListener("change", () => {
+  window.petAPI.setUiLang($("ui-lang").value);
+});
+
 /* ---------- 其他 ---------- */
 $("btn-save-other").addEventListener("click", async () => {
   const scale = parseFloat($("pet-scale").value) || 1;
   const r = await window.petAPI.saveSettings({
+    uiLang: $("ui-lang").value,
     hotkey: $("hotkey").value.trim() || "Alt+Shift+S",
     startHidden: $("start-hidden").value === "true",
     window: { scale },
@@ -202,16 +213,15 @@ $("btn-save-other").addEventListener("click", async () => {
   });
   // 立即应用桌宠大小（不等重启）
   if (r === true) await window.petAPI.setScale(scale);
-  setResult($("other-result"), r === true ? "✅ 已保存（热键/Agent 端口重启后生效）" : "❌ 保存失败", r === true);
+  setResult($("other-result"), r === true ? L("set.saved") : L("set.saveFailed"), r === true);
 });
 
 $("btn-open-terms").addEventListener("click", () => window.petAPI.openTerms());
 
-
 $("btn-open-config").addEventListener("click", () => window.petAPI.openConfig());
 
 $("btn-clear-history").addEventListener("click", async () => {
-  if (!confirm("确定清除全部聊天记忆？")) return;
+  if (!confirm(L("set.confirmClear"))) return;
   const ok = await window.petAPI.clearHistory();
-  setResult($("other-result"), ok ? "✅ 聊天记录已清除" : "❌ 清除失败", ok);
+  setResult($("other-result"), ok ? L("set.saved") : L("set.saveFailed"), ok);
 });

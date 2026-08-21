@@ -29,12 +29,12 @@ jobs:
       - name: 打包桌宠（electron-packager）
         run: npm run dist
 
-      - name: 精简语言包（只留中文/英文）
+      - name: 精简语言包（保留中/英/日）
         shell: pwsh
         run: |
           $folder = Get-ChildItem dist | Select-Object -First 1
           Get-ChildItem "$($folder.FullName)\locales" -Filter "*.pak" |
-            Where-Object { $_.Name -notin @("zh-CN.pak", "en-US.pak") } |
+            Where-Object { $_.Name -notin @("zh-CN.pak", "en-US.pak", "ja.pak") } |
             Remove-Item -Force
 
       - name: 压缩为 zip
@@ -42,20 +42,20 @@ jobs:
         run: |
           $folder = Get-ChildItem dist | Select-Object -First 1
           if (-not $folder) { Write-Error "dist 目录为空"; exit 1 }
-          Compress-Archive -Path $folder.FullName -DestinationPath "SuzuranPet-1.0.0-win32-x64.zip" -Force
-          Write-Host "已生成: SuzuranPet-1.0.0-win32-x64.zip"
+          Compress-Archive -Path $folder.FullName -DestinationPath "SuzuranPet-1.1.0-win32-x64.zip" -Force
+          Write-Host "已生成: SuzuranPet-1.1.0-win32-x64.zip"
 
       - name: 上传到 GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          name: "苏苏洛桌宠 1.0 正式版"
+          name: "苏苏洛桌宠 1.1 正式版"
           body: |
-            # 苏苏洛桌宠 1.0 正式版
+            # 苏苏洛桌宠 1.1 正式版
 
-            本版本为正式 1.0 发行版，包含条款确认、隐私/安全文档、可调桌宠大小、本地 Agent 调用接口、自定义调用词、API 模型列表、19 个可编辑情绪与本地语音克隆。
+            本版本为 1.1 发行版：接入本地 GPT-SoVITS v2ProPlus 微调音色（苏苏洛日语语音），新增「日语语音模式」（界面文字保持中文、说话先翻译成日语），界面语言支持中文 / English / 日本語 一键切换；沿用 1.0 的条款确认、隐私/安全文档、可调桌宠大小、本地 Agent 调用接口、自定义调用词、API 模型列表与 19 个可编辑情绪。
 
-            **开源但禁止商用**。使用前请阅读并同意 TERMS.md。
-          files: "SuzuranPet-1.0.0-win32-x64.zip"
+            **开源但禁止商用**。使用前请阅读并同意 TERMS.md。日语语音模式需先按「语音部署与训练指南」部署本地 Genie（GPT-SoVITS）日语微调模型。
+          files: "SuzuranPet-1.1.0-win32-x64.zip"
           generate_release_notes: false
           fail_on_unmatched_files: true
           draft: false

@@ -17,6 +17,7 @@ const router = require("./src/router");
 const chatClient = require("./src/chat-client");
 const zcodeClient = require("./src/zcode-client");
 const history = require("./src/history");
+const i18n = require("./src/i18n");
 
 const ICON_PATH = path.join(config.APP_DIR, "icon.png");
 
@@ -136,49 +137,54 @@ function createTray() {
 
 function refreshTrayMenu() {
   const cfg = config.getConfig();
+  const lang = cfg.uiLang || "zh";
   const zcodeOn = !!cfg.zcodeEnabled;
-  const modeLabel = !zcodeOn ? "模式：日常聊天"
-    : forcedMode === "zcode" ? "模式：ZCode 任务（点此切回自动）"
-    : forcedMode === "chat" ? "模式：日常聊天（点此切回自动）"
-    : "模式：自动路由";
+  const modeLabel = !zcodeOn ? i18n.t(lang, "tray.modeChat")
+    : forcedMode === "zcode" ? i18n.t(lang, "tray.modeZcode")
+    : forcedMode === "chat" ? i18n.t(lang, "tray.modeChat") + i18n.t(lang, "tray.clickAutoSuffix")
+    : i18n.t(lang, "tray.modeAuto");
   const ttsOn = !!(cfg.tts || {}).enabled;
   const rate = (cfg.tts || {}).rate || 0.9;
   const scale = clampScale((cfg.window || {}).scale);
+  const speakJa = !!((cfg.ttsGenie || {}).speakJa);
+  const rateWord = rate <= 0.85 ? "tray.rateWordSlow" : rate <= 0.95 ? "tray.rateWordSlight" : rate >= 1.1 ? "tray.rateWordFast" : "tray.rateWordNormal";
+  const sizeWord = scale <= 0.8 ? "tray.sizeWordSmall" : scale >= 1.6 ? "tray.sizeWordXLarge" : scale >= 1.2 ? "tray.sizeWordLarge" : "tray.sizeWordStandard";
   const items = [
-    { label: isWindowVisible() ? "隐藏桌宠" : "显示桌宠", click: () => toggleWindow() },
+    { label: isWindowVisible() ? i18n.t(lang, "tray.hidePet") : i18n.t(lang, "tray.showPet"), click: () => toggleWindow() },
     { type: "separator" },
     { label: modeLabel, enabled: false }
   ];
   if (zcodeOn) {
     items.push(
-      { label: forcedMode === "auto" ? "强制聊天模式" : forcedMode === "chat" ? "恢复自动路由" : "切到聊天模式", click: () => setMode(forcedMode === "chat" ? "auto" : "chat") },
-      { label: forcedMode === "auto" ? "强制 ZCode 任务模式" : forcedMode === "zcode" ? "恢复自动路由" : "切到任务模式", click: () => setMode(forcedMode === "zcode" ? "auto" : "zcode") }
+      { label: forcedMode === "auto" ? i18n.t(lang, "tray.forceChat") : forcedMode === "chat" ? i18n.t(lang, "tray.restoreAuto") : i18n.t(lang, "tray.switchChat"), click: () => setMode(forcedMode === "chat" ? "auto" : "chat") },
+      { label: forcedMode === "auto" ? i18n.t(lang, "tray.forceZcode") : forcedMode === "zcode" ? i18n.t(lang, "tray.restoreAuto") : i18n.t(lang, "tray.switchTask"), click: () => setMode(forcedMode === "zcode" ? "auto" : "zcode") }
     );
   }
   items.push(
     { type: "separator" },
-    { label: ttsOn ? "🔊 语音：开（点此关闭）" : "🔇 语音：关（点此开启）", click: () => setTts(!ttsOn) },
-    { label: "🎚 语速：当前 " + (rate <= 0.85 ? "慢" : rate <= 0.95 ? "稍慢" : rate >= 1.1 ? "较快" : "正常"), enabled: false },
-    { label: "慢（0.85）", type: "radio", checked: rate <= 0.85, click: () => setRate(0.85) },
-    { label: "稍慢（0.9）", type: "radio", checked: rate > 0.85 && rate <= 0.95, click: () => setRate(0.9) },
-    { label: "正常（1.0）", type: "radio", checked: rate > 0.95 && rate < 1.1, click: () => setRate(1.0) },
-    { label: "较快（1.1）", type: "radio", checked: rate >= 1.1, click: () => setRate(1.1) },
-    { label: "🔍 大小：当前 " + (scale <= 0.8 ? "小" : scale >= 1.6 ? "特大" : scale >= 1.2 ? "大" : "标准"), enabled: false },
-    { label: "小（75%）", type: "radio", checked: scale <= 0.8, click: () => setScale(0.75) },
-    { label: "标准（100%）", type: "radio", checked: scale > 0.8 && scale < 1.2, click: () => setScale(1.0) },
-    { label: "大（125%）", type: "radio", checked: scale >= 1.2 && scale < 1.6, click: () => setScale(1.25) },
-    { label: "特大（150%）", type: "radio", checked: scale >= 1.6, click: () => setScale(1.5) },
+    { label: ttsOn ? i18n.t(lang, "tray.voiceOn") : i18n.t(lang, "tray.voiceOff"), click: () => setTts(!ttsOn) },
+    { label: i18n.t(lang, "tray.rateLabel") + i18n.t(lang, rateWord), enabled: false },
+    { label: i18n.t(lang, "tray.rateSlow"), type: "radio", checked: rate <= 0.85, click: () => setRate(0.85) },
+    { label: i18n.t(lang, "tray.rateSlight"), type: "radio", checked: rate > 0.85 && rate <= 0.95, click: () => setRate(0.9) },
+    { label: i18n.t(lang, "tray.rateNormal"), type: "radio", checked: rate > 0.95 && rate < 1.1, click: () => setRate(1.0) },
+    { label: i18n.t(lang, "tray.rateFast"), type: "radio", checked: rate >= 1.1, click: () => setRate(1.1) },
+    { label: speakJa ? i18n.t(lang, "tray.speakJaOn") : i18n.t(lang, "tray.speakJaOff"), click: () => setSpeakJa(!speakJa) },
+    { label: i18n.t(lang, "tray.sizeLabel") + i18n.t(lang, sizeWord), enabled: false },
+    { label: i18n.t(lang, "tray.sizeSmall"), type: "radio", checked: scale <= 0.8, click: () => setScale(0.75) },
+    { label: i18n.t(lang, "tray.sizeStandard"), type: "radio", checked: scale > 0.8 && scale < 1.2, click: () => setScale(1.0) },
+    { label: i18n.t(lang, "tray.sizeLarge"), type: "radio", checked: scale >= 1.2 && scale < 1.6, click: () => setScale(1.25) },
+    { label: i18n.t(lang, "tray.sizeXLarge"), type: "radio", checked: scale >= 1.6, click: () => setScale(1.5) },
     { type: "separator" },
-    { label: "⚙️ 设置", click: () => openSettings() },
-    { label: "🎨 表情管理", click: () => openMoodManager() },
-    { label: "🎙️ 音色克隆与训练", click: () => openVoiceStudio() },
-    { label: "🎤 语音部署与训练", click: () => openTtsGuide() },
-    { label: "重载人设", click: () => { personaCache = config.getPersonaText(); sendToRenderer("pet:toast", "人设已重载 ✅"); } },
-    { label: "📖 苏苏洛使用说明", click: () => openHelp() },
-    { label: "打开配置 config.json", click: () => shell.openPath(config.CONFIG_PATH) },
-    { label: "打开人格设定 persona.md", click: () => shell.openPath(config.PERSONA_PATH) },
+    { label: i18n.t(lang, "tray.settings"), click: () => openSettings() },
+    { label: i18n.t(lang, "tray.moodManager"), click: () => openMoodManager() },
+    { label: i18n.t(lang, "tray.voiceStudio"), click: () => openVoiceStudio() },
+    { label: i18n.t(lang, "tray.ttsGuide"), click: () => openTtsGuide() },
+    { label: i18n.t(lang, "tray.reloadPersona"), click: () => { personaCache = config.getPersonaText(); sendToRenderer("pet:toast", i18n.t(lang, "tray.personaReloaded")); } },
+    { label: i18n.t(lang, "tray.help"), click: () => openHelp() },
+    { label: i18n.t(lang, "tray.openConfig"), click: () => shell.openPath(config.CONFIG_PATH) },
+    { label: i18n.t(lang, "tray.openPersona"), click: () => shell.openPath(config.PERSONA_PATH) },
     { type: "separator" },
-    { label: "退出", click: () => { quitting = true; savePosSafe(); app.quit(); } }
+    { label: i18n.t(lang, "tray.exit"), click: () => { quitting = true; savePosSafe(); app.quit(); } }
   );
   tray.setContextMenu(Menu.buildFromTemplate(items));
 }
@@ -224,6 +230,33 @@ function setRate(rate) {
   sendToRenderer("pet:tts-rate-changed", v);
 }
 ipcMain.handle("pet:set-rate", (_e, rate) => { setRate(rate); return true; });
+ipcMain.handle("pet:set-speak-ja", (_e, v) => { setSpeakJa(!!v); return true; });
+
+/** 日语语音模式：说话前把中文翻译成日语（文字/聊天保持中文）；保存并通知渲染层 */
+function setSpeakJa(v) {
+  config.saveConfig({ ttsGenie: { speakJa: !!v } });
+  refreshTrayMenu();
+  sendToRenderer("pet:speak-ja-changed", !!v);
+  logTts("ja", "日语语音模式: " + (!!v ? "开" : "关"));
+}
+
+/* ---------- 界面语言（中 / 英 / 日，可切换；聊天内容始终中文） ---------- */
+function sendToAllWindows(channel, ...args) {
+  for (const w of BrowserWindow.getAllWindows()) {
+    try { w.webContents.send(channel, ...args); } catch { /* 忽略 */ }
+  }
+}
+ipcMain.handle("pet:get-i18n", () => {
+  const lang = config.getConfig().uiLang || "zh";
+  return { lang, dict: i18n.getDict(lang) };
+});
+ipcMain.handle("pet:set-ui-lang", (_e, lang) => {
+  const v = ["zh", "en", "ja"].includes(String(lang)) ? String(lang) : "zh";
+  config.saveConfig({ uiLang: v });
+  refreshTrayMenu();
+  sendToAllWindows("pet:ui-lang-changed", v);
+  return true;
+});
 
 function shutdownGenieServer() {
   genieServerChecked = false;
@@ -839,6 +872,7 @@ ipcMain.handle("pet:get-settings", () => {
     agentApi: cfg.agentApi,
     hotkey: cfg.hotkey,
     startHidden: !!cfg.startHidden,
+    uiLang: cfg.uiLang || "zh",
     persona: config.getPersonaText(),
     hasPersonaDefault: fs.existsSync(config.PERSONA_DEFAULT_PATH),
     keySource: cfg._keySource
@@ -939,10 +973,17 @@ ipcMain.handle("pet:tts-clone", async (_e, text) => {
     const cfg = config.getConfig();
     const clean = String(text || "").slice(0, 200);
     const q = cfg.ttsGenie || {};
+    // 日语语音模式（speakJa）：先把中文翻译成日语，再用日语微调音色说话；文字/聊天保持中文
+    let ttsText = clean;
+    if (q.speakJa) {
+      const ja = await translateToJa(clean);
+      if (ja) { ttsText = ja; logTts("ja", "翻译: " + clean + " → " + ja); }
+      else logTts("ja", "翻译失败，退回中文合成");
+    }
     if (q.enabled) {
       const up = await ensureGenieServer(q);
       if (up) {
-        const b64 = await genieTts(q, clean);
+        const b64 = await genieTts(q, ttsText);
         if (b64) { logTts("route", "genie ok len=" + b64.length); return b64; }
         logTts("route", "genie 返回空 → 走 cosy/edge 回退");
       } else {
@@ -953,11 +994,11 @@ ipcMain.handle("pet:tts-clone", async (_e, text) => {
     }
     const cosy = cfg.ttsCosy || {};
     if (cosy.enabled && cosy.voice && cosy.apiKey) {
-      let b64 = await cosyTts(cosy, clean);
+      let b64 = await cosyTts(cosy, ttsText);
       if (!b64) { // 偶发网络/服务抖动时重试一次
         logTts("route", "cosy 首次失败，重试一次");
         await new Promise((r) => setTimeout(r, 800));
-        b64 = await cosyTts(cosy, clean);
+        b64 = await cosyTts(cosy, ttsText);
       }
       if (b64) { logTts("route", "cosy ok len=" + b64.length); return b64; }
       logTts("route", "cosy 仍失败 → 走 edge 回退");
@@ -1040,6 +1081,39 @@ async function genieTts(q, clean) {
     return buf.toString("base64");
   } catch (e) {
     logTts("genie", "请求失败: " + (e && e.message || e));
+    return "";
+  }
+}
+
+/* ---------- 中日翻译（日语语音模式） ---------- */
+/** 把中文翻译成自然口语的日语；失败返回空串（调用方回退中文合成） */
+async function translateToJa(text) {
+  try {
+    const cfg = config.getConfig();
+    const c = cfg.chat || {};
+    if (!c.apiKey || !c.baseUrl || String(c.apiType || "openai") === "anthropic") return "";
+    const base = String(c.baseUrl || "").replace(/\/+$/, "");
+    const resp = await fetch(base + "/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + c.apiKey },
+      body: JSON.stringify({
+        model: c.model || "deepseek-chat",
+        messages: [
+          { role: "system", content: "你是中日翻译器。把用户输入的中文翻译成自然流畅、口语化的日语。只输出译文本身，不要任何解释、引号或多余内容。" },
+          { role: "user", content: String(text || "").slice(0, 200) }
+        ],
+        temperature: 0.3,
+        max_tokens: 300,
+        stream: false
+      }),
+      signal: AbortSignal.timeout(30000)
+    });
+    if (!resp.ok) return "";
+    const j = await resp.json();
+    const out = String((j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || "").trim();
+    return out && out.length > 0 && out.length < 400 ? out : "";
+  } catch (e) {
+    logTts("ja", "翻译异常: " + (e && e.message || e));
     return "";
   }
 }

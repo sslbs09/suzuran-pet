@@ -10,25 +10,26 @@
 <div class="pet-root">
   <!-- 对话气泡 -->
   <div id="bubble" class="bubble hidden">
-    <button id="btn-zoom" class="btn btn-zoom" title="放大/还原对话框">⤢</button>
+    <button id="btn-zoom" class="btn btn-zoom" title="放大/还原对话框" data-i18n-title="ui.zoomTitle">⤢</button>
     <div id="bubble-text"></div>
     <div id="thinking-dots" class="thinking hidden"><span>.</span><span>.</span><span>.</span></div>
   </div>
 
   <!-- 桌宠形象（GIF 表情） -->
   <div id="pet" class="pet">
-    <img id="sprite" src="sprites/user/idle1.gif" alt="苏苏洛" draggable="false" />
+    <img id="sprite" src="sprites/user/idle1.gif" alt="苏苏洛" data-i18n-alt="ui.petAlt" draggable="false" />
   </div>
 
   <!-- 输入栏 -->
   <div id="input-bar" class="input-bar hidden">
-    <span id="mode-chip" class="mode-chip" title="点击切换模式">💬</span>
-    <input id="input" type="text" placeholder="和苏苏洛说点什么…" autocomplete="off" />
-    <button id="btn-stop" class="btn hidden" title="停止">■</button>
-    <button id="btn-tts" class="btn btn-tts" title="语音开关">🔊</button>
+    <span id="mode-chip" class="mode-chip" title="点击切换模式" data-i18n-title="ui.modeChipTitle">💬</span>
+    <input id="input" type="text" placeholder="和苏苏洛说点什么…" data-i18n-placeholder="ui.placeholder" autocomplete="off" />
+    <button id="btn-stop" class="btn hidden" title="停止" data-i18n-title="ui.stopTitle">■</button>
+    <button id="btn-tts" class="btn btn-tts" title="语音开关" data-i18n-title="ui.ttsTitle">🔊</button>
     <button id="btn-send" class="btn">➤</button>
   </div>
 </div>
+<script src="i18n.js"></script>
 <script src="pet.js"></script>
 </body>
 </html>
