@@ -62,6 +62,8 @@ const DEFAULTS = {
     maxHistoryTurns: 20
   },
   window: { x: null, y: null, width: 260, height: 200, scale: 1.0 }, // scale：桌宠显示大小（0.6~2.0）
+  renderMode: "gif",                        // 渲染模式：gif=经典表情包 | spine=Spine 小人模型（支持桌面行走）
+  walking: false,                           // 桌面行走开关（仅 spine 模式生效；GIF 模式下强制无效）
   firstRun: true,                           // 首次启动自动弹设置引导
   tts: { enabled: false, voice: "", rate: 0.9, pitch: 1.1 }, // 语音总开关（默认关）；rate=语速（<1 慢 >1 快）
   ttsCloud: { // edge-tts 云端语音（需安装 Python + edge-tts；失败自动回退系统语音）

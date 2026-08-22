@@ -240,6 +240,20 @@
       <label class="col"><input id="feat-memory" type="checkbox" checked /><span data-i18n="set.featMemory">🧠 长期记忆（自动记住重要对话内容）</span></label>
       <label class="col"><input id="feat-emotional" type="checkbox" checked /><span data-i18n="set.featEmotional">🎭 情绪语音（根据情绪调整语速音调）</span></label>
     </div>
+    <div class="row">
+      <label class="col">
+        <span data-i18n="set.renderMode">渲染模式</span>
+        <select id="render-mode">
+          <option value="gif" data-i18n="set.rmGif">经典 GIF 表情</option>
+          <option value="spine" data-i18n="set.rmSpine">Spine 小人模型（支持桌面行走）</option>
+        </select>
+      </label>
+      <label class="col">
+        <input id="walking-opt" type="checkbox" />
+        <span data-i18n="set.walkingOpt">🚶 桌面行走（沿屏幕走动、走走停停；拖拽时自动暂停；仅 Spine 模式生效）</span>
+      </label>
+    </div>
+    <p class="hint" data-i18n="set.spineHint">💡 懒人换模型：把任意 Spine 模型的 .atlas + .skel（或 .json）+ .png 放入 resources/app/renderer/spine/user/ 文件夹，重启即自动替换，无需任何配置</p>
     <p class="hint" data-i18n="set.agentHint">其他 agent / 脚本可调用：<code>POST http://127.0.0.1:8765/chat</code>，请求体 <code>{"text":"苏苏洛 帮我…"}</code>；<code>GET /health</code> 查状态。仅监听本机，不对局域网开放。</p>
     <div class="row actions">
       <button id="btn-save-other" type="button" class="primary" data-i18n="set.save">💾 保存</button>

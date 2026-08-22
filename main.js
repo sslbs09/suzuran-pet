@@ -148,6 +148,7 @@ function refreshTrayMenu() {
   const rate = (cfg.tts || {}).rate || 0.9;
   const scale = clampScale((cfg.window || {}).scale);
   const speakJa = !!((cfg.ttsGenie || {}).speakJa);
+  const walkingOn = !!cfg.walking && cfg.renderMode === "spine";
   const rateWord = rate <= 0.85 ? "tray.rateWordSlow" : rate <= 0.95 ? "tray.rateWordSlight" : rate >= 1.1 ? "tray.rateWordFast" : "tray.rateWordNormal";
   const sizeWord = scale <= 0.8 ? "tray.sizeWordSmall" : scale >= 1.6 ? "tray.sizeWordXLarge" : scale >= 1.2 ? "tray.sizeWordLarge" : "tray.sizeWordStandard";
   const items = [
@@ -170,6 +171,19 @@ function refreshTrayMenu() {
     { label: i18n.t(lang, "tray.rateNormal"), type: "radio", checked: rate > 0.95 && rate < 1.1, click: () => setRate(1.0) },
     { label: i18n.t(lang, "tray.rateFast"), type: "radio", checked: rate >= 1.1, click: () => setRate(1.1) },
     { label: speakJa ? i18n.t(lang, "tray.speakJaOn") : i18n.t(lang, "tray.speakJaOff"), click: () => setSpeakJa(!speakJa) },
+    { label: walkingOn ? i18n.t(lang, "tray.walkOn") : i18n.t(lang, "tray.walkOff"), click: () => {
+      const c = config.getConfig();
+      if (!c.walking && c.renderMode !== "spine") {
+        dialog.showMessageBox({
+          type: "info",
+          title: "SuzuranPet",
+          message: i18n.t(lang, "tray.walkNeedSpine"),
+          buttons: [i18n.t(lang, "common.ok", "OK")]
+        }).catch(() => {});
+        return;
+      }
+      setWalking(!c.walking);
+    } },
     { label: i18n.t(lang, "tray.sizeLabel") + i18n.t(lang, sizeWord), enabled: false },
     { label: i18n.t(lang, "tray.sizeSmall"), type: "radio", checked: scale <= 0.8, click: () => setScale(0.75) },
     { label: i18n.t(lang, "tray.sizeStandard"), type: "radio", checked: scale > 0.8 && scale < 1.2, click: () => setScale(1.0) },
@@ -908,7 +922,9 @@ ipcMain.handle("pet:get-state", () => {
     tts: cfg.tts || { enabled: false, voice: "", rate: 0.95, pitch: 1.1 },
     ttsCloud: { enabled: !!(cfg.ttsCloud?.enabled || cfg.ttsCosy?.enabled || cfg.ttsGenie?.enabled) },
     winSize: { width: cfg.window.width || 170, height: cfg.window.height || 260 },
-    hasUserSprite: fs.existsSync(path.join(config.APP_DIR, "renderer", "sprites", "user", "sprite.png"))
+    hasUserSprite: fs.existsSync(path.join(config.APP_DIR, "renderer", "sprites", "user", "sprite.png")),
+    renderMode: cfg.renderMode === "spine" ? "spine" : "gif",
+    walking: !!cfg.walking
   };
 });
 ipcMain.handle("pet:set-tts", (e, enabled) => { setTts(!!enabled); return true; });
@@ -946,6 +962,8 @@ ipcMain.handle("pet:get-settings", () => {
     hotkey: cfg.hotkey,
     startHidden: !!cfg.startHidden,
     uiLang: cfg.uiLang || "zh",
+    renderMode: cfg.renderMode === "spine" ? "spine" : "gif",
+    walking: !!cfg.walking,
     persona: config.getPersonaText(),
     hasPersonaDefault: fs.existsSync(config.PERSONA_DEFAULT_PATH),
     keySource: cfg._keySource
@@ -954,8 +972,16 @@ ipcMain.handle("pet:get-settings", () => {
 ipcMain.handle("pet:save-settings", (_e, patch) => {
   if (!patch || typeof patch !== "object") return false;
   try {
+    const before = config.getConfig();
     config.saveConfig(patch);
     refreshTrayMenu();
+    const after = config.getConfig();
+    if (after.renderMode !== before.renderMode) {
+      sendToRenderer("pet:render-mode-changed", after.renderMode);
+      syncWalkingEngine(); // 切回 GIF 时自动停走；切回 Spine 且开关开着则恢复
+    } else if (!!after.walking !== !!before.walking) {
+      syncWalkingEngine();
+    }
     return true;
   } catch (e) {
     return { ok: false, message: String(e.message || e) };
@@ -1091,6 +1117,168 @@ ipcMain.on("pet:move", (_e, dx, dy) => {
     win.setPosition(Math.round(x + dx), Math.round(y + dy));
   }
 });
+
+/* ---------- 桌面行走（仅 Spine 模式；Shimeji 式贴边环游整个桌面：底边走→侧边爬→顶边倒挂，走走停停） ---------- */
+const walk = {
+  active: false,   // 引擎运行中（配置开关 + spine 模式才为 true）
+  paused: false,   // 渲染层拖拽等临时暂停
+  dir: 1,          // 环绕方向：+1 / -1（决定绕行顺序与水平朝向翻转）
+  resting: false,  // true=原地放松（Relax） false=爬行（Move）
+  edge: "bottom",  // 当前贴合的屏幕边 bottom|right|top|left
+  timer: null,
+  phaseTimer: null
+};
+const WALK_TICK_MS = 40;
+const WALK_SPEED = 1.1;                        // 每 tick 像素 ≈ 27px/s
+const randInt = (a, b) => Math.floor(a + Math.random() * (b - a + 1));
+
+function walkBroadcast() {
+  sendToRenderer("pet:walking", { active: walk.active, dir: walk.dir, resting: walk.resting });
+}
+
+/** 走/停相位循环：爬 8~20 秒 → 放松 10~30 秒，随机交替；醒来偶尔换环游方向 */
+function walkStartPhase() {
+  clearTimeout(walk.phaseTimer);
+  if (!walk.active) return;
+  const ms = walk.resting ? randInt(10000, 30000) : randInt(8000, 20000);
+  walk.phaseTimer = setTimeout(() => {
+    walk.resting = !walk.resting;
+    if (!walk.resting && Math.random() < 0.3) walk.dir *= -1; // 醒来偶尔反向；当前贴边不变，由角落逻辑自然衔接
+    walkBroadcast();
+    walkStartPhase();
+  }, ms);
+}
+
+/** 沿工作区四条边循环爬行：bottom→right→top→left（dir=-1 时反向） */
+function walkTick() {
+  if (!win || win.isDestroyed()) return;
+  if (walk.paused || walk.resting || !win.isVisible()) return; // 拖拽中/隐藏到托盘时暂停移动
+  const b = win.getBounds();
+  const wa = screen.getDisplayMatching(b).workArea;
+  const maxX = Math.max(wa.x, wa.x + wa.width - b.width);
+  const maxY = Math.max(wa.y, wa.y + wa.height - b.height);
+  const s = WALK_SPEED * walk.dir;
+  let { x, y } = b;
+
+  switch (walk.edge) {
+    case "right":
+      y -= s; x = maxX;
+      if (s > 0 && y <= wa.y) { walk.edge = "top"; y = wa.y; }
+      else if (s < 0 && y >= maxY) { walk.edge = "bottom"; y = maxY; }
+      break;
+    case "top":
+      x -= s; y = wa.y;
+      if (s > 0 && x <= wa.x) { walk.edge = "left"; x = wa.x; }
+      else if (s < 0 && x >= maxX) { walk.edge = "right"; x = maxX; }
+      break;
+    case "left":
+      y += s; x = wa.x;
+      if (s > 0 && y >= maxY) { walk.edge = "bottom"; y = maxY; }
+      else if (s < 0 && y <= wa.y) { walk.edge = "top"; y = wa.y; }
+      break;
+    default: // bottom
+      x += s; y = maxY;
+      if (s > 0 && x >= maxX) { walk.edge = "right"; x = maxX; }
+      else if (s < 0 && x <= wa.x) { walk.edge = "left"; x = wa.x; }
+      break;
+  }
+  win.setPosition(Math.round(x), Math.round(y));
+}
+
+function startWalkingEngine() {
+  if (walk.active) return true;
+  if (config.getConfig().renderMode !== "spine") return false; // GIF 模式不可行走
+  walk.active = true;
+  walk.resting = false;
+  walk.dir = Math.random() < 0.5 ? -1 : 1;
+  // 就近选一条屏幕边开始爬，避免开启瞬间窗口跳动
+  try {
+    const b = win ? win.getBounds() : null;
+    const wa = b ? screen.getDisplayMatching(b).workArea : null;
+    if (b && wa) {
+      walk.edge = [
+        ["bottom", Math.abs(b.y + b.height - (wa.y + wa.height))],
+        ["right", Math.abs(b.x + b.width - (wa.x + wa.width))],
+        ["top", Math.abs(b.y - wa.y)],
+        ["left", Math.abs(b.x - wa.x)]
+      ].sort((p, q) => p[1] - q[1])[0][0];
+    } else {
+      walk.edge = "bottom";
+    }
+  } catch { walk.edge = "bottom"; }
+  walk.timer = setInterval(walkTick, WALK_TICK_MS);
+  walkBroadcast();
+  walkStartPhase();
+  logTts("walk", "桌面行走开启（贴边环游，起始边: " + walk.edge + "）");
+  return true;
+}
+
+function stopWalkingEngine(silent = false) {
+  if (!walk.active) return;
+  walk.active = false;
+  clearInterval(walk.timer); walk.timer = null;
+  clearTimeout(walk.phaseTimer); walk.phaseTimer = null;
+  if (!silent) walkBroadcast();
+  logTts("walk", "桌面行走关闭");
+}
+
+/** renderMode/walking 配置变化后同步引擎状态；切回 GIF 时自动停走（walking 记忆保留，回 Spine 后恢复） */
+function syncWalkingEngine() {
+  const cfg = config.getConfig();
+  const shouldRun = cfg.walking === true && cfg.renderMode === "spine";
+  if (shouldRun && !walk.active) startWalkingEngine();
+  else if (!shouldRun && walk.active) stopWalkingEngine();
+}
+
+function setWalking(on) {
+  config.saveConfig({ walking: !!on });
+  refreshTrayMenu();
+  if (on) {
+    if (startWalkingEngine()) {
+      if (win && !win.isDestroyed()) showWindow();
+    } else {
+      config.saveConfig({ walking: false }); // 非 Spine 模式：拒绝并回滚开关
+      refreshTrayMenu();
+      sendToRenderer("pet:toast", i18n.t(config.getConfig().uiLang || "zh", "tray.walkNeedSpine"));
+    }
+  } else {
+    stopWalkingEngine();
+  }
+}
+ipcMain.handle("pet:set-walking", (_e, on) => {
+  const cfg = config.getConfig();
+  if (on && cfg.renderMode !== "spine") {
+    return { ok: false, message: i18n.t(cfg.uiLang || "zh", "tray.walkNeedSpine") };
+  }
+  setWalking(!!on);
+  return { ok: true };
+});
+ipcMain.on("pet:walking-pause", (_e, p) => { walk.paused = !!p; });
+
+/** 探测 Spine 模型：优先 spine/user/ 里用户放置的模型（懒人替换：放文件即生效），否则内置苏苏洛 */
+function detectSpineModel() {
+  const userDir = path.join(config.APP_DIR, "renderer", "spine", "user");
+  try {
+    for (const f of fs.readdirSync(userDir)) {
+      if (!f.toLowerCase().endsWith(".atlas")) continue;
+      const base = f.slice(0, -".atlas".length);
+      const skelName = ["skel", "json"].map((ext) => base + "." + ext)
+        .find((n) => fs.existsSync(path.join(userDir, n)));
+      if (skelName) {
+        logTts("walk", "使用自定义 Spine 模型: " + f);
+        return { atlas: "spine/user/" + f, skel: "spine/user/" + skelName, custom: true };
+      }
+    }
+  } catch { /* 目录不存在等 */ }
+  return {
+    atlas: "spine/sussurro/build_char_298_susuro.atlas",
+    skel: "spine/sussurro/build_char_298_susuro.skel",
+    custom: false
+  };
+}
+ipcMain.handle("pet:get-spine-model", () => detectSpineModel());
+/* ---------- 桌面行走 结束 ---------- */
+
 ipcMain.on("pet:hide", () => hideWindow());
 ipcMain.on("pet:tts-playback", (_e, msg) => logTts("render", String(msg || "")));
 ipcMain.on("pet:set-clickable", (_e, clickable) => {
@@ -1594,6 +1782,7 @@ if (!gotLock) {
 
     createWindow();
     createTray();
+    syncWalkingEngine(); // 配置了 Spine+行走时，启动即开始桌面行走
 
     // 预热本地 Genie TTS 服务器（后台加载模型，不阻塞开窗；声音关闭时不拉起）
     const _q = config.getConfig().ttsGenie || {};

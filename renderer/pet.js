@@ -23,27 +23,47 @@ let MOODS = []; // [{name,label,emotion,custom,exists}]
 
 const SPRITE_BASE = "sprites/user/";
 
-/* ---------- Spine 渲染系统（可切换 GIF/Spine） ---------- */
+/* ---------- Spine 渲染系统（可切换 GIF/Spine；支持桌面行走） ---------- */
 let spineApp = null;         // PixiJS Application
 let spineObj = null;         // PIXI Spine 对象
 let renderMode = "gif";      // "gif" | "spine"
 const SPINE_BASE = "spine/sussurro/";
-const SPINE_ATLAS = SPINE_BASE + "build_char_298_susuro.atlas";
-const SPINE_SKEL  = SPINE_BASE + "build_char_298_susuro.skel";
+let spinePaths = {           // 默认内置模型；spine/user/ 有用户模型时由主进程探测替换（懒人换模型）
+  atlas: SPINE_BASE + "build_char_298_susuro.atlas",
+  skel: SPINE_BASE + "build_char_298_susuro.skel"
+};
+let spineBaseScaleX = 1;     // 初始缩放；朝向翻转时取反
+// 桌面行走状态（主进程广播驱动；明日方舟基建语义：Move=走动 Relax=放松 Interact=点击互动）
+let walkState = { active: false, dir: 1, resting: false };
+
+function spineHas(name) { return !!spineObj && !!spineObj.spineData.animations.find((a) => a.name === name); }
+
+/** 行走朝向：dir=-1 时镜像翻转（假设模型原始朝右；若实际相反改此处符号即可） */
+function spineFaceDir(dir) {
+  if (!spineObj) return;
+  const sx = Math.abs(spineBaseScaleX) * (dir === -1 ? -1 : 1);
+  if (spineObj.scale.x !== sx) spineObj.scale.x = sx;
+}
+
+/** 当前应播放的移动相位动画：走动→Move，放松→待机（Relax） */
+function spinePhaseAnim() {
+  if (walkState.active && !walkState.resting && spineHas("Move")) return "Move";
+  return spineAnimForMood("idle");
+}
 
 // 情绪 → Spine 动画名映射（Spine 模型中的动画名可能不同于 GIF 名）
 function spineAnimForMood(mood) {
   // 尝试精确匹配
   if (spineObj && spineObj.spineData.animations.find(a => a.name === mood)) return mood;
-  // 常见映射
+  // 常见映射（明日方舟基建模型只有 Relax/Move/Interact，情绪统一回退 Relax）
   const map = {
-    idle: ["Idle", "idle", "animation", "stand"],
-    happy: ["happy", "Happy", "idle"],
-    think: ["think", "Think", "idle"],
-    sleep: ["sleep", "Sleep", "idle"],
-    wave: ["wave", "Wave", "idle"],
-    angry: ["angry", "Angry", "idle"],
-    surprised: ["surprise", "Surprised", "idle"],
+    idle: ["Relax", "Idle", "idle", "animation", "stand"],
+    happy: ["happy", "Happy", "Relax"],
+    think: ["think", "Think", "Sit", "Relax"],
+    sleep: ["Sleep", "sleep", "Sit", "Relax"],
+    wave: ["wave", "Wave", "Interact"],
+    angry: ["angry", "Angry", "Relax"],
+    surprised: ["surprise", "Surprised", "Interact"],
   };
   const candidates = map[mood] || [mood];
   for (const c of candidates) {
@@ -60,6 +80,15 @@ async function initSpine() {
   try {
     if (spineApp) return true; // 已初始化
 
+    // 懒人换模型：主进程探测 renderer/spine/user/ 下放置的 .atlas+.skel/.json，命中即用
+    try {
+      const m = await window.petAPI.getSpineModel();
+      if (m && m.atlas && m.skel) {
+        spinePaths = m;
+        if (m.custom) console.log("[Spine] 使用自定义模型:", m.atlas);
+      }
+    } catch { /* 探测失败用内置 */ }
+
     // 创建 PixiJS 应用
     spineApp = new PIXI.Application({
       width: petEl.clientWidth || 260,
@@ -75,16 +104,17 @@ async function initSpine() {
     spriteEl.style.display = "none";
     petEl.insertBefore(spineApp.view, spriteEl);
 
-    // 加载 Spine 资源
-    await PIXI.Assets.load([
-      SPINE_ATLAS,
-      SPINE_SKEL,
-    ], (progress) => {
-      console.log("Spine 加载进度:", Math.round(progress.progress * 100) + "%");
+    // 加载 Spine 资源（先图集后骨架；.skel 二进制与 .json 均由 pixi-spine 解析器处理）
+    await PIXI.Assets.load(spinePaths.atlas, (p) => {
+      console.log("Spine 图集加载:", Math.round((p || 0) * 100) + "%");
     });
-
-    // 创建 Spine 对象
-    spineObj = new PIXI.Spine(SPINE_SKEL);
+    const skelRes = await PIXI.Assets.load(spinePaths.skel, (p) => {
+      console.log("Spine 骨架加载:", Math.round((p || 0) * 100) + "%");
+    });
+    // pixi-spine v4：类挂在 PIXI.spine 命名空间；解析结果含 spineData
+    const SpineCtor = (PIXI.spine && PIXI.spine.Spine) || PIXI.Spine;
+    const spineData = skelRes && skelRes.spineData ? skelRes.spineData : skelRes;
+    spineObj = new SpineCtor(spineData);
     spineApp.stage.addChild(spineObj);
 
     // 居中并缩放到合适大小
@@ -94,6 +124,7 @@ async function initSpine() {
       spineApp.screen.width / (spineObj.width || 300),
       spineApp.screen.height / (spineObj.height || 400)
     ) * 0.9;
+    spineBaseScaleX = scale;
     spineObj.scale.set(scale);
 
     // 播放默认动画
@@ -135,9 +166,52 @@ async function setRenderMode(mode) {
   }
 }
 
+/** 主进程广播行走状态：切 Move/Relax 动画并同步朝向 */
+function applyWalkState(s) {
+  const wasActive = walkState.active;
+  walkState = s || walkState;
+  if (!spineObj || renderMode !== "spine") return;
+  spineFaceDir(walkState.dir);
+  if (!walkState.active) {
+    // 行走刚停止 → 恢复正常待机动画（否则会一直保持最后姿势）
+    if (wasActive && !busy) {
+      const idle = spineAnimForMood("idle");
+      if (idle && spineObj.state.getCurrent(0)?.animation?.name !== idle) {
+        spineObj.state.setAnimation(0, idle, true);
+      }
+    }
+    return;
+  }
+  if (busy) return;                       // 聊天表情优先，不打断
+  const target = spinePhaseAnim();
+  if (target && spineObj.state.getCurrent(0)?.animation?.name !== target) {
+    spineObj.state.setAnimation(0, target, true);
+  }
+}
+
+/** 单击互动：播一次 Interact 后接回当前相位动画（还原游戏内点击基建干员的反应） */
+function playSpineInteract() {
+  if (!spineObj || renderMode !== "spine" || busy) return;
+  const inter = ["Interact", "interact"].find((n) => spineHas(n));
+  if (!inter) return;
+  const next = spinePhaseAnim();
+  if (!next) return;
+  spineObj.state.clearTrack(0);
+  spineObj.state.setAnimation(0, inter, false);
+  spineObj.state.addAnimation(0, next, true, 0);
+}
+
 /** 在 Spine 模式下播放对应情绪的动画 */
 function setSpineMood(mood) {
   if (!spineObj || renderMode !== "spine") return;
+  // 行走相位中回落待机 → 保持走路动画不中断（非 idle 情绪照常显示）
+  if (walkState.active && !walkState.resting && !busy && mood === "idle" && spineHas("Move")) {
+    spineFaceDir(walkState.dir);
+    if (spineObj.state.getCurrent(0)?.animation?.name !== "Move") {
+      spineObj.state.setAnimation(0, "Move", true);
+    }
+    return;
+  }
   const animName = spineAnimForMood(mood === "idle" ? "idle" : mood);
   if (animName && spineObj.state.getCurrent(0)?.animation?.name !== animName) {
     spineObj.state.setAnimation(0, animName, true);
@@ -531,6 +605,17 @@ window.petAPI.onToggleInput(() => toggleInputBar());
 
 window.petAPI.onToast((msg) => toast(msg));
 
+/* ---------- 桌面行走 / 渲染模式切换（主进程 → 渲染层） ---------- */
+if (window.petAPI.onWalking) {
+  window.petAPI.onWalking((s) => applyWalkState(s));
+}
+if (window.petAPI.onRenderModeChanged) {
+  window.petAPI.onRenderModeChanged(async (m) => {
+    await setRenderMode(m === "spine" ? "spine" : "gif");
+    setMood(lastMood || "idle"); // 切换后恢复当前情绪
+  });
+}
+
 // 表情被替换/情绪增删后：重建情绪表并刷新当前显示的 GIF
 window.petAPI.onSpritesChanged(({ name, moods }) => {
   if (Array.isArray(moods)) MOODS = moods;
@@ -722,6 +807,7 @@ petEl.addEventListener("mousedown", (e) => {
   wake();
   if (e.button !== 0) return;
   dragState = { sx: e.screenX, sy: e.screenY, moved: false, active: true };
+  window.petAPI.walkingPause(true); // 拖拽中暂停桌面行走，松手恢复
 });
 // 右键宠物 → 隐藏到托盘
 petEl.addEventListener("contextmenu", (e) => {
@@ -745,7 +831,11 @@ window.addEventListener("mouseup", () => {
   const wasDrag = dragState.moved;
   dragState = null;
   petEl.classList.remove("dragging");
-  if (!wasDrag) toggleInputBar();
+  window.petAPI.walkingPause(false);
+  if (!wasDrag) {
+    toggleInputBar();
+    playSpineInteract(); // 单击互动：还原基建里点一下干员的反应动作
+  }
 });
 
 /* ---------- 点击穿透：透明区域不挡下层应用 ----------
@@ -774,6 +864,12 @@ document.addEventListener("mousemove", (e) => {
   updateChip();
   updateTtsButton();
   initTts();
+
+  // Spine 小人模式（支持桌面行走）；加载失败自动回退 GIF
+  if (state.renderMode === "spine") {
+    await setRenderMode("spine");
+    if (state.walking) applyWalkState({ active: true, dir: 1, resting: false });
+  }
 
   if (!agreed) {
     showBubble();

@@ -82,6 +82,10 @@ async function toast(msg) {
   $("feat-sysmon").checked = !!f.systemMonitor;
   $("feat-memory").checked = f.longTermMemory !== false;
   $("feat-emotional").checked = f.emotionalVoice !== false;
+
+  // 渲染模式与桌面行走
+  $("render-mode").value = S.renderMode === "spine" ? "spine" : "gif";
+  $("walking-opt").checked = !!S.walking;
 })();
 
 /* ---------- 预设 ---------- */
@@ -242,7 +246,9 @@ $("btn-save-other").addEventListener("click", async () => {
       enabled: $("agent-enabled").value === "true",
       port: parseInt($("agent-port").value, 10) || 8765,
       invokeWord: $("agent-word").value.trim()
-    }
+    },
+    renderMode: $("render-mode").value === "spine" ? "spine" : "gif",
+    walking: $("walking-opt").checked
   });
   // 立即应用桌宠大小（不等重启）
   if (r === true) await window.petAPI.setScale(scale);
