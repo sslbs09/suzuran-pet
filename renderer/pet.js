@@ -518,10 +518,14 @@ async function speak(text, emotion) {
     try {
       const b64 = await window.petAPI.speakClone(clean);
       if (b64) {
-        const audio = new Audio("data:audio/mpeg;base64," + b64);
+        // MIME 按实际格式给（GSV/Genie 返回 WAV，cosy 返回 MP3）；错标会导致部分环境解码异常
+        const isWav = b64.slice(0, 8) === "UklGRg=="; // "RIFF" 的 base64 前缀
+        const audio = new Audio("data:" + (isWav ? "audio/wav" : "audio/mpeg") + ";base64," + b64);
         audio.volume = 1;
-        audio.preservesPitch = true;
-        audio.playbackRate = speakRate;
+        // 克隆音色本身语速自然：变速比限制在 ±10% 且关闭时间拉伸，
+        // 避免 Chromium preservesPitch 在大偏差下产生金属感/气泡音伪影（杂音来源）
+        const rate = Math.max(0.9, Math.min(1.1, speakRate));
+        audio.playbackRate = rate;
         isSpeakingAudio = true;
         audio.onended = () => { isSpeakingAudio = false; };
         await audio.play();

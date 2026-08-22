@@ -1450,6 +1450,13 @@ ipcMain.on("pet:set-size", (_e, w, h) => {
 ipcMain.handle("pet:tts-clone", async (_e, text) => {
   // 语音链路：本地 Genie（ttsGenie，主，克隆音色）→ 百炼 CosyVoice（ttsCosy，默认停用）→ edge-tts（ttsCloud）→ 空（渲染层回退系统语音）
   try {
+    const dumpWav = (b64) => { // 调试转储：保存最终交付的音频，便于排查播放端问题
+      try {
+        const dir = path.join(config.APP_DIR, "data");
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, "tts_last.wav"), Buffer.from(b64, "base64"));
+      } catch { /* 转储失败不影响主流程 */ }
+    };
     const cfg = config.getConfig();
     const clean = String(text || "").slice(0, 200);
     const q = cfg.ttsGenie || {};
@@ -1477,7 +1484,11 @@ ipcMain.handle("pet:tts-clone", async (_e, text) => {
           }
           if (parts.length) {
             const merged = mergeWavBase64(parts); // 单句也走一遍：统一做首尾静音裁剪
-            if (merged) { logTts("route", `gsv-ja ok ${parts.length}/${sents.length}句 len=${merged.length}`); return merged; }
+            if (merged) {
+              logTts("route", `gsv-ja ok ${parts.length}/${sents.length}句 len=${merged.length}`);
+              dumpWav(merged);
+              return merged;
+            }
           }
           logTts("route", "gsv-ja 失败 → 回退中文链路");
         } else {
@@ -1653,6 +1664,23 @@ async function ensureGsvServer(g) {
   return false;
 }
 
+/** 读取 WAV 时长（毫秒）；解析失败返回 -1 */
+function wavDurationMs(buf) {
+  try {
+    if (buf.length < 44 || buf.toString("ascii", 0, 4) !== "RIFF") return -1;
+    let off = 12, sr = 32000, ch = 1, bits = 16, dataSize = 0;
+    while (off + 8 <= buf.length) {
+      const id = buf.toString("ascii", off, off + 4);
+      const size = Math.min(buf.readUInt32LE(off + 4), buf.length - off - 8);
+      if (id === "fmt " && size >= 16) { ch = buf.readUInt16LE(off + 10); sr = buf.readUInt32LE(off + 12); bits = buf.readUInt16LE(off + 22); }
+      if (id === "data") { dataSize = size; break; }
+      off += 8 + size + (size % 2);
+    }
+    if (!dataSize || !sr) return -1;
+    return dataSize / (sr * ch * (bits / 8)) * 1000;
+  } catch { return -1; }
+}
+
 /** 调 GPT-SoVITS 服务器合成日语；返回 base64，失败返回空 */
 async function gsvTtsJa(g, text) {
   const base = String(g.server || "").replace(/\/+$/, "");
@@ -1665,6 +1693,21 @@ async function gsvTtsJa(g, text) {
     }
     const buf = Buffer.from(await resp.arrayBuffer());
     if (buf.length < 100) { logTts("gsv", "返回过短"); return ""; }
+    // 毛刺自愈：时长远短于文本预期（引擎偶发劣化输出碎片/毛刺）→ 重试一次
+    const t = String(text || "");
+    const durMs = wavDurationMs(buf);
+    const expectMs = Math.max(400, t.length * 90);
+    if (durMs > 0 && t.length > 6 && durMs < expectMs * 0.5) {
+      logTts("gsv", `疑似引擎毛刺（${Math.round(durMs)}ms << 预期${expectMs}ms）→ 重试`);
+      const resp2 = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(120000) });
+      if (resp2.ok) {
+        const buf2 = Buffer.from(await resp2.arrayBuffer());
+        const d2 = wavDurationMs(buf2);
+        if (buf2.length >= 100 && d2 >= expectMs * 0.5) return buf2.toString("base64");
+      }
+      logTts("gsv", "重试仍异常，跳过该句");
+      return "";
+    }
     return buf.toString("base64");
   } catch (e) {
     logTts("gsv", "请求失败: " + (e && e.message || e));
