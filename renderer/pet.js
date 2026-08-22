@@ -188,19 +188,19 @@ function stripForSpeech(text) {
   return String(text || "")
     .replace(/（[^）]*）/g, "")            // 去（舞台动作）
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, "") // 去 emoji
-    .replace(/[*_`#>【】"'“”]/g, "")
+    .replace(/[*_`#>【】"'""]/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-function speakSystem(clean) {
+function speakSystem(clean, rateOverride, pitchOverride) {
   try {
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(clean);
     if (zhVoice) u.voice = zhVoice;
     u.lang = (zhVoice && zhVoice.lang) || "zh-CN";
-    u.rate = ttsConfig.rate || 0.95;
-    u.pitch = ttsConfig.pitch || 1.1;
+    u.rate = rateOverride || ttsConfig.rate || 0.95;
+    u.pitch = pitchOverride || ttsConfig.pitch || 1.1;
     u.volume = 1;
     speechSynthesis.speak(u);
   } catch (e) {
@@ -208,10 +208,21 @@ function speakSystem(clean) {
   }
 }
 
-// 防重复保险：同一句文本在 10 秒内不重复播放（无论触发源，避免“同一句反复说”）
+// 防重复保险：同一句文本在 10 秒内不重复播放（无论触发源，避免"同一句反复说"）
 let lastSpoken = { text: "", ts: 0 };
 
-async function speak(text) {
+// 情绪 → 语音参数映射
+const EMOTION_VOICE = {
+  "\u5f00\u5fc3": { rate: 1.12, pitch: 1.12 },
+  "\u60ca\u559c": { rate: 1.18, pitch: 1.18 },
+  "\u751f\u6c14": { rate: 0.88, pitch: 0.82 },
+  "\u59d4\u5c48": { rate: 0.78, pitch: 0.92 },
+  "\u601d\u8003": { rate: 0.92, pitch: 0.96 },
+  "\u7761\u89c9": { rate: 0.62, pitch: 0.80 },
+  "\u50b2\u5a07": { rate: 1.06, pitch: 1.08 },
+};
+
+async function speak(text, emotion) {
   if (!ttsConfig.enabled) return;
   const clean = stripForSpeech(text);
   if (!clean) return;
@@ -221,6 +232,12 @@ async function speak(text) {
     return;
   }
   lastSpoken = { text: clean, ts: now };
+
+  // 情绪语音参数
+  const ev = EMOTION_VOICE[emotion] || {};
+  const speakRate = (ttsConfig.rate || 0.9) * (ev.rate || 1.0);
+  const speakPitch = (ttsConfig.pitch || 1.1) * (ev.pitch || 1.0);
+
   // 优先云端语音（百炼克隆 / edge-tts）
   if (ttsCloudOn) {
     try {
@@ -228,9 +245,8 @@ async function speak(text) {
       if (b64) {
         const audio = new Audio("data:audio/mpeg;base64," + b64);
         audio.volume = 1;
-        // 语速按配置 tts.rate 播放（默认 0.9 = 稍慢）；preservesPitch 保留音调不改变音色
         audio.preservesPitch = true;
-        audio.playbackRate = ttsConfig.rate || 0.9;
+        audio.playbackRate = speakRate;
         await audio.play();
         window.petAPI.playback("云端音频播放成功 len=" + b64.length);
         return;
@@ -243,7 +259,7 @@ async function speak(text) {
     // 失败 → 回退系统语音
   }
   window.petAPI.playback("回退系统语音");
-  speakSystem(clean);
+  speakSystem(clean, speakRate, speakPitch);
 }
 
 /* ---------- 对话框：放大/还原 + 尺寸记忆 ---------- */
@@ -334,15 +350,16 @@ window.petAPI.onChunk(({ id, mode, text }) => {
 window.petAPI.onDone(({ mode, full, emotion }) => {
   hideThinking();
   busy = false;
+  const emoLabel = emotion ? String(emotion).trim() : "";
   if (mode === "zcode") {
     const result = (full || replyBuffer).slice(-4000);
     bubbleText.textContent = result;
-    speak(result.length > 60 ? result.slice(0, 60) + "…" : result);
+    speak(result.length > 60 ? result.slice(0, 60) + "…" : result, emoLabel);
   } else {
     replyBuffer = full || replyBuffer;
     stopReveal();
     bubbleText.textContent = replyBuffer;
-    speak(replyBuffer);
+    speak(replyBuffer, emoLabel);
   }
   // 模型理解出的情绪 → 对应 GIF（没有匹配就用开心）
   const nm = emotion ? labelToName(String(emotion).trim()) : "";
@@ -422,6 +439,91 @@ modeChip.addEventListener("click", () => {
   window.petAPI.setMode(next);
 });
 btnSend.disabled = false;
+
+/* ---------- 语音输入（麦克风录音 → whisper 转写 → 填入输入框） ---------- */
+const btnMic = document.getElementById("btn-mic");
+let mediaRecorder = null;
+let audioChunks = [];
+let isRecording = false;
+
+if (btnMic) {
+  btnMic.addEventListener("mousedown", startRecording);
+  btnMic.addEventListener("mouseup", stopRecording);
+  btnMic.addEventListener("mouseleave", () => { if (isRecording) stopRecording(); });
+}
+
+async function startRecording() {
+  if (isRecording || busy) return;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+    audioChunks = [];
+    isRecording = true;
+    btnMic.textContent = "⏺";
+    btnMic.classList.add("recording");
+    inputEl.placeholder = I18N.t("ui.micRecording");
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
+    mediaRecorder.start();
+  } catch (e) {
+    console.error("无法访问麦克风:", e);
+    toast("无法访问麦克风，请检查权限设置");
+    isRecording = false;
+  }
+}
+
+async function stopRecording() {
+  if (!isRecording || !mediaRecorder) return;
+  isRecording = false;
+  btnMic.textContent = "🎤";
+  btnMic.classList.remove("recording");
+  inputEl.placeholder = I18N.t("ui.placeholder");
+
+  mediaRecorder.onstop = async () => {
+    try {
+      const blob = new Blob(audioChunks, { type: "audio/webm" });
+      if (blob.size < 1000) return; // 太短，忽略
+
+      // 转为 base64 发给主进程（用 FileReader，渲染层无 Buffer）
+      const b64 = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const dataUrl = String(reader.result || "");
+          resolve(dataUrl.split(",")[1] || "");
+        };
+        reader.readAsDataURL(blob);
+      });
+      if (!b64) return;
+
+      // 通过新的 IPC 通道发送 base64 音频
+      const result = await window.petAPI.voiceSttB64(b64, "ja");
+      if (result && result.ok && result.text) {
+        inputEl.value = result.text;
+        inputEl.focus();
+        toast(`🎤 识别：${result.text.slice(0, 30)}${result.text.length > 30 ? "…" : ""}`);
+      } else {
+        toast("语音识别失败，请重试");
+      }
+    } catch (e) {
+      console.error("语音处理失败:", e);
+    }
+  };
+  mediaRecorder.stop();
+  if (mediaRecorder.stream) {
+    mediaRecorder.stream.getTracks().forEach((t) => t.stop());
+  }
+}
+
+/* ---------- 主动搭话（主进程发送 → 显示气泡 + 语音） ---------- */
+if (window.petAPI && window.petAPI.onProactive) {
+  window.petAPI.onProactive(({ text, emotion }) => {
+    if (!text) return;
+    showBubble();
+    bubbleText.textContent = text;
+    setMood(emotion || "idle");
+    speak(text);
+    setTimeout(() => { if (!busy) hideBubble(); }, 15000);
+  });
+}
 
 /* ---------- TTS 开关按钮 ---------- */
 const btnTts = document.getElementById("btn-tts");

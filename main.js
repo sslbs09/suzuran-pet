@@ -18,6 +18,7 @@ const chatClient = require("./src/chat-client");
 const zcodeClient = require("./src/zcode-client");
 const history = require("./src/history");
 const i18n = require("./src/i18n");
+const features = require("./src/features");
 
 const ICON_PATH = path.join(config.APP_DIR, "icon.png");
 
@@ -763,6 +764,54 @@ async function handleAsk(sender, { id, text }) {
   const clean = (text || "").trim();
   if (!clean) return;
 
+  // 标记用户活跃（重置主动搭话计时）
+  features.touchChat();
+
+  // === 日程提醒检测 ===
+  if (/提醒|记得|别忘/.test(clean)) {
+    const at = features.parseTime(clean);
+    const reminderText = features.extractReminder(clean);
+    if (at && reminderText) {
+      const ok = features.setReminder(reminderText, at, (msg) => {
+        sendToRenderer("pet:proactive", { text: msg, emotion: "happy" });
+      });
+      if (ok) {
+        const timeStr = new Date(at).toLocaleString("zh-CN", { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" });
+        sender.send("pet:done", { id, mode: "chat", full: `好的博士，我已经记住了！${timeStr}会提醒你：${reminderText} ⏰`, emotion: "happy" });
+        return;
+      }
+    }
+  }
+
+  // === 番茄钟控制 ===
+  if (/番茄钟|pomodoro/i.test(clean)) {
+    if (/开始|启动|start/i.test(clean)) {
+      features.startPomodoro((msg) => sendToRenderer("pet:proactive", { text: msg, emotion: "happy" }));
+      sender.send("pet:done", { id, mode: "chat", full: "好的博士！🍅 番茄钟已启动（25分钟工作 + 5分钟休息），到时间我会提醒你的～", emotion: "happy" });
+      return;
+    }
+    if (/停止|取消|stop/i.test(clean)) {
+      features.stopPomodoro();
+      sender.send("pet:done", { id, mode: "chat", full: "番茄钟已停止。博士辛苦了～", emotion: "happy" });
+      return;
+    }
+    const st = features.getPomodoroStatus();
+    if (st) {
+      sender.send("pet:done", { id, mode: "chat", full: `当前番茄钟：${st.phase}，剩余 ${st.remaining}，已完成 ${st.count} 个 ⏱`, emotion: "think" });
+      return;
+    }
+  }
+
+  // === 系统状态查询 ===
+  if (/电脑状态|系统状态|CPU|内存|cpu|memory/i.test(clean)) {
+    const stats = features.getSystemStats();
+    if (stats) {
+      const comment = features.systemStatsToSpeech(stats) || "";
+      sender.send("pet:done", { id, mode: "chat", full: `📊 CPU: ${stats.cpu}% | 内存: ${stats.ramUsed}% (${stats.ramFree}/${stats.ramTotal}GB)\n${comment}`, emotion: "think" });
+      return;
+    }
+  }
+
   let mode = forcedMode !== "auto" ? forcedMode : router.route(clean).mode;
   if (mode === "zcode" && !config.getConfig().zcodeEnabled) mode = "chat"; // 任务模式未启用 → 走聊天
   const taskText = mode === "zcode" ? router.route(clean).task : clean;
@@ -944,6 +993,49 @@ ipcMain.handle("pet:clear-history", () => {
     return true;
   } catch { return false; }
 });
+
+/* ---------- 新功能 IPC ---------- */
+
+// 语音输入：接收音频文件路径 → whisper 转写 → 返回文字
+ipcMain.handle("pet:voice-stt", async (_e, { audioPath, lang }) => {
+  return features.speechToText(audioPath, lang || "ja");
+});
+
+// 语音输入：接收 base64 音频 → 保存临时文件 → whisper 转写
+ipcMain.handle("pet:voice-stt-b64", async (_e, { audioB64, lang }) => {
+  try {
+    if (!audioB64 || audioB64.length < 100) return { ok: false, text: "", error: "音频过短" };
+    const tmpPath = path.join(require("os").tmpdir(), `pet_voice_${Date.now()}.webm`);
+    fs.writeFileSync(tmpPath, Buffer.from(audioB64, "base64"));
+    const result = await features.speechToText(tmpPath, lang || "ja");
+    try { fs.unlinkSync(tmpPath); } catch { /* 忽略 */ }
+    return result;
+  } catch (e) {
+    return { ok: false, text: "", error: String(e.message || e) };
+  }
+});
+
+// 日程提醒
+ipcMain.handle("pet:set-reminder", (_e, { text, at }) => {
+  return features.setReminder(text, at, (msg) => {
+    sendToRenderer("pet:proactive", { text: msg, emotion: "happy" });
+  });
+});
+ipcMain.handle("pet:get-reminders", () => features.getReminders());
+ipcMain.handle("pet:cancel-reminder", (_e, index) => features.cancelReminder(index));
+
+// 番茄钟
+ipcMain.handle("pet:pomodoro-start", (_e, { workMin, restMin }) => {
+  features.startPomodoro((msg) => {
+    sendToRenderer("pet:proactive", { text: msg, emotion: "happy" });
+  }, workMin, restMin);
+  return true;
+});
+ipcMain.handle("pet:pomodoro-stop", () => { features.stopPomodoro(); return true; });
+ipcMain.handle("pet:pomodoro-status", () => features.getPomodoroStatus());
+
+// 系统监控
+ipcMain.handle("pet:get-sysstats", () => features.getSystemStats());
 ipcMain.on("pet:move", (_e, dx, dy) => {
   if (win && !win.isDestroyed()) {
     const [x, y] = win.getPosition();
@@ -1389,6 +1481,12 @@ if (!gotLock) {
 
     // 本地 Agent 调用接口（其他 agent / 脚本可调用，仅 127.0.0.1）
     startAgentApi();
+
+    // 主动搭话：闲置 8 分钟后 30% 概率开口
+    const _proactiveMin = (_cfg.features && _cfg.features.proactiveMin) || 8;
+    features.startProactive((msg) => {
+      sendToRenderer("pet:proactive", { text: msg, emotion: "idle" });
+    }, _proactiveMin);
 
     // 首次启动：已同意条款且无 API Key 时自动打开设置引导
     if (_cfg.agreed && _cfg.firstRun) {

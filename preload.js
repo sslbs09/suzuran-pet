@@ -26,6 +26,26 @@ contextBridge.exposeInMainWorld("petAPI", {
   agreeTerms: () => ipcRenderer.invoke("pet:agree-terms"),
   refuseTerms: () => ipcRenderer.invoke("pet:refuse-terms"),
   openTerms: () => ipcRenderer.invoke("pet:open-terms"),
+
+  // 新功能：语音输入
+  voiceStt: (audioPath, lang) => ipcRenderer.invoke("pet:voice-stt", { audioPath, lang }),
+  voiceSttB64: (audioB64, lang) => ipcRenderer.invoke("pet:voice-stt-b64", { audioB64, lang }),
+
+  // 新功能：日程提醒
+  setReminder: (text, at) => ipcRenderer.invoke("pet:set-reminder", { text, at }),
+  getReminders: () => ipcRenderer.invoke("pet:get-reminders"),
+  cancelReminder: (index) => ipcRenderer.invoke("pet:cancel-reminder", index),
+
+  // 新功能：番茄钟
+  pomodoroStart: (workMin, restMin) => ipcRenderer.invoke("pet:pomodoro-start", { workMin, restMin }),
+  pomodoroStop: () => ipcRenderer.invoke("pet:pomodoro-stop"),
+  pomodoroStatus: () => ipcRenderer.invoke("pet:pomodoro-status"),
+
+  // 新功能：系统监控
+  getSysStats: () => ipcRenderer.invoke("pet:get-sysstats"),
+
+  // 新功能：主动搭话（主进程 → 渲染层）
+  onProactive: (cb) => ipcRenderer.on("pet:proactive", (_e, data) => cb(data)),
   onTtsChanged: (cb) => ipcRenderer.on("pet:tts-changed", (_e, v) => cb(v)),
   onRateChanged: (cb) => ipcRenderer.on("pet:tts-rate-changed", (_e, v) => cb(v)),
   onSpeakJaChanged: (cb) => ipcRenderer.on("pet:speak-ja-changed", (_e, v) => cb(v)),
