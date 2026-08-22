@@ -75,6 +75,13 @@ async function toast(msg) {
   $("agent-enabled").value = String(aa.enabled !== false);
   $("agent-port").value = aa.port || 8765;
   $("agent-word").value = aa.invokeWord || "";
+
+  // 功能开关
+  const f = S.features || {};
+  $("feat-clipboard").checked = !!f.clipboardWatch;
+  $("feat-sysmon").checked = !!f.systemMonitor;
+  $("feat-memory").checked = f.longTermMemory !== false;
+  $("feat-emotional").checked = f.emotionalVoice !== false;
 })();
 
 /* ---------- 预设 ---------- */
@@ -207,6 +214,12 @@ $("btn-save-other").addEventListener("click", async () => {
     hotkey: $("hotkey").value.trim() || "Alt+Shift+S",
     startHidden: $("start-hidden").value === "true",
     window: { scale },
+    features: {
+      clipboardWatch: $("feat-clipboard").checked,
+      systemMonitor: $("feat-sysmon").checked,
+      longTermMemory: $("feat-memory").checked,
+      emotionalVoice: $("feat-emotional").checked
+    },
     agentApi: {
       enabled: $("agent-enabled").value === "true",
       port: parseInt($("agent-port").value, 10) || 8765,

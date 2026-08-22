@@ -228,6 +228,14 @@
         <input id="agent-word" type="text" maxlength="20" placeholder="留空 = 无需调用词" />
       </label>
     </div>
+    <div class="row">
+      <label class="col"><input id="feat-clipboard" type="checkbox" /><span data-i18n="set.featClipboard">📋 剪贴板感知（读取复制内容并反应）</span></label>
+      <label class="col"><input id="feat-sysmon" type="checkbox" /><span data-i18n="set.featSysmon">📊 系统监控播报（CPU/内存异常时提醒）</span></label>
+    </div>
+    <div class="row">
+      <label class="col"><input id="feat-memory" type="checkbox" checked /><span data-i18n="set.featMemory">🧠 长期记忆（自动记住重要对话内容）</span></label>
+      <label class="col"><input id="feat-emotional" type="checkbox" checked /><span data-i18n="set.featEmotional">🎭 情绪语音（根据情绪调整语速音调）</span></label>
+    </div>
     <p class="hint" data-i18n="set.agentHint">其他 agent / 脚本可调用：<code>POST http://127.0.0.1:8765/chat</code>，请求体 <code>{"text":"苏苏洛 帮我…"}</code>；<code>GET /health</code> 查状态。仅监听本机，不对局域网开放。</p>
     <div class="row actions">
       <button id="btn-save-other" type="button" class="primary" data-i18n="set.save">💾 保存</button>
