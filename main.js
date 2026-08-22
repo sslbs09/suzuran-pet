@@ -1809,7 +1809,20 @@ function mergeWavBase64(list) {
     // 段间插入随机停顿（自然换句感），最后一段后不加
     const trimmed = [];
     datas.forEach((d, i) => {
-      trimmed.push(trimPcmSilence(d, sampleRate, channels, 16));
+      const seg = Buffer.from(trimPcmSilence(d, sampleRate, channels, 16)); // 拷贝为可写
+      // 裁剪切口不在零交叉点会产生咔哒爆音：段首尾各做 10ms 淡入淡出消除
+      const frame = channels * 2;
+      const fade = Math.max(1, Math.min(Math.ceil((sampleRate * 0.01)), Math.floor(seg.length / frame / 2)));
+      for (let i = 0; i < fade; i++) {
+        const g = i / fade;
+        for (let c = 0; c < channels; c++) {
+          const oh = i * frame + c * 2;
+          seg.writeInt16LE(Math.round(seg.readInt16LE(oh) * g), oh);
+          const ot = seg.length - (i + 1) * frame + c * 2;
+          seg.writeInt16LE(Math.round(seg.readInt16LE(ot) * g), ot);
+        }
+      }
+      trimmed.push(seg);
       if (i < datas.length - 1) {
         trimmed.push(Buffer.alloc(Math.ceil(sampleRate * channels * 2 * (0.15 + Math.random() * 0.07))));
       }
