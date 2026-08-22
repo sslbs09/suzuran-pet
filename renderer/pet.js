@@ -892,9 +892,11 @@ window.petAPI.onTermsAgreed(() => {
 
 /* ---------- 拖拽（手动，区分点击） ---------- */
 let dragState = null;
+let pokeResumeTimer = null; // 戳一戳后的原地站立计时
 petEl.addEventListener("mousedown", (e) => {
   wake();
   if (e.button !== 0) return;
+  clearTimeout(pokeResumeTimer);
   dragState = { sx: e.screenX, sy: e.screenY, moved: false, active: true };
   window.petAPI.walkingPause(true); // 拖拽中暂停桌面行走，松手恢复
 });
@@ -920,10 +922,14 @@ window.addEventListener("mouseup", () => {
   const wasDrag = dragState.moved;
   dragState = null;
   petEl.classList.remove("dragging");
-  window.petAPI.walkingPause(false);
   if (!wasDrag) {
     toggleInputBar();
     playSpineInteract(); // 单击互动：还原基建里点一下干员的反应动作
+    // 戳一戳时原地站定：等互动动作播完再继续散步
+    clearTimeout(pokeResumeTimer);
+    pokeResumeTimer = setTimeout(() => { if (!dragState) window.petAPI.walkingPause(false); }, 2600);
+  } else {
+    window.petAPI.walkingPause(false);
   }
 });
 
