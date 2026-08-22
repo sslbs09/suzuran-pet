@@ -1248,43 +1248,36 @@ function walkTick() {
   const wa = screen.getDisplayMatching(b).workArea;
   const maxX = Math.max(wa.x, wa.x + wa.width - b.width);
   const maxY = Math.max(wa.y, wa.y + wa.height - b.height);
-  let x = b.x, y = b.y;
+  let x = b.x;
 
-  /* —— 去/回窗口的专用移动：先水平对准，再垂直升降 —— */
+  /* —— 去/回窗口：水平走到正下方后「一步跳」上去/跳下来，不做长距离垂直移动 —— */
   if (walk.gotoPerch || walk.returning) {
     const tx = walk.targetX;
-    if (tx != null && Math.abs(tx - x) > 2) {       // 水平接近
+    if (tx != null && Math.abs(tx - x) > 2) {      // 水平接近窗口正下方
       const nx = Math.abs(tx - x) < WALK_SPEED ? tx : x + Math.sign(tx - x) * WALK_SPEED;
       walkUpdateFace(Math.sign(nx - x));
-      win.setPosition(Math.round(nx), Math.round(y));
+      win.setPosition(Math.round(nx), b.y);
       return;
     }
-    x = tx != null ? tx : x;
+    // 到位 → 瞬间跳上窗顶（Sit）/ 跳回地面，避免在空中播放走路动画
     const ty = walk.returning ? maxY : walk.perchTopY;
-    if (Math.abs(ty - y) > 2) {                     // 垂直升降
-      const ny = Math.abs(ty - y) < WALK_SPEED ? ty : y + Math.sign(ty - y) * WALK_SPEED;
-      win.setPosition(Math.round(x), Math.round(ny));
-      return;
-    }
-    y = ty;
-    if (walk.gotoPerch) {                           // 已在窗顶 → 坐下休息一阵
+    win.setPosition(Math.round(tx != null ? tx : x), Math.round(ty));
+    if (walk.gotoPerch) {
       walk.gotoPerch = false;
       walk.perched = true;
       walk.resting = true;
       walkBroadcast();
       walkSchedulePhase(randInt(15000, 40000));
-    } else {                                        // 已落地
+    } else {
       walk.returning = false;
       walk.resting = true;
       walkBroadcast();
       walkSchedulePhase(randInt(8000, 20000));
     }
-    win.setPosition(Math.round(x), Math.round(y));
     return;
   }
 
   /* —— 地面状态 —— */
-  if (y !== maxY && !walk.resting) y = maxY;        // 走动时始终贴地
   if (walk.resting) return;                         // 放松：站着不动
 
   walkUpdateFace(walk.dir);                         // 朝向跟随实际位移方向
