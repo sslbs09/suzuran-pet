@@ -18,3 +18,4 @@ renderer/sprites/default/
 .env.local
 renderer/spine/user/*
 !renderer/spine/user/README-把模型放这里.txt
+.watchdog-notes.md
