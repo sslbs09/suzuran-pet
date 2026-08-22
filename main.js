@@ -193,6 +193,12 @@ function refreshTrayMenu() {
         click: () => setSpineSkin(m.id)
       }))
     },
+    { label: i18n.t(lang, "tray.animDemoLabel"),
+      enabled: cfg.renderMode === "spine",
+      submenu: ["Relax", "Move", "Sit", "Sleep", "Interact"].map((a) => ({
+        label: a, click: () => sendToRenderer("pet:play-anim", a)
+      }))
+    },
     { label: i18n.t(lang, "tray.sizeLabel") + i18n.t(lang, sizeWord), enabled: false },
     { label: i18n.t(lang, "tray.sizeSmall"), type: "radio", checked: scale <= 0.8, click: () => setScale(0.75) },
     { label: i18n.t(lang, "tray.sizeStandard"), type: "radio", checked: scale > 0.8 && scale < 1.2, click: () => setScale(1.0) },

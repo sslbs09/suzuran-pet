@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld("petAPI", {
   getSpineModels: () => ipcRenderer.invoke("pet:get-spine-models"),
   setSpineSkin: (id) => ipcRenderer.invoke("pet:set-spine-skin", id),
   onSpineSkinChanged: (cb) => ipcRenderer.on("pet:spine-skin-changed", (_e, id) => cb(id)),
+  onPlayAnim: (cb) => ipcRenderer.on("pet:play-anim", (_e, name) => cb(name)),
   setWalking: (on) => ipcRenderer.invoke("pet:set-walking", !!on),
   walkingPause: (b) => ipcRenderer.send("pet:walking-pause", !!b),
   onWalking: (cb) => ipcRenderer.on("pet:walking", (_e, s) => cb(s)),

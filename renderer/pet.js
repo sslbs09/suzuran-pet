@@ -215,11 +215,13 @@ async function setRenderMode(mode) {
 }
 
 /** 主进程广播行走状态：切 Move/Relax/Sit 动画并同步朝向 */
+let animDemoUntil = 0; // 动作试演期间不被行走相位打断
 function applyWalkState(s) {
   const wasActive = walkState.active;
   walkState = s || walkState;
   if (!spineObj || renderMode !== "spine") return;
   spineFaceDir(walkState.face);
+  if (Date.now() < animDemoUntil) return; // 演示中，不打断
   if (!walkState.active) {
     // 行走刚停止 → 恢复正常待机动画（否则会一直保持最后姿势）
     if (wasActive && !busy) {
@@ -255,6 +257,7 @@ function playSpineInteract() {
 /** 在 Spine 模式下播放对应情绪的动画 */
 function setSpineMood(mood) {
   if (!spineObj || renderMode !== "spine") return;
+  if (Date.now() < animDemoUntil) return; // 动作试演中，不被情绪切换打断
   // 行走相位中回落待机 → 保持走路动画不中断（非 idle 情绪照常显示）
   if (walkState.active && !walkState.resting && !busy && mood === "idle" && spineHas("Move")) {
     spineFaceDir(walkState.face);
@@ -689,6 +692,14 @@ async function rebuildSpine() {
 }
 if (window.petAPI.onSpineSkinChanged) {
   window.petAPI.onSpineSkinChanged(() => rebuildSpine().then(() => setMood(lastMood || "idle")));
+}
+if (window.petAPI.onPlayAnim) {
+  window.petAPI.onPlayAnim((name) => { // 托盘「动作试演」点播
+    if (!spineObj || renderMode !== "spine" || !spineHas(name)) return;
+    animDemoUntil = Date.now() + 15000; // 播 15 秒，期间行走相位不抢动画
+    spineObj.state.setAnimation(0, name, true);
+    scheduleFitSpine();
+  });
 }
 
 // 表情被替换/情绪增删后：重建情绪表并刷新当前显示的 GIF
