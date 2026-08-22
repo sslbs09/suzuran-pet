@@ -1649,7 +1649,12 @@ async function ensureGsvServer(g) {
       "-p", String(new URL(base).port || 9880),
       "-hp"
     ];
-    const child = spawn(g.python, args, { detached: true, windowsHide: true, stdio: "ignore" });
+    // api.py 必须以 GPT-SoVITS 根目录为工作目录启动（否则 ModuleNotFoundError: text）
+    const child = spawn(g.python, args, {
+      detached: true, windowsHide: true, stdio: "ignore",
+      cwd: path.dirname(String(g.serverScript || ""))
+    });
+    child.on("error", (e) => logTts("gsv", "拉起进程错误: " + (e && e.message || e)));
     child.unref();
   } catch (e) {
     logTts("gsv", "拉起失败: " + (e && e.message || e));
@@ -1681,6 +1686,54 @@ function wavDurationMs(buf) {
   } catch { return -1; }
 }
 
+/** 频谱质检：检测音频是否含高频刺耳成分（引擎冷启动/劣化时会输出 9-15kHz 尖叫）。
+ *  返回 [0,1] 刺耳帧占有声帧的比例；解析失败返回 -1 */
+function wavScreechRatio(buf) {
+  try {
+    if (buf.length < 44 || buf.toString("ascii", 0, 4) !== "RIFF") return -1;
+    let off = 12, sr = 32000, ch = 1, dataOff = -1, dataSize = 0;
+    while (off + 8 <= buf.length) {
+      const id = buf.toString("ascii", off, off + 4);
+      const size = Math.min(buf.readUInt32LE(off + 4), buf.length - off - 8);
+      if (id === "fmt " && size >= 16) { ch = buf.readUInt16LE(off + 10); sr = buf.readUInt32LE(off + 12); }
+      if (id === "data") { dataOff = off + 8; dataSize = size; break; }
+      off += 8 + size + (size % 2);
+    }
+    if (!dataOff || !sr) return -1;
+    const frame = ch * 2;
+    const n = Math.floor(dataSize / frame);
+    const win = Math.floor(sr * 0.1);
+    const goertzel = (seg, f) => {
+      const w = 2 * Math.PI * f / sr;
+      let p1 = 0, p2 = 0;
+      for (let i = 0; i < seg.length; i++) { // 全速率：高频探测不能降采样（会混叠失效）
+        const s = seg[i];
+        const t = s + 2 * Math.cos(w) * p1 - p2;
+        p2 = p1; p1 = t;
+      }
+      return p2 * p2 + p1 * p1 - 2 * Math.cos(w) * p1 * p2;
+    };
+    let loudF = 0, badF = 0;
+    for (let s = 0; s + win <= n; s += win) {
+      const seg = [];
+      let rms = 0;
+      for (let i = 0; i < win; i += 1) {
+        const v = buf.readInt16LE(dataOff + (s + i) * frame);
+        seg.push(v); rms += v * v;
+      }
+      rms = Math.sqrt(rms / win);
+      if (rms < 800) continue; // 只查有声帧
+      loudF++;
+      let hf = 0, mf = 0;
+      for (const f of [10000, 12500, 14500]) hf += goertzel(seg, f);
+      for (const f of [600, 1200]) mf += goertzel(seg, f);
+      const hfr = hf / (mf + 1);
+      if (hfr > 0.5) badF++; // 高频能量显著压过中频 = 刺耳
+    }
+    return loudF ? badF / loudF : 0;
+  } catch { return -1; }
+}
+
 /** 调 GPT-SoVITS 服务器合成日语；返回 base64，失败返回空 */
 async function gsvTtsJa(g, text) {
   const clean = sanitizeJaText(text); // ～ —— 引号等符号会让引擎输出碎片，先清洗
@@ -1694,32 +1747,83 @@ async function gsvTtsJa(g, text) {
     }
     const buf = Buffer.from(await resp.arrayBuffer());
     if (buf.length < 100) { logTts("gsv", "返回过短"); return ""; }
-    // 毛刺自愈：时长远短于文本预期（引擎偶发劣化输出碎片/毛刺）→ 重试一次
-    const durMs = wavDurationMs(buf);
+    // 质量门：时长碎片 / 高频刺耳成分（频谱质检）不达标就重试，最多 4 击（间隔递增）
     const expectMs = Math.max(400, clean.length * 90);
-    if (durMs > 0 && clean.length > 6 && durMs < expectMs * 0.5) {
-      logTts("gsv", `疑似引擎毛刺（${Math.round(durMs)}ms << 预期${expectMs}ms）→ 重试`);
+    const qualityOk = (b) => {
+      const d = wavDurationMs(b), s = wavScreechRatio(b);
+      return !(d > 0 && clean.length > 6 && d < expectMs * 0.5) && !(s > 0.15);
+    };
+    let best = buf;
+    if (qualityOk(buf)) return best.toString("base64");
+    for (let att = 2; att <= 4; att++) {
+      const d0 = wavDurationMs(buf), s0 = wavScreechRatio(buf);
+      const durBad = d0 > 0 && clean.length > 6 && d0 < expectMs * 0.5;
+      logTts("gsv", `疑似引擎毛刺（${durBad ? `时长${Math.round(d0)}ms+` : ""}刺耳帧${Math.round(s0 * 100)}%）→ 第${att}/4次重试`);
+      await new Promise((r) => setTimeout(r, 300 * att));
       const resp2 = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(120000) });
-      if (resp2.ok) {
-        const buf2 = Buffer.from(await resp2.arrayBuffer());
-        const d2 = wavDurationMs(buf2);
-        if (buf2.length >= 100 && d2 >= expectMs * 0.5) return buf2.toString("base64");
-      }
-      logTts("gsv", "重试仍异常，跳过该句: " + clean.slice(0, 24));
-      return "";
+      if (!resp2.ok) continue;
+      best = Buffer.from(await resp2.arrayBuffer());
+      if (best.length >= 100 && qualityOk(best)) return best.toString("base64");
     }
-    return buf.toString("base64");
+    // 四连击仍失败：引擎整体劣化 → 自动重启一次再合成；防重入避免嵌套互杀
+    if (gsvAutoRestarting || gsvWarmingUp) { logTts("gsv", "引擎自愈进行中，跳过该句: " + clean.slice(0, 24)); return ""; }
+    gsvAutoRestarting = true;
+    try {
+      logTts("gsv", "连续4次异常 → 自动重启日语引擎...");
+      const g2 = config.getConfig().ttsGsv || {};
+      await killGsvProcesses(g2);
+      for (let i = 0; i < 8; i++) {
+        await new Promise((r) => setTimeout(r, 800));
+        if (!(await portAlive(base))) break;
+      }
+      gsvServerChecked = false;
+      gsvServerUp = false;
+      const up = await ensureGsvServer(g2);
+      if (up) {
+        await warmupGsv(g2); // 先烧机到频谱干净，避免与正式合成并发抢 GPU
+        const resp3 = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(180000) });
+        if (resp3.ok) {
+          const b3 = Buffer.from(await resp3.arrayBuffer());
+          if (b3.length >= 100 && qualityOk(b3)) { logTts("gsv", "引擎重启后恢复干净输出"); return b3.toString("base64"); }
+        }
+      }
+    } catch (e2) {
+      logTts("gsv", "自动重启失败: " + (e2 && e2.message || e2));
+    } finally {
+      gsvAutoRestarting = false;
+    }
+    logTts("gsv", "跳过该句: " + clean.slice(0, 24));
+    return "";
   } catch (e) {
     logTts("gsv", "请求失败: " + (e && e.message || e));
     return "";
   }
 }
 
-/** 引擎就绪后先烧掉一次试合成，吸收闲置后的首次冷启动毛刺 */
+/** 引擎就绪后反复试合成直到输出频谱干净（最多 8 次），吸收冷启动期的刺耳垃圾输出。
+ *  返回 Promise（是否通过），调用方可 await 等待烧机完成后再用正式请求。 */
+let gsvAutoRestarting = false; // 自动重启进行中（防嵌套）
+let gsvWarmingUp = false;      // 预热进行中（防重入）
 function warmupGsv(g) {
-  gsvTtsJa(g, "テスト").then((b64) => {
-    logTts("gsv", b64 ? "预热完成" : "预热输出异常（不影响后续）");
-  }).catch(() => {});
+  if (gsvWarmingUp) return Promise.resolve(true);
+  if (gsvAutoRestarting) return Promise.resolve(false);
+  gsvWarmingUp = true;
+  return (async () => {
+    try {
+      for (let i = 1; i <= 8; i++) {
+        try {
+          const b64 = await gsvTtsJa(g, "テスト、おはようございます");
+          if (b64) { logTts("gsv", `预热第${i}次通过`); return true; }
+          logTts("gsv", `预热第${i}次异常，继续烧机`);
+        } catch { /* 继续 */ }
+        await new Promise((r) => setTimeout(r, 600));
+      }
+      logTts("gsv", "预热未达干净输出（每句自愈重试仍会兜底）");
+      return false;
+    } finally {
+      gsvWarmingUp = false;
+    }
+  })();
 }
 
 /* ---------- 手动重启日语 TTS 服务 ---------- */
