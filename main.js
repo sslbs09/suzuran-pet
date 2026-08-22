@@ -1871,25 +1871,30 @@ function splitJaSentences(text) {
 
 /** 裁掉 16bit PCM 段首尾的静音；尾部多留余量以保留句尾语调下降的自然衰减。
  *  GPT-SoVITS 每段输出首尾带 0.2~0.5s 纯静音，直接拼接会产生明显卡顿感，故先裁剪。 */
-function trimPcmSilence(pcm, sampleRate, channels, bits, headPadMs = 80, tailPadMs = 260) {
+function trimPcmSilence(pcm, sampleRate, channels, bits, headPadMs = 90, tailPadMs = 260) {
   try {
     if (bits !== 16 || !sampleRate || !channels) return pcm;
     const frame = channels * 2;
     const n = Math.floor(pcm.length / frame);
     if (n < 1) return pcm;
-    const THRESHOLD = 150; // ≈ -47dB，只裁真正的纯静音
-    const loud = (i) => {
-      for (let c = 0; c < channels; c++) {
-        if (Math.abs(pcm.readInt16LE(i * frame + c * 2)) > THRESHOLD) return true;
+    // 按人声电平回溯裁剪：引擎偶发在句尾输出白噪嘶声（广播调频感），其电平
+    // 高于普通静音阈值会被误保留。从两端向内找最后一个「明显人声」帧
+    // （窗口 RMS ≥ -31dB），之外的全部丢弃——无论残余噪声多响。
+    const hop = Math.max(1, Math.floor(sampleRate * 0.01));
+    const win = Math.max(hop, Math.floor(sampleRate * 0.02));
+    const VOICE = 900; // 窗口 RMS ≈ -31dB，明确的人声电平
+    let firstVoice = -1, lastVoice = -1;
+    for (let i = 0; i + win <= n; i += hop) {
+      let s = 0;
+      for (let j = 0; j < win; j++) {
+        for (let c = 0; c < channels; c++) { const v = pcm.readInt16LE((i + j) * frame + c * 2); s += v * v; }
       }
-      return false;
-    };
-    let start = 0;
-    while (start < n && !loud(start)) start++;
-    let end = n - 1;
-    while (end > start && !loud(end)) end--;
-    start = Math.max(0, start - Math.ceil((headPadMs / 1000) * sampleRate));
-    end = Math.min(n - 1, end + Math.ceil((tailPadMs / 1000) * sampleRate));
+      const rms = Math.sqrt(s / (win * channels));
+      if (rms >= VOICE) { if (firstVoice < 0) firstVoice = i; lastVoice = i + win - 1; }
+    }
+    if (firstVoice < 0) return pcm.subarray(0, Math.min(pcm.length, frame * win)); // 全程无人声：只留开头防空音频
+    const start = Math.max(0, firstVoice - Math.ceil((headPadMs / 1000) * sampleRate));
+    const end = Math.min(n - 1, lastVoice + Math.ceil((tailPadMs / 1000) * sampleRate));
     return pcm.subarray(start * frame, (end + 1) * frame);
   } catch { return pcm; }
 }
