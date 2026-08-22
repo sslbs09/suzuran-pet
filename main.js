@@ -40,9 +40,9 @@ function isWindowVisible() {
   return win && !win.isDestroyed() && win.isVisible();
 }
 function showWindow() {
-  if (!win || win.isDestroyed()) return;
+  if (!win || !win.isDestroyed()) return;
   win.show();
-  win.setAlwaysOnTop(true, "screen-saver");
+  applyLayer();
   win.focus();
 }
 function hideWindow() {
@@ -52,6 +52,35 @@ function toggleWindow() {
   if (isWindowVisible()) hideWindow();
   else showWindow();
 }
+
+/* ---------- 显示层级（置顶眼前 / 桌面层级）与坐任务栏 ---------- */
+/** 应用显示层级：top=置顶（所有窗口之上）| desktop=桌面层级（可被其他程序窗口遮挡） */
+function applyLayer() {
+  if (!win || win.isDestroyed()) return;
+  const onTop = (config.getConfig().layer || "top") !== "desktop";
+  win.setAlwaysOnTop(onTop, "screen-saver");
+}
+function setPetLayer(v) {
+  config.saveConfig({ layer: v === "desktop" ? "desktop" : "top" });
+  refreshTrayMenu();
+  applyLayer();
+  logTts("walk", "显示层级: " + config.getConfig().layer);
+}
+ipcMain.handle("pet:set-layer", (_e, v) => { setPetLayer(v); return true; });
+
+/** 一键坐到任务栏上：底边贴齐当前屏幕工作区下沿（即任务栏上沿） */
+function sitOnTaskbar() {
+  if (!win || win.isDestroyed()) return;
+  const b = win.getBounds();
+  const wa = screen.getDisplayMatching(b).workArea;
+  win.setPosition(
+    Math.min(Math.max(b.x, wa.x), wa.x + wa.width - b.width),
+    Math.max(wa.y, wa.y + wa.height - b.height)
+  );
+  showWindow();
+  logTts("walk", "坐到任务栏上");
+}
+ipcMain.handle("pet:sit-taskbar", () => { sitOnTaskbar(); return true; });
 
 /* ---------- 窗口 ---------- */
 function createWindow() {
@@ -81,7 +110,7 @@ function createWindow() {
     }
   });
 
-  win.setAlwaysOnTop(true, "screen-saver");
+  applyLayer();
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.loadFile(path.join(config.APP_DIR, "renderer", "index.html"));
   // 初始即开启点击穿透（透明区域不挡下层应用），由渲染层按需放行
@@ -199,6 +228,13 @@ function refreshTrayMenu() {
         label: a, click: () => sendToRenderer("pet:play-anim", a)
       }))
     },
+    { label: i18n.t(lang, "tray.layerLabel"),
+      submenu: [
+        { label: i18n.t(lang, "tray.layerTop"), type: "radio", checked: (cfg.layer || "top") !== "desktop", click: () => setPetLayer("top") },
+        { label: i18n.t(lang, "tray.layerDesktop"), type: "radio", checked: cfg.layer === "desktop", click: () => setPetLayer("desktop") }
+      ]
+    },
+    { label: i18n.t(lang, "tray.sitTaskbar"), click: () => sitOnTaskbar() },
     { label: i18n.t(lang, "tray.sizeLabel") + i18n.t(lang, sizeWord), enabled: false },
     { label: i18n.t(lang, "tray.sizeSmall"), type: "radio", checked: scale <= 0.8, click: () => setScale(0.75) },
     { label: i18n.t(lang, "tray.sizeStandard"), type: "radio", checked: scale > 0.8 && scale < 1.2, click: () => setScale(1.0) },
