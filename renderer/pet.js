@@ -34,7 +34,7 @@ let spinePaths = {           // 默认内置模型；spine/user/ 有用户模型
 };
 let spineBaseScaleX = 1;     // 初始缩放；朝向翻转时取反
 // 桌面行走状态（主进程广播驱动；明日方舟基建语义：Move=走动 Relax=放松 Sit=坐窗顶 Sleep=睡觉 Interact=点击互动）
-let walkState = { active: false, resting: true, perched: false, face: 1 };
+let walkState = { active: false, resting: true, perched: false, seated: false, face: 1 };
 
 function spineHas(name) { return !!spineObj && !!spineObj.spineData.animations.find((a) => a.name === name); }
 
@@ -220,6 +220,16 @@ function applyWalkState(s) {
   if (isSleeping) return;                 // 睡觉中：不被行走动画打断
   spineFaceDir(walkState.face);
   if (Date.now() < animDemoUntil) return; // 演示中，不打断
+  // 坐下（任务栏上沿/桌面图标顶/窗顶）：Sit 循环，优先级高于行走相位
+  if (walkState.seated || walkState.perched) {
+    const sit = ["Sit", "sit"].find((n) => spineHas(n));
+    const target = sit || spinePhaseAnim();
+    if (target && spineObj.state.getCurrent(0)?.animation?.name !== target) {
+      spineObj.state.setAnimation(0, target, true);
+      scheduleFitSpine();
+    }
+    return;
+  }
   if (!walkState.active) {
     // 行走刚停止 → 恢复正常待机动画（否则会一直保持最后姿势）
     if (wasActive && !busy) {
@@ -967,7 +977,7 @@ document.addEventListener("mousemove", (e) => {
   // Spine 小人模式（支持桌面行走）；加载失败自动回退 GIF
   if (state.renderMode === "spine") {
     await setRenderMode("spine");
-    if (state.walking) applyWalkState({ active: true, resting: true, perched: false, face: 1 });
+    if (state.walking) applyWalkState({ active: true, resting: true, perched: false, seated: false, face: 1 });
   }
 
   if (!agreed) {

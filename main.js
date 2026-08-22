@@ -68,7 +68,7 @@ function setPetLayer(v) {
 }
 ipcMain.handle("pet:set-layer", (_e, v) => { setPetLayer(v); return true; });
 
-/** 一键坐到任务栏上：底边贴齐当前屏幕工作区下沿（即任务栏上沿） */
+/** 一键坐到任务栏上：底边贴齐当前屏幕工作区下沿（即任务栏上沿），播放 Sit 坐姿 */
 function sitOnTaskbar() {
   if (!win || win.isDestroyed()) return;
   const b = win.getBounds();
@@ -78,6 +78,12 @@ function sitOnTaskbar() {
     Math.max(wa.y, wa.y + wa.height - b.height)
   );
   showWindow();
+  walk.seated = true;
+  walk.resting = true;
+  walk.perched = false;
+  walk.gotoPerch = false;
+  walk.returning = false;
+  walkBroadcast(); // 渲染层切 Sit 坐姿
   logTts("walk", "坐到任务栏上");
 }
 ipcMain.handle("pet:sit-taskbar", () => { sitOnTaskbar(); return true; });
@@ -1174,8 +1180,56 @@ ipcMain.on("pet:move", (_e, dx, dy) => {
   if (win && !win.isDestroyed()) {
     const [x, y] = win.getPosition();
     win.setPosition(Math.round(x + dx), Math.round(y + dy));
+    dragSeatUpdate(); // 拖拽落点吸附：接近任务栏/桌面图标自动坐下
   }
 });
+
+/** 拖拽落点吸附判定：底边接近任务栏上沿 → 贴齐坐下；
+ *  在主屏左侧桌面图标网格区且底边接近某图标格顶部 → 坐到该图标上。
+ *  返回是否处于坐下吸附。 */
+function dragSeatUpdate() {
+  if (!win || win.isDestroyed()) return false;
+  const b = win.getBounds();
+  const wa = screen.getDisplayMatching(b).workArea;
+  const bottom = b.y + b.height;
+  const waBottom = wa.y + wa.height;
+  let seated = false;
+  let ny = b.y, nx = b.x;
+
+  if (Math.abs(bottom - waBottom) <= 48) {
+    seated = true;                                   // 任务栏磁吸
+    ny = waBottom - b.height;
+    nx = Math.min(Math.max(b.x, wa.x), wa.x + wa.width - b.width);
+  } else {
+    // 桌面图标网格近似（主屏左侧区域；格尺寸按常见 DPI 估算）
+    const pd = screen.getPrimaryDisplay().workArea;
+    const cx = b.x + b.width / 2;
+    const regionW = Math.min(pd.width * 0.32, 560);
+    if (cx > pd.x && cx < pd.x + regionW) {
+      const cellW = 76, cellH = 92, ox = pd.x + 6, oy = pd.y + 6;
+      const col = Math.floor((cx - ox) / cellW);
+      const cellCx = ox + col * cellW + cellW / 2;
+      const rowTop = oy + Math.max(0, Math.round((bottom - oy) / cellH)) * cellH;
+      if (col >= 0 && Math.abs(bottom - rowTop) <= 44) {
+        seated = true;                               // 图标顶磁吸
+        ny = rowTop - b.height;
+        nx = Math.round(cellCx - b.width / 2);
+      }
+    }
+  }
+
+  const changed = seated !== walk.seated;
+  walk.seated = seated;
+  if (seated) {
+    walk.resting = true;
+    walk.gotoPerch = false;
+    walk.returning = false;
+    walk.perched = false;
+    win.setPosition(Math.round(nx), Math.round(ny));
+  }
+  if (changed) walkBroadcast();
+  return seated;
+}
 
 /* ---------- 桌面行走 v2（仅 Spine 模式，与 GIF 表情系统完全独立）
    地面 = 任务栏上沿；水平左右走动、走走停停；偶尔跳到桌面程序窗口顶上坐下休息（Sit）。 ---------- */
@@ -1186,6 +1240,7 @@ const walk = {
   face: 1,          // 视觉朝向：+1 右 / -1 左（按实际水平位移计算）
   resting: true,    // true=原地不动（地面 Relax / 窗顶 Sit） false=走动（Move）
   perched: false,   // 正坐在窗口顶上
+  seated: false,    // 坐下（任务栏上沿/桌面图标顶）：Sit 动画不移动
   gotoPerch: false, // 正走向/爬向窗口顶
   returning: false, // 坐完正回到地面
   dir: 1,           // 漫游方向
@@ -1200,7 +1255,7 @@ const randInt = (a, b) => Math.floor(a + Math.random() * (b - a + 1));
 
 function walkBroadcast() {
   sendToRenderer("pet:walking", {
-    active: walk.active, resting: walk.resting, perched: walk.perched, face: walk.face
+    active: walk.active, resting: walk.resting, perched: walk.perched, seated: walk.seated, face: walk.face
   });
 }
 
@@ -1212,6 +1267,7 @@ function walkSchedulePhase(ms) {
 /** 相位切换：走↔停↔坐窗循环；休息结束时 35% 概率尝试跳上桌面程序窗口 */
 function walkOnPhaseEnd() {
   if (!walk.active) return;
+  if (walk.seated) { walkSchedulePhase(randInt(8000, 15000)); return; } // 坐下中：保持坐姿
   if (walk.sleeping) { walkSchedulePhase(randInt(10000, 20000)); return; } // 睡觉中不切换相位
   if (walk.perched) {                       // 坐够了 → 回到地面
     walk.perched = false;
@@ -1296,7 +1352,7 @@ function walkAttemptPerch() {
 
 function walkTick() {
   if (!win || win.isDestroyed()) return;
-  if (walk.paused || !win.isVisible()) return;     // 拖拽中/隐藏到托盘时暂停移动
+  if (walk.paused || walk.seated || !win.isVisible()) return; // 拖拽中/坐下/隐藏到托盘时不移动
   const b = win.getBounds();
   const wa = screen.getDisplayMatching(b).workArea;
   const maxX = Math.max(wa.x, wa.x + wa.width - b.width);
@@ -1350,6 +1406,7 @@ function startWalkingEngine() {
   walk.perched = false;
   walk.gotoPerch = false;
   walk.returning = false;
+  walk.seated = false;
   walk.face = Math.random() < 0.5 ? -1 : 1;
   walk.timer = setInterval(walkTick, WALK_TICK_MS);
   walkBroadcast();
@@ -1411,6 +1468,8 @@ ipcMain.on("pet:walking-pause", (_e, p) => {
       clearTimeout(walk.phaseTimer);
       walkBroadcast();
     }
+    // 拖拽落点定格：仍贴近任务栏/图标则保持坐下，否则恢复正常状态
+    dragSeatUpdate();
   }
 });
 ipcMain.on("pet:set-sleeping", (_e, v) => { walk.sleeping = !!v; }); // 睡觉时行走引擎原地待命
