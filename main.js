@@ -413,10 +413,18 @@ ipcMain.handle("pet:remove-mood", (_e, name) => {
     const list = getMoodList();
     const m = list.find((x) => x.name === name);
     if (!m) return { ok: false, message: "未知情绪" };
-    if (!m.custom) return { ok: false, message: "内置情绪不能删除（可替换 GIF 或恢复默认）" };
-    const list2 = list.filter((x) => x.name !== name);
+
+    // 最少保留检查：至少各保留 1 个待机和 1 个情绪
+    const remaining = list.filter((x) => x.name !== name);
+    const hasIdle = remaining.some((x) => !x.emotion);
+    const hasEmotion = remaining.some((x) => x.emotion);
+    if (!hasIdle || !hasEmotion) {
+      return { ok: false, message: "至少需要保留 1 个待机表情和 1 个情绪表情，无法继续删除" };
+    }
+
+    const list2 = remaining;
     config.saveConfig({ moods: list2 });
-    fs.unlink(path.join(SPRITE_USER_DIR, name + ".gif"), () => {}); // 顺带删掉它的 GIF
+    fs.unlink(path.join(SPRITE_USER_DIR, name + ".gif"), () => {});
     sendToRenderer("pet:sprites-changed", { name, moods: list2 });
     return { ok: true, message: "已删除情绪「" + m.label + "」" };
   } catch (e) {

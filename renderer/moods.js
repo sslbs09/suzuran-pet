@@ -32,7 +32,7 @@ function cardHTML(m) {
       <button class="btn-type">${m.emotion ? "设为待机" : "设为情绪"}</button>
       <button class="btn-pick primary">选择 GIF</button>
       <button class="btn-reset">恢复默认</button>
-      ${m.custom ? '<button class="btn-del danger">删除</button>' : ""}
+      ${'<button class="btn-del danger">删除</button>'}
     </div>
   </div>`;
 }
