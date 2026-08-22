@@ -1758,33 +1758,33 @@ function splitJaSentences(text) {
   return head;
 }
 
-/** 裁掉 16bit PCM 段首尾的静音（保留 padMs 余量）；非 16bit 或异常时原样返回。
- *  GPT-SoVITS 每段输出首尾带 0.2~0.5s 静音，直接拼接会产生明显卡顿感，故先裁剪。 */
-function trimPcmSilence(pcm, sampleRate, channels, bits, padMs = 80) {
+/** 裁掉 16bit PCM 段首尾的静音；尾部多留余量以保留句尾语调下降的自然衰减。
+ *  GPT-SoVITS 每段输出首尾带 0.2~0.5s 纯静音，直接拼接会产生明显卡顿感，故先裁剪。 */
+function trimPcmSilence(pcm, sampleRate, channels, bits, headPadMs = 80, tailPadMs = 260) {
   try {
     if (bits !== 16 || !sampleRate || !channels) return pcm;
     const frame = channels * 2;
     const n = Math.floor(pcm.length / frame);
     if (n < 1) return pcm;
-    const THRESHOLD = 150; // ≈ -47dB，只裁真正的静音
+    const THRESHOLD = 150; // ≈ -47dB，只裁真正的纯静音
     const loud = (i) => {
       for (let c = 0; c < channels; c++) {
         if (Math.abs(pcm.readInt16LE(i * frame + c * 2)) > THRESHOLD) return true;
       }
       return false;
     };
-    const pad = Math.max(1, Math.ceil((padMs / 1000) * sampleRate));
     let start = 0;
     while (start < n && !loud(start)) start++;
     let end = n - 1;
     while (end > start && !loud(end)) end--;
-    start = Math.max(0, start - pad);
-    end = Math.min(n - 1, end + pad);
+    start = Math.max(0, start - Math.ceil((headPadMs / 1000) * sampleRate));
+    end = Math.min(n - 1, end + Math.ceil((tailPadMs / 1000) * sampleRate));
     return pcm.subarray(start * frame, (end + 1) * frame);
   } catch { return pcm; }
 }
 
-/** 把多段相同参数的 base64 WAV 拼接成单一 WAV：先裁各段首尾静音，句间补固定 130ms 停顿 */
+/** 把多段相同参数的 base64 WAV 拼接成单一 WAV：裁各段首部纯静音、保留句尾语调衰减（尾部 260ms），
+ *  句间补 150~220ms 随机停顿——加上尾部余量后总停顿约 500ms，接近真人换句节奏 */
 function mergeWavBase64(list) {
   try {
     const datas = [];
@@ -1806,12 +1806,13 @@ function mergeWavBase64(list) {
       }
     }
     if (!datas.length || !fmt || fmt.length < 16) return null;
-    // 逐段裁静音，句间插入固定停顿（自然换句节奏）
-    const gap = Buffer.alloc(Math.ceil(sampleRate * channels * 2 * 0.13));
+    // 段间插入随机停顿（自然换句感），最后一段后不加
     const trimmed = [];
     datas.forEach((d, i) => {
       trimmed.push(trimPcmSilence(d, sampleRate, channels, 16));
-      if (i < datas.length - 1) trimmed.push(gap);
+      if (i < datas.length - 1) {
+        trimmed.push(Buffer.alloc(Math.ceil(sampleRate * channels * 2 * (0.15 + Math.random() * 0.07))));
+      }
     });
     const pcm = Buffer.concat(trimmed);
     const out = Buffer.alloc(44 + pcm.length);
