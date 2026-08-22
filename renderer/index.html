@@ -18,6 +18,8 @@
   <!-- 桌宠形象（GIF 表情） -->
   <div id="pet" class="pet">
     <img id="sprite" src="sprites/user/idle1.gif" alt="苏苏洛" data-i18n-alt="ui.petAlt" draggable="false" />
+    <!-- Spine 渲染画布（GIF/Spine 切换） -->
+    <canvas id="spine-canvas" class="spine-canvas hidden"></canvas>
   </div>
 
   <!-- 输入栏 -->
@@ -31,6 +33,9 @@
   </div>
 </div>
 <script src="i18n.js"></script>
+<script src="i18n.js"></script>
+<script src="pixi.min.js"></script>
+<script src="pixi-spine.js"></script>
 <script src="pet.js"></script>
 </body>
 </html>

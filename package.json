@@ -23,6 +23,8 @@
     "markdownlint-cli2": "^0.23.2"
   },
   "dependencies": {
-    "omggif": "^1.0.10"
+    "omggif": "^1.0.10",
+    "pixi-spine": "^4.0.5",
+    "pixi.js": "^7.4.2"
   }
 }

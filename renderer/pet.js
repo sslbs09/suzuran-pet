@@ -23,6 +23,127 @@ let MOODS = []; // [{name,label,emotion,custom,exists}]
 
 const SPRITE_BASE = "sprites/user/";
 
+/* ---------- Spine 渲染系统（可切换 GIF/Spine） ---------- */
+let spineApp = null;         // PixiJS Application
+let spineObj = null;         // PIXI Spine 对象
+let renderMode = "gif";      // "gif" | "spine"
+const SPINE_BASE = "spine/sussurro/";
+const SPINE_ATLAS = SPINE_BASE + "build_char_298_susuro.atlas";
+const SPINE_SKEL  = SPINE_BASE + "build_char_298_susuro.skel";
+
+// 情绪 → Spine 动画名映射（Spine 模型中的动画名可能不同于 GIF 名）
+function spineAnimForMood(mood) {
+  // 尝试精确匹配
+  if (spineObj && spineObj.spineData.animations.find(a => a.name === mood)) return mood;
+  // 常见映射
+  const map = {
+    idle: ["Idle", "idle", "animation", "stand"],
+    happy: ["happy", "Happy", "idle"],
+    think: ["think", "Think", "idle"],
+    sleep: ["sleep", "Sleep", "idle"],
+    wave: ["wave", "Wave", "idle"],
+    angry: ["angry", "Angry", "idle"],
+    surprised: ["surprise", "Surprised", "idle"],
+  };
+  const candidates = map[mood] || [mood];
+  for (const c of candidates) {
+    if (spineObj && spineObj.spineData.animations.find(a => a.name === c)) return c;
+  }
+  // 回退到第一个可用动画
+  if (spineObj && spineObj.spineData.animations.length > 0) {
+    return spineObj.spineData.animations[0].name;
+  }
+  return null;
+}
+
+async function initSpine() {
+  try {
+    if (spineApp) return true; // 已初始化
+
+    // 创建 PixiJS 应用
+    spineApp = new PIXI.Application({
+      width: petEl.clientWidth || 260,
+      height: petEl.clientHeight || 200,
+      backgroundAlpha: 0, // 透明背景
+      autoStart: true,
+      antialias: true,
+    });
+    spineApp.view.id = "spine-canvas";
+    spineApp.view.classList.add("spine-canvas");
+
+    // 替换 GIF img 为 Spine canvas
+    spriteEl.style.display = "none";
+    petEl.insertBefore(spineApp.view, spriteEl);
+
+    // 加载 Spine 资源
+    await PIXI.Assets.load([
+      SPINE_ATLAS,
+      SPINE_SKEL,
+    ], (progress) => {
+      console.log("Spine 加载进度:", Math.round(progress.progress * 100) + "%");
+    });
+
+    // 创建 Spine 对象
+    spineObj = new PIXI.Spine(SPINE_SKEL);
+    spineApp.stage.addChild(spineObj);
+
+    // 居中并缩放到合适大小
+    spineObj.x = spineApp.screen.width / 2;
+    spineObj.y = spineApp.screen.height;
+    const scale = Math.min(
+      spineApp.screen.width / (spineObj.width || 300),
+      spineApp.screen.height / (spineObj.height || 400)
+    ) * 0.9;
+    spineObj.scale.set(scale);
+
+    // 播放默认动画
+    const animName = spineAnimForMood("idle");
+    if (animName) spineObj.state.setAnimation(0, animName, true);
+
+    console.log("[Spine] 初始化完成, 可用动画:",
+      spineObj.spineData.animations.map(a => a.name));
+    return true;
+  } catch (e) {
+    console.error("[Spine] 初始化失败:", e);
+    // 失败则回退到 GIF 模式
+    renderMode = "gif";
+    if (spineApp && spineApp.view.parentNode) {
+      spineApp.view.style.display = "none";
+    }
+    spriteEl.style.display = "";
+    return false;
+  }
+}
+
+/** 在 Spine/GIF 模式间切换 */
+async function setRenderMode(mode) {
+  if (mode === renderMode) return;
+  renderMode = mode;
+
+  if (mode === "spine") {
+    const ok = await initSpine();
+    if (ok) {
+      spriteEl.style.display = "none";
+      if (spineApp && spineApp.view) spineApp.view.style.display = "";
+    } else {
+      renderMode = "gif"; // Spine 初始化失败回退 GIF
+    }
+  } else {
+    // 切回 GIF
+    spriteEl.style.display = "";
+    if (spineApp && spineApp.view) spineApp.view.style.display = "none";
+  }
+}
+
+/** 在 Spine 模式下播放对应情绪的动画 */
+function setSpineMood(mood) {
+  if (!spineObj || renderMode !== "spine") return;
+  const animName = spineAnimForMood(mood === "idle" ? "idle" : mood);
+  if (animName && spineObj.state.getCurrent(0)?.animation?.name !== animName) {
+    spineObj.state.setAnimation(0, animName, true);
+  }
+}
+
 function moodNames() { return MOODS.map((m) => m.name); }
 function labelToName(label) {
   const m = MOODS.find((x) => x.label === label);
@@ -54,8 +175,13 @@ function setMood(mood) {
   if (!pool.length) return;
   const file = pool.length > 1 ? pool[++idleIdx % pool.length] : pool[0];
   lastMood = mood;
-  if (spriteEl.src.endsWith(file + ".gif")) return; // 同一文件不重载（避免闪烁）
-  spriteEl.src = SPRITE_BASE + encodeURI(file) + ".gif?t=" + Date.now(); // 加时间戳强制重载（换肤生效）
+
+  // Spine 模式：切换 Spine 动画而非 GIF
+  if (renderMode === "spine") { setSpineMood(mood); petEl.dataset.mood = mood; return; }
+
+  // GIF 模式
+  if (spriteEl.src.endsWith(file + ".gif")) return;
+  spriteEl.src = SPRITE_BASE + encodeURI(file) + ".gif?t=" + Date.now();
   petEl.dataset.mood = mood;
   if (mood === "sleep") awake = false;
   scheduleMoodReset(mood);
@@ -208,19 +334,35 @@ function speakSystem(clean, rateOverride, pitchOverride) {
   }
 }
 
-// 防重复保险：同一句文本在 10 秒内不重复播放（无论触发源，避免"同一句反复说"）
+// 气泡隐藏控制：等待语音播放完毕后再隐藏
+let isSpeakingAudio = false;
+let bubbleHideTimer = null;
+// 防重复保险
 let lastSpoken = { text: "", ts: 0 };
 
 // 情绪 → 语音参数映射
 const EMOTION_VOICE = {
-  "\u5f00\u5fc3": { rate: 1.12, pitch: 1.12 },
-  "\u60ca\u559c": { rate: 1.18, pitch: 1.18 },
-  "\u751f\u6c14": { rate: 0.88, pitch: 0.82 },
-  "\u59d4\u5c48": { rate: 0.78, pitch: 0.92 },
-  "\u601d\u8003": { rate: 0.92, pitch: 0.96 },
-  "\u7761\u89c9": { rate: 0.62, pitch: 0.80 },
-  "\u50b2\u5a07": { rate: 1.06, pitch: 1.08 },
+  "开心": { rate: 1.12, pitch: 1.12 },
+  "惊喜": { rate: 1.18, pitch: 1.18 },
+  "生气": { rate: 0.88, pitch: 0.82 },
+  "委屈": { rate: 0.78, pitch: 0.92 },
+  "思考": { rate: 0.92, pitch: 0.96 },
+  "睡觉": { rate: 0.62, pitch: 0.80 },
+  "傲娇": { rate: 1.06, pitch: 1.08 },
 };
+
+function scheduleBubbleHide(delayMs = 5000) {
+  if (bubbleHideTimer) clearTimeout(bubbleHideTimer);
+  const check = () => {
+    if (isSpeakingAudio) {
+      // 还在说话，1秒后再检查
+      setTimeout(() => { if (!busy) hideBubble(); }, 1000);
+    } else {
+      hideBubble();
+    }
+  };
+  bubbleHideTimer = setTimeout(check, delayMs);
+}
 
 async function speak(text, emotion) {
   if (!ttsConfig.enabled) return;
@@ -247,7 +389,12 @@ async function speak(text, emotion) {
         audio.volume = 1;
         audio.preservesPitch = true;
         audio.playbackRate = speakRate;
+        isSpeakingAudio = true;
+        audio.onended = () => { isSpeakingAudio = false; };
         await audio.play();
+        // 等待音频播放完毕
+        await new Promise((resolve) => { audio.onended = resolve; });
+        isSpeakingAudio = false;
         window.petAPI.playback("云端音频播放成功 len=" + b64.length);
         return;
       }
@@ -365,7 +512,7 @@ window.petAPI.onDone(({ mode, full, emotion }) => {
   const nm = emotion ? labelToName(String(emotion).trim()) : "";
   setMood(nm || "happy");
   setTimeout(() => { if (!busy) setMood("idle"); }, 2600);
-  setTimeout(() => { if (!busy) hideBubble(); }, 40000);
+  setTimeout(() => { if (!busy && !isSpeakingAudio) hideBubble(); }, 90000);
   updateControls();
   resetSleepTimer();
 });

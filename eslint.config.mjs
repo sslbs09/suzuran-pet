@@ -16,6 +16,7 @@ const sharedRules = {
 export default [
   {
     ignores: [
+      "**/pixi.min.js", "**/pixi-spine.js",
       "node_modules/**",
       "dist/**",
       "data/**",
@@ -39,7 +40,7 @@ export default [
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "script",
-      globals: { ...globals.browser, ...globals.es2021, I18N: "readonly" }
+      globals: { ...globals.browser, ...globals.es2021, I18N: "readonly", PIXI: "readonly", Buffer: "readonly" }
     },
     rules: sharedRules
   }
