@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld("petAPI", {
   setTts: (enabled) => ipcRenderer.invoke("pet:set-tts", enabled),
   setRate: (rate) => ipcRenderer.invoke("pet:set-rate", rate),
   setSpeakJa: (v) => ipcRenderer.invoke("pet:set-speak-ja", !!v),
+  restartGsv: () => ipcRenderer.invoke("pet:restart-gsv"),
   setUiLang: (lang) => ipcRenderer.invoke("pet:set-ui-lang", lang),
   getI18n: () => ipcRenderer.invoke("pet:get-i18n"),
   onUiLangChanged: (cb) => ipcRenderer.on("pet:ui-lang-changed", (_e, lang) => cb(lang)),

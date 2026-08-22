@@ -7,7 +7,7 @@
 "use strict";
 
 const { app, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, screen, dialog } = require("electron");
-const { spawn } = require("child_process");
+const { spawn, exec, execFile } = require("child_process");
 const http = require("http");
 const path = require("path");
 const fs = require("fs");
@@ -1334,9 +1334,86 @@ async function gsvTtsJa(g, text) {
   }
 }
 
-/** 日语文本按句切分（保留标点），最多 10 句 */
+/* ---------- 手动重启日语 TTS 服务 ---------- */
+function runPowerShell(ps) {
+  return new Promise((resolve) => {
+    execFile("powershell.exe", ["-NoProfile", "-Command", ps],
+      { windowsHide: true, timeout: 15000 },
+      (err, stdout) => resolve(err ? "" : String(stdout || "").trim()));
+  });
+}
+
+/** 按命令行匹配结束 GSV 推理服务进程（绝对路径启动 / 相对路径+端口启动 两种方式都覆盖） */
+async function killGsvProcesses(g) {
+  let port = "";
+  try { port = String(new URL(String(g.server || "")).port || ""); } catch { /* 保持空 */ }
+  const conds = [];
+  const pat = String(g.serverScript || "").replace(/'/g, "''");
+  if (pat) conds.push("$_.CommandLine -like '*" + pat + "*'");
+  const script = String(g.serverScript || "").toLowerCase();
+  if (port && script.endsWith("api.py")) {
+    conds.push("($_.CommandLine -like '*api.py*' -and $_.CommandLine -like '*-p " + port + "*')");
+  }
+  if (!conds.length) return;
+  const out = await runPowerShell(
+    "Get-CimInstance Win32_Process -Filter \"Name='python.exe' or Name='pythonw.exe'\" | " +
+    "Where-Object { " + conds.join(" -or ") + " } | " +
+    "ForEach-Object { Stop-Process -Id $_.ProcessId -Force; Write-Output $_.ProcessId }");
+  if (out) logTts("gsv", "已结束旧进程 PID: " + out.replace(/\s+/g, ","));
+}
+
+/** 结束占用指定 TCP 端口的监听进程（兜底） */
+function killPortListener(port) {
+  return new Promise((resolve) => {
+    exec("netstat -ano -p tcp", { windowsHide: true, timeout: 10000 }, (err, stdout) => {
+      if (err) return resolve(false);
+      let killed = false;
+      for (const ln of String(stdout || "").split(/\r?\n/)) {
+        const m = ln.match(new RegExp(":" + port + "\\s+\\S+\\s+LISTENING\\s+(\\d+)"));
+        if (m) { try { process.kill(Number(m[1])); killed = true; } catch { /* 已退出 */ } }
+      }
+      resolve(killed);
+    });
+  });
+}
+
+async function portAlive(base) {
+  try {
+    const r = await fetch(base + "/set_model", { signal: AbortSignal.timeout(1500) });
+    return r.status === 400 || r.ok; // 与 ensureGsvServer 相同的在线判定
+  } catch { return false; }
+}
+
+/** 一键重启日语 TTS：杀旧进程→等端口释放→拉起→试合成验证；返回 {ok, code} 供界面本地化提示 */
+ipcMain.handle("pet:restart-gsv", async () => {
+  const g = config.getConfig().ttsGsv || {};
+  if (!g.enabled || !g.python || !g.serverScript) return { ok: false, code: "disabled" };
+  const base = String(g.server || "").replace(/\/+$/, "");
+  let port = 9880;
+  try { port = Number(new URL(base).port) || 9880; } catch { /* 用默认端口 */ }
+  logTts("gsv", "手动重启：停止旧服务...");
+  await killGsvProcesses(g);
+  for (let i = 0; i < 6; i++) {
+    await new Promise((r) => setTimeout(r, 800));
+    if (!(await portAlive(base))) break;
+    if (i === 3) await killPortListener(port); // 迟迟不退出则按端口兜底清理
+  }
+  gsvServerChecked = false;
+  gsvServerUp = false;
+  logTts("gsv", "手动重启：重新拉起（模型加载约需 1~2 分钟）...");
+  const up = await ensureGsvServer(g);
+  if (!up) { logTts("gsv", "手动重启：失败（服务未就绪）"); return { ok: false, code: "timeout" }; }
+  const b64 = await gsvTtsJa(g, "おはようございます");
+  if (!b64) { logTts("gsv", "手动重启：失败（试合成无输出）"); return { ok: false, code: "synth" }; }
+  logTts("gsv", "手动重启：成功");
+  return { ok: true, code: "success" };
+});
+
+/** 日语文本按句切分（保留标点），丢弃纯标点碎片（如单独的 … 或 」），最多 10 句 */
 function splitJaSentences(text) {
-  const parts = String(text || "").split(/(?<=[。！？…\n])/).map((s) => s.trim()).filter(Boolean);
+  const speakable = (s) => /[\u3040-\u30FF\u4E00-\u9FFFa-zA-Z0-9]/.test(s);
+  const parts = String(text || "").split(/(?<=[。！？…\n])/).map((s) => s.trim()).filter(speakable);
+  if (!parts.length) parts.push(String(text || "").trim());
   if (parts.length <= 10) return parts;
   const head = parts.slice(0, 9);
   head.push(parts.slice(9).join(""));
@@ -1396,7 +1473,7 @@ async function translateToJa(text) {
             { role: "user", content: String(text || "").slice(0, 200) }
           ],
           temperature: 0.3,
-          max_tokens: 300,
+          max_tokens: 2000, // 推理模型（如 deepseek-v4-flash）先消耗思考 token，太小会截断到 content 为空
           stream: false
         }),
         signal: AbortSignal.timeout(45000)

@@ -176,6 +176,24 @@ function toggleGenieFields() {
 }
 $("tts-plan").addEventListener("change", toggleGenieFields);
 
+/* ---------- 一键重启日语 TTS ---------- */
+$("btn-restart-gsv").addEventListener("click", async () => {
+  const btn = $("btn-restart-gsv");
+  const out = $("gsv-result");
+  btn.disabled = true;
+  setResult(out, L("set.gsvRestarting"));
+  let r;
+  try { r = await window.petAPI.restartGsv(); } catch { r = { ok: false, code: "timeout" }; }
+  btn.disabled = false;
+  const msgs = {
+    success: L("set.gsvOk"),
+    timeout: L("set.gsvTimeout"),
+    synth: L("set.gsvSynthFail"),
+    disabled: L("set.gsvDisabled")
+  };
+  setResult(out, msgs[r && r.code] || L("set.gsvTimeout"), !!(r && r.ok));
+});
+
 $("btn-save-voice").addEventListener("click", async () => {
   const enabled = $("tts-enabled").value === "true";
   const plan = $("tts-plan").value;
