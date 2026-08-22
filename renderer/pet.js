@@ -38,6 +38,35 @@ let walkState = { active: false, resting: true, perched: false, face: 1 };
 
 function spineHas(name) { return !!spineObj && !!spineObj.spineData.animations.find((a) => a.name === name); }
 
+/** 播放新动画后测量姿势包围盒并自适应（坐姿/睡姿下半身超出画布底部会被裁掉） */
+let spineFitTimers = [];
+function scheduleFitSpine() {
+  spineFitTimers.forEach(clearTimeout);
+  spineFitTimers = [120, 450, 900].map((ms) => setTimeout(fitSpinePose, ms)); // 动画过渡期多次校准
+}
+function fitSpinePose() {
+  try {
+    if (!spineObj || !spineApp || renderMode !== "spine") return;
+    const H = spineApp.screen.height;
+    spineObj.updateTransform();
+    const b = spineObj.getBounds();
+    let y = H;                                   // 默认锚点：脚贴画布底
+    let scaleMag = Math.abs(spineBaseScaleX);
+    if (b.height > 0 && b.y + b.height > H) {
+      const overflow = (b.y + b.height) - H;
+      if (b.y - overflow < 0 && b.height > H - 4) {
+        // 姿势比画布还高 → 整体微缩到放得下
+        scaleMag = Math.abs(spineBaseScaleX) * ((H - 4) / b.height);
+      } else {
+        y = H - overflow;                        // 整体上移让脚不再被裁
+      }
+    }
+    const sx = Math.abs(scaleMag) * (walkState.face === -1 ? -1 : 1);
+    spineObj.scale.set(sx, scaleMag);
+    spineObj.y = y;
+  } catch { /* 测量失败不影响渲染 */ }
+}
+
 /** 行走朝向：face=-1 时镜像翻转（假设模型原始朝右；若实际相反改此处符号即可） */
 function spineFaceDir(face) {
   if (!spineObj) return;
@@ -131,7 +160,10 @@ async function initSpine() {
 
     // 播放默认动画
     const animName = spineAnimForMood("idle");
-    if (animName) spineObj.state.setAnimation(0, animName, true);
+    if (animName) {
+      spineObj.state.setAnimation(0, animName, true);
+      scheduleFitSpine();
+    }
 
     console.log("[Spine] 初始化完成, 可用动画:",
       spineObj.spineData.animations.map(a => a.name));
@@ -180,6 +212,7 @@ function applyWalkState(s) {
       const idle = spineAnimForMood("idle");
       if (idle && spineObj.state.getCurrent(0)?.animation?.name !== idle) {
         spineObj.state.setAnimation(0, idle, true);
+        scheduleFitSpine();
       }
     }
     return;
@@ -188,6 +221,7 @@ function applyWalkState(s) {
   const target = spinePhaseAnim();
   if (target && spineObj.state.getCurrent(0)?.animation?.name !== target) {
     spineObj.state.setAnimation(0, target, true);
+    scheduleFitSpine();
   }
 }
 
@@ -201,6 +235,7 @@ function playSpineInteract() {
   spineObj.state.clearTrack(0);
   spineObj.state.setAnimation(0, inter, false);
   spineObj.state.addAnimation(0, next, true, 0);
+  scheduleFitSpine();
 }
 
 /** 在 Spine 模式下播放对应情绪的动画 */
@@ -211,12 +246,14 @@ function setSpineMood(mood) {
     spineFaceDir(walkState.face);
     if (spineObj.state.getCurrent(0)?.animation?.name !== "Move") {
       spineObj.state.setAnimation(0, "Move", true);
+      scheduleFitSpine();
     }
     return;
   }
   const animName = spineAnimForMood(mood === "idle" ? "idle" : mood);
   if (animName && spineObj.state.getCurrent(0)?.animation?.name !== animName) {
     spineObj.state.setAnimation(0, animName, true);
+    scheduleFitSpine();
   }
 }
 
