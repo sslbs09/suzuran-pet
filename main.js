@@ -1749,6 +1749,18 @@ async function gsvTtsJa(g, text) {
     return "";
   } catch (e) {
     logTts("gsv", "请求失败: " + (e && e.message || e));
+    // 连接被拒/超时：服务器很可能已死或挂死——重置探测缓存并清掉进程，
+    // 让下一句话重新拉起（否则缓存的「在线」状态会让后续全部瞬间失败，永远哑巴）
+    if (gsvAutoRestarting || gsvWarmingUp) return "";
+    const msg = String(e && e.message || e);
+    if (/fetch failed|ECONNREFUSED|aborted|timeout/i.test(msg)) {
+      try {
+        gsvServerChecked = false;
+        gsvServerUp = false;
+        await killGsvProcesses(config.getConfig().ttsGsv || {});
+        logTts("gsv", "已重置引擎状态，下一句将自动重新拉起");
+      } catch { /* 忽略 */ }
+    }
     return "";
   }
 }
