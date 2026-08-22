@@ -111,12 +111,13 @@ async function initSpine() {
   try {
     if (spineApp) return true; // 已初始化
 
-    // 懒人换模型：主进程探测 renderer/spine/user/ 下放置的 .atlas+.skel/.json，命中即用
+    // 懒人换肤：主进程扫描 spine/user/ 下所有皮肤，返回当前选中的那套
     try {
-      const m = await window.petAPI.getSpineModel();
-      if (m && m.atlas && m.skel) {
-        spinePaths = m;
-        if (m.custom) console.log("[Spine] 使用自定义模型:", m.atlas);
+      const res = await window.petAPI.getSpineModels();
+      if (res && Array.isArray(res.list) && res.list.length) {
+        const cur = res.list.find((m) => m.id === (res.current || "builtin")) || res.list[0];
+        spinePaths = { atlas: cur.atlas, skel: cur.skel };
+        if (cur.id !== "builtin") console.log("[Spine] 使用自定义皮肤:", cur.atlas);
       }
     } catch { /* 探测失败用内置 */ }
 
@@ -653,6 +654,28 @@ if (window.petAPI.onRenderModeChanged) {
     await setRenderMode(m === "spine" ? "spine" : "gif");
     setMood(lastMood || "idle"); // 切换后恢复当前情绪
   });
+}
+
+/** 换肤：销毁旧模型与画布，重新探测皮肤并完整初始化 */
+async function rebuildSpine() {
+  try {
+    if (spineObj) { try { spineObj.destroy(); } catch { /* 忽略 */ } spineObj = null; }
+    if (spineApp) {
+      const view = spineApp.view;
+      if (view && view.parentNode) view.parentNode.removeChild(view);
+      try { spineApp.destroy(false, { children: true, texture: false, baseTexture: false }); } catch { /* 忽略 */ }
+      spineApp = null; // 共享纹理缓存保留（Assets 缓存按 URL 复用）
+    }
+    renderMode = "gif"; // 强制 setRenderMode("spine") 走一遍完整初始化
+    spriteEl.style.display = "";
+    await setRenderMode("spine");
+    if (walkState.active) applyWalkState(walkState);
+  } catch (e) {
+    console.error("[Spine] 换肤重建失败:", e);
+  }
+}
+if (window.petAPI.onSpineSkinChanged) {
+  window.petAPI.onSpineSkinChanged(() => rebuildSpine().then(() => setMood(lastMood || "idle")));
 }
 
 // 表情被替换/情绪增删后：重建情绪表并刷新当前显示的 GIF

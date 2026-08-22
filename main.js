@@ -184,6 +184,15 @@ function refreshTrayMenu() {
       }
       setWalking(!c.walking);
     } },
+    { label: i18n.t(lang, "tray.skinLabel"),
+      enabled: cfg.renderMode === "spine",
+      submenu: detectSpineModels().map((m) => ({
+        label: spineSkinDisplayName(m.id, m.name, lang),
+        type: "radio",
+        checked: (cfg.spineSkinId || "builtin") === m.id,
+        click: () => setSpineSkin(m.id)
+      }))
+    },
     { label: i18n.t(lang, "tray.sizeLabel") + i18n.t(lang, sizeWord), enabled: false },
     { label: i18n.t(lang, "tray.sizeSmall"), type: "radio", checked: scale <= 0.8, click: () => setScale(0.75) },
     { label: i18n.t(lang, "tray.sizeStandard"), type: "radio", checked: scale > 0.8 && scale < 1.2, click: () => setScale(1.0) },
@@ -1361,28 +1370,61 @@ ipcMain.on("pet:walking-pause", (_e, p) => {
   }
 });
 
-/** 探测 Spine 模型：优先 spine/user/ 里用户放置的模型（懒人替换：放文件即生效），否则内置苏苏洛 */
-function detectSpineModel() {
-  const userDir = path.join(config.APP_DIR, "renderer", "spine", "user");
-  try {
-    for (const f of fs.readdirSync(userDir)) {
-      if (!f.toLowerCase().endsWith(".atlas")) continue;
-      const base = f.slice(0, -".atlas".length);
-      const skelName = ["skel", "json"].map((ext) => base + "." + ext)
-        .find((n) => fs.existsSync(path.join(userDir, n)));
-      if (skelName) {
-        logTts("walk", "使用自定义 Spine 模型: " + f);
-        return { atlas: "spine/user/" + f, skel: "spine/user/" + skelName, custom: true };
-      }
-    }
-  } catch { /* 目录不存在等 */ }
-  return {
+/** 扫描全部可用 Spine 皮肤：内置苏苏洛 + spine/user/ 下每个含 .atlas+.skel/.json 的模型（支持子文件夹分皮肤） */
+function detectSpineModels() {
+  const list = [{
+    id: "builtin",
+    name: "Sussurro",
     atlas: "spine/sussurro/build_char_298_susuro.atlas",
-    skel: "spine/sussurro/build_char_298_susuro.skel",
-    custom: false
+    skel: "spine/sussurro/build_char_298_susuro.skel"
+  }];
+  const userDir = path.join(config.APP_DIR, "renderer", "spine", "user");
+  const scan = (relDir) => {
+    let entries = [];
+    try { entries = fs.readdirSync(path.join(userDir, relDir), { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.isDirectory() && relDir === "") { scan(e.name); continue; }
+      if (!e.isFile() || !e.name.toLowerCase().endsWith(".atlas")) continue;
+      const base = e.name.slice(0, -".atlas".length);
+      const skelName = ["skel", "json"].map((ext) => base + "." + ext)
+        .find((n) => fs.existsSync(path.join(userDir, relDir, n)));
+      if (!skelName) continue;
+      const prefix = relDir ? relDir + "/" : "";
+      list.push({
+        id: prefix + base,
+        name: base.replace(/^(build_char_\d+_)/, "").replace(/_/g, " "),
+        atlas: "spine/user/" + prefix + e.name,
+        skel: "spine/user/" + prefix + skelName
+      });
+    }
   };
+  scan("");
+  return list;
 }
-ipcMain.handle("pet:get-spine-model", () => detectSpineModel());
+
+/** 当前选中的皮肤（config.spineSkinId；未命中回退内置） */
+function selectedSpineModel() {
+  const want = config.getConfig().spineSkinId || "builtin";
+  const all = detectSpineModels();
+  return all.find((m) => m.id === want) || all[0];
+}
+
+function setSpineSkin(id) {
+  config.saveConfig({ spineSkinId: String(id || "") });
+  refreshTrayMenu();
+  sendToRenderer("pet:spine-skin-changed", String(id || ""));
+  logTts("walk", "切换小人皮肤: " + (id || "builtin"));
+}
+
+/** 皮肤显示名：已知 id 用三语文案，未知皮肤用清理后的文件名 */
+function spineSkinDisplayName(id, fallbackName, lang) {
+  if (id === "builtin") return i18n.t(lang, "skin.builtin", "Sussurro");
+  if (/summer/i.test(id)) return i18n.t(lang, "skin.summer", "Sussurro Summer");
+  if (/winter/i.test(id)) return i18n.t(lang, "skin.winter", "Sussurro Winter");
+  return fallbackName || id;
+}
+ipcMain.handle("pet:get-spine-models", () => ({ list: detectSpineModels(), current: config.getConfig().spineSkinId || "builtin" }));
+ipcMain.handle("pet:set-spine-skin", (_e, id) => { setSpineSkin(id); return true; });
 /* ---------- 桌面行走 结束 ---------- */
 
 ipcMain.on("pet:hide", () => hideWindow());

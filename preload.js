@@ -21,7 +21,9 @@ contextBridge.exposeInMainWorld("petAPI", {
   setSpeakJa: (v) => ipcRenderer.invoke("pet:set-speak-ja", !!v),
   restartGsv: () => ipcRenderer.invoke("pet:restart-gsv"),
   // 桌面行走（仅 Spine 模式）
-  getSpineModel: () => ipcRenderer.invoke("pet:get-spine-model"),
+  getSpineModels: () => ipcRenderer.invoke("pet:get-spine-models"),
+  setSpineSkin: (id) => ipcRenderer.invoke("pet:set-spine-skin", id),
+  onSpineSkinChanged: (cb) => ipcRenderer.on("pet:spine-skin-changed", (_e, id) => cb(id)),
   setWalking: (on) => ipcRenderer.invoke("pet:set-walking", !!on),
   walkingPause: (b) => ipcRenderer.send("pet:walking-pause", !!b),
   onWalking: (cb) => ipcRenderer.on("pet:walking", (_e, s) => cb(s)),

@@ -16,3 +16,5 @@ renderer/sprites/default/
 # 本地环境
 .env
 .env.local
+renderer/spine/user/*
+!renderer/spine/user/README-把模型放这里.txt
