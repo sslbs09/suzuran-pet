@@ -122,12 +122,15 @@ async function initSpine() {
     } catch { /* 探测失败用内置 */ }
 
     // 创建 PixiJS 应用
+    const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2)); // 高DPI 屏按物理像素渲染，避免整体发糊
     spineApp = new PIXI.Application({
       width: petEl.clientWidth || 260,
       height: petEl.clientHeight || 200,
       backgroundAlpha: 0, // 透明背景
       autoStart: true,
       antialias: true,
+      resolution: dpr,
+      autoDensity: true // 画布物理分辨率提升但 CSS 尺寸保持不变
     });
     spineApp.view.id = "spine-canvas";
     spineApp.view.classList.add("spine-canvas");
@@ -137,9 +140,19 @@ async function initSpine() {
     petEl.insertBefore(spineApp.view, spriteEl);
 
     // 加载 Spine 资源（先图集后骨架；.skel 二进制与 .json 均由 pixi-spine 解析器处理）
-    await PIXI.Assets.load(spinePaths.atlas, (p) => {
+    const atlasRes = await PIXI.Assets.load(spinePaths.atlas, (p) => {
       console.log("Spine 图集加载:", Math.round((p || 0) * 100) + "%");
     });
+    // 模型会被明显缩小显示：开启 mipmap 减少缩小发虚
+    try {
+      for (const page of (atlasRes && atlasRes.pages) || []) {
+        if (page && page.baseTexture) {
+          page.baseTexture.autoGenerateMipmaps = true;
+          page.baseTexture.mipmap = PIXI.MIPMAP_MODES?.ON ?? 1;
+          page.baseTexture.update();
+        }
+      }
+    } catch { /* mipmap 失败不影响渲染 */ }
     const skelRes = await PIXI.Assets.load(spinePaths.skel, (p) => {
       console.log("Spine 骨架加载:", Math.round((p || 0) * 100) + "%");
     });

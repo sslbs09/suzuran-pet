@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval'; worker-src 'self' blob:; img-src 'self' data: file: blob:; media-src 'self' data: blob:"> <!-- unsafe-eval/blob：PIXI/pixi-spine 编译着色器与 Worker 必需；本窗口只加载本地文件 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval'; worker-src 'self' blob:; connect-src 'self' data: blob:; img-src 'self' data: file: blob:; media-src 'self' data: blob:"> <!-- unsafe-eval/blob/data：PIXI/pixi-spine 着色器编译、Worker 与占位纹理必需；本窗口只加载本地文件 -->
 <title>苏苏洛桌宠</title>
 <link rel="stylesheet" href="pet.css" />
 </head>
