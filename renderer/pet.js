@@ -33,21 +33,23 @@ let spinePaths = {           // 默认内置模型；spine/user/ 有用户模型
   skel: SPINE_BASE + "build_char_298_susuro.skel"
 };
 let spineBaseScaleX = 1;     // 初始缩放；朝向翻转时取反
-// 桌面行走状态（主进程广播驱动；明日方舟基建语义：Move=走动 Relax=放松 Interact=点击互动）
-let walkState = { active: false, dir: 1, resting: false };
+// 桌面行走状态（主进程广播驱动；明日方舟基建语义：Move=走动 Relax=放松 Sit=坐窗顶 Sleep=睡觉 Interact=点击互动）
+let walkState = { active: false, resting: true, perched: false, face: 1 };
 
 function spineHas(name) { return !!spineObj && !!spineObj.spineData.animations.find((a) => a.name === name); }
 
-/** 行走朝向：dir=-1 时镜像翻转（假设模型原始朝右；若实际相反改此处符号即可） */
-function spineFaceDir(dir) {
+/** 行走朝向：face=-1 时镜像翻转（假设模型原始朝右；若实际相反改此处符号即可） */
+function spineFaceDir(face) {
   if (!spineObj) return;
-  const sx = Math.abs(spineBaseScaleX) * (dir === -1 ? -1 : 1);
+  const sx = Math.abs(spineBaseScaleX) * (face === -1 ? -1 : 1);
   if (spineObj.scale.x !== sx) spineObj.scale.x = sx;
 }
 
-/** 当前应播放的移动相位动画：走动→Move，放松→待机（Relax） */
+/** 当前应播放的移动相位动画：窗顶→Sit，地面放松→待机（Relax），走动→Move */
 function spinePhaseAnim() {
-  if (walkState.active && !walkState.resting && spineHas("Move")) return "Move";
+  if (!walkState.active) return null;
+  if (walkState.perched && spineHas("Sit")) return "Sit";
+  if (!walkState.resting && spineHas("Move")) return "Move";
   return spineAnimForMood("idle");
 }
 
@@ -166,12 +168,12 @@ async function setRenderMode(mode) {
   }
 }
 
-/** 主进程广播行走状态：切 Move/Relax 动画并同步朝向 */
+/** 主进程广播行走状态：切 Move/Relax/Sit 动画并同步朝向 */
 function applyWalkState(s) {
   const wasActive = walkState.active;
   walkState = s || walkState;
   if (!spineObj || renderMode !== "spine") return;
-  spineFaceDir(walkState.dir);
+  spineFaceDir(walkState.face);
   if (!walkState.active) {
     // 行走刚停止 → 恢复正常待机动画（否则会一直保持最后姿势）
     if (wasActive && !busy) {
@@ -206,7 +208,7 @@ function setSpineMood(mood) {
   if (!spineObj || renderMode !== "spine") return;
   // 行走相位中回落待机 → 保持走路动画不中断（非 idle 情绪照常显示）
   if (walkState.active && !walkState.resting && !busy && mood === "idle" && spineHas("Move")) {
-    spineFaceDir(walkState.dir);
+    spineFaceDir(walkState.face);
     if (spineObj.state.getCurrent(0)?.animation?.name !== "Move") {
       spineObj.state.setAnimation(0, "Move", true);
     }
@@ -868,7 +870,7 @@ document.addEventListener("mousemove", (e) => {
   // Spine 小人模式（支持桌面行走）；加载失败自动回退 GIF
   if (state.renderMode === "spine") {
     await setRenderMode("spine");
-    if (state.walking) applyWalkState({ active: true, dir: 1, resting: false });
+    if (state.walking) applyWalkState({ active: true, resting: true, perched: false, face: 1 });
   }
 
   if (!agreed) {
@@ -888,8 +890,8 @@ document.addEventListener("mousemove", (e) => {
   setMood("idle");
   resetSleepTimer();
 
-  // 开场白（气泡 + 语音；可在设置里关闭「启动问候」）
-  if (state.greetingOnStart !== false && state.personaOpening) {
+  // 开场白（气泡 + 语音；可在设置里关闭「启动问候」；隐藏启动时静默待命不打扰）
+  if (state.greetingOnStart !== false && state.personaOpening && !state.hiddenAtStart) {
     showBubble();
     bubbleText.textContent = state.personaOpening;
     speak(state.personaOpening);

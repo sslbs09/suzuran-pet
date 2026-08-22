@@ -766,6 +766,13 @@ function sendToRenderer(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
 
+/** 主动类消息网关：桌宠隐藏到托盘时保持静默待命（不说话不出声）；
+ *  提醒/番茄钟等用户明确设置的任务用 force=true 照常送达 */
+function sendProactive(text, emotion, { force = false } = {}) {
+  if (!force && !isWindowVisible()) return;
+  sendToRenderer("pet:proactive", { text, emotion });
+}
+
 function savePosSafe() {
   if (win && !win.isDestroyed()) {
     const [x, y] = win.getPosition();
@@ -795,7 +802,7 @@ async function handleAsk(sender, { id, text }) {
     const reminderText = features.extractReminder(clean);
     if (at && reminderText) {
       const ok = features.setReminder(reminderText, at, (msg) => {
-        sendToRenderer("pet:proactive", { text: msg, emotion: "happy" });
+        sendProactive(msg, "happy", { force: true });
       });
       if (ok) {
         const timeStr = new Date(at).toLocaleString("zh-CN", { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" });
@@ -808,7 +815,7 @@ async function handleAsk(sender, { id, text }) {
   // === 番茄钟控制 ===
   if (/番茄钟|pomodoro/i.test(clean)) {
     if (/开始|启动|start/i.test(clean)) {
-      features.startPomodoro((msg) => sendToRenderer("pet:proactive", { text: msg, emotion: "happy" }));
+      features.startPomodoro((msg) => sendProactive(msg, "happy", { force: true }));
       sender.send("pet:done", { id, mode: "chat", full: "好的博士！🍅 番茄钟已启动（25分钟工作 + 5分钟休息），到时间我会提醒你的～", emotion: "happy" });
       return;
     }
@@ -924,7 +931,8 @@ ipcMain.handle("pet:get-state", () => {
     winSize: { width: cfg.window.width || 170, height: cfg.window.height || 260 },
     hasUserSprite: fs.existsSync(path.join(config.APP_DIR, "renderer", "sprites", "user", "sprite.png")),
     renderMode: cfg.renderMode === "spine" ? "spine" : "gif",
-    walking: !!cfg.walking
+    walking: !!cfg.walking,
+    hiddenAtStart: !isWindowVisible()
   };
 });
 ipcMain.handle("pet:set-tts", (e, enabled) => { setTts(!!enabled); return true; });
@@ -1067,7 +1075,7 @@ ipcMain.handle("pet:voice-stt-b64", async (_e, { audioB64, lang }) => {
 // 日程提醒
 ipcMain.handle("pet:set-reminder", (_e, { text, at }) => {
   return features.setReminder(text, at, (msg) => {
-    sendToRenderer("pet:proactive", { text: msg, emotion: "happy" });
+    sendProactive(msg, "happy", { force: true });
   });
 });
 ipcMain.handle("pet:get-reminders", () => features.getReminders());
@@ -1076,7 +1084,7 @@ ipcMain.handle("pet:cancel-reminder", (_e, index) => features.cancelReminder(ind
 // 番茄钟
 ipcMain.handle("pet:pomodoro-start", (_e, { workMin, restMin }) => {
   features.startPomodoro((msg) => {
-    sendToRenderer("pet:proactive", { text: msg, emotion: "happy" });
+    sendProactive(msg, "happy", { force: true });
   }, workMin, restMin);
   return true;
 });
@@ -1092,7 +1100,7 @@ ipcMain.handle("pet:toggle-feature", (_e, { name, value }) => {
   if (name === "clipboardWatch") {
     if (value) {
       features.startClipboardWatch((msg) => {
-        sendToRenderer("pet:proactive", { text: msg, emotion: "idle" });
+        sendProactive(msg, "idle");
       }, 3000);
     } else {
       features.stopClipboardWatch();
@@ -1102,7 +1110,7 @@ ipcMain.handle("pet:toggle-feature", (_e, { name, value }) => {
     if (value) {
       features.startSystemMonitor(
         () => features.getSystemStats(),
-        (msg) => { sendToRenderer("pet:proactive", { text: msg, emotion: "think" }); },
+        (msg) => { sendProactive(msg, "think"); },
         15
       );
     } else {
@@ -1118,98 +1126,189 @@ ipcMain.on("pet:move", (_e, dx, dy) => {
   }
 });
 
-/* ---------- 桌面行走（仅 Spine 模式；Shimeji 式贴边环游整个桌面：底边走→侧边爬→顶边倒挂，走走停停） ---------- */
+/* ---------- 桌面行走 v2（仅 Spine 模式，与 GIF 表情系统完全独立）
+   地面 = 任务栏上沿；水平左右走动、走走停停；偶尔跳到桌面程序窗口顶上坐下休息（Sit）。 ---------- */
 const walk = {
-  active: false,   // 引擎运行中（配置开关 + spine 模式才为 true）
-  paused: false,   // 渲染层拖拽等临时暂停
-  dir: 1,          // 环绕方向：+1 / -1（决定绕行顺序与水平朝向翻转）
-  resting: false,  // true=原地放松（Relax） false=爬行（Move）
-  edge: "bottom",  // 当前贴合的屏幕边 bottom|right|top|left
+  active: false,    // 引擎运行中（配置开关 + spine 模式才为 true）
+  paused: false,    // 渲染层拖拽等临时暂停
+  face: 1,          // 视觉朝向：+1 右 / -1 左（按实际水平位移计算）
+  resting: true,    // true=原地不动（地面 Relax / 窗顶 Sit） false=走动（Move）
+  perched: false,   // 正坐在窗口顶上
+  gotoPerch: false, // 正走向/爬向窗口顶
+  returning: false, // 坐完正回到地面
+  dir: 1,           // 漫游方向
+  targetX: null,
+  perchTopY: 0,
   timer: null,
   phaseTimer: null
 };
 const WALK_TICK_MS = 40;
-const WALK_SPEED = 1.1;                        // 每 tick 像素 ≈ 27px/s
+const WALK_SPEED = 1.2;                        // 每 tick 像素 ≈ 30px/s
 const randInt = (a, b) => Math.floor(a + Math.random() * (b - a + 1));
 
 function walkBroadcast() {
-  sendToRenderer("pet:walking", { active: walk.active, dir: walk.dir, resting: walk.resting });
+  sendToRenderer("pet:walking", {
+    active: walk.active, resting: walk.resting, perched: walk.perched, face: walk.face
+  });
 }
 
-/** 走/停相位循环：爬 8~20 秒 → 放松 10~30 秒，随机交替；醒来偶尔换环游方向 */
-function walkStartPhase() {
+function walkSchedulePhase(ms) {
   clearTimeout(walk.phaseTimer);
-  if (!walk.active) return;
-  const ms = walk.resting ? randInt(10000, 30000) : randInt(8000, 20000);
-  walk.phaseTimer = setTimeout(() => {
-    walk.resting = !walk.resting;
-    if (!walk.resting && Math.random() < 0.3) walk.dir *= -1; // 醒来偶尔反向；当前贴边不变，由角落逻辑自然衔接
-    walkBroadcast();
-    walkStartPhase();
-  }, ms);
+  walk.phaseTimer = setTimeout(walkOnPhaseEnd, ms);
 }
 
-/** 沿工作区四条边循环爬行：bottom→right→top→left（dir=-1 时反向） */
+/** 相位切换：走↔停↔坐窗循环；休息结束时 35% 概率尝试跳上桌面程序窗口 */
+function walkOnPhaseEnd() {
+  if (!walk.active) return;
+  if (walk.perched) {                       // 坐够了 → 回到地面
+    walk.perched = false;
+    walk.returning = true;
+    walk.resting = false;
+    walkBroadcast();
+    return;                                 // walkTick 完成下降后再排下一相位
+  }
+  if (walk.resting) {
+    if (!walk.paused && Math.random() < 0.35) { walkAttemptPerch(); return; }
+    walk.resting = false;                   // 开始散步
+    walk.dir = Math.random() < 0.5 ? -1 : 1;
+    walkBroadcast();
+    walkSchedulePhase(randInt(8000, 20000));
+  } else {                                  // 散步结束 → 地面放松
+    walk.resting = true;
+    walkBroadcast();
+    walkSchedulePhase(randInt(10000, 30000));
+  }
+}
+
+function walkUpdateFace(dx) {
+  if (dx !== 0) {
+    const f = dx > 0 ? 1 : -1;
+    if (f !== walk.face) { walk.face = f; walkBroadcast(); }
+  }
+}
+
+/** 枚举可见应用窗口（PowerShell user32），供「坐窗口」挑选落点 */
+const PS_WINDOW_LIST =
+  "Add-Type 'using System;using System.Runtime.InteropServices;public struct RECT{public int L,T,R,B;}public class WQ{" +
+  "[DllImport(\"user32.dll\")]public static extern bool GetWindowRect(IntPtr h,out RECT r);" +
+  "[DllImport(\"user32.dll\")]public static extern bool IsWindowVisible(IntPtr h);}';" +
+  "$o=@();Get-Process|?{$_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -and $_.MainWindowTitle -notmatch '苏苏洛' }|%{" +
+  "$r=New-Object RECT;if([WQ]::GetWindowRect($_.MainWindowHandle,[ref]$r) -and [WQ]::IsWindowVisible($_.MainWindowHandle)){" +
+  "$o+=@{x=$r.L;y=$r.T;w=($r.R-$r.L);h=($r.B-$r.T)}}};" +
+  "if($o.Count -eq 0){'[]'}else{$o|ConvertTo-Json -Compress}";
+
+async function listAppWindows() {
+  try {
+    const txt = await runPowerShell(PS_WINDOW_LIST);
+    const j = JSON.parse(txt || "[]");
+    return Array.isArray(j) ? j : [j];
+  } catch { return []; }
+}
+
+/** 挑一个合适的程序窗口，走过去跳上去坐 */
+function walkAttemptPerch() {
+  (async () => {
+    try {
+      if (!win || win.isDestroyed()) return;
+      const b = win.getBounds();
+      const wa = screen.getDisplayMatching(b).workArea;
+      const wins = await listAppWindows();
+      const cands = wins.filter((r) =>
+        r.w >= 280 && r.h >= 140 &&
+        r.y >= wa.y + 60 &&                          // 太靠上的窗口坐上去会出屏
+        r.y - b.height >= wa.y + 6 &&                // 上方要放得下整个小人
+        r.x < wa.x + wa.width && r.x + r.w > wa.x    // 在当前屏幕内
+      );
+      if (!cands.length) {                           // 没有合适窗口 → 继续地面放松
+        walk.resting = true;
+        walkBroadcast();
+        walkSchedulePhase(randInt(10000, 30000));
+        return;
+      }
+      const t = cands[Math.floor(Math.random() * cands.length)];
+      walk.perchTopY = t.y;
+      walk.targetX = Math.min(Math.max(t.x + t.w / 2 - b.width / 2, wa.x), wa.x + wa.width - b.width);
+      walk.gotoPerch = true;
+      walk.resting = false;
+      walkBroadcast();
+      logTts("walk", "跳上窗口: " + JSON.stringify(t));
+    } catch (e) {
+      logTts("walk", "坐窗口失败: " + (e && e.message || e));
+      walk.resting = true;
+      walkBroadcast();
+      walkSchedulePhase(randInt(10000, 30000));
+    }
+  })();
+}
+
 function walkTick() {
   if (!win || win.isDestroyed()) return;
-  if (walk.paused || walk.resting || !win.isVisible()) return; // 拖拽中/隐藏到托盘时暂停移动
+  if (walk.paused || !win.isVisible()) return;     // 拖拽中/隐藏到托盘时暂停移动
   const b = win.getBounds();
   const wa = screen.getDisplayMatching(b).workArea;
   const maxX = Math.max(wa.x, wa.x + wa.width - b.width);
   const maxY = Math.max(wa.y, wa.y + wa.height - b.height);
-  const s = WALK_SPEED * walk.dir;
-  let { x, y } = b;
+  let x = b.x, y = b.y;
 
-  switch (walk.edge) {
-    case "right":
-      y -= s; x = maxX;
-      if (s > 0 && y <= wa.y) { walk.edge = "top"; y = wa.y; }
-      else if (s < 0 && y >= maxY) { walk.edge = "bottom"; y = maxY; }
-      break;
-    case "top":
-      x -= s; y = wa.y;
-      if (s > 0 && x <= wa.x) { walk.edge = "left"; x = wa.x; }
-      else if (s < 0 && x >= maxX) { walk.edge = "right"; x = maxX; }
-      break;
-    case "left":
-      y += s; x = wa.x;
-      if (s > 0 && y >= maxY) { walk.edge = "bottom"; y = maxY; }
-      else if (s < 0 && y <= wa.y) { walk.edge = "top"; y = wa.y; }
-      break;
-    default: // bottom
-      x += s; y = maxY;
-      if (s > 0 && x >= maxX) { walk.edge = "right"; x = maxX; }
-      else if (s < 0 && x <= wa.x) { walk.edge = "left"; x = wa.x; }
-      break;
+  /* —— 去/回窗口的专用移动：先水平对准，再垂直升降 —— */
+  if (walk.gotoPerch || walk.returning) {
+    const tx = walk.targetX;
+    if (tx != null && Math.abs(tx - x) > 2) {       // 水平接近
+      const nx = Math.abs(tx - x) < WALK_SPEED ? tx : x + Math.sign(tx - x) * WALK_SPEED;
+      walkUpdateFace(Math.sign(nx - x));
+      win.setPosition(Math.round(nx), Math.round(y));
+      return;
+    }
+    x = tx != null ? tx : x;
+    const ty = walk.returning ? maxY : walk.perchTopY;
+    if (Math.abs(ty - y) > 2) {                     // 垂直升降
+      const ny = Math.abs(ty - y) < WALK_SPEED ? ty : y + Math.sign(ty - y) * WALK_SPEED;
+      win.setPosition(Math.round(x), Math.round(ny));
+      return;
+    }
+    y = ty;
+    if (walk.gotoPerch) {                           // 已在窗顶 → 坐下休息一阵
+      walk.gotoPerch = false;
+      walk.perched = true;
+      walk.resting = true;
+      walkBroadcast();
+      walkSchedulePhase(randInt(15000, 40000));
+    } else {                                        // 已落地
+      walk.returning = false;
+      walk.resting = true;
+      walkBroadcast();
+      walkSchedulePhase(randInt(8000, 20000));
+    }
+    win.setPosition(Math.round(x), Math.round(y));
+    return;
   }
-  win.setPosition(Math.round(x), Math.round(y));
+
+  /* —— 地面状态 —— */
+  if (y !== maxY && !walk.resting) y = maxY;        // 走动时始终贴地
+  if (walk.resting) return;                         // 放松：站着不动
+
+  walkUpdateFace(walk.dir);                         // 朝向跟随实际位移方向
+  let nx = x + walk.dir * WALK_SPEED;
+  if (nx <= wa.x || nx >= maxX) {                   // 到屏幕边折返
+    walk.dir *= -1;
+    nx = Math.min(Math.max(nx, wa.x), maxX);
+  }
+  win.setPosition(Math.round(nx), Math.round(maxY));
 }
 
 function startWalkingEngine() {
   if (walk.active) return true;
   if (config.getConfig().renderMode !== "spine") return false; // GIF 模式不可行走
   walk.active = true;
-  walk.resting = false;
-  walk.dir = Math.random() < 0.5 ? -1 : 1;
-  // 就近选一条屏幕边开始爬，避免开启瞬间窗口跳动
-  try {
-    const b = win ? win.getBounds() : null;
-    const wa = b ? screen.getDisplayMatching(b).workArea : null;
-    if (b && wa) {
-      walk.edge = [
-        ["bottom", Math.abs(b.y + b.height - (wa.y + wa.height))],
-        ["right", Math.abs(b.x + b.width - (wa.x + wa.width))],
-        ["top", Math.abs(b.y - wa.y)],
-        ["left", Math.abs(b.x - wa.x)]
-      ].sort((p, q) => p[1] - q[1])[0][0];
-    } else {
-      walk.edge = "bottom";
-    }
-  } catch { walk.edge = "bottom"; }
+  walk.resting = true;
+  walk.perched = false;
+  walk.gotoPerch = false;
+  walk.returning = false;
+  walk.face = Math.random() < 0.5 ? -1 : 1;
   walk.timer = setInterval(walkTick, WALK_TICK_MS);
   walkBroadcast();
-  walkStartPhase();
-  logTts("walk", "桌面行走开启（贴边环游，起始边: " + walk.edge + "）");
+  walkSchedulePhase(randInt(5000, 15000));
+  logTts("walk", "桌面行走开启");
   return true;
 }
 
@@ -1253,7 +1352,21 @@ ipcMain.handle("pet:set-walking", (_e, on) => {
   setWalking(!!on);
   return { ok: true };
 });
-ipcMain.on("pet:walking-pause", (_e, p) => { walk.paused = !!p; });
+ipcMain.on("pet:walking-pause", (_e, p) => {
+  walk.paused = !!p;
+  if (!p && walk.active) {
+    // 松手/恢复：若之前处于坐窗流程中被拖走，就地转入「回到地面」下降流程
+    if (walk.perched || walk.gotoPerch || walk.returning) {
+      walk.perched = false;
+      walk.gotoPerch = false;
+      walk.returning = true;
+      walk.resting = false;
+      walk.targetX = null; // 水平保持当前 x，只垂直落地
+      clearTimeout(walk.phaseTimer);
+      walkBroadcast();
+    }
+  }
+});
 
 /** 探测 Spine 模型：优先 spine/user/ 里用户放置的模型（懒人替换：放文件即生效），否则内置苏苏洛 */
 function detectSpineModel() {
@@ -1806,13 +1919,13 @@ if (!gotLock) {
     // 主动搭话：闲置 8 分钟后 30% 概率开口
     const _proactiveMin = (_cfg.features && _cfg.features.proactiveMin) || 8;
     features.startProactive((msg) => {
-      sendToRenderer("pet:proactive", { text: msg, emotion: "idle" });
+      sendProactive(msg, "idle"); // 隐藏到托盘时静默待命，不主动搭话
     }, _proactiveMin);
 
     // 剪贴板感知（默认关，用户在设置里勾选后启用）
     if (_cfg.features && _cfg.features.clipboardWatch) {
       features.startClipboardWatch((msg) => {
-        sendToRenderer("pet:proactive", { text: msg, emotion: "idle" });
+        sendProactive(msg, "idle");
       }, 3000);
       logTts("features", "剪贴板感知已启动");
     }
@@ -1821,7 +1934,7 @@ if (!gotLock) {
     if (_cfg.features && _cfg.features.systemMonitor) {
       features.startSystemMonitor(
         () => features.getSystemStats(),
-        (msg) => { sendToRenderer("pet:proactive", { text: msg, emotion: "think" }); },
+        (msg) => { sendProactive(msg, "think"); },
         15
       );
       logTts("features", "系统监控已启动");
