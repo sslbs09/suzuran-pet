@@ -1411,13 +1411,6 @@ function detectSpineModels() {
   return list;
 }
 
-/** 当前选中的皮肤（config.spineSkinId；未命中回退内置） */
-function selectedSpineModel() {
-  const want = config.getConfig().spineSkinId || "builtin";
-  const all = detectSpineModels();
-  return all.find((m) => m.id === want) || all[0];
-}
-
 function setSpineSkin(id) {
   config.saveConfig({ spineSkinId: String(id || "") });
   refreshTrayMenu();
@@ -1483,7 +1476,7 @@ ipcMain.handle("pet:tts-clone", async (_e, text) => {
             else logTts("gsv", "单句失败（跳过）: " + String(s).slice(0, 30));
           }
           if (parts.length) {
-            const merged = parts.length === 1 ? parts[0] : mergeWavBase64(parts);
+            const merged = mergeWavBase64(parts); // 单句也走一遍：统一做首尾静音裁剪
             if (merged) { logTts("route", `gsv-ja ok ${parts.length}/${sents.length}句 len=${merged.length}`); return merged; }
           }
           logTts("route", "gsv-ja 失败 → 回退中文链路");
@@ -1765,11 +1758,38 @@ function splitJaSentences(text) {
   return head;
 }
 
-/** 把多段相同参数的 base64 WAV 拼接成单一 WAV */
+/** 裁掉 16bit PCM 段首尾的静音（保留 padMs 余量）；非 16bit 或异常时原样返回。
+ *  GPT-SoVITS 每段输出首尾带 0.2~0.5s 静音，直接拼接会产生明显卡顿感，故先裁剪。 */
+function trimPcmSilence(pcm, sampleRate, channels, bits, padMs = 80) {
+  try {
+    if (bits !== 16 || !sampleRate || !channels) return pcm;
+    const frame = channels * 2;
+    const n = Math.floor(pcm.length / frame);
+    if (n < 1) return pcm;
+    const THRESHOLD = 150; // ≈ -47dB，只裁真正的静音
+    const loud = (i) => {
+      for (let c = 0; c < channels; c++) {
+        if (Math.abs(pcm.readInt16LE(i * frame + c * 2)) > THRESHOLD) return true;
+      }
+      return false;
+    };
+    const pad = Math.max(1, Math.ceil((padMs / 1000) * sampleRate));
+    let start = 0;
+    while (start < n && !loud(start)) start++;
+    let end = n - 1;
+    while (end > start && !loud(end)) end--;
+    start = Math.max(0, start - pad);
+    end = Math.min(n - 1, end + pad);
+    return pcm.subarray(start * frame, (end + 1) * frame);
+  } catch { return pcm; }
+}
+
+/** 把多段相同参数的 base64 WAV 拼接成单一 WAV：先裁各段首尾静音，句间补固定 130ms 停顿 */
 function mergeWavBase64(list) {
   try {
     const datas = [];
     let fmt = null;
+    let sampleRate = 32000, channels = 1;
     for (const b64 of list) {
       const buf = Buffer.from(b64, "base64");
       if (buf.length < 44 || buf.toString("ascii", 0, 4) !== "RIFF") continue;
@@ -1777,13 +1797,23 @@ function mergeWavBase64(list) {
       while (off + 8 <= buf.length) {
         const id = buf.toString("ascii", off, off + 4);
         const size = Math.min(buf.readUInt32LE(off + 4), buf.length - off - 8);
-        if (id === "fmt " && !fmt) fmt = Buffer.from(buf.subarray(off + 8, off + 8 + size));
+        if (id === "fmt " && !fmt) {
+          fmt = Buffer.from(buf.subarray(off + 8, off + 8 + size));
+          if (fmt.length >= 16) { channels = fmt.readUInt16LE(2) || 1; sampleRate = fmt.readUInt32LE(4) || 32000; }
+        }
         if (id === "data") { datas.push(buf.subarray(off + 8, off + 8 + size)); break; }
         off += 8 + size + (size % 2);
       }
     }
     if (!datas.length || !fmt || fmt.length < 16) return null;
-    const pcm = Buffer.concat(datas);
+    // 逐段裁静音，句间插入固定停顿（自然换句节奏）
+    const gap = Buffer.alloc(Math.ceil(sampleRate * channels * 2 * 0.13));
+    const trimmed = [];
+    datas.forEach((d, i) => {
+      trimmed.push(trimPcmSilence(d, sampleRate, channels, 16));
+      if (i < datas.length - 1) trimmed.push(gap);
+    });
+    const pcm = Buffer.concat(trimmed);
     const out = Buffer.alloc(44 + pcm.length);
     out.write("RIFF", 0, "ascii"); out.write("WAVE", 8, "ascii");
     out.writeUInt32LE(36 + pcm.length, 4);
