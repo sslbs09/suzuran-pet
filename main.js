@@ -1939,6 +1939,29 @@ function mergeWavBase64(list) {
       }
     });
     const pcm = Buffer.concat(trimmed);
+    // 抑制引擎偶发的 sr/4（32k 时即 8kHz）窄带啸叫：双二阶陷波滤波器，Q=6 只挖 7.5~8.5kHz，
+    // 语音基元与摩擦音几乎不受影响；无啸叫时该频段本就近似无声，处理无副作用
+    if (sampleRate >= 16000) {
+      const w0 = 2 * Math.PI * (sampleRate / 4) / sampleRate;
+      const alpha = Math.sin(w0) / (2 * 6);
+      const a0 = 1 + alpha;
+      const b0n = 1 / a0, b1n = (-2 * Math.cos(w0)) / a0, b2n = 1 / a0;
+      const a1n = (-2 * Math.cos(w0)) / a0, a2n = (1 - alpha) / a0;
+      const frameN = channels * 2;
+      const total = Math.floor(pcm.length / frameN);
+      const x1 = new Float64Array(channels), x2 = new Float64Array(channels);
+      const y1 = new Float64Array(channels), y2 = new Float64Array(channels);
+      for (let i = 0; i < total; i++) {
+        for (let c = 0; c < channels; c++) {
+          const o = i * frameN + c * 2;
+          const x0 = pcm.readInt16LE(o);
+          const y0 = b0n * x0 + b1n * x1[c] + b2n * x2[c] - a1n * y1[c] - a2n * y2[c];
+          x2[c] = x1[c]; x1[c] = x0;
+          y2[c] = y1[c]; y1[c] = y0;
+          pcm.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(y0))), o);
+        }
+      }
+    }
     const out = Buffer.alloc(44 + pcm.length);
     out.write("RIFF", 0, "ascii"); out.write("WAVE", 8, "ascii");
     out.writeUInt32LE(36 + pcm.length, 4);
