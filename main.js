@@ -845,6 +845,21 @@ async function handleAsk(sender, { id, text }) {
     }
     history.append({ ts: Date.now(), mode, role: "assistant", content: full });
     sender.send("pet:done", { id, mode, full, emotion });
+
+    // 长期记忆摘要：每 20 轮对话自动生成一次
+    const _fc = config.getConfig();
+    if (_fc.features && _fc.features.longTermMemory) {
+      const turns = history.recent("chat", 999).length;
+      if (turns > 0 && turns % 20 === 0) {
+        const recent = history.recent("chat", 20);
+        features.generateMemorySummary(chatClient, recent).then((summary) => {
+          if (summary) {
+            logTts("memory", "记忆摘要: " + summary.slice(0, 80));
+            sendToRenderer("pet:toast", "🧠 记忆已更新");
+          }
+        }).catch(() => {});
+      }
+    }
   } catch (err) {
     if (err.name === "AbortError") {
       sender.send("pet:done", { id, mode, full: "（已停止）" });
@@ -1036,6 +1051,32 @@ ipcMain.handle("pet:pomodoro-status", () => features.getPomodoroStatus());
 
 // 系统监控
 ipcMain.handle("pet:get-sysstats", () => features.getSystemStats());
+
+// 功能开关
+ipcMain.handle("pet:toggle-feature", (_e, { name, value }) => {
+  config.saveConfig({ features: { [name]: !!value } });
+  if (name === "clipboardWatch") {
+    if (value) {
+      features.startClipboardWatch((msg) => {
+        sendToRenderer("pet:proactive", { text: msg, emotion: "idle" });
+      }, 3000);
+    } else {
+      features.stopClipboardWatch();
+    }
+  }
+  if (name === "systemMonitor") {
+    if (value) {
+      features.startSystemMonitor(
+        () => features.getSystemStats(),
+        (msg) => { sendToRenderer("pet:proactive", { text: msg, emotion: "think" }); },
+        15
+      );
+    } else {
+      features.stopSystemMonitor();
+    }
+  }
+  return true;
+});
 ipcMain.on("pet:move", (_e, dx, dy) => {
   if (win && !win.isDestroyed()) {
     const [x, y] = win.getPosition();
@@ -1493,6 +1534,24 @@ if (!gotLock) {
     features.startProactive((msg) => {
       sendToRenderer("pet:proactive", { text: msg, emotion: "idle" });
     }, _proactiveMin);
+
+    // 剪贴板感知（默认关，用户在设置里勾选后启用）
+    if (_cfg.features && _cfg.features.clipboardWatch) {
+      features.startClipboardWatch((msg) => {
+        sendToRenderer("pet:proactive", { text: msg, emotion: "idle" });
+      }, 3000);
+      logTts("features", "剪贴板感知已启动");
+    }
+
+    // 系统监控播报（默认关，用户在设置里勾选后启用）
+    if (_cfg.features && _cfg.features.systemMonitor) {
+      features.startSystemMonitor(
+        () => features.getSystemStats(),
+        (msg) => { sendToRenderer("pet:proactive", { text: msg, emotion: "think" }); },
+        15
+      );
+      logTts("features", "系统监控已启动");
+    }
 
     // 首次启动：已同意条款且无 API Key 时自动打开设置引导
     if (_cfg.agreed && _cfg.firstRun) {

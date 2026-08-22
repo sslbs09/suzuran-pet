@@ -103,7 +103,16 @@ const DEFAULTS = {
   hotkey: "Alt+Shift+S",
   startHidden: false,
   greetingOnStart: true, // 启动时自动问候（气泡 + 语音），可在设置里关闭,
-  uiLang: "zh" // 界面语言：zh=中文 | en=English | ja=日本語（聊天内容始终为中文）
+  uiLang: "zh", // 界面语言：zh=中文 | en=English | ja=日本語（聊天内容始终为中文）
+  features: { // 功能开关（每个敏感权限单独授权，默认关闭）
+    clipboardWatch: false,    // 剪贴板感知：读取系统剪贴板内容并反应
+    systemMonitor: false,     // 系统监控播报：CPU/内存异常时角色语音提醒
+    screenAwareness: false,   // 屏幕感知：定期截屏分析（需配置视觉模型）
+    longTermMemory: true,     // 长期记忆摘要：自动记住重要对话内容
+    emotionalVoice: true,     // 情绪语音：根据情绪调整语速/音调
+    pomodoro: true,           // 番茄钟伴侣
+    proactiveInterval: 8      // 主动搭话间隔（分钟）
+  }
 };
 
 let cache = null;

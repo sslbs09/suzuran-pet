@@ -241,9 +241,11 @@ function systemStatsToSpeech(stats) {
  * ============================================================ */
 const { clipboard } = require("electron");
 let lastClipboard = "";
+let clipboardTimer = null;
 
 function startClipboardWatch(sendFn, intervalMs = 3000) {
-  return setInterval(() => {
+  stopClipboardWatch();
+  clipboardTimer = setInterval(() => {
     const text = clipboard.readText().trim();
     if (!text || text === lastClipboard || text.length < 10) return;
     lastClipboard = text;
@@ -260,6 +262,10 @@ function startClipboardWatch(sendFn, intervalMs = 3000) {
       sendFn(`📋 检测到一段长文本（${text.length}字），博士在整理资料吗？`);
     }
   }, intervalMs);
+}
+
+function stopClipboardWatch() {
+  if (clipboardTimer) { clearInterval(clipboardTimer); clipboardTimer = null; }
 }
 
 /* ============================================================
@@ -323,6 +329,27 @@ function getRandomDream() {
 }
 
 /* ============================================================
+ * 10. 长期记忆摘要（对话历史 → LLM 压缩 → 人设记忆）
+ * ============================================================ */
+/** 用 LLM 把最近对话压缩成简短的"苏苏洛的记忆"摘要 */
+async function generateMemorySummary(chatClient, recentLines) {
+  if (!recentLines || recentLines.length < 4) return null;
+  try {
+    const dialogText = recentLines
+      .map((l) => `${l.role === "user" ? "博士" : "苏苏洛"}: ${String(l.content || "").slice(0, 100)}`)
+      .join("\n");
+    const r = await chatClient.chat({
+      persona: "你是一个记忆整理器。把下面的对话浓缩成 2~3 句第三人称描述，格式如「博士提到了…；苏苏洛回应了…」。只输出摘要本身。",
+      history: [],
+      text: dialogText.slice(0, 2000),
+      onChunk: () => {},
+    });
+    const summary = String(r.text || "").trim();
+    return summary && summary.length > 5 && summary.length < 500 ? summary : null;
+  } catch { return null; }
+}
+
+/* ============================================================
  * 导出
  * ============================================================ */
 module.exports = {
@@ -350,6 +377,7 @@ module.exports = {
 
   // 剪贴板
   startClipboardWatch,
+  stopClipboardWatch,
 
   // 番茄钟
   startPomodoro,
@@ -358,4 +386,7 @@ module.exports = {
 
   // 梦境
   getRandomDream,
+
+  // 记忆摘要
+  generateMemorySummary,
 };
