@@ -4,12 +4,11 @@
  */
 "use strict";
 
-const { spawn, execSync } = require("child_process");
+const { spawn, exec } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 
 const config = require("./config");
-const history = require("./history");
 
 /* ============================================================
  * 1. 语音输入（麦克风 → whisper → 文字）
@@ -18,13 +17,20 @@ const STT_SCRIPT = path.join(config.APP_DIR, "scripts", "stt_whisper.py");
 
 /** 用 GSV runtime 的 faster-whisper 做语音转文字 */
 async function speechToText(audioPath, lang = "ja") {
-  const gsvPy = "E:\\GSV-training\\GPT-SoVITS-v2pro-20250604\\runtime\\python.exe";
-  if (!fs.existsSync(gsvPy)) return { ok: false, text: "", error: "未找到 GSV 运行时" };
+  // 自动探测 GSV runtime Python
+  const gsvCandidates = [
+    "E:\\GSV-training\\GPT-SoVITS-v2pro-20250604\\runtime\\python.exe",
+    "D:\\GPT-SoVITS\\runtime\\python.exe",
+    "C:\\GPT-SoVITS\\runtime\\python.exe",
+  ];
+  const gsvPy = gsvCandidates.find((p) => fs.existsSync(p));
+  if (!gsvPy) return { ok: false, text: "", error: "未找到 GSV 运行时（请安装 GPT-SoVITS）" };
   if (!fs.existsSync(STT_SCRIPT)) return { ok: false, text: "", error: "stt_whisper.py 不存在" };
 
+  const gsvKit = path.dirname(path.dirname(gsvPy));
   return new Promise((resolve) => {
     const proc = spawn(gsvPy, [STT_SCRIPT, audioPath, lang], {
-      env: { ...process.env, GSV_KIT: "E:\\GSV-training\\GPT-SoVITS-v2pro-20250604" },
+      env: { ...process.env, GSV_KIT: gsvKit },
       stdio: ["pipe", "pipe", "pipe"],
     });
     let out = "", err = "";
@@ -200,21 +206,24 @@ function getVoiceParams(emotion) {
  * 5. 系统监控（CPU/内存 → 角色语音）
  * ============================================================ */
 function getSystemStats() {
-  try {
-    const output = execSync(
+  return new Promise((resolve) => {
+    exec(
       `powershell -NoProfile -Command "Get-CimInstance Win32_Processor | Select-Object -ExpandProperty LoadPercentage; [math]::Round((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1MB,1); [math]::Round((Get-CimInstance Win32_OperatingSystem).TotalVisibleMemorySize/1MB,1)"`,
-      { encoding: "utf8", timeout: 5000 }
-    ).trim().split("\n");
-
-    return {
-      cpu: parseInt(output[0]) || 0,
-      ramFree: parseFloat(output[1]) || 0,
-      ramTotal: parseFloat(output[2]) || 0,
-      ramUsed: Math.round((1 - parseFloat(output[1]) / parseFloat(output[2])) * 100),
-    };
-  } catch {
-    return null;
-  }
+      { encoding: "utf8", timeout: 5000 },
+      (err, stdout) => {
+        if (err) { resolve(null); return; }
+        try {
+          const output = stdout.trim().split("\n");
+          resolve({
+            cpu: parseInt(output[0]) || 0,
+            ramFree: parseFloat(output[1]) || 0,
+            ramTotal: parseFloat(output[2]) || 0,
+            ramUsed: Math.round((1 - parseFloat(output[1]) / parseFloat(output[2])) * 100),
+          });
+        } catch { resolve(null); }
+      }
+    );
+  });
 }
 
 function systemStatsToSpeech(stats) {

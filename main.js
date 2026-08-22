@@ -802,9 +802,9 @@ async function handleAsk(sender, { id, text }) {
     }
   }
 
-  // === 系统状态查询 ===
-  if (/电脑状态|系统状态|CPU|内存|cpu|memory/i.test(clean)) {
-    const stats = features.getSystemStats();
+  // === 系统状态查询（精确匹配，避免拦截普通聊天中的 CPU/内存话题） ===
+  if (/^(电脑|系统|CPU|内存)状态$|^(查看|看看|检查).*(电脑|系统)状态|^CPU$|^内存$|^cpu使用率$|^内存使用率$/i.test(clean)) {
+    const stats = await features.getSystemStats();
     if (stats) {
       const comment = features.systemStatsToSpeech(stats) || "";
       sender.send("pet:done", { id, mode: "chat", full: `📊 CPU: ${stats.cpu}% | 内存: ${stats.ramUsed}% (${stats.ramFree}/${stats.ramTotal}GB)\n${comment}`, emotion: "think" });
@@ -1460,6 +1460,12 @@ if (!gotLock) {
   });
 
   app.whenReady().then(() => {
+    // 允许渲染层访问麦克风（语音输入功能）
+    const { session } = require("electron");
+    session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+      callback(permission === "media");
+    });
+
     createWindow();
     createTray();
 
