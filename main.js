@@ -1475,7 +1475,7 @@ ipcMain.handle("pet:tts-clone", async (_e, text) => {
       if (g.enabled) {
         const up = await ensureGsvServer(g);
         if (up) {
-          const sents = splitJaSentences(jaText);
+          const sents = splitJaSentences(sanitizeJaText(jaText));
           const parts = [];
           for (const s of sents) {
             const b64 = await gsvTtsJa(g, s);
@@ -1631,7 +1631,7 @@ async function ensureGsvServer(g) {
       return r.status === 400 || r.ok; // 服务器在线即返回 400/200
     } catch { return false; }
   };
-  if (await alive()) { gsvServerUp = true; logTts("gsv", "服务器已在运行"); return true; }
+  if (await alive()) { gsvServerUp = true; logTts("gsv", "服务器已在运行"); warmupGsv(g); return true; }
   if (!g.python || !g.serverScript) {
     logTts("gsv", "配置不完整（python/serverScript）");
     return false;
@@ -1658,7 +1658,7 @@ async function ensureGsvServer(g) {
   const deadline = Date.now() + (g.startTimeout || 240000);
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 3000));
-    if (await alive()) { gsvServerUp = true; logTts("gsv", "服务器就绪"); return true; }
+    if (await alive()) { gsvServerUp = true; logTts("gsv", "服务器就绪"); warmupGsv(g); return true; }
   }
   logTts("gsv", "等待超时");
   return false;
@@ -1683,9 +1683,10 @@ function wavDurationMs(buf) {
 
 /** 调 GPT-SoVITS 服务器合成日语；返回 base64，失败返回空 */
 async function gsvTtsJa(g, text) {
+  const clean = sanitizeJaText(text); // ～ —— 引号等符号会让引擎输出碎片，先清洗
   const base = String(g.server || "").replace(/\/+$/, "");
   try {
-    const params = new URLSearchParams({ text: String(text || "").slice(0, 300), text_language: "ja" });
+    const params = new URLSearchParams({ text: clean.slice(0, 300), text_language: "ja" });
     const resp = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(120000) });
     if (!resp.ok) {
       logTts("gsv", "HTTP " + resp.status);
@@ -1694,10 +1695,9 @@ async function gsvTtsJa(g, text) {
     const buf = Buffer.from(await resp.arrayBuffer());
     if (buf.length < 100) { logTts("gsv", "返回过短"); return ""; }
     // 毛刺自愈：时长远短于文本预期（引擎偶发劣化输出碎片/毛刺）→ 重试一次
-    const t = String(text || "");
     const durMs = wavDurationMs(buf);
-    const expectMs = Math.max(400, t.length * 90);
-    if (durMs > 0 && t.length > 6 && durMs < expectMs * 0.5) {
+    const expectMs = Math.max(400, clean.length * 90);
+    if (durMs > 0 && clean.length > 6 && durMs < expectMs * 0.5) {
       logTts("gsv", `疑似引擎毛刺（${Math.round(durMs)}ms << 预期${expectMs}ms）→ 重试`);
       const resp2 = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(120000) });
       if (resp2.ok) {
@@ -1705,7 +1705,7 @@ async function gsvTtsJa(g, text) {
         const d2 = wavDurationMs(buf2);
         if (buf2.length >= 100 && d2 >= expectMs * 0.5) return buf2.toString("base64");
       }
-      logTts("gsv", "重试仍异常，跳过该句");
+      logTts("gsv", "重试仍异常，跳过该句: " + clean.slice(0, 24));
       return "";
     }
     return buf.toString("base64");
@@ -1713,6 +1713,13 @@ async function gsvTtsJa(g, text) {
     logTts("gsv", "请求失败: " + (e && e.message || e));
     return "";
   }
+}
+
+/** 引擎就绪后先烧掉一次试合成，吸收闲置后的首次冷启动毛刺 */
+function warmupGsv(g) {
+  gsvTtsJa(g, "テスト").then((b64) => {
+    logTts("gsv", b64 ? "预热完成" : "预热输出异常（不影响后续）");
+  }).catch(() => {});
 }
 
 /* ---------- 手动重启日语 TTS 服务 ---------- */
@@ -1789,6 +1796,17 @@ ipcMain.handle("pet:restart-gsv", async () => {
   logTts("gsv", "手动重启：成功");
   return { ok: true, code: "success" };
 });
+
+/** 清洗日语合成文本：GPT-SoVITS 对 ～ —— 引号 emoji 等符号处理不稳（易输出碎片），替换或剔除 */
+function sanitizeJaText(t) {
+  return String(t || "")
+    .replace(/[～〜]/g, "ー")
+    .replace(/[-—]{2,}/g, "、")
+    .replace(/[“”„«»「」『』【】（）()【】]/g, "")
+    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 /** 日语文本按句切分（保留标点），丢弃纯标点碎片（如单独的 … 或 」），最多 10 句 */
 function splitJaSentences(text) {
