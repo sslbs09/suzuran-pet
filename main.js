@@ -1146,6 +1146,7 @@ ipcMain.on("pet:move", (_e, dx, dy) => {
 const walk = {
   active: false,    // 引擎运行中（配置开关 + spine 模式才为 true）
   paused: false,    // 渲染层拖拽等临时暂停
+  sleeping: false,  // 渲染层睡觉状态：原地待命不移动
   face: 1,          // 视觉朝向：+1 右 / -1 左（按实际水平位移计算）
   resting: true,    // true=原地不动（地面 Relax / 窗顶 Sit） false=走动（Move）
   perched: false,   // 正坐在窗口顶上
@@ -1175,6 +1176,7 @@ function walkSchedulePhase(ms) {
 /** 相位切换：走↔停↔坐窗循环；休息结束时 35% 概率尝试跳上桌面程序窗口 */
 function walkOnPhaseEnd() {
   if (!walk.active) return;
+  if (walk.sleeping) { walkSchedulePhase(randInt(10000, 20000)); return; } // 睡觉中不切换相位
   if (walk.perched) {                       // 坐够了 → 回到地面
     walk.perched = false;
     walk.returning = true;
@@ -1266,7 +1268,7 @@ function walkTick() {
   let x = b.x;
 
   /* —— 去/回窗口：水平走到正下方后「一步跳」上去/跳下来，不做长距离垂直移动 —— */
-  if (walk.gotoPerch || walk.returning) {
+  if ((walk.gotoPerch || walk.returning) && !walk.sleeping) {
     const tx = walk.targetX;
     if (tx != null && Math.abs(tx - x) > 2) {      // 水平接近窗口正下方
       const nx = Math.abs(tx - x) < WALK_SPEED ? tx : x + Math.sign(tx - x) * WALK_SPEED;
@@ -1293,7 +1295,7 @@ function walkTick() {
   }
 
   /* —— 地面状态 —— */
-  if (walk.resting) return;                         // 放松：站着不动
+  if (walk.resting || walk.sleeping) return;        // 放松/睡觉：站着不动
 
   walkUpdateFace(walk.dir);                         // 朝向跟随实际位移方向
   let nx = x + walk.dir * WALK_SPEED;
@@ -1375,6 +1377,7 @@ ipcMain.on("pet:walking-pause", (_e, p) => {
     }
   }
 });
+ipcMain.on("pet:set-sleeping", (_e, v) => { walk.sleeping = !!v; }); // 睡觉时行走引擎原地待命
 
 /** 扫描全部可用 Spine 皮肤：内置苏苏洛 + spine/user/ 下每个含 .atlas+.skel/.json 的模型（支持子文件夹分皮肤） */
 function detectSpineModels() {

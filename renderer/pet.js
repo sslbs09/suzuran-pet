@@ -38,32 +38,29 @@ let walkState = { active: false, resting: true, perched: false, face: 1 };
 
 function spineHas(name) { return !!spineObj && !!spineObj.spineData.animations.find((a) => a.name === name); }
 
-/** 播放新动画后测量姿势包围盒并自适应（坐姿/睡姿下半身超出画布底部会被裁掉） */
+/** 播放新动画后测量姿势包围盒并自适应（坐姿/睡姿超出画布任意一边都会被裁掉） */
 let spineFitTimers = [];
 function scheduleFitSpine() {
   spineFitTimers.forEach(clearTimeout);
-  spineFitTimers = [120, 450, 900].map((ms) => setTimeout(fitSpinePose, ms)); // 动画过渡期多次校准
+  spineFitTimers = [150, 500, 1000].map((ms) => setTimeout(fitSpinePose, ms)); // 动画过渡期多次校准
 }
 function fitSpinePose() {
   try {
     if (!spineObj || !spineApp || renderMode !== "spine") return;
-    const H = spineApp.screen.height;
+    const W = spineApp.screen.width, H = spineApp.screen.height;
     spineObj.updateTransform();
-    const b = spineObj.getBounds();
-    let y = H;                                   // 默认锚点：脚贴画布底
-    let scaleMag = Math.abs(spineBaseScaleX);
-    if (b.height > 0 && b.y + b.height > H) {
-      const overflow = (b.y + b.height) - H;
-      if (b.y - overflow < 0 && b.height > H - 4) {
-        // 姿势比画布还高 → 整体微缩到放得下
-        scaleMag = Math.abs(spineBaseScaleX) * ((H - 4) / b.height);
-      } else {
-        y = H - overflow;                        // 整体上移让脚不再被裁
-      }
-    }
-    const sx = Math.abs(scaleMag) * (walkState.face === -1 ? -1 : 1);
-    spineObj.scale.set(sx, scaleMag);
-    spineObj.y = y;
+    let b = spineObj.getBounds();
+    if (!(b.width > 0) || !(b.height > 0)) return;
+    let mag = Math.abs(spineBaseScaleX);
+    // 宽或高任一超出画布（如躺姿变宽、坐姿变矮高）→ 整体微缩到完全放得下
+    const k = Math.min(1, (W - 6) / b.width, (H - 6) / b.height);
+    if (k < 1) mag *= k;
+    spineObj.scale.set(mag * (walkState.face === -1 ? -1 : 1), mag);
+    spineObj.updateTransform();
+    b = spineObj.getBounds();
+    // 底边贴地、水平居中：保证耳朵/手脚不被四边裁剪
+    spineObj.x += (W - b.width) / 2 - b.x;
+    spineObj.y += H - (b.y + b.height);
   } catch { /* 测量失败不影响渲染 */ }
 }
 
@@ -220,6 +217,7 @@ function applyWalkState(s) {
   const wasActive = walkState.active;
   walkState = s || walkState;
   if (!spineObj || renderMode !== "spine") return;
+  if (isSleeping) return;                 // 睡觉中：不被行走动画打断
   spineFaceDir(walkState.face);
   if (Date.now() < animDemoUntil) return; // 演示中，不打断
   if (!walkState.active) {
@@ -293,6 +291,7 @@ let lastMood = "idle";
 let moodTimer = null;      // 心情自动回落定时器
 let sleepTimer = null;     // 闲置睡觉定时器
 let awake = true;
+let isSleeping = false;    // 睡觉状态（同步给行走引擎暂停移动）
 let idleIdx = 0;
 
 function setMood(mood) {
@@ -305,6 +304,10 @@ function setMood(mood) {
   if (!pool.length) return;
   const file = pool.length > 1 ? pool[++idleIdx % pool.length] : pool[0];
   lastMood = mood;
+
+  // 睡觉/醒来同步行走引擎（睡着后不再移动）
+  if (mood === "sleep" && !isSleeping) { isSleeping = true; window.petAPI.setSleeping(true); }
+  else if (mood !== "sleep" && isSleeping) { isSleeping = false; window.petAPI.setSleeping(false); }
 
   // Spine 模式：切换 Spine 动画而非 GIF
   if (renderMode === "spine") { setSpineMood(mood); petEl.dataset.mood = mood; return; }
