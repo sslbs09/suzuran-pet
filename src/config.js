@@ -101,6 +101,7 @@ const DEFAULTS = {
     gptPath: "",         // 训练好的 GPT 模型 .ckpt
     refAudio: "",        // 日语参考音频（3~10s 干净人声）
     refText: "",         // 参考音频的日语原文
+    device: "",          // 推理设备：空=引擎自动（GPU）| "cpu"=强制 CPU（显存被其他程序挤占时稳定但慢）
     startTimeout: 240000
   },
   hotkey: "Alt+Shift+S",
