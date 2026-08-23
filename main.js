@@ -1949,6 +1949,11 @@ function spineSkinDisplayName(id, fallbackName, lang) {
   if (id === "builtin") return i18n.t(lang, "skin.builtin", "Sussurro");
   if (/summer/i.test(id)) return i18n.t(lang, "skin.summer", "Sussurro Summer");
   if (/winter/i.test(id)) return i18n.t(lang, "skin.winter", "Sussurro Winter");
+  // 其他角色（user 目录模型）：按关键词给中文名，未收录的用文件名清理结果
+  if (/mon3tr/i.test(id)) return "Mon3tr";
+  if (/amiya/i.test(id)) return "阿米娅";
+  if (/silverash|silence.*ash|sa_/i.test(id)) return "银灰";
+  if (/lumen/i.test(id)) return "流明";
   return fallbackName || id;
 }
 ipcMain.handle("pet:get-spine-models", () => ({ list: detectSpineModels(), current: config.getConfig().spineSkinId || "builtin" }));
