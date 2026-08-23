@@ -1268,23 +1268,29 @@ function walkSchedulePhase(ms) {
 /** 相位切换：走↔停↔坐窗循环；休息结束时 35% 概率尝试跳上桌面程序窗口 */
 function walkOnPhaseEnd() {
   if (!walk.active) return;
-  if (walk.seated) { walkSchedulePhase(randInt(8000, 15000)); return; } // 坐下中：保持坐姿
   if (walk.sleeping) { walkSchedulePhase(randInt(10000, 20000)); return; } // 睡觉中不切换相位
   if (walk.perched) {                       // 坐够了 → 回到地面
     walk.perched = false;
     walk.returning = true;
     walk.resting = false;
+    walk.seated = false;
     walkBroadcast();
     return;                                 // walkTick 完成下降后再排下一相位
+  }
+  if (walk.resting && !walk.seated) {       // 久坐起身活动（拖拽吸附坐下保持到被拖走）
+    walkSchedulePhase(randInt(8000, 15000));
+    return;
   }
   if (walk.resting) {
     if (!walk.paused && Math.random() < 0.35) { walkAttemptPerch(); return; }
     walk.resting = false;                   // 开始散步
+    walk.seated = false;
     walk.dir = Math.random() < 0.5 ? -1 : 1;
     walkBroadcast();
     walkSchedulePhase(randInt(8000, 20000));
-  } else {                                  // 散步结束 → 地面放松
+  } else {                                  // 散步结束 → 坐下休息（Sit）
     walk.resting = true;
+    walk.seated = true;
     walkBroadcast();
     walkSchedulePhase(randInt(10000, 30000));
   }
@@ -1329,8 +1335,9 @@ function walkAttemptPerch() {
         r.y - b.height >= wa.y + 6 &&                // 上方要放得下整个小人
         r.x < wa.x + wa.width && r.x + r.w > wa.x    // 在当前屏幕内
       );
-      if (!cands.length) {                           // 没有合适窗口 → 继续地面放松
+      if (!cands.length) {                           // 没有合适窗口 → 坐下休息
         walk.resting = true;
+        walk.seated = true;
         walkBroadcast();
         walkSchedulePhase(randInt(10000, 30000));
         return;
@@ -1381,6 +1388,7 @@ function walkTick() {
     } else {
       walk.returning = false;
       walk.resting = true;
+      walk.seated = true; // 落地坐下
       walkBroadcast();
       walkSchedulePhase(randInt(8000, 20000));
     }
@@ -1407,7 +1415,7 @@ function startWalkingEngine() {
   walk.perched = false;
   walk.gotoPerch = false;
   walk.returning = false;
-  walk.seated = false;
+  walk.seated = true; // 启动先坐下，片刻后起身散步
   walk.face = Math.random() < 0.5 ? -1 : 1;
   walk.timer = setInterval(walkTick, WALK_TICK_MS);
   walkBroadcast();
