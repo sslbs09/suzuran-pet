@@ -187,11 +187,11 @@ async function initSpine() {
       spineApp.screen.width / (spineObj.width || 300),
       spineApp.screen.height / (spineObj.height || 400)
     ) * 0.9;
-    // 部分模型导出尺度偏小（实测 Mon3tr 锋锐原始高度仅 19 单位）：按目录名加缩放修正
+    // 部分模型导出尺度/宽高比不同：按目录名加缩放修正（宽度优先约束，防横向出画布）
     const boostTable = {
-      "4179_monstr": 9.5,
-      "4179_monstr_boc_11": 9.5,
-      "391_rosmon_sale_16": 6.5
+      "4179_monstr": 3.2,
+      "4179_monstr_boc_11": 3.2,
+      "391_rosmon_sale_16": 2.3
     };
     let boost = 1;
     try {
