@@ -35,6 +35,8 @@ contextBridge.exposeInMainWorld("petAPI", {
   getI18n: () => ipcRenderer.invoke("pet:get-i18n"),
   onUiLangChanged: (cb) => ipcRenderer.on("pet:ui-lang-changed", (_e, lang) => cb(lang)),
   setScale: (scale) => ipcRenderer.invoke("pet:set-scale", scale),
+  getSeatSink: () => ipcRenderer.invoke("pet:get-seat-sink"),
+  setSeatSink: (px) => ipcRenderer.invoke("pet:set-seat-sink", px),
   agreeTerms: () => ipcRenderer.invoke("pet:agree-terms"),
   refuseTerms: () => ipcRenderer.invoke("pet:refuse-terms"),
   openTerms: () => ipcRenderer.invoke("pet:open-terms"),

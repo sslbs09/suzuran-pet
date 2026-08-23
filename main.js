@@ -607,11 +607,23 @@ function setScale(scale) {
       win.setPosition(Math.min(Math.max(x, wa.x), wa.x + wa.width - ws),
                       Math.min(Math.max(y, wa.y), wa.y + wa.height - hs + 80)); // +80 允许坐姿下沉探入任务栏区
     } catch { /* 忽略 */ }
+    applySeatPosition(); // 尺寸档位变了，若正处于坐姿立即按新档位重新落座
   }
   refreshTrayMenu();
   sendToRenderer("pet:scale-changed", s);
 }
 ipcMain.handle("pet:set-scale", (_e, scale) => { setScale(scale); return true; });
+ipcMain.handle("pet:get-seat-sink", () => {
+  const t = seatSinkTier();
+  return { tier: t, value: getSeatSink(), default: SEAT_SINK_DEFAULTS[t] };
+});
+ipcMain.handle("pet:set-seat-sink", (_e, v) => {
+  const n = Math.max(0, Math.min(80, Math.round(Number(v) || 0)));
+  const t = seatSinkTier();
+  config.saveConfig({ walkSeatSink: { ...config.getConfig().walkSeatSink, [t]: n } });
+  applySeatPosition();
+  return { tier: t, value: getSeatSink(), default: SEAT_SINK_DEFAULTS[t] };
+});
 
 /* ---------- 本地 Agent 调用接口（其他 agent / 脚本可调用，仅 127.0.0.1） ---------- */
 function startAgentApi() {
@@ -1248,7 +1260,6 @@ const walk = {
   perched: false,   // 正坐在窗口顶上
   seated: false,    // 坐下（任务栏上沿/桌面图标顶）：Sit 动画不移动
   groundGap: 0,     // 角色脚底到窗口底边的空隙（渲染层上报）：贴地定位时窗口下探补偿
-  seatSink: 30,     // 坐姿下沉量：坐下时腿垂进任务栏区域（坐台阶边沿效果）
   sunk: false,      // 当前是否处于坐姿下沉状态
   gotoPerch: false, // 正走向/爬向窗口顶
   returning: false, // 坐完正回到地面
@@ -1274,6 +1285,24 @@ function walkSchedulePhase(ms) {
 }
 
 /** 相位切换：走↔停↔坐窗循环；休息结束时 35% 概率尝试跳上桌面程序窗口 */
+
+/* ---------- 坐姿下沉量分档 ----------
+ * 小尺寸（≤80%）窗口矮、腿短，固定下沉会陷得过深；冬季皮肤大尺寸单独一档；
+ * 其余档位（含普通大/特大）统一用标准值。设置页滑杆可按档位覆盖，存 config.walkSeatSink。 */
+const SEAT_SINK_DEFAULTS = { small: 22, standard: 30, winterLarge: 30 };
+function seatSinkTier() {
+  const cfg = config.getConfig();
+  const scale = clampScale((cfg.window || {}).scale);
+  if (/winter/i.test(String(cfg.spineSkinId || "")) && scale >= 1.2 && scale < 1.6) return "winterLarge";
+  if (scale <= 0.8) return "small";
+  return "standard";
+}
+function getSeatSink() {
+  const t = seatSinkTier();
+  const v = Number((config.getConfig().walkSeatSink || {})[t]);
+  return Number.isFinite(v) && v >= 0 ? Math.round(v) : SEAT_SINK_DEFAULTS[t];
+}
+
 /** 坐姿定位（绝对）：按当前 seated 状态把窗口摆到正确高度——
  *  站=脚踩任务栏上沿；坐=下沉 seatSink 腿垂进任务栏。幂等自愈，
  *  任何中间位移（拖拽/重启钳制）都会在下一次调用时纠正。仅 Spine 模式。 */
@@ -1282,7 +1311,7 @@ function applySeatPosition() {
   const b = win.getBounds();
   const wa = screen.getDisplayMatching(b).workArea;
   const baseY = wa.y + wa.height + walk.groundGap - b.height;   // 站立贴地
-  const targetY = walk.seated ? baseY + walk.seatSink : baseY;  // 坐姿下沉
+  const targetY = walk.seated ? baseY + getSeatSink() : baseY;  // 坐姿下沉（按尺寸档位）
   walk.sunk = walk.seated;
   if (Math.abs(b.y - targetY) > 1) win.setPosition(b.x, Math.round(targetY));
   applyLayer(walk.seated || walk.active); // 接触任务栏表面时保证在任务栏之上

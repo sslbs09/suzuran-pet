@@ -71,6 +71,11 @@ async function toast(msg) {
   $("hotkey").value = S.hotkey || "Alt+Shift+S";
   $("start-hidden").value = String(!!S.startHidden);
   $("pet-scale").value = String(S.scale || 1);
+  try {
+    const ss = await window.petAPI.getSeatSink();
+    $("seat-sink").value = String(ss.value);
+    $("seat-sink-val").textContent = ss.value + " px · " + seatTierLabel(ss.tier);
+  } catch { /* 滑杆保持默认值 */ }
   const aa = S.agentApi || {};
   $("agent-enabled").value = String(aa.enabled !== false);
   $("agent-port").value = aa.port || 8765;
@@ -226,6 +231,19 @@ $("btn-open-studio").addEventListener("click", () => window.petAPI.openVoiceStud
 /* ---------- 界面语言（即时切换） ---------- */
 $("ui-lang").addEventListener("change", () => {
   window.petAPI.setUiLang($("ui-lang").value);
+});
+
+/* ---------- 坐姿下沉量（按当前尺寸档位读写，拖动即生效） ---------- */
+function seatTierLabel(t) {
+  return L("set.seatTier." + t) === "set.seatTier." + t ? t : L("set.seatTier." + t);
+}
+$("seat-sink").addEventListener("input", () => {
+  $("seat-sink-val").textContent = $("seat-sink").value + " px";
+});
+$("seat-sink").addEventListener("change", async () => {
+  const r = await window.petAPI.setSeatSink(Number($("seat-sink").value));
+  $("seat-sink").value = String(r.value);
+  $("seat-sink-val").textContent = r.value + " px · " + seatTierLabel(r.tier);
 });
 
 /* ---------- 其他 ---------- */
