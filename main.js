@@ -2554,7 +2554,10 @@ function mergeWavBase64(list) {
       }
       trimmed.push(seg);
       if (i < datas.length - 1) {
-        trimmed.push(Buffer.alloc(Math.ceil(sampleRate * channels * 2 * (0.15 + Math.random() * 0.07))));
+        // 句间停顿长度必须按 16bit 采样帧（frame 字节）取整：若为奇数字节，
+        // 其后所有样本高低字节错位 → 从该句起整段电音杂讯（单句不插停顿故从无杂音）
+        const silFrames = Math.ceil(sampleRate * (0.15 + Math.random() * 0.07));
+        trimmed.push(Buffer.alloc(silFrames * frame));
       }
     });
     const pcm = Buffer.concat(trimmed);
