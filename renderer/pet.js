@@ -44,6 +44,7 @@ function scheduleFitSpine() {
   spineFitTimers.forEach(clearTimeout);
   spineFitTimers = [150, 500, 1000].map((ms) => setTimeout(fitSpinePose, ms)); // 动画过渡期多次校准
 }
+let spineBoost = 1; // >1 表示该模型包围盒远大于可见内容（空白/特效区），fit 校准需跳过缩小保护
 function fitSpinePose() {
   try {
     if (!spineObj || !spineApp || renderMode !== "spine") return;
@@ -53,7 +54,8 @@ function fitSpinePose() {
     if (!(b.width > 0) || !(b.height > 0)) return;
     let mag = Math.abs(spineBaseScaleX);
     // 宽或高任一超出画布（如躺姿变宽、坐姿变矮高）→ 整体微缩到完全放得下
-    const k = Math.min(1, (W - 6) / b.width, (H - 6) / b.height);
+    // boost>1 的模型包围盒含大量不可见空白，按包围盒缩小会让可见角色过小 → 跳过缩小保护
+    const k = spineBoost > 1 ? 1 : Math.min(1, (W - 6) / b.width, (H - 6) / b.height);
     if (k < 1) mag *= k;
     spineObj.scale.set(mag * (walkState.face === -1 ? -1 : 1), mag);
     spineObj.updateTransform();
@@ -180,13 +182,14 @@ async function initSpine() {
       spineApp.screen.height / (spineObj.height || 400)
     ) * 0.9;
     // 部分模型图集包围盒偏大（含空白/特效区），自适应后显得偏小：按目录名加缩放修正
-    const boostTable = { "4179_monstr": 10, "391_rosmon_sale_16": 10 }; // TODO 调试用 10 倍，确认生效后回调
+    const boostTable = { "4179_monstr": 2.2, "391_rosmon_sale_16": 2.0 };
     let boost = 1;
     try {
       const segs = decodeURIComponent((spinePaths.skel || "")).split("/");
       const dirName = segs.find((p) => /^\d{3,4}_/.test(p)) || ""; // 定位 spine/user/<目录>/... 中的目录段
       boost = boostTable[dirName] || 1;
     } catch { boost = 1; }
+    spineBoost = boost; // fitSpinePose 据此跳过缩小保护
     spineBaseScaleX = scale * boost;
     spineObj.scale.set(scale * boost);
 
