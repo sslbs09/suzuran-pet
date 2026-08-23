@@ -230,32 +230,48 @@ function refreshTrayMenu() {
       }
       setWalking(!c.walking);
     } },
-    ...(() => { // 皮肤按角色分组：每个角色一个二级菜单，内含本体与各时装
+    ...(() => { // 皮肤三层菜单：人物 > 角色（形态） > 皮肤
       const models = detectSpineModels();
-      const groups = new Map();
+      const persons = new Map(); // 人物编号 → Map(角色 → {name, items})
       for (const m of models) {
-        const gid = skinGroupId(m.id);
-        if (!groups.has(gid)) groups.set(gid, []);
-        groups.get(gid).push({ id: m.id, label: skinItemLabel(m, lang) });
-      }
-      const order = ["298", "002", "1001", "1037", "172", "391", "4042", "4235", "1052", "003"];
-      const gids = [...groups.keys()].sort((a, b) => {
-        const ia = order.indexOf(a), ib = order.indexOf(b);
-        return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib) || a.localeCompare(b);
-      });
-      return gids.map((gid) => {
-        const items = groups.get(gid).map((m) => ({
-          label: m.label,
+        let num, chKey, skin = "";
+        const dir = String(m.id).split("/")[0];
+        if (m.id === "builtin" || dir === "summer" || dir === "winter") {
+          num = "298"; chKey = "298_susuro";
+          if (dir === "summer") skin = "summer";
+          if (dir === "winter") skin = "winter";
+        } else {
+          const p = skinParseDir(dir);
+          if (!p) continue;
+          num = p.num; chKey = p.num + "_" + p.ch; skin = p.skin;
+        }
+        if (!persons.has(num)) persons.set(num, new Map());
+        const chars = persons.get(num);
+        if (!chars.has(chKey)) {
+          chars.set(chKey, { name: SKIN_CHAR_NAMES[chKey] || chKey.split("_").slice(1).join("_"), items: [] });
+        }
+        chars.get(chKey).items.push({
+          label: skin || "默认",
           type: "radio",
           checked: (cfg.spineSkinId || "builtin") === m.id,
           click: () => setSpineSkin(m.id)
-        }));
-        const grpName = (SKIN_GROUP_NAMES[gid] || {}).zh || gid;
-        const spineOn = cfg.renderMode === "spine";
-        return items.length === 1
-          ? { ...items[0], enabled: spineOn } // 单项角色不套二级菜单
-          : { label: grpName, enabled: spineOn, submenu: items };
+        });
+      }
+      const order = ["298", "002", "1001", "1037", "172", "391", "4042", "4235", "003", "1052"];
+      const nums = [...persons.keys()].sort((a, b) => {
+        const ia = order.indexOf(a), ib = order.indexOf(b);
+        return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib) || a.localeCompare(b);
       });
+      return [{
+        label: i18n.t(lang, "tray.personLabel"),
+        submenu: nums.map((num) => ({
+          label: (SKIN_PERSON_NAMES[num] || {})[lang] || num,
+          submenu: [...persons.get(num).entries()].map(([chKey, ch]) => ({
+            label: ch.name,
+            submenu: ch.items
+          }))
+        }))
+      }];
     })(),
     { label: i18n.t(lang, "tray.animDemoLabel"),
       enabled: cfg.renderMode === "spine",
@@ -1957,14 +1973,20 @@ function detectSpineModels() {
 
 function setSpineSkin(id) {
   config.saveConfig({ spineSkinId: String(id || "") });
+  // 选择皮肤即进入 Spine 渲染模式（GIF 模式下只换模型不换画面，会让人以为切换无效）
+  if (config.getConfig().renderMode !== "spine") {
+    config.saveConfig({ renderMode: "spine" });
+    sendToRenderer("pet:render-mode-changed", "spine");
+    syncWalkingEngine();
+    logTts("walk", "选择新皮肤，已自动切换到 Spine 模式");
+  }
   refreshTrayMenu();
   sendToRenderer("pet:spine-skin-changed", String(id || ""));
   logTts("walk", "切换小人皮肤: " + (id || "builtin"));
 }
 
-/** 皮肤显示名：已知 id 用三语文案，未知皮肤用清理后的文件名 */
-/** 皮肤菜单分组：user 子目录名形如 <编号>_<角色>[_<皮肤代号>#N]，按编号归入角色的二级菜单 */
-const SKIN_GROUP_NAMES = {
+/** 皮肤三层菜单：人物 > 角色（形态） > 皮肤 */
+const SKIN_PERSON_NAMES = {
   "298": { zh: "苏苏洛", en: "Sussurro", ja: "スズラン" },
   "002": { zh: "阿米娅", en: "Amiya", ja: "アーミヤ" },
   "1001": { zh: "阿米娅", en: "Amiya", ja: "アーミヤ" },
@@ -1973,28 +1995,24 @@ const SKIN_GROUP_NAMES = {
   "391": { zh: "迷迭香", en: "Rosmontis", ja: "ローズモンティス" },
   "4042": { zh: "流明", en: "Lumen", ja: "ルーメン" },
   "4235": { zh: "珊比", en: "Thumpy", ja: "タンピー" },
-  "4179": { zh: "Mon3tr", en: "Mon3tr", ja: "モンススリー" },
-  "1052": { zh: "凯尔希", en: "Kal'tsit", ja: "ケルシー" },
-  "003": { zh: "凯尔希", en: "Kal'tsit", ja: "ケルシー" }
+  "003": { zh: "凯尔希", en: "Kal'tsit", ja: "ケルシー" },
+  "1052": { zh: "凯尔希", en: "Kal'tsit", ja: "ケルシー" }
 };
-function skinGroupId(id) {
-  if (id === "builtin") return "298";
-  const dir = String(id || "").split("/")[0];
-  if (dir === "summer" || dir === "winter") return "298"; // 苏苏洛时装归内置组
-  const m = dir.match(/^(\d{3,4})_/);
-  return m ? m[1] : dir;
-}
-function skinItemLabel(m, lang) {
-  const id = String(m.id || "");
-  if (id === "builtin") return i18n.t(lang, "skin.builtin", "Sussurro");
-  const dir = id.split("/")[0];
-  if (dir === "summer") return i18n.t(lang, "skin.summer", "Sussurro Summer");
-  if (dir === "winter") return i18n.t(lang, "skin.winter", "Sussurro Winter");
-  const grp = SKIN_GROUP_NAMES[skinGroupId(id)] || {};
-  const baseName = grp[lang] || grp.zh || m.name || dir;
-  const vm = dir.match(/^\d+_([a-z0-9]+)(?:_(.+))?$/i);
-  const tag = vm && vm[2] ? ` · ${vm[2]}` : "";
-  return `${baseName}${tag}`;
+const SKIN_CHAR_NAMES = { // 角色（形态）中文名；未收录的用目录代号
+  "002_amiya": "本体",
+  "1001_amiya2": "升变",
+  "1037_amiya3": "异格形态",
+  "003_kalts": "本体",
+  "1052_kalts2": "Mon3tr 形象",
+  "172_svrash": "本体",
+  "391_rosmon": "本体",
+  "4042_lumen": "本体",
+  "4235_thumpy": "本体",
+  "298_susuro": "本体"
+};
+function skinParseDir(dir) { // "002_amiya_epoque#4" → {num:"002", ch:"amiya", skin:"epoque#4"}
+  const m = String(dir || "").match(/^(\d{3,4})_([a-z0-9]+)(?:_(.+))?$/i);
+  return m ? { num: m[1], ch: m[2].toLowerCase(), skin: m[3] || "" } : null;
 }
 ipcMain.handle("pet:get-spine-models", () => ({ list: detectSpineModels(), current: config.getConfig().spineSkinId || "builtin" }));
 ipcMain.handle("pet:set-spine-skin", (_e, id) => { setSpineSkin(id); return true; });
