@@ -1204,8 +1204,10 @@ ipcMain.on("pet:move", (_e, dx, dy) => {
     const [x, y] = win.getPosition();
     win.setPosition(Math.round(x + dx), Math.round(y + dy));
     dragSeatUpdate(); // 拖拽落点吸附：接近任务栏/桌面图标自动坐下
+    dbgLastMoveTs = Date.now();
   }
 });
+let dbgLastMoveTs = 0; // 最近一次拖拽移动时刻（paused 卡死自愈用）
 
 /** 拖拽落点吸附判定（final=true 表示松手时刻）：
  *  桌面层级＋已授权：拖拽途中完全自由（任何磁吸都关掉，防任务栏 48px 带把人钉死），
