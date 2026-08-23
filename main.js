@@ -1564,9 +1564,9 @@ elseif ($out.Count -eq 1) { "[" + ($out[0] | ConvertTo-Json -Compress) + "]" }
 else { $out | ConvertTo-Json -Compress }
 `;
 
-function desktopIconMode() { // 桌面层级＋用户授权 同时满足才启用图标互动
+function desktopIconMode() { // 仅 Spine 行走系统＋桌面层级＋授权 同时满足才启用（GIF 模式无坐图标系统）
   const cfg = config.getConfig();
-  return cfg.layer === "desktop" && !!((cfg.features || {}).desktopIcons);
+  return cfg.renderMode === "spine" && cfg.layer === "desktop" && !!((cfg.features || {}).desktopIcons);
 }
 let desktopIconCache = { at: 0, list: [] };
 
