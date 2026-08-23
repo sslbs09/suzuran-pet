@@ -83,7 +83,7 @@ function sitOnTaskbar() {
   walk.perched = false;
   walk.gotoPerch = false;
   walk.returning = false;
-  seatSinkWindow(1);
+  applySeatPosition();
   walkBroadcast(); // 渲染层切 Sit 坐姿
   logTts("walk", "坐到任务栏上");
 }
@@ -130,7 +130,7 @@ function createWindow() {
     const [cw, ch] = win.getSize();
     win.setPosition(
       Math.min(Math.max(x, wa.x), wa.x + wa.width - cw),
-      Math.min(Math.max(y, wa.y), wa.y + wa.height - ch)
+      Math.min(Math.max(y, wa.y), wa.y + wa.height - ch + 80) // +80 允许坐姿下沉探入任务栏区
     );
   } catch { /* 忽略 */ }
 
@@ -604,7 +604,7 @@ function setScale(scale) {
       const wa = screen.getDisplayMatching(win.getBounds()).workArea;
       const [x, y] = win.getPosition();
       win.setPosition(Math.min(Math.max(x, wa.x), wa.x + wa.width - ws),
-                      Math.min(Math.max(y, wa.y), wa.y + wa.height - hs));
+                      Math.min(Math.max(y, wa.y), wa.y + wa.height - hs + 80)); // +80 允许坐姿下沉探入任务栏区
     } catch { /* 忽略 */ }
   }
   refreshTrayMenu();
@@ -1229,7 +1229,7 @@ function dragSeatUpdate() {
     win.setPosition(Math.round(nx), Math.round(ny));
   }
   if (changed) {
-    seatSinkWindow(seated ? 1 : -1); // 坐下腿垂进任务栏/图标区，离开收腿
+    applySeatPosition(); // 坐下腿垂进任务栏/图标区，离开收腿
     walkBroadcast();
   }
   return seated;
@@ -1272,15 +1272,17 @@ function walkSchedulePhase(ms) {
 }
 
 /** 相位切换：走↔停↔坐窗循环；休息结束时 35% 概率尝试跳上桌面程序窗口 */
-/** 坐姿下沉/上浮：坐下时窗口额外下沉 seatSink，让 Sit 姿势的腿垂进任务栏
- *  （站=踩在任务栏上，坐=坐在边沿腿垂下去）。仅 Spine 模式。 */
-function seatSinkWindow(down) {
-  if (!win || win.isDestroyed()) return;
-  if (config.getConfig().renderMode !== "spine") return;
-  if ((down > 0) === walk.sunk) return; // 已在目标状态
-  walk.sunk = down > 0;
-  const [x, y] = win.getPosition();
-  win.setPosition(x, Math.round(y + (down > 0 ? walk.seatSink : -walk.seatSink)));
+/** 坐姿定位（绝对）：按当前 seated 状态把窗口摆到正确高度——
+ *  站=脚踩任务栏上沿；坐=下沉 seatSink 腿垂进任务栏。幂等自愈，
+ *  任何中间位移（拖拽/重启钳制）都会在下一次调用时纠正。仅 Spine 模式。 */
+function applySeatPosition() {
+  if (!win || win.isDestroyed() || config.getConfig().renderMode !== "spine") return;
+  const b = win.getBounds();
+  const wa = screen.getDisplayMatching(b).workArea;
+  const baseY = wa.y + wa.height + walk.groundGap - b.height;   // 站立贴地
+  const targetY = walk.seated ? baseY + walk.seatSink : baseY;  // 坐姿下沉
+  walk.sunk = walk.seated;
+  if (Math.abs(b.y - targetY) > 1) win.setPosition(b.x, Math.round(targetY));
 }
 
 function walkOnPhaseEnd() {
@@ -1291,7 +1293,7 @@ function walkOnPhaseEnd() {
     walk.returning = true;
     walk.resting = false;
     walk.seated = false;
-    seatSinkWindow(-1);
+    applySeatPosition();
     walkBroadcast();
     return;                                 // walkTick 完成下降后再排下一相位
   }
@@ -1303,14 +1305,14 @@ function walkOnPhaseEnd() {
     if (!walk.paused && Math.random() < 0.35) { walkAttemptPerch(); return; }
     walk.resting = false;                   // 开始散步
     walk.seated = false;
-    seatSinkWindow(-1);                     // 起身：腿从任务栏里收回来
+    applySeatPosition();                    // 起身：腿从任务栏里收回来
     walk.dir = Math.random() < 0.5 ? -1 : 1;
     walkBroadcast();
     walkSchedulePhase(randInt(8000, 20000));
   } else {                                  // 散步结束 → 坐下休息（Sit）
     walk.resting = true;
     walk.seated = true;
-    seatSinkWindow(1);                      // 坐下：腿垂进任务栏
+    applySeatPosition();                   // 坐下：腿垂进任务栏
     walkBroadcast();
     walkSchedulePhase(randInt(10000, 30000));
   }
@@ -1358,7 +1360,7 @@ function walkAttemptPerch() {
       if (!cands.length) {                           // 没有合适窗口 → 坐下休息
         walk.resting = true;
         walk.seated = true;
-        seatSinkWindow(1);
+        applySeatPosition();
         walkBroadcast();
         walkSchedulePhase(randInt(10000, 30000));
         return;
@@ -1410,7 +1412,7 @@ function walkTick() {
       walk.returning = false;
       walk.resting = true;
       walk.seated = true; // 落地坐下
-      seatSinkWindow(1);
+      applySeatPosition();
       walkBroadcast();
       walkSchedulePhase(randInt(8000, 20000));
     }
@@ -1442,7 +1444,7 @@ function startWalkingEngine() {
   try { // 已在地面线附近则直接进入下沉坐姿
     const b0 = win.getBounds();
     const wa0 = screen.getDisplayMatching(b0).workArea;
-    if (Math.abs(b0.y + b0.height - walk.groundGap - (wa0.y + wa0.height)) < 60) seatSinkWindow(1);
+    if (Math.abs(b0.y + b0.height - walk.groundGap - (wa0.y + wa0.height)) < 60) applySeatPosition();
   } catch { /* 忽略 */ }
   walk.timer = setInterval(walkTick, WALK_TICK_MS);
   walkBroadcast();
@@ -1452,8 +1454,7 @@ function startWalkingEngine() {
 }
 
 function stopWalkingEngine(silent = false) {
-  if (!walk.active) return;
-  seatSinkWindow(-1);
+  if (!walk.active) return; // 停止行走保持当前坐姿（seated 不重置，仍坐在任务栏上）
   walk.active = false;
   clearInterval(walk.timer); walk.timer = null;
   clearTimeout(walk.phaseTimer); walk.phaseTimer = null;
@@ -1580,7 +1581,7 @@ ipcMain.on("pet:set-size", (_e, w, h) => {
     const wa = screen.getDisplayMatching(win.getBounds()).workArea;
     const [x, y] = win.getPosition();
     win.setPosition(Math.min(Math.max(x, wa.x), wa.x + wa.width - ws),
-                    Math.min(Math.max(y, wa.y), wa.y + wa.height - hs));
+                    Math.min(Math.max(y, wa.y), wa.y + wa.height - hs + 80)); // +80 允许坐姿下沉
   } catch { /* 忽略 */ }
 });
 ipcMain.handle("pet:tts-clone", async (_e, text) => {
