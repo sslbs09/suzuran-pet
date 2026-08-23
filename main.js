@@ -1208,8 +1208,8 @@ ipcMain.on("pet:move", (_e, dx, dy) => {
 });
 
 /** 拖拽落点吸附判定：底边接近任务栏上沿 → 贴齐坐下；
- *  在主屏左侧桌面图标网格区且底边接近某图标格顶部 → 坐到该图标上。
- *  返回是否处于坐下吸附。贴地定位统一用 groundGap 下探，让角色脚底真正踩在表面上。 */
+ *  桌面层级＋已授权时用真实桌面图标位置吸附（其余位置自由放置）；
+ *  置顶模式沿用主屏左侧图标网格估算。返回是否处于坐下吸附。 */
 function dragSeatUpdate() {
   if (!win || win.isDestroyed()) return false;
   const b = win.getBounds();
@@ -1223,6 +1223,19 @@ function dragSeatUpdate() {
     seated = true;                                   // 任务栏磁吸
     ny = waBottom + walk.groundGap - b.height;
     nx = Math.min(Math.max(b.x, walkMinX(wa)), wa.x + wa.width - b.width);
+  } else if (desktopIconMode()) {
+    // 桌面层级＋已授权：贴近真实桌面图标顶(±44px)才坐上，其余位置＝自由放置不吸附
+    const charCx = (walk.charInset + b.width - 2) / 2;
+    let best = null, bestD = Infinity;
+    for (const p of desktopIconCache.list) {
+      const d = Math.abs(feet - p.y);
+      if (d <= 44 && d < bestD && Math.abs((b.x + charCx) - p.x) <= 60) { best = p; bestD = d; }
+    }
+    if (best) {
+      seated = true;                                 // 图标顶磁吸
+      ny = best.y + walk.groundGap - b.height;
+      nx = Math.round(best.x - charCx);
+    }
   } else {
     // 桌面图标网格近似（主屏左侧区域；格尺寸按常见 DPI 估算）
     const pd = screen.getPrimaryDisplay().workArea;
@@ -1245,13 +1258,19 @@ function dragSeatUpdate() {
   walk.seated = seated;
   if (seated) {
     walk.resting = true;
+    walk.freeStand = false;
     walk.gotoPerch = false;
     walk.returning = false;
     walk.perched = false;
     win.setPosition(Math.round(nx), Math.round(ny));
   }
   if (changed) {
-    applySeatPosition(); // 坐下腿垂进任务栏/图标区，离开收腿
+    if (!seated && desktopIconMode()) {       // 桌面模式离开吸附区＝自由放置：保持松手位置站姿，不自愈回任务栏
+      walk.resting = true;
+      walk.freeStand = true;
+    } else {
+      applySeatPosition();                    // 置顶模式维持原行为：回到任务栏地面线
+    }
     walkBroadcast();
   }
   applyLayer(walk.seated || walk.active);
@@ -1275,6 +1294,7 @@ const walk = {
   sunk: false,      // 当前是否处于坐姿下沉状态
   gotoPerch: false, // 正走向/爬向窗口顶
   iconTarget: false,// 本次跳的目标是桌面图标（决定跳上后站或坐）
+  freeStand: false, // 桌面层级下被自由放置在桌面上（站姿待命，不被相位机拉回任务栏）
   returning: false, // 坐完正回到地面
   dir: 1,           // 漫游方向
   targetX: null,
@@ -1359,6 +1379,10 @@ function applySeatPosition() {
 
 async function walkOnPhaseEnd() {
   if (!walk.active) return;
+  if (walk.paused) {                        // 拖拽中冻结一切相位动作（防 applySeatPosition 把窗口弹回任务栏）
+    walkSchedulePhase(randInt(3000, 6000));
+    return;
+  }
   if (walk.sleeping) { walkSchedulePhase(randInt(10000, 20000)); return; } // 睡觉中不切换相位
   if (walk.perched || walk.iconRest) {      // 图标/窗顶待够 → 回到地面
     walk.iconRest = false;
@@ -1370,9 +1394,13 @@ async function walkOnPhaseEnd() {
     walkBroadcast();
     return;                                 // walkTick 完成下降后再排下一相位
   }
-  if (walk.resting && !walk.seated) {       // 久坐起身活动（拖拽吸附坐下保持到被拖走）
-    walkSchedulePhase(randInt(8000, 15000));
-    return;
+  if (walk.resting && !walk.seated) {       // 拖拽吸附久坐（保持到被拖走/到期回归循环）
+    if (walk.freeStand) {
+      walk.freeStand = false;               // 桌面自由放置到期 → 继续往下走正常决策（散步/跳图标）
+    } else {
+      walkSchedulePhase(randInt(8000, 15000));
+      return;
+    }
   }
   if (walk.resting) {
     if (!walk.paused && desktopIconMode()) { // 桌面层级＋已授权：优先与桌面图标互动
@@ -1686,6 +1714,7 @@ function startWalkingEngine() {
   walk.perched = false;
   walk.iconRest = false;
   walk.iconTarget = false;
+  walk.freeStand = false;
   walk.gotoPerch = false;
   walk.returning = false;
   walk.seated = true; // 启动先坐下，片刻后起身散步
@@ -1771,7 +1800,11 @@ ipcMain.on("pet:walking-pause", (_e, p) => {
       walkBroadcast();
     }
     // 拖拽落点定格：仍贴近任务栏/图标则保持坐下，否则恢复正常状态
-    dragSeatUpdate();
+    const sat = dragSeatUpdate();
+    if (!sat && walk.freeStand && desktopIconMode()) { // 自由放置在桌面：原地站一会儿再回归正常循环
+      clearTimeout(walk.phaseTimer);
+      walkSchedulePhase(randInt(15000, 35000));
+    }
   }
 });
 ipcMain.on("pet:set-sleeping", (_e, v) => { walk.sleeping = !!v; }); // 睡觉时行走引擎原地待命
