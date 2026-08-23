@@ -2186,8 +2186,9 @@ async function ensureGsvServerImpl(g) {
       "-dt", g.refText,
       "-dl", "ja",
       "-a", "127.0.0.1",
-      "-p", String(new URL(base).port || 9880),
-      "-hp"
+      "-p", String(new URL(base).port || 9880)
+      // 不传 -hp（半精度 fp16）：此环境偶发数值不稳定，输出破碎电音/极短碎片且随机分布；
+      // 全精度略慢更稳（4060 8GB 显存充足）。若确认需要半精度可在此手动加回 "-hp"
     ];
     let device = String(g.device || "").trim();
     if (!device) device = await detectGsvDevice(); // 未配置时自动检测：有 N 卡用 CUDA，否则 CPU
