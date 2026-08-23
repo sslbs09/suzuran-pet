@@ -180,7 +180,7 @@ async function initSpine() {
       spineApp.screen.height / (spineObj.height || 400)
     ) * 0.9;
     // 部分模型图集包围盒偏大（含空白/特效区），自适应后显得偏小：按目录名加缩放修正
-    const boostTable = { "4179_monstr": 1.7, "391_rosmon_sale_16": 1.5 };
+    const boostTable = { "4179_monstr": 10, "391_rosmon_sale_16": 10 }; // TODO 调试用 10 倍，确认生效后回调
     let boost = 1;
     try {
       const segs = decodeURIComponent((spinePaths.skel || "")).split("/");
