@@ -2151,9 +2151,17 @@ async function genieTts(q, clean) {
 /* ---------- 本地 GPT-SoVITS 日语 TTS（ttsGsv，配合 speakJa 日语模式） ---------- */
 let gsvServerChecked = false;
 let gsvServerUp = false;
+let gsvEnsurePromise = null; // 拉起流程单飞：进行中的拉起由后续调用共享等待
 
-/** 确保 GPT-SoVITS 日语推理服务器在运行（端口 9880）；返回是否可用 */
-async function ensureGsvServer(g) {
+/** 确保 GPT-SoVITS 日语推理服务器在运行（端口 9880）；返回是否可用。
+ *  启动预热与第一句话可能同时触发本函数：拉起进行中时后来者必须共用同一次等待，
+ *  而不是各自探活误判「服务不可用」回退中文（曾导致引擎拉起窗口期的句子全部丢音色）。 */
+function ensureGsvServer(g) {
+  if (gsvEnsurePromise) return gsvEnsurePromise;
+  gsvEnsurePromise = ensureGsvServerImpl(g).finally(() => { gsvEnsurePromise = null; });
+  return gsvEnsurePromise;
+}
+async function ensureGsvServerImpl(g) {
   if (gsvServerChecked) return gsvServerUp;
   gsvServerChecked = true;
   const base = String(g.server || "").replace(/\/+$/, "");
