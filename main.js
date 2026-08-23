@@ -2004,6 +2004,7 @@ const SKIN_CHAR_NAMES = { // 角色（形态）中文名；未收录的用目录
   "1037_amiya3": "异格形态",
   "003_kalts": "本体",
   "1052_kalts2": "Mon3tr 形象",
+  "4179_monstr": "Mon3tr",
   "172_svrash": "本体",
   "391_rosmon": "本体",
   "4042_lumen": "本体",

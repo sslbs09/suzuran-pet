@@ -179,8 +179,15 @@ async function initSpine() {
       spineApp.screen.width / (spineObj.width || 300),
       spineApp.screen.height / (spineObj.height || 400)
     ) * 0.9;
-    spineBaseScaleX = scale;
-    spineObj.scale.set(scale);
+    // 部分模型图集包围盒偏大（含空白/特效区），自适应后显得偏小：按目录名加缩放修正
+    const boostTable = { "4179_monstr": 1.35, "391_rosmon_sale_16": 1.3 };
+    let boost = 1;
+    try {
+      const dirName = decodeURIComponent((spinePaths.skel || "").split("/")[0]);
+      boost = boostTable[dirName] || 1;
+    } catch { boost = 1; }
+    spineBaseScaleX = scale * boost;
+    spineObj.scale.set(scale * boost);
 
     // 播放默认动画
     const animName = spineAnimForMood("idle");
