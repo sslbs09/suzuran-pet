@@ -40,9 +40,9 @@ function isWindowVisible() {
   return win && !win.isDestroyed() && win.isVisible();
 }
 function showWindow() {
-  if (!win || !win.isDestroyed()) return;
+  if (!win || win.isDestroyed()) return;
   win.show();
-  applyLayer();
+  applyLayer(walk.active || walk.seated); // 行走/坐下中保持任务栏之上
   win.focus();
 }
 function hideWindow() {
@@ -54,16 +54,17 @@ function toggleWindow() {
 }
 
 /* ---------- 显示层级（置顶眼前 / 桌面层级）与坐任务栏 ---------- */
-/** 应用显示层级：top=置顶（所有窗口之上）| desktop=桌面层级（可被其他程序窗口遮挡） */
-function applyLayer() {
+/** 应用显示层级：top=置顶（所有窗口之上）| desktop=桌面层级（可被其他程序窗口遮挡）。
+ *  forceTop：接触任务栏表面（行走/坐下）时强制置顶，否则桌面层级下任务栏会盖住她。 */
+function applyLayer(forceTop) {
   if (!win || win.isDestroyed()) return;
-  const onTop = (config.getConfig().layer || "top") !== "desktop";
+  const onTop = !!forceTop || (config.getConfig().layer || "top") !== "desktop";
   win.setAlwaysOnTop(onTop, "screen-saver");
 }
 function setPetLayer(v) {
   config.saveConfig({ layer: v === "desktop" ? "desktop" : "top" });
   refreshTrayMenu();
-  applyLayer();
+  applyLayer(walk.active || walk.seated); // 接触任务栏表面时仍保持置顶
   logTts("walk", "显示层级: " + config.getConfig().layer);
 }
 ipcMain.handle("pet:set-layer", (_e, v) => { setPetLayer(v); return true; });
@@ -1232,6 +1233,7 @@ function dragSeatUpdate() {
     applySeatPosition(); // 坐下腿垂进任务栏/图标区，离开收腿
     walkBroadcast();
   }
+  applyLayer(walk.seated || walk.active);
   return seated;
 }
 
@@ -1246,7 +1248,7 @@ const walk = {
   perched: false,   // 正坐在窗口顶上
   seated: false,    // 坐下（任务栏上沿/桌面图标顶）：Sit 动画不移动
   groundGap: 0,     // 角色脚底到窗口底边的空隙（渲染层上报）：贴地定位时窗口下探补偿
-  seatSink: 44,     // 坐姿下沉量：坐下时腿垂进任务栏区域（坐台阶边沿效果）
+  seatSink: 30,     // 坐姿下沉量：坐下时腿垂进任务栏区域（坐台阶边沿效果）
   sunk: false,      // 当前是否处于坐姿下沉状态
   gotoPerch: false, // 正走向/爬向窗口顶
   returning: false, // 坐完正回到地面
@@ -1283,6 +1285,7 @@ function applySeatPosition() {
   const targetY = walk.seated ? baseY + walk.seatSink : baseY;  // 坐姿下沉
   walk.sunk = walk.seated;
   if (Math.abs(b.y - targetY) > 1) win.setPosition(b.x, Math.round(targetY));
+  applyLayer(walk.seated || walk.active); // 接触任务栏表面时保证在任务栏之上
 }
 
 function walkOnPhaseEnd() {
@@ -1449,12 +1452,14 @@ function startWalkingEngine() {
   walk.timer = setInterval(walkTick, WALK_TICK_MS);
   walkBroadcast();
   walkSchedulePhase(randInt(5000, 15000));
+  applyLayer(true); // 行走全程贴任务栏，需在任务栏之上
   logTts("walk", "桌面行走开启");
   return true;
 }
 
 function stopWalkingEngine(silent = false) {
   if (!walk.active) return; // 停止行走保持当前坐姿（seated 不重置，仍坐在任务栏上）
+  applyLayer(walk.seated);
   walk.active = false;
   clearInterval(walk.timer); walk.timer = null;
   clearTimeout(walk.phaseTimer); walk.phaseTimer = null;
