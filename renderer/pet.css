@@ -79,7 +79,7 @@ html, body {
 .btn-zoom {
   position: absolute;
   top: 2px;
-  right: 2px;
+  right: 20px;
   width: 16px;
   height: 16px;
   font-size: 10px;
@@ -88,6 +88,33 @@ html, body {
   z-index: 7;
 }
 .btn-zoom:hover { background: #8ec7e8; color: #fff; }
+/* 关闭按钮：与放大按钮并排，hover 红色调提示"收起"语义 */
+.btn-close {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  font-size: 10px;
+  background: rgba(142, 199, 232, 0.55);
+  color: #3c5a70;
+  z-index: 7;
+}
+.btn-close:hover { background: #e88a8a; color: #fff; }
+/* 气泡出现：淡入＋轻微上浮 */
+.bubble:not(.hidden) { animation: bubble-in 0.18s ease-out; }
+@keyframes bubble-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* 气泡滚动条美化：细条圆角配蓝色主题 */
+.bubble::-webkit-scrollbar { width: 6px; height: 6px; }
+.bubble::-webkit-scrollbar-track { background: transparent; }
+.bubble::-webkit-scrollbar-thumb {
+  background: rgba(142, 199, 232, 0.6);
+  border-radius: 3px;
+}
+.bubble::-webkit-scrollbar-thumb:hover { background: #6fb3dc; }
 
 /* 放大模式：窗口变大 + 气泡更大更清晰 */
 body.enlarged .bubble {
@@ -178,7 +205,10 @@ body.enlarged #input { font-size: calc(var(--chat-fz, 11px) + 1px); }
   cursor: pointer;
   line-height: 1;
   flex-shrink: 0;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
 }
+.btn:hover { transform: scale(1.08); }
+.btn:active { transform: scale(0.95); }
 .btn:hover { background: #6fb3dc; }
 .btn-stop { background: #e8a0a0; }
 .btn-stop.hidden { display: none; }

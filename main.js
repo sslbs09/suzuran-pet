@@ -1390,9 +1390,6 @@ function applySeatPosition() {
 
 async function walkOnPhaseEnd() {
   if (!walk.active) return;
-  // TODO 相位心跳（诊断期临时）：每次相位切换记录状态快照，定位卡死后移除
-  logTts("phase", `r=${walk.resting} s=${walk.seated} p=${walk.perched} ir=${walk.iconRest} fs=${walk.freeStand} gp=${walk.gotoPerch} ret=${walk.returning}`);
-  if (!walk.active) return;
   if (walk.paused) {                        // 拖拽中冻结一切相位动作（防 applySeatPosition 把窗口弹回任务栏）
     walkSchedulePhase(randInt(3000, 6000));
     return;

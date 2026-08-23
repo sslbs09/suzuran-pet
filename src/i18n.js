@@ -67,6 +67,7 @@ const DICT = {
 
     "ui.placeholder": "和苏苏洛说点什么…",
     "ui.zoomTitle": "放大/还原对话框",
+    "ui.closeTitle": "收起对话框",
     "ui.stopTitle": "停止",
     "ui.ttsTitle": "语音开关",
     "ui.micTitle": "按住说话",
@@ -237,6 +238,7 @@ const DICT = {
 
     "ui.placeholder": "Say something to Sussurro…",
     "ui.zoomTitle": "Zoom / restore dialog",
+    "ui.closeTitle": "Hide dialog",
     "ui.stopTitle": "Stop",
     "ui.ttsTitle": "Voice on/off",
     "ui.micTitle": "Hold to talk",
@@ -407,6 +409,7 @@ const DICT = {
 
     "ui.placeholder": "ススロに何か話しかけて…",
     "ui.zoomTitle": "吹き出しを拡大/戻す",
+    "ui.closeTitle": "吹き出しを閉じる",
     "ui.stopTitle": "停止",
     "ui.ttsTitle": "音声のオン/オフ",
     "ui.micTitle": "押して話す",

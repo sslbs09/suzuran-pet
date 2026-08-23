@@ -585,6 +585,10 @@ async function speak(text, emotion) {
 
 /* ---------- 对话框：放大/还原 + 尺寸记忆 ---------- */
 const zoomBtn = document.getElementById("btn-zoom");
+const btnClose = document.getElementById("btn-close");
+if (btnClose) btnClose.addEventListener("click", () => {
+  hideBubble(); // 仅收起气泡画面；正在播放的语音不受影响，会继续播完
+});
 let winSize = { width: 170, height: 260 };
 let enlarged = false;
 
