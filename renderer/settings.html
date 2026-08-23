@@ -257,6 +257,16 @@
         <input id="walking-opt" type="checkbox" />
         <span data-i18n="set.walkingOpt">🚶 桌面行走（沿屏幕走动、走走停停；拖拽时自动暂停；仅 Spine 模式生效）</span>
       </label>
+      <label class="col">
+        <span data-i18n="set.sitMax">单次坐下最久（秒）</span>
+        <input id="sit-max" type="range" min="15" max="180" step="5" />
+        <span id="sit-max-val" style="font-weight:600;">30 s</span>
+      </label>
+      <label class="col">
+        <span data-i18n="set.walkMax">单次散步最久（秒）</span>
+        <input id="walk-max" type="range" min="8" max="120" step="1" />
+        <span id="walk-max-val" style="font-weight:600;">20 s</span>
+      </label>
     </div>
     <p class="hint" data-i18n="set.spineHint">💡 懒人换模型：把任意 Spine 模型的 .atlas + .skel（或 .json）+ .png 放入 resources/app/renderer/spine/user/ 文件夹，重启即自动替换，无需任何配置</p>
     <p class="hint" data-i18n="set.agentHint">其他 agent / 脚本可调用：<code>POST http://127.0.0.1:8765/chat</code>，请求体 <code>{"text":"苏苏洛 帮我…"}</code>；<code>GET /health</code> 查状态。仅监听本机，不对局域网开放。</p>

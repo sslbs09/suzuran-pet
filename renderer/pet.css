@@ -50,6 +50,22 @@ html, body {
   border-right: 0;
 }
 .bubble.error { border-color: #f2b8b8; }
+/* 左缘延伸区模式（主进程 edge-left 事件）：气泡挪到桌宠头顶上方、尾巴朝下，避免被屏幕左缘裁掉 */
+.bubble.top {
+  right: 4px;
+  bottom: 152px;               /* 桌宠顶(26+120)+6px */
+  max-width: 116px;
+  max-height: calc(100% - 160px);
+}
+.bubble.top::after {
+  top: auto;
+  bottom: -8px;
+  right: 50%;
+  transform: translateX(50%);
+  border: 5.5px solid transparent;
+  border-top-color: rgba(255, 255, 255, 0.96);  /* 尾巴朝下指向桌宠 */
+  border-bottom: 0;
+}
 .bubble.task { font-family: Consolas, "Courier New", monospace; font-size: 10px; }
 .bubble.hidden { display: none; }
 #bubble-text { padding-right: 14px; }

@@ -75,7 +75,7 @@ function sitOnTaskbar() {
   const b = win.getBounds();
   const wa = screen.getDisplayMatching(b).workArea;
   win.setPosition(
-    Math.min(Math.max(b.x, wa.x), wa.x + wa.width - b.width),
+    Math.min(Math.max(b.x, walkMinX(wa)), wa.x + wa.width - b.width),
     wa.y + wa.height + walk.groundGap - b.height
   );
   showWindow();
@@ -130,7 +130,7 @@ function createWindow() {
     const [x, y] = win.getPosition();
     const [cw, ch] = win.getSize();
     win.setPosition(
-      Math.min(Math.max(x, wa.x), wa.x + wa.width - cw),
+      Math.min(Math.max(x, walkMinX(wa)), wa.x + wa.width - cw),
       Math.min(Math.max(y, wa.y), wa.y + wa.height - ch + 80) // +80 允许坐姿下沉探入任务栏区
     );
   } catch { /* 忽略 */ }
@@ -604,7 +604,7 @@ function setScale(scale) {
     try {
       const wa = screen.getDisplayMatching(win.getBounds()).workArea;
       const [x, y] = win.getPosition();
-      win.setPosition(Math.min(Math.max(x, wa.x), wa.x + wa.width - ws),
+      win.setPosition(Math.min(Math.max(x, walkMinX(wa)), wa.x + wa.width - ws),
                       Math.min(Math.max(y, wa.y), wa.y + wa.height - hs + 80)); // +80 允许坐姿下沉探入任务栏区
     } catch { /* 忽略 */ }
     applySeatPosition(); // 尺寸档位变了，若正处于坐姿立即按新档位重新落座
@@ -1213,7 +1213,7 @@ function dragSeatUpdate() {
   if (Math.abs(feet - waBottom) <= 48) {
     seated = true;                                   // 任务栏磁吸
     ny = waBottom + walk.groundGap - b.height;
-    nx = Math.min(Math.max(b.x, wa.x), wa.x + wa.width - b.width);
+    nx = Math.min(Math.max(b.x, walkMinX(wa)), wa.x + wa.width - b.width);
   } else {
     // 桌面图标网格近似（主屏左侧区域；格尺寸按常见 DPI 估算）
     const pd = screen.getPrimaryDisplay().workArea;
@@ -1260,6 +1260,8 @@ const walk = {
   perched: false,   // 正坐在窗口顶上
   seated: false,    // 坐下（任务栏上沿/桌面图标顶）：Sit 动画不移动
   groundGap: 0,     // 角色脚底到窗口底边的空隙（渲染层上报）：贴地定位时窗口下探补偿
+  charInset: 0,     // 窗口左缘到角色左缘的距离（渲染层上报）：行走左边界按此放宽，角色能贴到屏幕左缘
+  edgeLeft: false,  // 当前是否探出屏幕左侧（气泡需切到头顶模式）
   sunk: false,      // 当前是否处于坐姿下沉状态
   gotoPerch: false, // 正走向/爬向窗口顶
   returning: false, // 坐完正回到地面
@@ -1303,6 +1305,33 @@ function getSeatSink() {
   return Number.isFinite(v) && v >= 0 ? Math.round(v) : SEAT_SINK_DEFAULTS[t];
 }
 
+/* ---------- 行走左边界补偿＋动作时长 ----------
+ * 角色渲染在窗口右侧条带内、左侧是气泡预留区：按 charInset 放宽左边界，让角色能贴到屏幕左缘；
+ * 坐/走时长在设置页调上限（保底随机），每个相位调度时实时读配置，改了立即生效。 */
+function walkMinX(wa) {
+  return wa.x - (walk.charInset || 0);
+}
+function setEdgeLeft(v) {
+  v = !!v;
+  if (walk.edgeLeft !== v) {
+    walk.edgeLeft = v;
+    sendToRenderer("pet:edge-left", v); // 渲染层据此把气泡切到头顶模式
+  }
+}
+function timingSec(key, min, max) {
+  const n = Number((config.getConfig().walkTiming || {})[key]);
+  return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : null;
+}
+const SIT_MIN_MS = 10000, WALK_MIN_MS = 8000; // 相位保底时长
+function sitPhaseMs() {   // 单次坐下：10s ~ 设置上限（默认30s）
+  const cap = (timingSec("sitMaxSec", 15, 180) || 30) * 1000;
+  return randInt(SIT_MIN_MS, Math.max(SIT_MIN_MS, cap));
+}
+function walkPhaseMs() {  // 单次散步：8s ~ 设置上限（默认20s）
+  const cap = (timingSec("walkMaxSec", 8, 120) || 20) * 1000;
+  return randInt(WALK_MIN_MS, Math.max(WALK_MIN_MS, cap));
+}
+
 /** 坐姿定位（绝对）：按当前 seated 状态把窗口摆到正确高度——
  *  站=脚踩任务栏上沿；坐=下沉 seatSink 腿垂进任务栏。幂等自愈，
  *  任何中间位移（拖拽/重启钳制）都会在下一次调用时纠正。仅 Spine 模式。 */
@@ -1340,13 +1369,13 @@ function walkOnPhaseEnd() {
     applySeatPosition();                    // 起身：腿从任务栏里收回来
     walk.dir = Math.random() < 0.5 ? -1 : 1;
     walkBroadcast();
-    walkSchedulePhase(randInt(8000, 20000));
+    walkSchedulePhase(walkPhaseMs());
   } else {                                  // 散步结束 → 坐下休息（Sit）
     walk.resting = true;
     walk.seated = true;
     applySeatPosition();                   // 坐下：腿垂进任务栏
     walkBroadcast();
-    walkSchedulePhase(randInt(10000, 30000));
+    walkSchedulePhase(sitPhaseMs());
   }
 }
 
@@ -1394,7 +1423,7 @@ function walkAttemptPerch() {
         walk.seated = true;
         applySeatPosition();
         walkBroadcast();
-        walkSchedulePhase(randInt(10000, 30000));
+        walkSchedulePhase(sitPhaseMs());
         return;
       }
       const t = cands[Math.floor(Math.random() * cands.length)];
@@ -1408,7 +1437,7 @@ function walkAttemptPerch() {
       logTts("walk", "坐窗口失败: " + (e && e.message || e));
       walk.resting = true;
       walkBroadcast();
-      walkSchedulePhase(randInt(10000, 30000));
+      walkSchedulePhase(sitPhaseMs());
     }
   })();
 }
@@ -1418,7 +1447,8 @@ function walkTick() {
   if (walk.paused || walk.seated || !win.isVisible()) return; // 拖拽中/坐下/隐藏到托盘时不移动
   const b = win.getBounds();
   const wa = screen.getDisplayMatching(b).workArea;
-  const maxX = Math.max(wa.x, wa.x + wa.width - b.width);
+  const minX = walkMinX(wa); // 左边界外扩角色条带宽：角色（而非透明气泡区）贴到屏幕左缘
+  const maxX = Math.max(minX, wa.x + wa.width - b.width);
   const groundY = Math.max(wa.y, wa.y + wa.height - b.height) + walk.groundGap; // 窗口底边允许下探任务栏区，使角色脚底贴地
   let x = b.x;
 
@@ -1439,14 +1469,14 @@ function walkTick() {
       walk.perched = true;
       walk.resting = true;
       walkBroadcast();
-      walkSchedulePhase(randInt(15000, 40000));
+      walkSchedulePhase(sitPhaseMs());
     } else {
       walk.returning = false;
       walk.resting = true;
       walk.seated = true; // 落地坐下
       applySeatPosition();
       walkBroadcast();
-      walkSchedulePhase(randInt(8000, 20000));
+      walkSchedulePhase(sitPhaseMs());
     }
     return;
   }
@@ -1456,10 +1486,11 @@ function walkTick() {
 
   walkUpdateFace(walk.dir);                         // 朝向跟随实际位移方向
   let nx = x + walk.dir * WALK_SPEED;
-  if (nx <= wa.x || nx >= maxX) {                   // 到屏幕边折返
+  if (nx <= minX || nx >= maxX) {                   // 到屏幕边折返（左侧已按角色条带补偿）
     walk.dir *= -1;
-    nx = Math.min(Math.max(nx, wa.x), maxX);
+    nx = Math.min(Math.max(nx, minX), maxX);
   }
+  setEdgeLeft(nx < wa.x - 2);                       // 探出屏幕左侧：气泡切头顶模式
   win.setPosition(Math.round(nx), Math.round(groundY));
 }
 
@@ -1548,6 +1579,27 @@ ipcMain.on("pet:set-sleeping", (_e, v) => { walk.sleeping = !!v; }); // 睡觉�
 ipcMain.on("pet:set-ground-gap", (_e, px) => {
   const v = Number(px);
   if (Number.isFinite(v)) walk.groundGap = Math.max(0, Math.min(80, Math.round(v)));
+});
+ipcMain.on("pet:set-char-inset", (_e, px) => { // 渲染层上报：窗口左缘到角色左缘的距离
+  const v = Number(px);
+  if (Number.isFinite(v)) walk.charInset = Math.max(0, Math.min(400, Math.round(v)));
+});
+ipcMain.handle("pet:get-walk-timing", () => ({
+  sitMaxSec: timingSec("sitMaxSec", 15, 180) || 30,
+  walkMaxSec: timingSec("walkMaxSec", 8, 120) || 20
+}));
+ipcMain.handle("pet:set-walk-timing", (_e, patch) => {
+  patch = patch || {};
+  if (patch.sitMaxSec != null) {
+    config.saveConfig({ walkTiming: { sitMaxSec: Math.max(15, Math.min(180, Math.round(Number(patch.sitMaxSec) || 30))) } });
+  }
+  if (patch.walkMaxSec != null) {
+    config.saveConfig({ walkTiming: { walkMaxSec: Math.max(8, Math.min(120, Math.round(Number(patch.walkMaxSec) || 20))) } });
+  }
+  return {
+    sitMaxSec: timingSec("sitMaxSec", 15, 180) || 30,
+    walkMaxSec: timingSec("walkMaxSec", 8, 120) || 20
+  };
 });
 
 /** 扫描全部可用 Spine 皮肤：内置苏苏洛 + spine/user/ 下每个含 .atlas+.skel/.json 的模型（支持子文件夹分皮肤） */

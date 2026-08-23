@@ -72,6 +72,7 @@ function reportGroundGap() {
     const r = petEl.getBoundingClientRect();
     const gap = Math.max(0, Math.min(80, Math.round(window.innerHeight - r.bottom)));
     window.petAPI.setGroundGap(gap);
+    window.petAPI.setCharInset && window.petAPI.setCharInset(Math.max(0, Math.round(r.left))); // 同一测量顺便上报：行走左边界补偿用
   } catch { /* 忽略 */ }
 }
 
@@ -701,6 +702,9 @@ window.petAPI.onToast((msg) => toast(msg));
 /* ---------- 桌面行走 / 渲染模式切换（主进程 → 渲染层） ---------- */
 if (window.petAPI.onWalking) {
   window.petAPI.onWalking((s) => applyWalkState(s));
+}
+if (window.petAPI.onEdgeLeft) {
+  window.petAPI.onEdgeLeft((v) => bubbleEl.classList.toggle("top", !!v)); // 探出屏幕左侧：气泡挪到头顶
 }
 if (window.petAPI.onRenderModeChanged) {
   window.petAPI.onRenderModeChanged(async (m) => {

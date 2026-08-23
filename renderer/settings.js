@@ -75,6 +75,11 @@ async function toast(msg) {
     const ss = await window.petAPI.getSeatSink();
     $("seat-sink").value = String(ss.value);
     $("seat-sink-val").textContent = ss.value + " px · " + seatTierLabel(ss.tier);
+    const wt = await window.petAPI.getWalkTiming();
+    $("sit-max").value = String(wt.sitMaxSec);
+    $("sit-max-val").textContent = wt.sitMaxSec + " s";
+    $("walk-max").value = String(wt.walkMaxSec);
+    $("walk-max-val").textContent = wt.walkMaxSec + " s";
   } catch { /* 滑杆保持默认值 */ }
   const aa = S.agentApi || {};
   $("agent-enabled").value = String(aa.enabled !== false);
@@ -244,6 +249,24 @@ $("seat-sink").addEventListener("change", async () => {
   const r = await window.petAPI.setSeatSink(Number($("seat-sink").value));
   $("seat-sink").value = String(r.value);
   $("seat-sink-val").textContent = r.value + " px · " + seatTierLabel(r.tier);
+});
+
+/* ---------- 行走节奏（单次坐下/散步最长时间，松手即生效） ---------- */
+$("sit-max").addEventListener("input", () => {
+  $("sit-max-val").textContent = $("sit-max").value + " s";
+});
+$("sit-max").addEventListener("change", async () => {
+  const r = await window.petAPI.setWalkTiming({ sitMaxSec: Number($("sit-max").value) });
+  $("sit-max").value = String(r.sitMaxSec);
+  $("sit-max-val").textContent = r.sitMaxSec + " s";
+});
+$("walk-max").addEventListener("input", () => {
+  $("walk-max-val").textContent = $("walk-max").value + " s";
+});
+$("walk-max").addEventListener("change", async () => {
+  const r = await window.petAPI.setWalkTiming({ walkMaxSec: Number($("walk-max").value) });
+  $("walk-max").value = String(r.walkMaxSec);
+  $("walk-max-val").textContent = r.walkMaxSec + " s";
 });
 
 /* ---------- 其他 ---------- */

@@ -66,6 +66,7 @@ const DEFAULTS = {
   layer: "top",                             // 显示层级：top=置顶（在所有窗口眼前）| desktop=桌面层级（可被其他窗口遮挡）
   spineSkinId: "",                          // Spine 皮肤 id（""=内置苏苏洛；spine/user/ 子文件夹名+文件基名）
   walking: false,                           // 桌面行走开关（仅 spine 模式生效；GIF 模式下强制无效）
+  walkTiming: { sitMaxSec: 30, walkMaxSec: 20 }, // 行走节奏：单次坐下/散步的最长秒数（保底随机），设置页可调
   firstRun: true,                           // 首次启动自动弹设置引导
   tts: { enabled: false, voice: "", rate: 0.9, pitch: 1.1 }, // 语音总开关（默认关）；rate=语速（<1 慢 >1 快）
   ttsCloud: { // edge-tts 云端语音（需安装 Python + edge-tts；失败自动回退系统语音）
