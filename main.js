@@ -68,10 +68,6 @@ function applyLayer(_forceTop) {
       onTop = b.y + b.height > wa.y + wa.height - 2; // 窗口底探入任务栏区
     } catch { onTop = true; }
   }
-  if (onTop !== applyLayer._dbgLast) { // TODO 诊断埋点，定位后移除
-    applyLayer._dbgLast = onTop;
-    logTts("drag", "onTop=" + onTop);
-  }
   win.setAlwaysOnTop(onTop, "screen-saver");
 }
 function setPetLayer(v) {
@@ -1208,14 +1204,8 @@ ipcMain.on("pet:move", (_e, dx, dy) => {
     const [x, y] = win.getPosition();
     win.setPosition(Math.round(x + dx), Math.round(y + dy));
     dragSeatUpdate(); // 拖拽落点吸附：接近任务栏/桌面图标自动坐下
-    const now = Date.now();
-    if (now - (dbgLastMoveLog || 0) > 1000) { // TODO 诊断埋点，定位后移除
-      dbgLastMoveLog = now;
-      logTts("drag", "move -> " + Math.round(x + dx) + "," + Math.round(y + dy) + " seated=" + walk.seated);
-    }
   }
 });
-let dbgLastMoveLog = 0;
 
 /** 拖拽落点吸附判定（final=true 表示松手时刻）：
  *  桌面层级＋已授权：拖拽途中完全自由（任何磁吸都关掉，防任务栏 48px 带把人钉死），
@@ -1802,7 +1792,6 @@ ipcMain.handle("pet:set-walking", (_e, on) => {
 });
 ipcMain.on("pet:walking-pause", (_e, p) => {
   walk.paused = !!p;
-  logTts("drag", "paused=" + walk.paused); // TODO 诊断埋点，定位后移除
   if (!p && walk.active) {
     // 松手/恢复：若之前处于坐窗流程中被拖走，就地转入「回到地面」下降流程
     if (walk.perched || walk.gotoPerch || walk.returning || walk.iconRest) {
@@ -1933,12 +1922,7 @@ ipcMain.on("pet:hide", () => hideWindow());
 ipcMain.on("pet:tts-playback", (_e, msg) => logTts("render", String(msg || "")));
 ipcMain.on("pet:set-clickable", (_e, clickable) => {
   // 透明区域点击穿透：只有鼠标在 桌宠/气泡/输入栏 上时才接收鼠标事件，其余穿透给下层应用
-  const v = !!clickable;
-  if (v !== ipcMain._dbgClickable) { // TODO 诊断埋点，定位后移除
-    ipcMain._dbgClickable = v;
-    logTts("drag", "setClickable=" + v);
-  }
-  if (win && !win.isDestroyed()) win.setIgnoreMouseEvents(!v, { forward: true });
+  if (win && !win.isDestroyed()) win.setIgnoreMouseEvents(!clickable, { forward: true });
 });
 ipcMain.on("pet:set-size", (_e, w, h) => {
   if (!win || win.isDestroyed()) return;
