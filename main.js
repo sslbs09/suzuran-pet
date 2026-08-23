@@ -1218,11 +1218,13 @@ function dragSeatUpdate(final = false) {
   const feet = b.y + b.height - walk.groundGap; // 角色脚底实际屏幕位置
   const waBottom = wa.y + wa.height;
   let seated = false;
+  let magnet = null;                                // 本次吸附类型："taskbar"|"icon"|null
   let ny = b.y, nx = b.x;
 
   if (final || !desktopIconMode()) {
     if (Math.abs(feet - waBottom) <= 48) {
       seated = true;                                   // 任务栏磁吸
+      magnet = "taskbar";
       ny = waBottom + walk.groundGap - b.height;
       nx = Math.min(Math.max(b.x, walkMinX(wa)), wa.x + wa.width - b.width);
     } else if (desktopIconMode()) {
@@ -1235,6 +1237,7 @@ function dragSeatUpdate(final = false) {
       }
       if (best) {
         seated = true;                                 // 图标顶磁吸
+        magnet = "icon";
         ny = best.y + walk.groundGap - b.height;
         nx = Math.round(best.x - charCx);
       }
@@ -1271,8 +1274,10 @@ function dragSeatUpdate(final = false) {
     if (!seated && desktopIconMode()) {       // 桌面模式离开吸附区＝自由放置：保持松手位置站姿，不自愈回任务栏
       walk.resting = true;
       walk.freeStand = true;
-    } else {
-      applySeatPosition();                    // 置顶模式维持原行为：回到任务栏地面线
+    } else if (!(seated && magnet === "icon")) {
+      // 图标吸附的位置已是精确落点（脚踩图标顶），不能再用任务栏贴地定位覆盖；
+      // 其余情况（任务栏磁吸/置顶模式）按地面线自愈
+      applySeatPosition();
     }
     walkBroadcast();
   }
@@ -1586,11 +1591,13 @@ async function walkAttemptIconPerch() {
     const icons = await listDesktopIcons(true);
     const cands = icons.filter((p) =>
       p.x >= wa.x + 8 && p.x <= wa.x + wa.width - 60 &&
-      p.y >= wa.y && p.y + b.height <= wa.y + wa.height + 60 // 跳上后整窗不出屏（底部允许略探任务栏区）
+      p.y >= wa.y &&                                        // 图标顶不出屏幕顶
+      p.y + walk.groundGap - b.height >= wa.y - 8 &&        // 站上去后窗口顶部（头）也不出屏幕顶
+      p.y + walk.groundGap <= wa.y + wa.height + 60         // 脚底不超出工作区底太多
     );
     if (!cands.length) return false;
     const t = cands[Math.floor(Math.random() * cands.length)];
-    walk.perchTopY = Math.round(t.y);
+    walk.perchTopY = Math.round(t.y + walk.groundGap - b.height); // 窗口底=图标顶+脚下空隙 → 角色脚踩图标顶
     const charCx = (walk.charInset + b.width - 2) / 2; // 角色条带中心对准图标
     walk.targetX = Math.min(Math.max(Math.round(t.x - charCx), walkMinX(wa)), wa.x + wa.width - b.width);
     walk.iconTarget = true;
