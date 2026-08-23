@@ -1954,6 +1954,7 @@ function spineSkinDisplayName(id, fallbackName, lang) {
   if (/amiya/i.test(id)) return "阿米娅";
   if (/silverash|silence.*ash|sa_/i.test(id)) return "银灰";
   if (/lumen/i.test(id)) return "流明";
+  if (/rosmon/i.test(id)) return "迷迭香";
   return fallbackName || id;
 }
 ipcMain.handle("pet:get-spine-models", () => ({ list: detectSpineModels(), current: config.getConfig().spineSkinId || "builtin" }));
