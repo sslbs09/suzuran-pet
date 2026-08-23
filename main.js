@@ -2181,7 +2181,9 @@ async function ensureGsvServer(g) {
       "-p", String(new URL(base).port || 9880),
       "-hp"
     ];
-    if (g.device) args.push("-d", String(g.device)); // 显存紧张时可配 "cpu"（慢但稳定）
+    let device = String(g.device || "").trim();
+    if (!device) device = await detectGsvDevice(); // 未配置时自动检测：有 N 卡用 CUDA，否则 CPU
+    if (device) args.push("-d", device); // 显存紧张时可配 "cpu"（慢但稳定）
     // api.py 必须以 GPT-SoVITS 根目录为工作目录启动（否则 ModuleNotFoundError: text）
     const child = spawn(g.python, args, {
       detached: true, windowsHide: true, stdio: "ignore",
@@ -2255,6 +2257,7 @@ async function gsvTtsJa(g, text) {
     gsvAutoRestarting = true;
     try {
       logTts("gsv", "连续3次碎片化 → 自动重启日语引擎...");
+      if (gsvDeviceCache === "cuda") gpuMemoryLog(); // CUDA 模式下记录显存占用，辅助定位毛刺根因
       const g2 = config.getConfig().ttsGsv || {};
       await killGsvProcesses(g2);
       for (let i = 0; i < 8; i++) {
@@ -2319,6 +2322,37 @@ async function gsvTtsJa(g, text) {
     }
     return "";
   }
+}
+
+/* ---------- 显卡检测与显存观测（GSV 设备自动选择／毛刺排查） ---------- */
+function gpuMemoryLog() {
+  execFile("nvidia-smi", ["--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"],
+    { windowsHide: true, timeout: 5000 },
+    (err, stdout) => {
+      if (err) return;
+      const [u, t] = String(stdout || "").split(",").map((s) => parseInt(s, 10));
+      if (Number.isFinite(u) && Number.isFinite(t)) {
+        const free = t - u;
+        logTts("gsv", `显卡显存: ${u}/${t} MiB 已用` +
+          (free < 1500 ? "（空闲不足 1.5GB——显存紧张可能引发输出毛刺，建议关闭占显存的程序）" : ""));
+      }
+    });
+}
+let gsvDeviceCache = null; // 检测结果缓存（null=未检测）
+async function detectGsvDevice() { // 用户未配置 device 时自动选择：有 NVIDIA 卡→CUDA，否则 CPU
+  if (gsvDeviceCache) return gsvDeviceCache;
+  const has = await new Promise((resolve) => {
+    execFile("nvidia-smi", ["-L"], { windowsHide: true, timeout: 5000 },
+      (err, stdout) => resolve(!err && /GPU/i.test(String(stdout || ""))));
+  });
+  gsvDeviceCache = has ? "cuda" : "cpu";
+  if (has) {
+    logTts("gsv", "检测到 NVIDIA 显卡 → 引擎使用 CUDA");
+    gpuMemoryLog();
+  } else {
+    logTts("gsv", "未检测到 NVIDIA 显卡 → 引擎使用 CPU");
+  }
+  return gsvDeviceCache;
 }
 
 /** 引擎就绪后先烧掉一次试合成，吸收闲置/冷启动后的首次碎片输出。
@@ -2700,6 +2734,18 @@ if (!gotLock) {
       ensureGenieServer(_q).then((ok) => logTts("genie", "启动预热: " + (ok ? "已就绪" : "不可用")));
     } else {
       logTts("genie", "声音关闭，跳过服务器预热");
+    }
+
+    // GSV 日语引擎预启动：应用开启即后台拉起+预热，避免第一句话等几十秒冷启动
+    const _gsv = config.getConfig().ttsGsv || {};
+    if (_gsv.enabled && _ttsOn && _q.speakJa) {
+      ensureGsvServer(_gsv).then((up) => {
+        if (up) return warmupGsv(_gsv); // 内部自带"预热完成"日志
+        logTts("gsv", "启动预热失败，首句将再尝试拉起");
+        return false;
+      }).catch(() => {});
+    } else if (_gsv.enabled) {
+      logTts("gsv", "日语模式/声音开关未全开，跳过引擎预热");
     }
 
     // 使用条款强制确认：未同意 → 弹条款窗口，桌宠/聊天/Agent 均不可用
