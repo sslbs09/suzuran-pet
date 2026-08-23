@@ -1303,6 +1303,7 @@ const walk = {
   gotoPerch: false, // 正走向/爬向窗口顶
   iconTarget: false,// 本次跳的目标是桌面图标（决定跳上后站或坐）
   freeStand: false, // 桌面层级下被自由放置在桌面上（站姿待命，不被相位机拉回任务栏）
+  pausedAt: 0,      // 进入拖拽暂停的时刻（用于 mouseup 丢失自愈）
   returning: false, // 坐完正回到地面
   dir: 1,           // 漫游方向
   targetX: null,
@@ -1386,6 +1387,9 @@ function applySeatPosition() {
 }
 
 async function walkOnPhaseEnd() {
+  if (!walk.active) return;
+  // TODO 相位心跳（诊断期临时）：每次相位切换记录状态快照，定位卡死后移除
+  logTts("phase", `r=${walk.resting} s=${walk.seated} p=${walk.perched} ir=${walk.iconRest} fs=${walk.freeStand} gp=${walk.gotoPerch} ret=${walk.returning}`);
   if (!walk.active) return;
   if (walk.paused) {                        // 拖拽中冻结一切相位动作（防 applySeatPosition 把窗口弹回任务栏）
     walkSchedulePhase(randInt(3000, 6000));
@@ -1651,7 +1655,19 @@ function walkAttemptPerch() {
 
 function walkTick() {
   if (!win || win.isDestroyed()) return;
+  // 自愈①：拖拽 mouseup 丢失导致 paused 卡死——60s 无移动事件自动解除
+  if (walk.paused && walk.pausedAt && Date.now() - walk.pausedAt > 60000 && Date.now() - (dbgLastMoveTs || 0) > 5000) {
+    walk.paused = false;
+    walk.pausedAt = 0;
+    logTts("walk", "拖拽暂停超时，自动恢复");
+  }
   if (walk.paused || walk.seated || !win.isVisible()) return; // 拖拽中/坐下/隐藏到托盘时不移动
+  // 自愈②：相位定时器丢失（不在任何过渡流程却无人排程）→ 自动重启循环，防永久静止
+  if (!walk.paused && !walk.sleeping && !walk.phaseTimer &&
+      !walk.gotoPerch && !walk.returning && !walk.perched && !walk.iconRest && !walk.seated) {
+    logTts("walk", "相位定时器丢失，自动恢复"); // TODO 心跳诊断期保留
+    walkSchedulePhase(randInt(3000, 8000));
+  }
   const b = win.getBounds();
   const wa = screen.getDisplayMatching(b).workArea;
   const minX = walkMinX(wa); // 左边界外扩角色条带宽：角色（而非透明气泡区）贴到屏幕左缘
@@ -1803,6 +1819,7 @@ ipcMain.handle("pet:set-walking", (_e, on) => {
 });
 ipcMain.on("pet:walking-pause", (_e, p) => {
   walk.paused = !!p;
+  walk.pausedAt = p ? Date.now() : 0;
   if (!p && walk.active) {
     // 松手/恢复：若之前处于坐窗流程中被拖走，就地转入「回到地面」下降流程
     if (walk.perched || walk.gotoPerch || walk.returning || walk.iconRest) {
