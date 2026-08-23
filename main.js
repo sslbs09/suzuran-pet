@@ -1972,7 +1972,14 @@ ipcMain.on("pet:set-size", (_e, w, h) => {
                     Math.min(Math.max(y, wa.y), wa.y + wa.height - hs + 80)); // +80 允许坐姿下沉
   } catch { /* 忽略 */ }
 });
-ipcMain.handle("pet:tts-clone", async (_e, text) => {
+let ttsQueue = Promise.resolve(); // 合成串行队列：GSV/Genie 单模型串行处理，并发施压是毛刺诱因之一
+ipcMain.handle("pet:tts-clone", (_e, text) => {
+  const task = ttsQueue.then(() => ttsCloneImpl(text));
+  ttsQueue = task.then(() => {}, () => {}); // 单次失败不中断后续排队
+  return task;
+});
+
+async function ttsCloneImpl(text) {
   // 语音链路：本地 Genie（ttsGenie，主，克隆音色）→ 百炼 CosyVoice（ttsCosy，默认停用）→ edge-tts（ttsCloud）→ 空（渲染层回退系统语音）
   try {
     const dumpWav = (b64) => { // 调试转储：保存最终交付的音频，便于排查播放端问题
@@ -2058,7 +2065,7 @@ ipcMain.handle("pet:tts-clone", async (_e, text) => {
     console.error("[SuzuranPet] 语音合成失败:", e.message);
     return "";
   }
-});
+}
 
 /* ---------- 本地 Genie (GPT-SoVITS) TTS（ttsGenie） ---------- */
 let genieServerChecked = false;
@@ -2216,8 +2223,15 @@ function wavDurationMs(buf) {
 async function gsvTtsJa(g, text) {
   const clean = sanitizeJaText(text); // ～ —— 引号等符号会让引擎输出碎片，先清洗
   const base = String(g.server || "").replace(/\/+$/, "");
+  const params = new URLSearchParams({ text: clean.slice(0, 300), text_language: "ja" });
+  // 质量门：只查时长碎片（引擎偶发输出 1s 碎片）。
+  // 注：不做高频频谱质检——日语摩擦音天然高频，误判率过高（曾导致大量跳句）。
+  const expectMs = Math.max(400, clean.length * 90);
+  const durOk = (b) => {
+    const d = wavDurationMs(b);
+    return !(d > 0 && clean.length > 6 && d < expectMs * 0.5);
+  };
   try {
-    const params = new URLSearchParams({ text: clean.slice(0, 300), text_language: "ja" });
     const resp = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(120000) });
     if (!resp.ok) {
       logTts("gsv", "HTTP " + resp.status);
@@ -2225,19 +2239,12 @@ async function gsvTtsJa(g, text) {
     }
     const buf = Buffer.from(await resp.arrayBuffer());
     if (buf.length < 100) { logTts("gsv", "返回过短"); return ""; }
-    // 质量门：只查时长碎片（引擎偶发输出 1s 碎片）。最多重试 2 次，间隔递增。
-    // 注：不做高频频谱质检——日语摩擦音天然高频，误判率过高（曾导致大量跳句）。
-    const expectMs = Math.max(400, clean.length * 90);
-    const durOk = (b) => {
-      const d = wavDurationMs(b);
-      return !(d > 0 && clean.length > 6 && d < expectMs * 0.5);
-    };
     let best = buf;
     if (durOk(buf)) return best.toString("base64");
     for (let att = 2; att <= 3; att++) {
       const d0 = wavDurationMs(buf);
       logTts("gsv", `疑似引擎毛刺（时长${Math.round(d0)}ms << 预期${expectMs}ms）→ 第${att}/3次重试`);
-      await new Promise((r) => setTimeout(r, 300 * att));
+      await new Promise((r) => setTimeout(r, 800 * att)); // 退避重试：引擎坏状态连发更容易连环失败
       const resp2 = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(120000) });
       if (!resp2.ok) continue;
       best = Buffer.from(await resp2.arrayBuffer());
@@ -2273,18 +2280,42 @@ async function gsvTtsJa(g, text) {
     logTts("gsv", "跳过该句: " + clean.slice(0, 24));
     return "";
   } catch (e) {
-    logTts("gsv", "请求失败: " + (e && e.message || e));
-    // 连接被拒/超时：服务器很可能已死或挂死——重置探测缓存并清掉进程，
-    // 让下一句话重新拉起（否则缓存的「在线」状态会让后续全部瞬间失败，永远哑巴）
-    if (gsvAutoRestarting || gsvWarmingUp) return "";
     const msg = String(e && e.message || e);
-    if (/fetch failed|ECONNREFUSED|aborted|timeout/i.test(msg)) {
-      try {
-        gsvServerChecked = false;
-        gsvServerUp = false;
-        await killGsvProcesses(config.getConfig().ttsGsv || {});
-        logTts("gsv", "已重置引擎状态，下一句将自动重新拉起");
-      } catch { /* 忽略 */ }
+    logTts("gsv", "请求失败: " + msg);
+    if (!/fetch failed|ECONNREFUSED|aborted|timeout/i.test(msg)) return ""; // 非连接类错误不走重启
+    // 连接被拒/超时：服务器很可能已死或挂死——若只重置缓存等下一句，本句会丢失/变中文音色。
+    // 改为当场杀进程→重拉→预热→重试本句一次；60s 节流防止连环崩溃时反复重启。
+    if (gsvAutoRestarting || gsvWarmingUp) return "";
+    const now = Date.now();
+    if (now - gsvCrashRecoveryAt < 60000) {
+      logTts("gsv", "引擎崩掉（60s内已自愈过），跳过本句回退中文");
+      return "";
+    }
+    gsvCrashRecoveryAt = now;
+    gsvAutoRestarting = true;
+    try {
+      logTts("gsv", "引擎崩掉 → 当场自动重启并重试本句...");
+      await killGsvProcesses(config.getConfig().ttsGsv || {});
+      for (let i = 0; i < 8; i++) {
+        await new Promise((r) => setTimeout(r, 800));
+        if (!(await portAlive(base))) break;
+      }
+      gsvServerChecked = false;
+      gsvServerUp = false;
+      const g2 = config.getConfig().ttsGsv || {};
+      const up = await ensureGsvServer(g2);
+      if (up) {
+        await warmupGsv(g2); // 烧机吸收冷启动毛刺，再正式重试本句
+        const resp2 = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(180000) });
+        if (resp2.ok) {
+          const b2 = Buffer.from(await resp2.arrayBuffer());
+          if (b2.length >= 100 && durOk(b2)) { logTts("gsv", "引擎重启后本句恢复合成"); return b2.toString("base64"); }
+        }
+      }
+    } catch (e2) {
+      logTts("gsv", "崩溃自愈失败: " + (e2 && e2.message || e2));
+    } finally {
+      gsvAutoRestarting = false;
     }
     return "";
   }
@@ -2294,6 +2325,7 @@ async function gsvTtsJa(g, text) {
  *  返回 Promise，调用方可 await 完成后再发正式请求。 */
 let gsvAutoRestarting = false; // 自动重启进行中（防嵌套）
 let gsvWarmingUp = false;      // 预热进行中（防重入）
+let gsvCrashRecoveryAt = 0;    // 上次崩溃自愈时刻（60s 节流，防连环重启）
 function warmupGsv(g) {
   if (gsvWarmingUp) return Promise.resolve(true);
   if (gsvAutoRestarting) return Promise.resolve(false);

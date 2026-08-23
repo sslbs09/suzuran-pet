@@ -528,6 +528,8 @@ function scheduleBubbleHide(delayMs = 5000) {
   bubbleHideTimer = setTimeout(check, delayMs);
 }
 
+let cloneAudio = null; // 当前正在播放的克隆音频（新语音打断旧语音，消除叠播）
+
 async function speak(text, emotion) {
   if (!ttsConfig.enabled) return;
   const clean = stripForSpeech(text);
@@ -557,11 +559,15 @@ async function speak(text, emotion) {
         // 避免 Chromium preservesPitch 在大偏差下产生金属感/气泡音伪影（杂音来源）
         const rate = Math.max(0.9, Math.min(1.1, speakRate));
         audio.playbackRate = rate;
+        if (cloneAudio && cloneAudio !== audio) { try { cloneAudio.pause(); } catch { /* 忽略 */ } } // 新语音打断上一段，消除叠播
+        cloneAudio = audio;
         isSpeakingAudio = true;
-        audio.onended = () => { isSpeakingAudio = false; };
+        audio.onended = () => { isSpeakingAudio = false; if (cloneAudio === audio) cloneAudio = null; };
         await audio.play();
         // 等待音频播放完毕
-        await new Promise((resolve) => { audio.onended = resolve; });
+        await new Promise((resolve) => {
+          audio.onended = () => { isSpeakingAudio = false; if (cloneAudio === audio) cloneAudio = null; resolve(); };
+        });
         isSpeakingAudio = false;
         window.petAPI.playback("云端音频播放成功 len=" + b64.length);
         return;
