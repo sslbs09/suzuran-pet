@@ -267,6 +267,31 @@
         <input id="walk-max" type="range" min="8" max="120" step="1" />
         <span id="walk-max-val" style="font-weight:600;">20 s</span>
       </label>
+      <label class="col">
+        <span data-i18n="set.bubbleWidth">聊天气泡宽度</span>
+        <input id="bubble-width" type="range" min="0" max="600" step="20" />
+        <span id="bubble-width-val" style="font-weight:600;">自适应</span>
+      </label>
+      <label class="col">
+        <span data-i18n="set.chatFontSize">聊天字体大小</span>
+        <input id="chat-font-size" type="range" min="10" max="22" step="1" />
+        <span id="chat-font-size-val" style="font-weight:600;">11 px</span>
+      </label>
+      <label class="col">
+        <span data-i18n="set.chatFont">聊天字体</span>
+        <select id="chat-font">
+          <option value="">默认（微软雅黑）</option>
+          <option value="宋体">宋体</option>
+          <option value="黑体">黑体</option>
+          <option value="楷体">楷体</option>
+          <option value="仿宋">仿宋</option>
+          <option value="等线">等线</option>
+        </select>
+      </label>
+      <label class="col">
+        <span data-i18n="set.importFont">导入本地字体（ttf/otf/woff）</span>
+        <button id="btn-import-font" type="button">📂 <span data-i18n="set.importFontBtn">选择字体文件并应用</span></button>
+      </label>
     </div>
     <p class="hint" data-i18n="set.spineHint">💡 懒人换模型：把任意 Spine 模型的 .atlas + .skel（或 .json）+ .png 放入 resources/app/renderer/spine/user/ 文件夹，重启即自动替换，无需任何配置</p>
     <p class="hint" data-i18n="set.agentHint">其他 agent / 脚本可调用：<code>POST http://127.0.0.1:8765/chat</code>，请求体 <code>{"text":"苏苏洛 帮我…"}</code>；<code>GET /health</code> 查状态。仅监听本机，不对局域网开放。</p>

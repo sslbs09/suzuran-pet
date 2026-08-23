@@ -27,7 +27,7 @@ html, body {
   border: 1.5px solid #cfe3f2;
   border-radius: 11px;
   padding: 5px 9px 12px;
-  font-size: 11px;
+  font-size: var(--chat-fz, 11px); /* 聊天字号：设置页可调（CSS 变量，输入框同步） */
   line-height: 1.5;
   color: #44505c;
   box-shadow: 0 2px 8px rgba(90, 140, 180, 0.22);
@@ -50,6 +50,11 @@ html, body {
   border-right: 0;
 }
 .bubble.error { border-color: #f2b8b8; }
+/* 右下角拖拽把手可视化（斜纹）：配合设置页「气泡宽度」滑杆调节大小 */
+.bubble::-webkit-resizer {
+  background: linear-gradient(135deg, transparent 0 44%, rgba(142, 199, 232, .95) 44% 55%, transparent 55% 64%, rgba(142, 199, 232, .95) 64% 73%, transparent 73%);
+  border-bottom-right-radius: 9px;
+}
 /* 左缘延伸区模式（主进程 edge-left 事件）：气泡挪到桌宠头顶上方、尾巴朝下，避免被屏幕左缘裁掉 */
 .bubble.top {
   right: 4px;
@@ -66,7 +71,7 @@ html, body {
   border-top-color: rgba(255, 255, 255, 0.96);  /* 尾巴朝下指向桌宠 */
   border-bottom: 0;
 }
-.bubble.task { font-family: Consolas, "Courier New", monospace; font-size: 10px; }
+.bubble.task { font-family: Consolas, "Courier New", monospace; font-size: calc(var(--chat-fz, 11px) - 1px); }
 .bubble.hidden { display: none; }
 #bubble-text { padding-right: 14px; }
 
@@ -87,13 +92,13 @@ html, body {
 /* 放大模式：窗口变大 + 气泡更大更清晰 */
 body.enlarged .bubble {
   max-height: 430px;
-  font-size: 13px;
+  font-size: calc(var(--chat-fz, 11px) + 2px);
   line-height: 1.7;
   padding: 8px 14px 14px;
 }
-body.enlarged .bubble.task { font-size: 12px; }
+body.enlarged .bubble.task { font-size: var(--chat-fz, 11px); }
 body.enlarged .input-bar { width: 320px; } /* 放大时输入栏随窗口变宽 */
-body.enlarged #input { font-size: 12px; }
+body.enlarged #input { font-size: calc(var(--chat-fz, 11px) + 1px); }
 
 /* 思考点点 */
 .thinking { display: flex; gap: 2px; justify-content: center; font-size: 15px; color: #8ec7e8; height: 15px; }
@@ -156,7 +161,7 @@ body.enlarged #input { font-size: 12px; }
   border: none;
   outline: none;
   background: transparent;
-  font-size: 11px;
+  font-size: var(--chat-fz, 11px);
   color: #333;
   padding: 2px;
   min-width: 0;

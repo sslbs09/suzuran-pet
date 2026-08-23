@@ -619,6 +619,7 @@ zoomBtn.addEventListener("click", () => {
   // 窗口切换后：清掉记忆的固定尺寸，让气泡按新窗口自动缩放显示（超限由 clamp 收拢）
   if (enlarged) { bubbleEl.style.width = ""; bubbleEl.style.height = ""; }
   setTimeout(clampBubbleToWindow, 80); // 窗口切换后收拢超限气泡
+  if (!enlarged && appearanceCfg) setTimeout(() => applyAppearance(appearanceCfg), 120); // 还原时恢复设置的气泡宽度/窗口宽
 });
 
 // 用户拖拽气泡右下角调整大小后记住（下次打开保持；超窗尺寸自动截断）
@@ -633,6 +634,50 @@ if (typeof ResizeObserver !== "undefined") {
     }
   }).observe(bubbleEl);
 }
+
+/* ---------- 聊天外观（设置页即时下发：字号/字体/气泡宽度，含本地导入字体） ---------- */
+let appearanceCfg = null;
+
+function injectFontFace(file) { // 导入的字体文件位于 renderer/fonts/user/，按需注册 @font-face
+  const id = "cffont-" + file;
+  if (document.getElementById(id)) return;
+  const st = document.createElement("style");
+  st.id = id;
+  st.textContent = `@font-face{font-family:"cf-${file}";src:url("fonts/user/${encodeURIComponent(file)}");}`;
+  document.head.appendChild(st);
+}
+
+/** 气泡需要更宽窗口时自动加宽（宽度=气泡+角色条带余量，按 zoom 换算成窗口 DIP） */
+function ensureWindowWidthFor(bubbleW) {
+  const zoom = parseFloat(document.body.style.zoom) || 1;
+  const need = Math.ceil((bubbleW + 140) * zoom);
+  window.petAPI.setSize(Math.max(winSize.width, need), winSize.height);
+}
+
+function applyAppearance(a) {
+  appearanceCfg = a || {};
+  const root = document.documentElement.style;
+  root.setProperty("--chat-fz", (Number(a.fontSize) > 0 ? Number(a.fontSize) : 11) + "px");
+  let ff = "";
+  if (a.fontFamily && a.fontFamily.startsWith("custom:")) {
+    const f = a.fontFamily.slice(7);
+    injectFontFace(f);
+    ff = `"cf-${f}"`;
+  } else if (a.fontFamily) {
+    ff = `"${a.fontFamily}", "Microsoft YaHei"`;
+  }
+  bubbleEl.style.fontFamily = ff;
+  const inputBar = document.getElementById("input-bar");
+  if (inputBar) inputBar.style.fontFamily = ff; // 输入框与气泡同字体
+  if (Number(a.bubbleWidth) > 0) {              // 固定宽度：高度恢复内容自适应
+    bubbleEl.style.width = Number(a.bubbleWidth) + "px";
+    bubbleEl.style.height = "";
+    if (!enlarged) ensureWindowWidthFor(Number(a.bubbleWidth));
+  } else {
+    applyBubbleSize();                          // 恢复自适应/拖拽记忆尺寸
+  }
+}
+if (window.petAPI.onAppearanceChanged) window.petAPI.onAppearanceChanged(applyAppearance);
 
 /* 事件绑定 */
 window.petAPI.onThinking(({ mode }) => {
@@ -996,6 +1041,7 @@ document.addEventListener("mousemove", (e) => {
   if (state.winSize) winSize = state.winSize;
   applyBubbleSize();
   reportGroundGap(); // 上报角色脚底与窗口底边空隙，供主进程贴地补偿
+  try { const ap = await window.petAPI.getAppearance(); if (ap) applyAppearance(ap); } catch { /* 默认外观 */ }
   updateChip();
   updateTtsButton();
   initTts();

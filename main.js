@@ -1602,6 +1602,34 @@ ipcMain.handle("pet:set-walk-timing", (_e, patch) => {
   };
 });
 
+/* ---------- 聊天外观（字号/字体/气泡宽度，设置页即时下发并广播渲染层） ---------- */
+ipcMain.handle("pet:get-appearance", () => config.getConfig().appearance || {});
+ipcMain.handle("pet:set-appearance", (_e, patch) => {
+  patch = patch && typeof patch === "object" ? patch : {};
+  config.saveConfig({ appearance: { ...(config.getConfig().appearance || {}), ...patch } });
+  const a = config.getConfig().appearance || {};
+  sendToRenderer("pet:appearance-changed", a);
+  return a;
+});
+ipcMain.handle("pet:import-font", async () => { // 选本地字体文件→复制到 renderer/fonts/user/→记入配置
+  if (!win || win.isDestroyed()) return null;
+  const r = await dialog.showOpenDialog(win, {
+    title: "选择字体文件",
+    filters: [{ name: "字体文件", extensions: ["ttf", "otf", "woff", "woff2"] }],
+    properties: ["openFile"]
+  });
+  if (!r.filePaths || !r.filePaths.length) return null;
+  const name = path.basename(r.filePaths[0]);
+  if (!/\.(ttf|otf|woff2?)$/i.test(name)) return null;
+  const dir = path.join(config.APP_DIR, "renderer", "fonts", "user");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.copyFileSync(r.filePaths[0], path.join(dir, name));
+  const prev = (config.getConfig().appearance || {}).customFonts || [];
+  config.saveConfig({ appearance: { ...(config.getConfig().appearance || {}), customFonts: Array.from(new Set([...prev, name])) } });
+  logTts("walk", "导入字体: " + name);
+  return { customFonts: (config.getConfig().appearance || {}).customFonts || [] };
+});
+
 /** 扫描全部可用 Spine 皮肤：内置苏苏洛 + spine/user/ 下每个含 .atlas+.skel/.json 的模型（支持子文件夹分皮肤） */
 function detectSpineModels() {
   const list = [{

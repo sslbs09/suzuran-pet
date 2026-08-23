@@ -80,6 +80,15 @@ async function toast(msg) {
     $("sit-max-val").textContent = wt.sitMaxSec + " s";
     $("walk-max").value = String(wt.walkMaxSec);
     $("walk-max-val").textContent = wt.walkMaxSec + " s";
+    const ap = await window.petAPI.getAppearance();
+    fillChatFontOptions(ap.customFonts);
+    $("chat-font").value = ap.fontFamily || "";
+    const fz = Number(ap.fontSize) > 0 ? Number(ap.fontSize) : 11;
+    $("chat-font-size").value = String(fz);
+    $("chat-font-size-val").textContent = fz + " px";
+    const bw = Number(ap.bubbleWidth) > 0 ? Number(ap.bubbleWidth) : 0;
+    $("bubble-width").value = String(bw);
+    $("bubble-width-val").textContent = bw > 0 ? bw + " px" : "自适应";
   } catch { /* 滑杆保持默认值 */ }
   const aa = S.agentApi || {};
   $("agent-enabled").value = String(aa.enabled !== false);
@@ -267,6 +276,50 @@ $("walk-max").addEventListener("change", async () => {
   const r = await window.petAPI.setWalkTiming({ walkMaxSec: Number($("walk-max").value) });
   $("walk-max").value = String(r.walkMaxSec);
   $("walk-max-val").textContent = r.walkMaxSec + " s";
+});
+
+/* ---------- 聊天外观（字体/字号/气泡宽度，松手即生效） ---------- */
+function fillChatFontOptions(customFonts) { // 已导入的本地字体追加到下拉末尾
+  const sel = $("chat-font");
+  sel.querySelectorAll("option[data-custom]").forEach((o) => o.remove());
+  (customFonts || []).forEach((f) => {
+    const o = document.createElement("option");
+    o.value = "custom:" + f;
+    o.textContent = "自定义·" + f.replace(/\.(ttf|otf|woff2?)$/i, "");
+    o.setAttribute("data-custom", "1");
+    sel.appendChild(o);
+  });
+}
+$("chat-font").addEventListener("change", async () => {
+  await window.petAPI.setAppearance({ fontFamily: $("chat-font").value });
+});
+$("chat-font-size").addEventListener("input", () => {
+  $("chat-font-size-val").textContent = $("chat-font-size").value + " px";
+});
+$("chat-font-size").addEventListener("change", async () => {
+  const r = await window.petAPI.setAppearance({ fontSize: Number($("chat-font-size").value) });
+  const fz = Number(r.fontSize) > 0 ? Number(r.fontSize) : 11;
+  $("chat-font-size").value = String(fz);
+  $("chat-font-size-val").textContent = fz + " px";
+});
+$("bubble-width").addEventListener("input", () => {
+  const v = Number($("bubble-width").value);
+  $("bubble-width-val").textContent = v > 0 ? v + " px" : "自适应";
+});
+$("bubble-width").addEventListener("change", async () => {
+  const r = await window.petAPI.setAppearance({ bubbleWidth: Number($("bubble-width").value) });
+  const bw = Number(r.bubbleWidth) > 0 ? Number(r.bubbleWidth) : 0;
+  $("bubble-width").value = String(bw);
+  $("bubble-width-val").textContent = bw > 0 ? bw + " px" : "自适应";
+});
+$("btn-import-font").addEventListener("click", async () => {
+  const r = await window.petAPI.importFont();
+  if (r && r.customFonts && r.customFonts.length) {
+    fillChatFontOptions(r.customFonts);
+    const last = r.customFonts[r.customFonts.length - 1];
+    $("chat-font").value = "custom:" + last;
+    await window.petAPI.setAppearance({ fontFamily: $("chat-font").value }); // 导入后自动应用
+  }
 });
 
 /* ---------- 其他 ---------- */
