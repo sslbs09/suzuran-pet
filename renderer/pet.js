@@ -58,6 +58,11 @@ function fitSpinePose() {
     const k = spineBoost > 1 ? 1 : Math.min(1, (W - 6) / b.width, (H - 6) / b.height);
     if (k < 1) mag *= k;
     spineObj.scale.set(mag * (walkState.face === -1 ? -1 : 1), mag);
+    // TODO 心跳诊断（临时）：fit 首次执行记录
+    if (!fitSpinePose._logged) {
+      fitSpinePose._logged = true;
+      try { window.petAPI.playback && window.petAPI.playback(`[spine] fit mag=${mag.toFixed(4)} k=${k.toFixed(3)} bw=${Math.round(b.width)} bh=${Math.round(b.height)} boost=${spineBoost}`); } catch { /* 忽略 */ }
+    }
     spineObj.updateTransform();
     b = spineObj.getBounds();
     // 底边贴地、水平居中：保证耳朵/手脚不被四边裁剪
@@ -129,6 +134,7 @@ async function initSpine() {
       if (res && Array.isArray(res.list) && res.list.length) {
         const cur = res.list.find((m) => m.id === (res.current || "builtin")) || res.list[0];
         spinePaths = { atlas: cur.atlas, skel: cur.skel };
+        window.petAPI.playback && window.petAPI.playback("[spine] initSpine 选中: " + cur.id); // TODO 心跳诊断
         if (cur.id !== "builtin") console.log("[Spine] 使用自定义皮肤:", cur.atlas);
       }
     } catch { /* 探测失败用内置 */ }
@@ -192,6 +198,12 @@ async function initSpine() {
     spineBoost = boost; // fitSpinePose 据此跳过缩小保护
     spineBaseScaleX = scale * boost;
     spineObj.scale.set(scale * boost);
+    // TODO 心跳诊断（临时）：初始化关键数值，定位后移除
+    try {
+      window.petAPI.playback && window.petAPI.playback(
+        `[spine] ok boost=${boost} scale=${scale.toFixed(4)} final=${(scale * boost).toFixed(4)} w=${Math.round(spineObj.width)} h=${Math.round(spineObj.height)} skel=${spinePaths.skel}`
+      );
+    } catch { /* 忽略 */ }
 
     // 播放默认动画
     const animName = spineAnimForMood("idle");
