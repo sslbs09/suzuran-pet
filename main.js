@@ -1980,6 +1980,7 @@ const SKIN_GROUP_NAMES = {
 function skinGroupId(id) {
   if (id === "builtin") return "298";
   const dir = String(id || "").split("/")[0];
+  if (dir === "summer" || dir === "winter") return "298"; // 苏苏洛时装归内置组
   const m = dir.match(/^(\d{3,4})_/);
   return m ? m[1] : dir;
 }
