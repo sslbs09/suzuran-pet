@@ -183,14 +183,17 @@ async function initSpine() {
     // 居中并缩放到合适大小
     spineObj.x = spineApp.screen.width / 2;
     spineObj.y = spineApp.screen.height;
+    // 测量有效性防护：部分模型未播动画时骨骼收拢，width/height 接近 0，
+    // 直接进缩放公式会得到天文数字的倍率爆出画布——此时改用标准基准尺寸
+    const mw = spineObj.width || 0, mh = spineObj.height || 0;
+    const useW = mw > 50 ? mw : 300, useH = mh > 50 ? mh : 400;
     const scale = Math.min(
-      spineApp.screen.width / (spineObj.width || 300),
-      spineApp.screen.height / (spineObj.height || 400)
+      spineApp.screen.width / useW,
+      spineApp.screen.height / useH
     ) * 0.9;
     // 部分模型导出尺度/宽高比不同：按目录名加缩放修正（宽度优先约束，防横向出画布）
     const boostTable = {
-      "4179_monstr": 3.2,
-      "4179_monstr_boc_11": 3.2,
+      "4179_monstr_boc_11": 7.5,
       "391_rosmon_sale_16": 2.3
     };
     let boost = 1;
