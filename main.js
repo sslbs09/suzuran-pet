@@ -1207,10 +1207,10 @@ ipcMain.on("pet:move", (_e, dx, dy) => {
   }
 });
 
-/** 拖拽落点吸附判定：底边接近任务栏上沿 → 贴齐坐下；
- *  桌面层级＋已授权时用真实桌面图标位置吸附（其余位置自由放置）；
- *  置顶模式沿用主屏左侧图标网格估算。返回是否处于坐下吸附。 */
-function dragSeatUpdate() {
+/** 拖拽落点吸附判定（final=true 表示松手时刻）：底边接近任务栏上沿 → 贴齐坐下；
+ *  桌面层级＋已授权时松手贴近真实桌面图标顶 → 坐到该图标上，其余位置自由放置；
+ *  拖拽途中不做图标吸附（图标网格密集，边拖边吸会把人钉死），置顶模式沿用估算网格。 */
+function dragSeatUpdate(final = false) {
   if (!win || win.isDestroyed()) return false;
   const b = win.getBounds();
   const wa = screen.getDisplayMatching(b).workArea;
@@ -1224,17 +1224,19 @@ function dragSeatUpdate() {
     ny = waBottom + walk.groundGap - b.height;
     nx = Math.min(Math.max(b.x, walkMinX(wa)), wa.x + wa.width - b.width);
   } else if (desktopIconMode()) {
-    // 桌面层级＋已授权：贴近真实桌面图标顶(±44px)才坐上，其余位置＝自由放置不吸附
-    const charCx = (walk.charInset + b.width - 2) / 2;
-    let best = null, bestD = Infinity;
-    for (const p of desktopIconCache.list) {
-      const d = Math.abs(feet - p.y);
-      if (d <= 44 && d < bestD && Math.abs((b.x + charCx) - p.x) <= 60) { best = p; bestD = d; }
-    }
-    if (best) {
-      seated = true;                                 // 图标顶磁吸
-      ny = best.y + walk.groundGap - b.height;
-      nx = Math.round(best.x - charCx);
+    // 桌面层级＋已授权：仅松手瞬间判定——贴近真实桌面图标顶(±44px)才坐上，其余位置＝自由放置
+    if (final) {
+      const charCx = (walk.charInset + b.width - 2) / 2;
+      let best = null, bestD = Infinity;
+      for (const p of desktopIconCache.list) {
+        const d = Math.abs(feet - p.y);
+        if (d <= 44 && d < bestD && Math.abs((b.x + charCx) - p.x) <= 60) { best = p; bestD = d; }
+      }
+      if (best) {
+        seated = true;                                 // 图标顶磁吸
+        ny = best.y + walk.groundGap - b.height;
+        nx = Math.round(best.x - charCx);
+      }
     }
   } else {
     // 桌面图标网格近似（主屏左侧区域；格尺寸按常见 DPI 估算）
@@ -1564,9 +1566,12 @@ async function listDesktopIcons(force = false) {
   try {
     const txt = await runPowerShell(PS_DESKTOP_ICONS);
     const j = JSON.parse(txt || "[]");
-    const list = Array.isArray(j) ? j.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y)) : [];
+    const scale = screen.getPrimaryDisplay().scaleFactor || 1; // Win32 返回物理像素，换算成窗口用的逻辑像素(DIP)
+    const list = (Array.isArray(j) ? j : [])
+      .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
+      .map((p) => ({ x: Math.round(p.x / scale), y: Math.round(p.y / scale) }));
     desktopIconCache = { at: Date.now(), list };
-    logTts("walk", "桌面图标感知: " + list.length + " 个");
+    logTts("walk", "桌面图标感知: " + list.length + " 个 (scale=" + scale + ")");
     return list;
   } catch { return []; }
 }
@@ -1799,8 +1804,8 @@ ipcMain.on("pet:walking-pause", (_e, p) => {
       clearTimeout(walk.phaseTimer);
       walkBroadcast();
     }
-    // 拖拽落点定格：仍贴近任务栏/图标则保持坐下，否则恢复正常状态
-    const sat = dragSeatUpdate();
+    // 拖拽落点定格（松手时刻）：贴近任务栏/真实图标则吸附坐下，否则自由放置/恢复正常状态
+    const sat = dragSeatUpdate(true);
     if (!sat && walk.freeStand && desktopIconMode()) { // 自由放置在桌面：原地站一会儿再回归正常循环
       clearTimeout(walk.phaseTimer);
       walkSchedulePhase(randInt(15000, 35000));
