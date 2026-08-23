@@ -1227,7 +1227,8 @@ function dragSeatUpdate(final = false) {
     if (Math.abs(feet - waBottom) <= 48) {
       seated = true;                                   // 任务栏磁吸
       magnet = "taskbar";
-      ny = waBottom + walk.groundGap - b.height;
+      // 下沉量与 applySeatPosition 一致：小幅拖动放回带内时（changed=false 无人自愈）也保持完整坐姿
+      ny = waBottom + walk.groundGap - b.height + getSeatSink();
       nx = Math.min(Math.max(b.x, walkMinX(wa)), wa.x + wa.width - b.width);
     } else if (desktopIconMode()) {
       // 桌面层级＋已授权：松手贴近真实桌面图标顶(±44px)才坐上
