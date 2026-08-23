@@ -180,10 +180,11 @@ async function initSpine() {
       spineApp.screen.height / (spineObj.height || 400)
     ) * 0.9;
     // 部分模型图集包围盒偏大（含空白/特效区），自适应后显得偏小：按目录名加缩放修正
-    const boostTable = { "4179_monstr": 1.35, "391_rosmon_sale_16": 1.3 };
+    const boostTable = { "4179_monstr": 1.7, "391_rosmon_sale_16": 1.5 };
     let boost = 1;
     try {
-      const dirName = decodeURIComponent((spinePaths.skel || "").split("/")[0]);
+      const segs = decodeURIComponent((spinePaths.skel || "")).split("/");
+      const dirName = segs.find((p) => /^\d{3,4}_/.test(p)) || ""; // 定位 spine/user/<目录>/... 中的目录段
       boost = boostTable[dirName] || 1;
     } catch { boost = 1; }
     spineBaseScaleX = scale * boost;
