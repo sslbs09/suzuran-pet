@@ -277,6 +277,15 @@ function playSpineInteract() {
 function setSpineMood(mood) {
   if (!spineObj || renderMode !== "spine") return;
   if (Date.now() < animDemoUntil) return; // 动作试演中，不被情绪切换打断
+  // 坐下状态：待机回落/轮换保持坐姿，不被顶回站姿（聊天情绪仍可短暂覆盖）
+  if (walkState.seated && (mood === "idle" || mood === undefined)) {
+    const sit = ["Sit", "sit"].find((n) => spineHas(n));
+    if (sit && spineObj.state.getCurrent(0)?.animation?.name !== sit) {
+      spineObj.state.setAnimation(0, sit, true);
+      scheduleFitSpine();
+    }
+    return;
+  }
   // 行走相位中回落待机 → 保持走路动画不中断（非 idle 情绪照常显示）
   if (walkState.active && !walkState.resting && !busy && mood === "idle" && spineHas("Move")) {
     spineFaceDir(walkState.face);
