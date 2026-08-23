@@ -62,6 +62,17 @@ function fitSpinePose() {
     spineObj.x += (W - b.width) / 2 - b.x;
     spineObj.y += H - (b.y + b.height);
   } catch { /* 测量失败不影响渲染 */ }
+  reportGroundGap();
+}
+
+/** 上报角色脚底到窗口底边的空隙（宠物元素悬浮在输入栏上方导致），
+ *  主进程贴地吸附时用它把窗口下探相应距离，让脚真正踩在任务栏/图标上 */
+function reportGroundGap() {
+  try {
+    const r = petEl.getBoundingClientRect();
+    const gap = Math.max(0, Math.min(80, Math.round(window.innerHeight - r.bottom)));
+    window.petAPI.setGroundGap(gap);
+  } catch { /* 忽略 */ }
 }
 
 /** 行走朝向：face=-1 时镜像翻转（假设模型原始朝右；若实际相反改此处符号即可） */
@@ -703,6 +714,7 @@ async function rebuildSpine() {
     spriteEl.style.display = "";
     await setRenderMode("spine");
     if (walkState.active) applyWalkState(walkState);
+    reportGroundGap();
   } catch (e) {
     console.error("[Spine] 换肤重建失败:", e);
   }
@@ -970,6 +982,7 @@ document.addEventListener("mousemove", (e) => {
   if (state.ttsCloud) ttsCloudOn = !!state.ttsCloud.enabled;
   if (state.winSize) winSize = state.winSize;
   applyBubbleSize();
+  reportGroundGap(); // 上报角色脚底与窗口底边空隙，供主进程贴地补偿
   updateChip();
   updateTtsButton();
   initTts();

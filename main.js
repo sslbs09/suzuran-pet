@@ -68,14 +68,14 @@ function setPetLayer(v) {
 }
 ipcMain.handle("pet:set-layer", (_e, v) => { setPetLayer(v); return true; });
 
-/** 一键坐到任务栏上：底边贴齐当前屏幕工作区下沿（即任务栏上沿），播放 Sit 坐姿 */
+/** 一键坐到任务栏上：角色脚底贴齐任务栏上沿（窗口按 groundGap 下探补偿），播放 Sit 坐姿 */
 function sitOnTaskbar() {
   if (!win || win.isDestroyed()) return;
   const b = win.getBounds();
   const wa = screen.getDisplayMatching(b).workArea;
   win.setPosition(
     Math.min(Math.max(b.x, wa.x), wa.x + wa.width - b.width),
-    Math.max(wa.y, wa.y + wa.height - b.height)
+    wa.y + wa.height + walk.groundGap - b.height
   );
   showWindow();
   walk.seated = true;
@@ -1186,19 +1186,19 @@ ipcMain.on("pet:move", (_e, dx, dy) => {
 
 /** 拖拽落点吸附判定：底边接近任务栏上沿 → 贴齐坐下；
  *  在主屏左侧桌面图标网格区且底边接近某图标格顶部 → 坐到该图标上。
- *  返回是否处于坐下吸附。 */
+ *  返回是否处于坐下吸附。贴地定位统一用 groundGap 下探，让角色脚底真正踩在表面上。 */
 function dragSeatUpdate() {
   if (!win || win.isDestroyed()) return false;
   const b = win.getBounds();
   const wa = screen.getDisplayMatching(b).workArea;
-  const bottom = b.y + b.height;
+  const feet = b.y + b.height - walk.groundGap; // 角色脚底实际屏幕位置
   const waBottom = wa.y + wa.height;
   let seated = false;
   let ny = b.y, nx = b.x;
 
-  if (Math.abs(bottom - waBottom) <= 48) {
+  if (Math.abs(feet - waBottom) <= 48) {
     seated = true;                                   // 任务栏磁吸
-    ny = waBottom - b.height;
+    ny = waBottom + walk.groundGap - b.height;
     nx = Math.min(Math.max(b.x, wa.x), wa.x + wa.width - b.width);
   } else {
     // 桌面图标网格近似（主屏左侧区域；格尺寸按常见 DPI 估算）
@@ -1209,10 +1209,10 @@ function dragSeatUpdate() {
       const cellW = 76, cellH = 92, ox = pd.x + 6, oy = pd.y + 6;
       const col = Math.floor((cx - ox) / cellW);
       const cellCx = ox + col * cellW + cellW / 2;
-      const rowTop = oy + Math.max(0, Math.round((bottom - oy) / cellH)) * cellH;
-      if (col >= 0 && Math.abs(bottom - rowTop) <= 44) {
+      const rowTop = oy + Math.max(0, Math.round((feet - oy) / cellH)) * cellH;
+      if (col >= 0 && Math.abs(feet - rowTop) <= 44) {
         seated = true;                               // 图标顶磁吸
-        ny = rowTop - b.height;
+        ny = rowTop + walk.groundGap - b.height;
         nx = Math.round(cellCx - b.width / 2);
       }
     }
@@ -1241,6 +1241,7 @@ const walk = {
   resting: true,    // true=原地不动（地面 Relax / 窗顶 Sit） false=走动（Move）
   perched: false,   // 正坐在窗口顶上
   seated: false,    // 坐下（任务栏上沿/桌面图标顶）：Sit 动画不移动
+  groundGap: 0,     // 角色脚底到窗口底边的空隙（渲染层上报）：贴地定位时窗口下探补偿
   gotoPerch: false, // 正走向/爬向窗口顶
   returning: false, // 坐完正回到地面
   dir: 1,           // 漫游方向
@@ -1356,7 +1357,7 @@ function walkTick() {
   const b = win.getBounds();
   const wa = screen.getDisplayMatching(b).workArea;
   const maxX = Math.max(wa.x, wa.x + wa.width - b.width);
-  const maxY = Math.max(wa.y, wa.y + wa.height - b.height);
+  const groundY = Math.max(wa.y, wa.y + wa.height - b.height) + walk.groundGap; // 窗口底边允许下探任务栏区，使角色脚底贴地
   let x = b.x;
 
   /* —— 去/回窗口：水平走到正下方后「一步跳」上去/跳下来，不做长距离垂直移动 —— */
@@ -1369,7 +1370,7 @@ function walkTick() {
       return;
     }
     // 到位 → 瞬间跳上窗顶（Sit）/ 跳回地面，避免在空中播放走路动画
-    const ty = walk.returning ? maxY : walk.perchTopY;
+    const ty = walk.returning ? groundY : walk.perchTopY;
     win.setPosition(Math.round(tx != null ? tx : x), Math.round(ty));
     if (walk.gotoPerch) {
       walk.gotoPerch = false;
@@ -1395,7 +1396,7 @@ function walkTick() {
     walk.dir *= -1;
     nx = Math.min(Math.max(nx, wa.x), maxX);
   }
-  win.setPosition(Math.round(nx), Math.round(maxY));
+  win.setPosition(Math.round(nx), Math.round(groundY));
 }
 
 function startWalkingEngine() {
@@ -1473,6 +1474,10 @@ ipcMain.on("pet:walking-pause", (_e, p) => {
   }
 });
 ipcMain.on("pet:set-sleeping", (_e, v) => { walk.sleeping = !!v; }); // 睡觉时行走引擎原地待命
+ipcMain.on("pet:set-ground-gap", (_e, px) => {
+  const v = Number(px);
+  if (Number.isFinite(v)) walk.groundGap = Math.max(0, Math.min(80, Math.round(v)));
+});
 
 /** 扫描全部可用 Spine 皮肤：内置苏苏洛 + spine/user/ 下每个含 .atlas+.skel/.json 的模型（支持子文件夹分皮肤） */
 function detectSpineModels() {
