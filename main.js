@@ -1575,8 +1575,12 @@ let desktopIconCache = { at: 0, list: [] };
 async function listDesktopIcons(force = false) {
   if (!desktopIconMode()) return [];
   if (!force && Date.now() - desktopIconCache.at < 5 * 60 * 1000) return desktopIconCache.list;
+  let txt = await runPowerShell(PS_DESKTOP_ICONS);
+  if (!txt && !desktopIconCache.list.length) { // PowerShell 偶发失败：稍候重试一次
+    await new Promise((r) => setTimeout(r, 1200));
+    txt = await runPowerShell(PS_DESKTOP_ICONS);
+  }
   try {
-    const txt = await runPowerShell(PS_DESKTOP_ICONS);
     const j = JSON.parse(txt || "[]");
     const scale = screen.getPrimaryDisplay().scaleFactor || 1; // Win32 返回物理像素，换算成窗口用的逻辑像素(DIP)
     const list = (Array.isArray(j) ? j : [])
@@ -1594,7 +1598,8 @@ async function walkAttemptIconPerch() {
     if (!win || win.isDestroyed()) return false;
     const b = win.getBounds();
     const wa = screen.getDisplayMatching(b).workArea;
-    const icons = await listDesktopIcons(true);
+    let icons = await listDesktopIcons(false);               // 优先用缓存（≤5 分钟），避免频繁起 PowerShell 偶发失败导致静默长坐
+    if (!icons.length) icons = await listDesktopIcons(true); // 无缓存/上次失败再强取一次
     const cands = icons.filter((p) =>
       p.x >= wa.x + 8 && p.x <= wa.x + wa.width - 60 &&
       p.y >= wa.y &&                                        // 图标顶不出屏幕顶
@@ -1632,6 +1637,7 @@ function walkAttemptPerch() {
         r.x < wa.x + wa.width && r.x + r.w > wa.x    // 在当前屏幕内
       );
       if (!cands.length) {                           // 没有合适窗口 → 坐下休息
+        logTts("walk", "无合适窗口可坐，就地休息"); // 失败可观测：避免静默长坐无从排查
         walk.resting = true;
         walk.seated = true;
         applySeatPosition();
