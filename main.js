@@ -230,7 +230,7 @@ function refreshTrayMenu() {
       }
       setWalking(!c.walking);
     } },
-    (() => { // 皮肤按角色分组：每个角色一个二级菜单，内含本体与各时装
+    ...(() => { // 皮肤按角色分组：每个角色一个二级菜单，内含本体与各时装
       const models = detectSpineModels();
       const groups = new Map();
       for (const m of models) {
