@@ -982,6 +982,7 @@ petEl.addEventListener("mousedown", (e) => {
   if (e.button !== 0) return;
   clearTimeout(pokeResumeTimer);
   dragState = { sx: e.screenX, sy: e.screenY, moved: false, active: true };
+  window.petAPI.playback && window.petAPI.playback("[drag] mousedown"); // TODO 诊断埋点，问题定位后移除
   window.petAPI.walkingPause(true); // 拖拽中暂停桌面行走，松手恢复
 });
 // 右键宠物 → 隐藏到托盘
@@ -994,6 +995,7 @@ window.addEventListener("mousemove", (e) => {
   const dx = e.screenX - dragState.sx;
   const dy = e.screenY - dragState.sy;
   if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+    if (!dragState.moved) window.petAPI.playback && window.petAPI.playback("[drag] first move " + Math.round(dx) + "," + Math.round(dy)); // TODO 诊断埋点
     dragState.moved = true;
     petEl.classList.add("dragging");
     window.petAPI.moveWindow(dx, dy);
@@ -1006,6 +1008,7 @@ window.addEventListener("mouseup", () => {
   const wasDrag = dragState.moved;
   dragState = null;
   petEl.classList.remove("dragging");
+  window.petAPI.playback && window.petAPI.playback("[drag] up wasDrag=" + wasDrag); // TODO 诊断埋点
   if (!wasDrag) {
     toggleInputBar();
     playSpineInteract(); // 单击互动：还原基建里点一下干员的反应动作
@@ -1023,9 +1026,15 @@ window.addEventListener("mouseup", () => {
 function isPetUI(el) {
   return !!el && (el.closest("#pet") || el.closest("#bubble") || el.closest("#input-bar"));
 }
+let dbgLastClickable = null; // TODO 诊断埋点，定位后移除
 document.addEventListener("mousemove", (e) => {
   const el = document.elementFromPoint(e.clientX, e.clientY);
-  window.petAPI.setClickable(isPetUI(el) || (dragState && dragState.active));
+  const c = isPetUI(el) || (dragState && dragState.active);
+  if (c !== dbgLastClickable) {
+    dbgLastClickable = c;
+    window.petAPI.playback && window.petAPI.playback("[clickable] " + c);
+  }
+  window.petAPI.setClickable(c);
 });
 
 /* ---------- 初始化 ---------- */
