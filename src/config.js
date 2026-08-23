@@ -115,6 +115,7 @@ const DEFAULTS = {
     clipboardWatch: false,    // 剪贴板感知：读取系统剪贴板内容并反应
     systemMonitor: false,     // 系统监控播报：CPU/内存异常时角色语音提醒
     screenAwareness: false,   // 屏幕感知：定期截屏分析（需配置视觉模型）
+    desktopIcons: false,      // 桌面图标感知：只读图标位置坐标（仅本机、不上传），让她走到图标上站/坐（需桌面层级模式）
     longTermMemory: true,     // 长期记忆摘要：自动记住重要对话内容
     emotionalVoice: true,     // 情绪语音：根据情绪调整语速/音调
     pomodoro: true,           // 番茄钟伴侣

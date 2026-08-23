@@ -101,6 +101,7 @@ async function toast(msg) {
   $("feat-sysmon").checked = !!f.systemMonitor;
   $("feat-memory").checked = f.longTermMemory !== false;
   $("feat-emotional").checked = f.emotionalVoice !== false;
+  $("feat-desktop-icons").checked = !!f.desktopIcons;
 
   // 渲染模式与桌面行走
   $("render-mode").value = S.renderMode === "spine" ? "spine" : "gif";
@@ -334,7 +335,8 @@ $("btn-save-other").addEventListener("click", async () => {
       clipboardWatch: $("feat-clipboard").checked,
       systemMonitor: $("feat-sysmon").checked,
       longTermMemory: $("feat-memory").checked,
-      emotionalVoice: $("feat-emotional").checked
+      emotionalVoice: $("feat-emotional").checked,
+      desktopIcons: $("feat-desktop-icons").checked
     },
     agentApi: {
       enabled: $("agent-enabled").value === "true",

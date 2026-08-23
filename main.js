@@ -55,10 +55,19 @@ function toggleWindow() {
 
 /* ---------- 显示层级（置顶眼前 / 桌面层级）与坐任务栏 ---------- */
 /** 应用显示层级：top=置顶（所有窗口之上）| desktop=桌面层级（可被其他程序窗口遮挡）。
- *  forceTop：接触任务栏表面（行走/坐下）时强制置顶，否则桌面层级下任务栏会盖住她。 */
-function applyLayer(forceTop) {
+ *  桌面层级下仅当窗口接触任务栏表面（贴地/坐姿下沉探入任务栏区）时才置顶，防止被任务栏盖住；
+ *  其余情况（走在图标区、跳上图标/窗顶）让位于普通程序窗口＝真的在桌面上。
+ *  参数已废弃：是否接触任务栏改由窗口几何位置判断，调用处无需再传。 */
+function applyLayer(_forceTop) {
   if (!win || win.isDestroyed()) return;
-  const onTop = !!forceTop || (config.getConfig().layer || "top") !== "desktop";
+  let onTop = (config.getConfig().layer || "top") !== "desktop";
+  if (!onTop) {
+    try {
+      const b = win.getBounds();
+      const wa = screen.getDisplayMatching(b).workArea;
+      onTop = b.y + b.height > wa.y + wa.height - 2; // 窗口底探入任务栏区
+    } catch { onTop = true; }
+  }
   win.setAlwaysOnTop(onTop, "screen-saver");
 }
 function setPetLayer(v) {
@@ -1258,12 +1267,14 @@ const walk = {
   face: 1,          // 视觉朝向：+1 右 / -1 左（按实际水平位移计算）
   resting: true,    // true=原地不动（地面 Relax / 窗顶 Sit） false=走动（Move）
   perched: false,   // 正坐在窗口顶上
+  iconRest: false,  // 正站在桌面图标上（Rest 待机，非 Sit）
   seated: false,    // 坐下（任务栏上沿/桌面图标顶）：Sit 动画不移动
   groundGap: 0,     // 角色脚底到窗口底边的空隙（渲染层上报）：贴地定位时窗口下探补偿
   charInset: 0,     // 窗口左缘到角色左缘的距离（渲染层上报）：行走左边界按此放宽，角色能贴到屏幕左缘
   edgeLeft: false,  // 当前是否探出屏幕左侧（气泡需切到头顶模式）
   sunk: false,      // 当前是否处于坐姿下沉状态
   gotoPerch: false, // 正走向/爬向窗口顶
+  iconTarget: false,// 本次跳的目标是桌面图标（决定跳上后站或坐）
   returning: false, // 坐完正回到地面
   dir: 1,           // 漫游方向
   targetX: null,
@@ -1346,10 +1357,11 @@ function applySeatPosition() {
   applyLayer(walk.seated || walk.active); // 接触任务栏表面时保证在任务栏之上
 }
 
-function walkOnPhaseEnd() {
+async function walkOnPhaseEnd() {
   if (!walk.active) return;
   if (walk.sleeping) { walkSchedulePhase(randInt(10000, 20000)); return; } // 睡觉中不切换相位
-  if (walk.perched) {                       // 坐够了 → 回到地面
+  if (walk.perched || walk.iconRest) {      // 图标/窗顶待够 → 回到地面
+    walk.iconRest = false;
     walk.perched = false;
     walk.returning = true;
     walk.resting = false;
@@ -1363,12 +1375,26 @@ function walkOnPhaseEnd() {
     return;
   }
   if (walk.resting) {
+    if (!walk.paused && desktopIconMode()) { // 桌面层级＋已授权：优先与桌面图标互动
+      if (Math.random() < 0.7) {
+        if (await walkAttemptIconPerch()) return;
+        walk.resting = true;                // 图标不可用 → 就地坐下休息
+        walk.seated = true;
+        applySeatPosition();
+        walkBroadcast();
+        walkSchedulePhase(sitPhaseMs());
+        return;
+      }
+      walkAttemptPerch();                   // 剩余概率仍可尝试跳程序窗
+      return;
+    }
     if (!walk.paused && Math.random() < 0.35) { walkAttemptPerch(); return; }
     walk.resting = false;                   // 开始散步
     walk.seated = false;
     applySeatPosition();                    // 起身：腿从任务栏里收回来
     walk.dir = Math.random() < 0.5 ? -1 : 1;
     walkBroadcast();
+    if (desktopIconMode()) listDesktopIcons(); // 预取图标缓存，供行走引导判断
     walkSchedulePhase(walkPhaseMs());
   } else {                                  // 散步结束 → 坐下休息（Sit）
     walk.resting = true;
@@ -1402,6 +1428,146 @@ async function listAppWindows() {
     const j = JSON.parse(txt || "[]");
     return Array.isArray(j) ? j : [j];
   } catch { return []; }
+}
+
+/* ---------- 桌面图标感知（需 features.desktopIcons 授权，默认关） ----------
+ * 只读桌面图标的屏幕坐标（Win32 SysListView32 + ReadProcessMemory，不读内容、不上传），
+ * 供她走到图标上站/坐、以及「前方没图标就不硬走」。结果缓存 5 分钟。
+ * 注意：部分环境下 FindWindow 查不到 Progman，故统一用 EnumWindows/EnumChildWindows 枚举定位。 */
+const PS_DESKTOP_ICONS = `
+$sig = @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public struct IRECT { public int L, T, R, B; }
+public class DI {
+  public delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr l);
+  [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr h, EnumProc cb, IntPtr l);
+  [DllImport("user32.dll")] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr wp, IntPtr lp);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out IRECT r);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("kernel32.dll")] public static extern IntPtr OpenProcess(uint a, bool ih, uint pid);
+  [DllImport("kernel32.dll")] public static extern IntPtr VirtualAllocEx(IntPtr h, IntPtr a, uint s, uint t, uint p);
+  [DllImport("kernel32.dll")] public static extern bool ReadProcessMemory(IntPtr h, IntPtr b, byte[] buf, uint s, out IntPtr r);
+  [DllImport("kernel32.dll")] public static extern bool VirtualFreeEx(IntPtr h, IntPtr b, uint s, uint t);
+  [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
+}
+'@
+Add-Type -TypeDefinition $sig
+
+$script:progman = [IntPtr]::Zero
+$script:workers = New-Object System.Collections.Generic.List[IntPtr]
+$cbTop = [DI+EnumProc]{
+  param($h, $l)
+  $sb = New-Object System.Text.StringBuilder 256
+  [DI]::GetClassName($h, $sb, 256) | Out-Null
+  $cls = $sb.ToString()
+  if ($cls -eq "Progman" -and $script:progman -eq [IntPtr]::Zero) { $script:progman = $h }
+  elseif ($cls -eq "WorkerW") { $script:workers.Add($h) }
+  $true
+}
+[DI]::EnumWindows($cbTop, [IntPtr]::Zero) | Out-Null
+
+$script:defview = [IntPtr]::Zero
+$parents = New-Object System.Collections.Generic.List[IntPtr]
+if ($script:progman -ne [IntPtr]::Zero) { $parents.Add($script:progman) }
+foreach ($w in $script:workers) { $parents.Add($w) }
+
+foreach ($p in $parents) {
+  if ($script:defview -ne [IntPtr]::Zero) { break }
+  $cbChild = [DI+EnumProc]{
+    param($h, $l)
+    $sb = New-Object System.Text.StringBuilder 256
+    [DI]::GetClassName($h, $sb, 256) | Out-Null
+    if ($sb.ToString() -eq "SHELLDLL_DefView") { $script:defview = $h; return $false }
+    return $true
+  }
+  [DI]::EnumChildWindows($p, $cbChild, [IntPtr]::Zero) | Out-Null
+}
+
+if ($script:defview -eq [IntPtr]::Zero) { "[]"; exit }
+
+$script:lv = [IntPtr]::Zero
+$cbLv = [DI+EnumProc]{
+  param($h, $l)
+  $sb = New-Object System.Text.StringBuilder 256
+  [DI]::GetClassName($h, $sb, 256) | Out-Null
+  if ($sb.ToString() -eq "SysListView32") { $script:lv = $h; return $false }
+  return $true
+}
+[DI]::EnumChildWindows($script:defview, $cbLv, [IntPtr]::Zero) | Out-Null
+if ($script:lv -eq [IntPtr]::Zero) { "[]"; exit }
+
+$rc = New-Object IRECT
+[DI]::GetWindowRect($script:lv, [ref]$rc) | Out-Null
+$count = [DI]::SendMessage($script:lv, 0x1004, [IntPtr]::Zero, [IntPtr]::Zero).ToInt32()
+$procId = 0
+[DI]::GetWindowThreadProcessId($script:lv, [ref]$procId) | Out-Null
+$proc = [DI]::OpenProcess(0x38, $false, $procId)
+if ($proc -eq [IntPtr]::Zero -or $count -le 0) { "[]"; exit }
+
+$ptr = [DI]::VirtualAllocEx($proc, [IntPtr]::Zero, 16, 0x3000, 0x04)
+$out = @()
+for ($i = 0; $i -lt $count; $i++) {
+  [DI]::SendMessage($script:lv, 0x1010, [IntPtr]$i, $ptr) | Out-Null
+  $buf = New-Object byte[] 8
+  $rd = [IntPtr]::Zero
+  [DI]::ReadProcessMemory($proc, $ptr, $buf, 8, [ref]$rd) | Out-Null
+  $out += @{ x = $rc.L + [BitConverter]::ToInt32($buf, 0); y = $rc.T + [BitConverter]::ToInt32($buf, 4) }
+}
+[DI]::VirtualFreeEx($proc, $ptr, 0, 0x8000) | Out-Null
+[DI]::CloseHandle($proc) | Out-Null
+if ($out.Count -eq 0) { "[]" }
+elseif ($out.Count -eq 1) { "[" + ($out[0] | ConvertTo-Json -Compress) + "]" }
+else { $out | ConvertTo-Json -Compress }
+`;
+
+function desktopIconMode() { // 桌面层级＋用户授权 同时满足才启用图标互动
+  const cfg = config.getConfig();
+  return cfg.layer === "desktop" && !!((cfg.features || {}).desktopIcons);
+}
+let desktopIconCache = { at: 0, list: [] };
+
+async function listDesktopIcons(force = false) {
+  if (!desktopIconMode()) return [];
+  if (!force && Date.now() - desktopIconCache.at < 5 * 60 * 1000) return desktopIconCache.list;
+  try {
+    const txt = await runPowerShell(PS_DESKTOP_ICONS);
+    const j = JSON.parse(txt || "[]");
+    const list = Array.isArray(j) ? j.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y)) : [];
+    desktopIconCache = { at: Date.now(), list };
+    logTts("walk", "桌面图标感知: " + list.length + " 个");
+    return list;
+  } catch { return []; }
+}
+
+/** 挑一个桌面图标走过去跳上去站/坐（复用跳窗的走近→一步跳→回落流程） */
+async function walkAttemptIconPerch() {
+  try {
+    if (!win || win.isDestroyed()) return false;
+    const b = win.getBounds();
+    const wa = screen.getDisplayMatching(b).workArea;
+    const icons = await listDesktopIcons(true);
+    const cands = icons.filter((p) =>
+      p.x >= wa.x + 8 && p.x <= wa.x + wa.width - 60 &&
+      p.y >= wa.y && p.y + b.height <= wa.y + wa.height + 60 // 跳上后整窗不出屏（底部允许略探任务栏区）
+    );
+    if (!cands.length) return false;
+    const t = cands[Math.floor(Math.random() * cands.length)];
+    walk.perchTopY = Math.round(t.y);
+    const charCx = (walk.charInset + b.width - 2) / 2; // 角色条带中心对准图标
+    walk.targetX = Math.min(Math.max(Math.round(t.x - charCx), walkMinX(wa)), wa.x + wa.width - b.width);
+    walk.iconTarget = true;
+    walk.gotoPerch = true;
+    walk.resting = false;
+    walkBroadcast();
+    logTts("walk", "跳上桌面图标: " + JSON.stringify(t));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** 挑一个合适的程序窗口，走过去跳上去坐 */
@@ -1466,9 +1632,15 @@ function walkTick() {
     win.setPosition(Math.round(tx != null ? tx : x), Math.round(ty));
     if (walk.gotoPerch) {
       walk.gotoPerch = false;
-      walk.perched = true;
-      walk.resting = true;
+      if (walk.iconTarget && Math.random() < 0.45) { // 图标上随机改为站立（Relax 待机）
+        walk.iconRest = true;
+        walk.resting = true;
+      } else {
+        walk.perched = true;                        // 坐着（Sit）
+        walk.resting = true;
+      }
       walkBroadcast();
+      applyLayer();                                 // 已离开任务栏表面：桌面层级下让位程序窗口
       walkSchedulePhase(sitPhaseMs());
     } else {
       walk.returning = false;
@@ -1490,6 +1662,18 @@ function walkTick() {
     walk.dir *= -1;
     nx = Math.min(Math.max(nx, minX), maxX);
   }
+  /* —— 桌面层级＋已授权：前进方向近处没有桌面图标就不硬走，就地坐下休息 —— */
+  if (desktopIconMode() && desktopIconCache.list.length) {
+    const lo = Math.min(x, nx) - 40, hi = Math.max(x, nx) + 140;
+    if (!desktopIconCache.list.some((p) => p.x >= lo && p.x <= hi)) {
+      walk.resting = true;
+      walk.seated = true;
+      applySeatPosition();
+      walkBroadcast();
+      walkSchedulePhase(sitPhaseMs());
+      return;
+    }
+  }
   setEdgeLeft(nx < wa.x - 2);                       // 探出屏幕左侧：气泡切头顶模式
   win.setPosition(Math.round(nx), Math.round(groundY));
 }
@@ -1500,6 +1684,8 @@ function startWalkingEngine() {
   walk.active = true;
   walk.resting = true;
   walk.perched = false;
+  walk.iconRest = false;
+  walk.iconTarget = false;
   walk.gotoPerch = false;
   walk.returning = false;
   walk.seated = true; // 启动先坐下，片刻后起身散步
@@ -1519,6 +1705,17 @@ function startWalkingEngine() {
 
 function stopWalkingEngine(silent = false) {
   if (!walk.active) return; // 停止行走保持当前坐姿（seated 不重置，仍坐在任务栏上）
+  if (walk.iconRest || walk.perched || walk.gotoPerch || walk.returning) {
+    // 正在图标/窗顶时关掉行走：清掉空中状态，落回任务栏坐下
+    walk.iconRest = false;
+    walk.iconTarget = false;
+    walk.perched = false;
+    walk.gotoPerch = false;
+    walk.returning = false;
+    walk.resting = true;
+    walk.seated = true;
+    applySeatPosition();
+  }
   applyLayer(walk.seated);
   walk.active = false;
   clearInterval(walk.timer); walk.timer = null;
@@ -1562,8 +1759,10 @@ ipcMain.on("pet:walking-pause", (_e, p) => {
   walk.paused = !!p;
   if (!p && walk.active) {
     // 松手/恢复：若之前处于坐窗流程中被拖走，就地转入「回到地面」下降流程
-    if (walk.perched || walk.gotoPerch || walk.returning) {
+    if (walk.perched || walk.gotoPerch || walk.returning || walk.iconRest) {
       walk.perched = false;
+      walk.iconRest = false;
+      walk.iconTarget = false;
       walk.gotoPerch = false;
       walk.returning = true;
       walk.resting = false;
