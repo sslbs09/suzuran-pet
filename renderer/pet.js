@@ -187,8 +187,12 @@ async function initSpine() {
       spineApp.screen.width / (spineObj.width || 300),
       spineApp.screen.height / (spineObj.height || 400)
     ) * 0.9;
-    // 部分模型图集包围盒偏大（含空白/特效区），自适应后显得偏小：按目录名加缩放修正
-    const boostTable = { "4179_monstr": 2.2, "391_rosmon_sale_16": 2.0 };
+    // 部分模型导出尺度偏小（实测 Mon3tr 锋锐原始高度仅 19 单位）：按目录名加缩放修正
+    const boostTable = {
+      "4179_monstr": 9.5,
+      "4179_monstr_boc_11": 9.5,
+      "391_rosmon_sale_16": 6.5
+    };
     let boost = 1;
     try {
       const segs = decodeURIComponent((spinePaths.skel || "")).split("/");
