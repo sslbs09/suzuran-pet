@@ -1238,7 +1238,7 @@ function dragSeatUpdate(final = false) {
       if (best) {
         seated = true;                                 // 图标顶磁吸
         magnet = "icon";
-        ny = best.y + walk.groundGap - b.height;
+        ny = best.y + walk.groundGap - b.height + getSeatSink(); // 任务栏同款下沉：臀坐图标沿、腿垂进图标格
         nx = Math.round(best.x - charCx);
       }
     } else {
@@ -1673,12 +1673,16 @@ function walkTick() {
     win.setPosition(Math.round(tx != null ? tx : x), Math.round(ty));
     if (walk.gotoPerch) {
       walk.gotoPerch = false;
-      if (walk.iconTarget && Math.random() < 0.45) { // 图标上随机改为站立（Relax 待机）
+      const onIcon = walk.iconTarget;
+      if (onIcon && Math.random() < 0.45) {         // 图标上随机改为站立（Relax 待机）
         walk.iconRest = true;
         walk.resting = true;
       } else {
         walk.perched = true;                        // 坐着（Sit）
         walk.resting = true;
+      }
+      if (walk.perched && onIcon) {                 // 图标坐姿＝任务栏同款：臀坐图标沿、腿垂进图标格
+        win.setPosition(Math.round(tx != null ? tx : x), Math.round(walk.perchTopY + getSeatSink()));
       }
       walkBroadcast();
       applyLayer();                                 // 已离开任务栏表面：桌面层级下让位程序窗口
