@@ -1207,9 +1207,10 @@ ipcMain.on("pet:move", (_e, dx, dy) => {
   }
 });
 
-/** 拖拽落点吸附判定（final=true 表示松手时刻）：底边接近任务栏上沿 → 贴齐坐下；
- *  桌面层级＋已授权时松手贴近真实桌面图标顶 → 坐到该图标上，其余位置自由放置；
- *  拖拽途中不做图标吸附（图标网格密集，边拖边吸会把人钉死），置顶模式沿用估算网格。 */
+/** 拖拽落点吸附判定（final=true 表示松手时刻）：
+ *  桌面层级＋已授权：拖拽途中完全自由（任何磁吸都关掉，防任务栏 48px 带把人钉死），
+ *  松手瞬间判定——贴近任务栏上沿坐下／贴近真实桌面图标顶坐上／其余位置自由放置；
+ *  置顶模式沿用旧行为（边拖边吸：任务栏带＋估算网格）。 */
 function dragSeatUpdate(final = false) {
   if (!win || win.isDestroyed()) return false;
   const b = win.getBounds();
@@ -1219,13 +1220,13 @@ function dragSeatUpdate(final = false) {
   let seated = false;
   let ny = b.y, nx = b.x;
 
-  if (Math.abs(feet - waBottom) <= 48) {
-    seated = true;                                   // 任务栏磁吸
-    ny = waBottom + walk.groundGap - b.height;
-    nx = Math.min(Math.max(b.x, walkMinX(wa)), wa.x + wa.width - b.width);
-  } else if (desktopIconMode()) {
-    // 桌面层级＋已授权：仅松手瞬间判定——贴近真实桌面图标顶(±44px)才坐上，其余位置＝自由放置
-    if (final) {
+  if (final || !desktopIconMode()) {
+    if (Math.abs(feet - waBottom) <= 48) {
+      seated = true;                                   // 任务栏磁吸
+      ny = waBottom + walk.groundGap - b.height;
+      nx = Math.min(Math.max(b.x, walkMinX(wa)), wa.x + wa.width - b.width);
+    } else if (desktopIconMode()) {
+      // 桌面层级＋已授权：松手贴近真实桌面图标顶(±44px)才坐上
       const charCx = (walk.charInset + b.width - 2) / 2;
       let best = null, bestD = Infinity;
       for (const p of desktopIconCache.list) {
@@ -1237,21 +1238,21 @@ function dragSeatUpdate(final = false) {
         ny = best.y + walk.groundGap - b.height;
         nx = Math.round(best.x - charCx);
       }
-    }
-  } else {
-    // 桌面图标网格近似（主屏左侧区域；格尺寸按常见 DPI 估算）
-    const pd = screen.getPrimaryDisplay().workArea;
-    const cx = b.x + b.width / 2;
-    const regionW = Math.min(pd.width * 0.32, 560);
-    if (cx > pd.x && cx < pd.x + regionW) {
-      const cellW = 76, cellH = 92, ox = pd.x + 6, oy = pd.y + 6;
-      const col = Math.floor((cx - ox) / cellW);
-      const cellCx = ox + col * cellW + cellW / 2;
-      const rowTop = oy + Math.max(0, Math.round((feet - oy) / cellH)) * cellH;
-      if (col >= 0 && Math.abs(feet - rowTop) <= 44) {
-        seated = true;                               // 图标顶磁吸
-        ny = rowTop + walk.groundGap - b.height;
-        nx = Math.round(cellCx - b.width / 2);
+    } else {
+      // 桌面图标网格近似（主屏左侧区域；格尺寸按常见 DPI 估算）
+      const pd = screen.getPrimaryDisplay().workArea;
+      const cx = b.x + b.width / 2;
+      const regionW = Math.min(pd.width * 0.32, 560);
+      if (cx > pd.x && cx < pd.x + regionW) {
+        const cellW = 76, cellH = 92, ox = pd.x + 6, oy = pd.y + 6;
+        const col = Math.floor((cx - ox) / cellW);
+        const cellCx = ox + col * cellW + cellW / 2;
+        const rowTop = oy + Math.max(0, Math.round((feet - oy) / cellH)) * cellH;
+        if (col >= 0 && Math.abs(feet - rowTop) <= 44) {
+          seated = true;                               // 图标顶磁吸
+          ny = rowTop + walk.groundGap - b.height;
+          nx = Math.round(cellCx - b.width / 2);
+        }
       }
     }
   }
