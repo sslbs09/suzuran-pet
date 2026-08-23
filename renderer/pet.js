@@ -194,6 +194,14 @@ async function initSpine() {
     return true;
   } catch (e) {
     console.error("[Spine] 初始化失败:", e);
+    // TODO 诊断埋点（临时）：把真实加载错误写进 tts.log，定位后移除
+    try {
+      window.petAPI.playback && window.petAPI.playback(
+        "[spine] 初始化失败: " + (e && e.message || e) +
+        " | atlas=" + (spinePaths && spinePaths.atlas || "?") +
+        " skel=" + (spinePaths && spinePaths.skel || "?")
+      );
+    } catch { /* 忽略 */ }
     // 失败则回退到 GIF 模式
     renderMode = "gif";
     if (spineApp && spineApp.view.parentNode) {
