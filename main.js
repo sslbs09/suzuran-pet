@@ -1319,7 +1319,8 @@ const randInt = (a, b) => Math.floor(a + Math.random() * (b - a + 1));
 
 function walkBroadcast() {
   sendToRenderer("pet:walking", {
-    active: walk.active, resting: walk.resting, perched: walk.perched, seated: walk.seated, face: walk.face
+    active: walk.active, resting: walk.resting, perched: walk.perched, seated: walk.seated, face: walk.face,
+    paused: walk.paused // 暂停也广播：渲染层据此切站立待机，不挂走路动画
   });
 }
 
@@ -1664,6 +1665,7 @@ function walkTick() {
   if (walk.paused && walk.pausedAt && Date.now() - walk.pausedAt > 60000 && Date.now() - (dbgLastMoveTs || 0) > 5000) {
     walk.paused = false;
     walk.pausedAt = 0;
+    walkBroadcast(); // 自愈解除暂停，同步渲染层动画
     logTts("walk", "拖拽暂停超时，自动恢复");
   }
   if (walk.paused || walk.seated || !win.isVisible()) return; // 拖拽中/坐下/隐藏到托盘时不移动
@@ -1825,6 +1827,7 @@ ipcMain.handle("pet:set-walking", (_e, on) => {
 ipcMain.on("pet:walking-pause", (_e, p) => {
   walk.paused = !!p;
   walk.pausedAt = p ? Date.now() : 0;
+  if (walk.active) walkBroadcast(); // 暂停/恢复即时同步渲染层动画（暂停时切站立待机）
   if (!p && walk.active) {
     // 松手/恢复：若之前处于坐窗流程中被拖走，就地转入「回到地面」下降流程
     if (walk.perched || walk.gotoPerch || walk.returning || walk.iconRest) {

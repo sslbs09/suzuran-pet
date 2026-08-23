@@ -87,6 +87,7 @@ function spineFaceDir(face) {
 function spinePhaseAnim() {
   if (!walkState.active) return null;
   if (walkState.perched && spineHas("Sit")) return "Sit";
+  if (walkState.paused) return spineAnimForMood("idle"); // 暂停中（单击互动/拖拽）：站立待机，不挂走路动画
   if (!walkState.resting && spineHas("Move")) return "Move";
   return spineAnimForMood("idle");
 }
