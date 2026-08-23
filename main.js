@@ -2237,10 +2237,12 @@ async function gsvTtsJa(g, text) {
   const params = new URLSearchParams({ text: clean.slice(0, 300), text_language: "ja" });
   // 质量门：只查时长碎片（引擎偶发输出 1s 碎片）。
   // 注：不做高频频谱质检——日语摩擦音天然高频，误判率过高（曾导致大量跳句）。
+  // 阈值 0.75：实测正常输出时长恒为预期的 1.5 倍以上，毛刺碎片 ≤0.4，
+  // 0.5~0.75 区间的「半残音频」（说到一半截断）同样需要重试兜底。
   const expectMs = Math.max(400, clean.length * 90);
   const durOk = (b) => {
     const d = wavDurationMs(b);
-    return !(d > 0 && clean.length > 6 && d < expectMs * 0.5);
+    return !(d > 0 && clean.length > 6 && d < expectMs * 0.75);
   };
   try {
     const resp = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(120000) });
