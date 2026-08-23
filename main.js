@@ -230,15 +230,33 @@ function refreshTrayMenu() {
       }
       setWalking(!c.walking);
     } },
-    { label: i18n.t(lang, "tray.skinLabel"),
-      enabled: cfg.renderMode === "spine",
-      submenu: detectSpineModels().map((m) => ({
-        label: spineSkinDisplayName(m.id, m.name, lang),
-        type: "radio",
-        checked: (cfg.spineSkinId || "builtin") === m.id,
-        click: () => setSpineSkin(m.id)
-      }))
-    },
+    (() => { // 皮肤按角色分组：每个角色一个二级菜单，内含本体与各时装
+      const models = detectSpineModels();
+      const groups = new Map();
+      for (const m of models) {
+        const gid = skinGroupId(m.id);
+        if (!groups.has(gid)) groups.set(gid, []);
+        groups.get(gid).push({ id: m.id, label: skinItemLabel(m, lang) });
+      }
+      const order = ["298", "002", "1001", "1037", "172", "391", "4042", "4235", "1052", "003"];
+      const gids = [...groups.keys()].sort((a, b) => {
+        const ia = order.indexOf(a), ib = order.indexOf(b);
+        return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib) || a.localeCompare(b);
+      });
+      return gids.map((gid) => {
+        const items = groups.get(gid).map((m) => ({
+          label: m.label,
+          type: "radio",
+          checked: (cfg.spineSkinId || "builtin") === m.id,
+          click: () => setSpineSkin(m.id)
+        }));
+        const grpName = (SKIN_GROUP_NAMES[gid] || {}).zh || gid;
+        const spineOn = cfg.renderMode === "spine";
+        return items.length === 1
+          ? { ...items[0], enabled: spineOn } // 单项角色不套二级菜单
+          : { label: grpName, enabled: spineOn, submenu: items };
+      });
+    })(),
     { label: i18n.t(lang, "tray.animDemoLabel"),
       enabled: cfg.renderMode === "spine",
       submenu: ["Relax", "Move", "Sit", "Sleep", "Interact"].map((a) => ({
@@ -1945,17 +1963,37 @@ function setSpineSkin(id) {
 }
 
 /** 皮肤显示名：已知 id 用三语文案，未知皮肤用清理后的文件名 */
-function spineSkinDisplayName(id, fallbackName, lang) {
+/** 皮肤菜单分组：user 子目录名形如 <编号>_<角色>[_<皮肤代号>#N]，按编号归入角色的二级菜单 */
+const SKIN_GROUP_NAMES = {
+  "298": { zh: "苏苏洛", en: "Sussurro", ja: "スズラン" },
+  "002": { zh: "阿米娅", en: "Amiya", ja: "アーミヤ" },
+  "1001": { zh: "阿米娅", en: "Amiya", ja: "アーミヤ" },
+  "1037": { zh: "阿米娅", en: "Amiya", ja: "アーミヤ" },
+  "172": { zh: "银灰", en: "SilverAsh", ja: "シルバーアッシュ" },
+  "391": { zh: "迷迭香", en: "Rosmontis", ja: "ローズモンティス" },
+  "4042": { zh: "流明", en: "Lumen", ja: "ルーメン" },
+  "4235": { zh: "珊比", en: "Thumpy", ja: "タンピー" },
+  "4179": { zh: "Mon3tr", en: "Mon3tr", ja: "モンススリー" },
+  "1052": { zh: "凯尔希", en: "Kal'tsit", ja: "ケルシー" },
+  "003": { zh: "凯尔希", en: "Kal'tsit", ja: "ケルシー" }
+};
+function skinGroupId(id) {
+  if (id === "builtin") return "298";
+  const dir = String(id || "").split("/")[0];
+  const m = dir.match(/^(\d{3,4})_/);
+  return m ? m[1] : dir;
+}
+function skinItemLabel(m, lang) {
+  const id = String(m.id || "");
   if (id === "builtin") return i18n.t(lang, "skin.builtin", "Sussurro");
-  if (/summer/i.test(id)) return i18n.t(lang, "skin.summer", "Sussurro Summer");
-  if (/winter/i.test(id)) return i18n.t(lang, "skin.winter", "Sussurro Winter");
-  // 其他角色（user 目录模型）：按关键词给中文名，未收录的用文件名清理结果
-  if (/mon3tr/i.test(id)) return "Mon3tr";
-  if (/amiya/i.test(id)) return "阿米娅";
-  if (/silverash|silence.*ash|sa_/i.test(id)) return "银灰";
-  if (/lumen/i.test(id)) return "流明";
-  if (/rosmon/i.test(id)) return "迷迭香";
-  return fallbackName || id;
+  const dir = id.split("/")[0];
+  if (dir === "summer") return i18n.t(lang, "skin.summer", "Sussurro Summer");
+  if (dir === "winter") return i18n.t(lang, "skin.winter", "Sussurro Winter");
+  const grp = SKIN_GROUP_NAMES[skinGroupId(id)] || {};
+  const baseName = grp[lang] || grp.zh || m.name || dir;
+  const vm = dir.match(/^\d+_([a-z0-9]+)(?:_(.+))?$/i);
+  const tag = vm && vm[2] ? ` · ${vm[2]}` : "";
+  return `${baseName}${tag}`;
 }
 ipcMain.handle("pet:get-spine-models", () => ({ list: detectSpineModels(), current: config.getConfig().spineSkinId || "builtin" }));
 ipcMain.handle("pet:set-spine-skin", (_e, id) => { setSpineSkin(id); return true; });
