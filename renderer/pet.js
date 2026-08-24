@@ -58,9 +58,10 @@ function fitSpinePose() {
     let b = spineObj.getBounds();
     if (!(b.width > 0) || !(b.height > 0)) return;
     let mag = Math.abs(spineBaseScaleX);
-    // 宽或高任一超出画布（如躺姿变宽、坐姿变矮高）→ 整体微缩到完全放得下
-    // boost>1 的模型包围盒含大量不可见空白，按包围盒缩小会让可见角色过小 → 跳过缩小保护
-    const k = spineBoost > 1 ? 1 : Math.min(1, (W - 6) / b.width, (H - 6) / b.height);
+    const safe = 4;
+    const rawK = Math.min(1, (W - safe * 2) / b.width, (H - safe * 2) / b.height);
+    // 手动 boost 的普通姿势可能含大块 metadata 空白；仅在结构 bounds 明显超出画布时临时 containment。
+    const k = spineBoost > 1 && rawK > 0.6 ? 1 : rawK;
     if (k < 1) mag *= k;
     spineObj.scale.set(mag * (walkState.face === -1 ? -1 : 1), mag);
     // TODO 心跳诊断（临时）：fit 首次执行记录
@@ -101,18 +102,6 @@ function fitSpinePose() {
           spineAutoScaled = true;
           try { window.petAPI.playback && window.petAPI.playback(`[spine] 自动适配 vis=${Math.round(vy1-vy0)}px → ×${kk.toFixed(2)} dir=${relDirOf()}`); } catch { /* 忽略 */ }
           fitSpinePose(); // 放大后重跑一遍本函数完成最终定位
-          return;
-        }
-        const safe = 4;
-        const visibleW = vx1 - vx0, visibleH = vy1 - vy0;
-        const visibleK = Math.min(1, (W - safe * 2) / visibleW, (H - safe * 2) / visibleH);
-        if (visibleK < 0.995) {
-          spineObj.scale.set(spineObj.scale.x * visibleK, spineObj.scale.y * visibleK);
-          spineObj.updateTransform();
-          b = spineObj.getBounds();
-          spineObj.x += (W - b.width) / 2 - b.x;
-          spineObj.y += H - (b.y + b.height);
-          try { window.petAPI.playback && window.petAPI.playback(`[spine] 姿势限框 ×${visibleK.toFixed(2)} dir=${relDirOf()}`); } catch { /* 忽略 */ }
           return;
         }
         const sampledGap = Math.max(0, Math.min(24, Math.round(H - vy1)));

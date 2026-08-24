@@ -256,7 +256,14 @@
 
 ## 7. 待办：下一阶段优先级
 
-### P1：发布工程（务必在干净 commit / 工作树实施）
+### 最新横姿/大姿势裁切修复（2026-08-24）
+- [x] 真实内容在 render texture 中已被裁切后再采样无法补救；现在在 `fitSpinePose()` 的结构 bounds 阶段提前 containment。
+- [x] 手动 boost 普通姿势保持原尺寸；只有结构 bounds 明显超出 120×120 canvas 时按宽高比例临时缩小当前姿势。
+- [x] 移除上一版已裁切像素后的二次 `visibleK` 缩放；`visibleCanvasGap` 仅用于 groundGap。
+- [x] 部署日志已实际出现 `姿势限框 ×0.93`，普通姿势仍有 `fit k=1.000`；部署进程正常。
+- [ ] 仍需人工切换受影响横姿、Relax/Move/Sit/Interact 与不同缩放档位观察完整显示。
+
+
 
 > 当前源码有大量持续积累的本地改动，不要在当前 dirty 工作树直接生成或发布新的 GitHub Release 流程产物。
 
