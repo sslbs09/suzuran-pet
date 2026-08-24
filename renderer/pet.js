@@ -103,6 +103,18 @@ function fitSpinePose() {
           fitSpinePose(); // 放大后重跑一遍本函数完成最终定位
           return;
         }
+        const safe = 4;
+        const visibleW = vx1 - vx0, visibleH = vy1 - vy0;
+        const visibleK = Math.min(1, (W - safe * 2) / visibleW, (H - safe * 2) / visibleH);
+        if (visibleK < 0.995) {
+          spineObj.scale.set(spineObj.scale.x * visibleK, spineObj.scale.y * visibleK);
+          spineObj.updateTransform();
+          b = spineObj.getBounds();
+          spineObj.x += (W - b.width) / 2 - b.x;
+          spineObj.y += H - (b.y + b.height);
+          try { window.petAPI.playback && window.petAPI.playback(`[spine] 姿势限框 ×${visibleK.toFixed(2)} dir=${relDirOf()}`); } catch { /* 忽略 */ }
+          return;
+        }
         const sampledGap = Math.max(0, Math.min(24, Math.round(H - vy1)));
         if (sampledGap <= 12) {
           if (Math.abs(sampledGap - visibleCanvasGapCandidate) <= 3) visibleCanvasGapHits += 1;

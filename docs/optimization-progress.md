@@ -5,6 +5,26 @@
 
 ---
 
+## 2.0 正式版发布（2026-08-24，已推 GitHub）
+
+**发布物**（4 个，均放入 `E:\苏苏洛桌宠已发布\`，此为干净包——已清用户数据残留）：
+- `苏苏洛桌宠-2.0正式版.zip`（218MB）：桌宠本体 2.0（版本号 2.0.0、exe 改名、1.1 文案全部更新、help 页新增「2.0 更新亮点」区块；不含 config/data/persona.md 等用户数据）
+- `苏苏洛语音训练懒人包-普通版.zip`（37KB）
+- `苏苏洛语音训练懒人包-完整版.zip`（6.71GB，含预置苏苏洛音色）
+- `苏苏洛音色-独立部署包.zip`（291MB，新增：预置音色单独部署包）
+- `更新日志-CHANGELOG.md`
+
+**GitHub**（用户明确要求发布，覆盖「不推送」旧约定；本机 Clash 代理 127.0.0.1:7897 已配给 git）：
+- commit `9a98683`（40 文件 +3969/-889，含全部未提交功能）→ push main
+- tag `v2.0.0` 已推送；Release「苏苏洛桌宠 2.0 正式版」https://github.com/sslbs09/suzuran-pet/releases/tag/v2.0.0
+- 资产 3 个（英文名，GitHub 中文文件名会截断！）：SuzuranPet-2.0.0-win32-x64.zip、SuzuranPet-VoiceTrain-Lite.zip、SuzuranPet-SussurroVoice-Preset.zip
+- **完整版 6.71GB 超 GitHub 单文件 2GB 限制未上传**，Release 说明指向本地已发布文件夹/网盘
+- 发布用 git 凭据（OAuth token 40 位）调 API 完成；临时凭据文件已删除
+
+**经验**：GitHub Release 资产上传 URL 是 `uploads.github.com`（非 api.github.com）；中文资产名会被截断成 `-xxx.zip`，用英文名。
+
+---
+
 ## 音色训练懒人包重构（2026-08-24，已交付两版本）
 
 **背景**：用户修复音频机制后要求重做懒人包。构建中发现并修复了旧包多个隐藏缺陷，并新增「预置苏苏洛音色免训练直接用」。
