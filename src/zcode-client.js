@@ -29,25 +29,22 @@ function readDeepseekFromV2() {
 }
 
 /**
- * 确保 ~/.zcode/cli/config.json 包含可用模型配置（CLI 免交互模式的硬性要求）
- * 只做增量合并，不覆盖已有配置
+ * 只读检查 ~/.zcode/cli/config.json 是否已具备 CLI 免交互模式所需的 model 与 provider。
+ * 注意：绝不写入/修改 ZCode 的配置文件——那是其他应用的数据。
+ * 不完整时抛出带指引的错误，由用户自行完成 ZCode 初始化。
  */
-function ensureCliConfig() {
-  const { provider, apiKey } = readDeepseekFromV2();
-  if (!provider) return { apiKey, model: "" };
-  try {
-    fs.mkdirSync(path.dirname(CLI_CONFIG_PATH), { recursive: true });
-    let cfg = {};
-    try { cfg = JSON.parse(fs.readFileSync(CLI_CONFIG_PATH, "utf8")); } catch { cfg = {}; }
-    let changed = false;
-    if (!cfg.model) { cfg.model = "deepseek/deepseek-v4-flash"; changed = true; }
-    if (!cfg.provider || !cfg.provider.deepseek) {
-      cfg.provider = { ...(cfg.provider || {}), deepseek: provider };
-      changed = true;
-    }
-    if (changed) fs.writeFileSync(CLI_CONFIG_PATH, JSON.stringify(cfg, null, 2), "utf8");
-  } catch (e) { console.error("[SuzuranPet] 写 CLI 配置失败:", e.message); }
-  return { apiKey, model: "deepseek/deepseek-v4-flash" };
+function checkCliConfigReadonly() {
+  const { apiKey } = readDeepseekFromV2();
+  let cli = {};
+  try { cli = JSON.parse(fs.readFileSync(CLI_CONFIG_PATH, "utf8")); } catch { cli = {}; }
+  if (!cli.model || !cli.provider || !Object.keys(cli.provider).length) {
+    throw new Error(
+      "ZCode CLI 配置不完整（缺少 model 或 provider）。" +
+      "请先打开一次 ZCode 完成初始化，或手动编辑 " + CLI_CONFIG_PATH +
+      "。苏苏洛桌宠不会替你修改其他应用的配置文件。"
+    );
+  }
+  return { apiKey, model: cli.model };
 }
 
 /** 从 zcode -p --json 输出中提取可读文本（容忍多种返回结构） */
@@ -79,8 +76,8 @@ async function runZcodeTask({ prompt, persona, onChunk = () => {}, signal }) {
   const cfg = config.getConfig();
   if (!cfg.zcodeCli) throw new Error("未探测到 zcode.cjs（请在 config.json 的 zcodeCli 填写完整路径）");
 
-  // 自愈：确保 CLI 模型配置存在
-  const { apiKey, model } = ensureCliConfig();
+  // 只读自检：CLI 模型配置必须已存在（本模块不再代写 ZCode 配置）
+  const { apiKey, model } = checkCliConfigReadonly();
   if (!apiKey) throw new Error("未找到 DeepSeek API Key（请检查 ZCode 配置或 config.json）");
 
   const personaHead = persona ? config.fillTokens(persona.split("\n").slice(0, 6).join(" ")) : "";

@@ -216,13 +216,16 @@ async function chat({ persona, history = [], text, onChunk = () => {}, signal })
  */
 async function testConnection(overrides = {}) {
   const cfg = config.getConfig();
+  // 属性存在语义：显式传入的 apiKey（包括空串）优先生效，用于测试“已清空 key”的场景；
+  // 未传该属性时才回退到已保存的 key。
+  const has = (k) => Object.prototype.hasOwnProperty.call(overrides, k) && overrides[k] !== undefined;
   const o = {
-    apiType: overrides.apiType || cfg.chat.apiType,
-    baseUrl: overrides.baseUrl || cfg.chat.baseUrl,
-    model: overrides.model || cfg.chat.model,
-    apiKey: overrides.apiKey || cfg.chat.apiKey,
-    temperature: overrides.temperature ?? cfg.chat.temperature,
-    maxTokens: Math.min(16, overrides.maxTokens || 16)
+    apiType: has("apiType") ? overrides.apiType : cfg.chat.apiType,
+    baseUrl: has("baseUrl") ? overrides.baseUrl : cfg.chat.baseUrl,
+    model: has("model") ? overrides.model : cfg.chat.model,
+    apiKey: has("apiKey") ? String(overrides.apiKey || "") : cfg.chat.apiKey,
+    temperature: has("temperature") ? overrides.temperature : cfg.chat.temperature,
+    maxTokens: Math.min(16, (has("maxTokens") && overrides.maxTokens) || 16)
   };
   const t0 = Date.now();
   const probe = (async () => {

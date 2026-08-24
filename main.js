@@ -6,29 +6,53 @@
  */
 "use strict";
 
-const { app, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, screen, dialog } = require("electron");
+const { app, protocol, safeStorage, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, screen, dialog, Notification } = require("electron");
+protocol.registerSchemesAsPrivileged([{ scheme: "pet-user", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 const { spawn, exec, execFile } = require("child_process");
 const http = require("http");
+const crypto = require("crypto");
 const path = require("path");
 const fs = require("fs");
+const XLSX = require("xlsx");
 
 const config = require("./src/config");
 const router = require("./src/router");
 const chatClient = require("./src/chat-client");
 const zcodeClient = require("./src/zcode-client");
 const history = require("./src/history");
+const schedules = require("./src/schedules");
 const i18n = require("./src/i18n");
 const features = require("./src/features");
+let koffi = null;
+try { koffi = require("koffi"); } catch (e) { console.warn("[SuzuranPet] koffi unavailable:", e && e.message || e); }
 
 const ICON_PATH = path.join(config.APP_DIR, "icon.png");
+const USER_ASSET_DIR = path.join(config.STORAGE.userDir, "assets");
+
+function registerUserAssetProtocol() {
+  protocol.handle("pet-user", (request) => {
+    try {
+      const url = new URL(request.url);
+      const rel = decodeURIComponent(url.hostname + url.pathname).replace(/^[/\\]+/, "");
+      const file = path.resolve(USER_ASSET_DIR, rel);
+      if (file !== USER_ASSET_DIR && !file.startsWith(USER_ASSET_DIR + path.sep)) return new Response("forbidden", { status: 403 });
+      if (!fs.existsSync(file) || !fs.statSync(file).isFile()) return new Response("not found", { status: 404 });
+      const ext = path.extname(file).toLowerCase();
+      const type = { ".png": "image/png", ".gif": "image/gif", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".otf": "font/otf", ".json": "application/json", ".atlas": "text/plain", ".skel": "application/octet-stream" }[ext] || "application/octet-stream";
+      return new Response(fs.readFileSync(file), { headers: { "content-type": type } });
+    } catch { return new Response("bad request", { status: 400 }); }
+  });
+}
 
 let win = null;
 let tray = null;
 let helpWin = null; // 使用说明窗口
+let quickstartWin = null; // 新手教程窗口
 let settingsWin = null; // 设置窗口
 let voiceWin = null; // 音色克隆与训练窗口
 let moodWin = null; // 表情管理窗口
 let termsWin = null; // 使用条款确认窗口
+let scheduleWin = null; // 日程管理窗口
 let agentApiAbort = null; // Agent 接口当前请求的中止控制器
 let activeReq = null; // { id, abort }
 let forcedMode = "auto"; // auto | chat | zcode
@@ -42,10 +66,14 @@ function isWindowVisible() {
 function showWindow() {
   if (!win || win.isDestroyed()) return;
   win.show();
-  applyLayer(walk.active || walk.seated); // 行走/坐下中保持任务栏之上
+  // 从托盘恢复时先接收一次鼠标命中，渲染层后续会按透明区域重新开启穿透。
+  win.setIgnoreMouseEvents(false);
+  applyLayer(walk.active || walk.seated);
   win.focus();
 }
 function hideWindow() {
+  cancelFlight();
+  cancelWalkJump();
   if (win && !win.isDestroyed()) win.hide();
 }
 function toggleWindow() {
@@ -65,9 +93,11 @@ function applyLayer(_forceTop) {
     try {
       const b = win.getBounds();
       const wa = screen.getDisplayMatching(b).workArea;
-      onTop = b.y + b.height > wa.y + wa.height - 2; // 窗口底探入任务栏区
+      // 仅当窗口底部进入任务栏条带时临时置顶，避免坐姿被任务栏裁切。
+      onTop = b.y + b.height > wa.y + wa.height - 2;
     } catch { onTop = true; }
   }
+  if (!onTop && (walk.perched || walk.gotoPerch || walk.returning || walk.jump)) onTop = true;
   win.setAlwaysOnTop(onTop, "screen-saver");
 }
 function setPetLayer(v) {
@@ -99,6 +129,29 @@ function sitOnTaskbar() {
 }
 ipcMain.handle("pet:sit-taskbar", () => { sitOnTaskbar(); return true; });
 
+function clampPetToWorkArea(reason = "显示器变化") {
+  if (!win || win.isDestroyed()) return;
+  try {
+    const b = win.getBounds();
+    const wa = screen.getDisplayMatching(b).workArea;
+    const x = Math.min(Math.max(b.x, walkMinX(wa)), Math.max(walkMinX(wa), wa.x + wa.width - b.width));
+    const maxY = wa.y + wa.height - b.height + 80; // 保留坐姿下沉到任务栏的空间
+    const y = Math.min(Math.max(b.y, wa.y), Math.max(wa.y, maxY));
+    if (x !== b.x || y !== b.y) {
+      win.setPosition(Math.round(x), Math.round(y));
+      logTts("display", reason + "，已钳制到工作区");
+    }
+    applyLayer();
+  } catch (e) {
+    logTts("display", reason + "，坐标钳制失败: " + (e && e.message || e));
+  }
+}
+let displayClampTimer = null;
+function scheduleDisplayClamp(reason) {
+  clearTimeout(displayClampTimer);
+  displayClampTimer = setTimeout(() => clampPetToWorkArea(reason), 180);
+}
+
 /* ---------- 窗口 ---------- */
 function createWindow() {
   const cfg = config.getConfig();
@@ -109,9 +162,11 @@ function createWindow() {
   win = new BrowserWindow({
     width: w,
     height: h,
+    title: config.fillTokens("{{petName}}桌宠"),
     x: cfg.window.x ?? undefined,
     y: cfg.window.y ?? undefined,
     transparent: true,
+    backgroundColor: "#00000000",
     frame: false,
     alwaysOnTop: true,
     resizable: false,
@@ -128,21 +183,15 @@ function createWindow() {
   });
 
   applyLayer();
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  win.webContents.on("will-navigate", (event) => event.preventDefault());
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.loadFile(path.join(config.APP_DIR, "renderer", "index.html"));
   // 初始即开启点击穿透（透明区域不挡下层应用），由渲染层按需放行
   win.setIgnoreMouseEvents(true, { forward: true });
 
   // 启动时把窗口钳回屏幕工作区内（布局变宽后旧位置可能越界）
-  try {
-    const wa = screen.getDisplayMatching(win.getBounds()).workArea;
-    const [x, y] = win.getPosition();
-    const [cw, ch] = win.getSize();
-    win.setPosition(
-      Math.min(Math.max(x, walkMinX(wa)), wa.x + wa.width - cw),
-      Math.min(Math.max(y, wa.y), wa.y + wa.height - ch + 80) // +80 允许坐姿下沉探入任务栏区
-    );
-  } catch { /* 忽略 */ }
+  clampPetToWorkArea("启动");
 
   // 位置持久化
   const savePos = () => {
@@ -251,13 +300,17 @@ function refreshTrayMenu() {
           chars.set(chKey, { name: SKIN_CHAR_NAMES[chKey] || chKey.split("_").slice(1).join("_"), items: [] });
         }
         chars.get(chKey).items.push({
-          label: skin || "默认",
+          label: (() => { // 皮肤名：优先取 SPINE_CN 全名「人物·皮肤」里「·」后的部分；summer/winter 同理
+            const cn = SPINE_CN[dir];
+            if (skin && cn && cn.includes("·")) return cn.split("·").slice(1).join("·");
+            return skin ? skin.replace(/_/g, " ") : "默认";
+          })(),
           type: "radio",
           checked: (cfg.spineSkinId || "builtin") === m.id,
           click: () => setSpineSkin(m.id)
         });
       }
-      const order = ["298", "002", "1001", "1037", "172", "391", "4042", "4235", "003", "1052"];
+      const order = ["298", "002", "1001", "1037", "172", "391", "4042", "4235", "003", "1052", "254", "358", "2015", "2025"];
       const nums = [...persons.keys()].sort((a, b) => {
         const ia = order.indexOf(a), ib = order.indexOf(b);
         return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib) || a.localeCompare(b);
@@ -285,18 +338,27 @@ function refreshTrayMenu() {
         { label: i18n.t(lang, "tray.layerDesktop"), type: "radio", checked: cfg.layer === "desktop", click: () => setPetLayer("desktop") }
       ]
     },
+    { label: "🌗 半透明模式", type: "checkbox", checked: !!cfg.dimMode, click: () => setDimMode(!cfg.dimMode) },
     { label: i18n.t(lang, "tray.sitTaskbar"), click: () => sitOnTaskbar() },
     { label: i18n.t(lang, "tray.sizeLabel") + i18n.t(lang, sizeWord), enabled: false },
     { label: i18n.t(lang, "tray.sizeSmall"), type: "radio", checked: scale <= 0.8, click: () => setScale(0.75) },
     { label: i18n.t(lang, "tray.sizeStandard"), type: "radio", checked: scale > 0.8 && scale < 1.2, click: () => setScale(1.0) },
     { label: i18n.t(lang, "tray.sizeLarge"), type: "radio", checked: scale >= 1.2 && scale < 1.6, click: () => setScale(1.25) },
     { label: i18n.t(lang, "tray.sizeXLarge"), type: "radio", checked: scale >= 1.6, click: () => setScale(1.5) },
+    { label: "🚶 散步速度", submenu: [
+      { label: "🐢 慢速", type: "radio", checked: (cfg.walkSpeedMul || 1) <= 0.8, click: () => setWalkSpeed(0.6) },
+      { label: "🚶 标准", type: "radio", checked: !cfg.walkSpeedMul || ((cfg.walkSpeedMul > 0.8) && (cfg.walkSpeedMul < 1.4)), click: () => setWalkSpeed(1) },
+      { label: "🏃 快速", type: "radio", checked: cfg.walkSpeedMul >= 1.4 && cfg.walkSpeedMul < 2.2, click: () => setWalkSpeed(1.6) },
+      { label: "⚡ 飞快", type: "radio", checked: cfg.walkSpeedMul >= 2.2, click: () => setWalkSpeed(2.5) }
+    ]},
     { type: "separator" },
+    { label: "📅 日程安排", click: () => openSchedule() },
     { label: i18n.t(lang, "tray.settings"), click: () => openSettings() },
     { label: i18n.t(lang, "tray.moodManager"), click: () => openMoodManager() },
     { label: i18n.t(lang, "tray.voiceStudio"), click: () => openVoiceStudio() },
     { label: i18n.t(lang, "tray.ttsGuide"), click: () => openTtsGuide() },
     { label: i18n.t(lang, "tray.reloadPersona"), click: () => { personaCache = config.getPersonaText(); sendToRenderer("pet:toast", i18n.t(lang, "tray.personaReloaded")); } },
+    { label: i18n.t(lang, "tray.quickstart"), click: () => openQuickstart() },
     { label: i18n.t(lang, "tray.help"), click: () => openHelp() },
     { label: i18n.t(lang, "tray.openConfig"), click: () => shell.openPath(config.CONFIG_PATH) },
     { label: i18n.t(lang, "tray.openPersona"), click: () => shell.openPath(config.PERSONA_PATH) },
@@ -312,6 +374,9 @@ function openHelp() {
   helpWin = new BrowserWindow({
     width: 470,
     height: 620,
+    minWidth: 420,
+    minHeight: 520,
+    resizable: true,
     title: "苏苏洛使用说明",
     autoHideMenuBar: true,
     webPreferences: { nodeIntegration: false, contextIsolation: true }
@@ -319,6 +384,28 @@ function openHelp() {
   helpWin.setMenuBarVisibility(false);
   helpWin.loadFile(path.join(config.APP_DIR, "renderer", "help.html"));
   helpWin.on("closed", () => { helpWin = null; });
+}
+
+/* ---------- 新手教程窗口 ---------- */
+function openQuickstart() {
+  if (quickstartWin && !quickstartWin.isDestroyed()) { quickstartWin.focus(); return; }
+  quickstartWin = new BrowserWindow({
+    width: 700,
+    height: 780,
+    minWidth: 520,
+    minHeight: 560,
+    resizable: true,
+    title: "苏苏洛 · 快速开始（新手教程）",
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(config.APP_DIR, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  quickstartWin.setMenuBarVisibility(false);
+  quickstartWin.loadFile(path.join(config.APP_DIR, "renderer", "quickstart.html"));
+  quickstartWin.on("closed", () => { quickstartWin = null; });
 }
 
 function setTts(enabled) {
@@ -394,6 +481,9 @@ function openSettings() {
   settingsWin = new BrowserWindow({
     width: 720,
     height: 800,
+    minWidth: 560,
+    minHeight: 620,
+    resizable: true,
     title: "苏苏洛 · 设置",
     autoHideMenuBar: true,
     webPreferences: {
@@ -407,9 +497,18 @@ function openSettings() {
   settingsWin.on("closed", () => { settingsWin = null; });
 }
 
+function openSchedule() {
+  if (scheduleWin && !scheduleWin.isDestroyed()) { scheduleWin.focus(); return; }
+  scheduleWin = new BrowserWindow({ width: 820, height: 700, minWidth: 620, minHeight: 520, resizable: true, title: "苏苏洛 · 日程安排", autoHideMenuBar: true,
+    webPreferences: { preload: path.join(config.APP_DIR, "preload.js"), contextIsolation: true, nodeIntegration: false } });
+  scheduleWin.setMenuBarVisibility(false);
+  scheduleWin.loadFile(path.join(config.APP_DIR, "renderer", "schedule.html"));
+  scheduleWin.on("closed", () => { scheduleWin = null; });
+}
+
 /* ---------- 表情管理（换装，动态情绪表） ---------- */
-const SPRITE_USER_DIR = path.join(config.APP_DIR, "renderer", "sprites", "user");
-const SPRITE_DEFAULT_DIR = path.join(config.APP_DIR, "renderer", "sprites", "default");
+const SPRITE_USER_DIR = config.STORAGE.spritesUser;
+const SPRITE_DEFAULT_DIR = config.STORAGE.spritesDefault;
 
 /** 情绪表来自 config.json（moods），支持自定义增删 */
 function getMoodList() {
@@ -422,6 +521,9 @@ function openMoodManager() {
   moodWin = new BrowserWindow({
     width: 760,
     height: 680,
+    minWidth: 560,
+    minHeight: 520,
+    resizable: true,
     title: "苏苏洛 · 表情管理",
     autoHideMenuBar: true,
     webPreferences: {
@@ -593,6 +695,9 @@ function openTerms() {
   termsWin = new BrowserWindow({
     width: 660,
     height: 760,
+    minWidth: 520,
+    minHeight: 560,
+    resizable: true,
     title: "苏苏洛 · 使用条款与隐私政策",
     autoHideMenuBar: true,
     webPreferences: {
@@ -630,6 +735,7 @@ ipcMain.handle("pet:refuse-terms", () => {
   return true;
 });
 ipcMain.handle("pet:open-terms", () => { openTerms(); return true; });
+ipcMain.handle("pet:open-quickstart", () => { openQuickstart(); return true; });
 
 /* ---------- 桌宠大小缩放 ---------- */
 function clampScale(s) {
@@ -644,11 +750,12 @@ function setScale(scale) {
     const ws = Math.round((cfg.window.width || 260) * s);
     const hs = Math.round((cfg.window.height || 200) * s);
     win.setSize(ws, hs);
+    setTimeout(() => clampPetToWorkArea("缩放"), 120);
     try {
       const wa = screen.getDisplayMatching(win.getBounds()).workArea;
       const [x, y] = win.getPosition();
       win.setPosition(Math.min(Math.max(x, walkMinX(wa)), wa.x + wa.width - ws),
-                      Math.min(Math.max(y, wa.y), wa.y + wa.height - hs + 80)); // +80 允许坐姿下沉探入任务栏区
+                      Math.min(Math.max(y, wa.y), wa.y + wa.height - hs + 80));
     } catch { /* 忽略 */ }
     applySeatPosition(); // 尺寸档位变了，若正处于坐姿立即按新档位重新落座
   }
@@ -656,6 +763,18 @@ function setScale(scale) {
   sendToRenderer("pet:scale-changed", s);
 }
 ipcMain.handle("pet:set-scale", (_e, scale) => { setScale(scale); return true; });
+function setWalkSpeed(mul) { // 散步速度档位（借鉴 Ark-Pets 可调移速）
+  const v = Math.max(0.4, Math.min(3, Number(mul) || 1));
+  config.saveConfig({ walkSpeedMul: v });
+  logTts("walk", "散步速度: x" + v);
+  refreshTrayMenu();
+}
+function setDimMode(v) { // 半透明模式：角色变淡不挡视线（借鉴 Ark-Pets opacity_dim）
+  config.saveConfig({ dimMode: !!v });
+  sendToRenderer("pet:set-dim", !!v);
+  logTts("walk", "半透明: " + (!!v ? "开" : "关"));
+  refreshTrayMenu();
+}
 ipcMain.handle("pet:get-seat-sink", () => {
   const t = seatSinkTier();
   return { tier: t, value: getSeatSink(), default: SEAT_SINK_DEFAULTS[t] };
@@ -668,61 +787,84 @@ ipcMain.handle("pet:set-seat-sink", (_e, v) => {
   return { tier: t, value: getSeatSink(), default: SEAT_SINK_DEFAULTS[t] };
 });
 
-/* ---------- 本地 Agent 调用接口（其他 agent / 脚本可调用，仅 127.0.0.1） ---------- */
+/* ---------- 本地 Agent 调用接口（仅 127.0.0.1；可选 Bearer token） ---------- */
+function safeTokenEqual(actual, expected) {
+  const a = Buffer.from(String(actual || ""));
+  const b = Buffer.from(String(expected || ""));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+async function readAgentJson(req, maxBytes) {
+  const declared = Number(req.headers["content-length"] || 0);
+  if (declared > maxBytes) return { error: 413 };
+  const parts = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > maxBytes) return { error: 413 };
+    parts.push(chunk);
+  }
+  try {
+    const body = JSON.parse(Buffer.concat(parts).toString("utf8") || "{}");
+    return body && typeof body === "object" && !Array.isArray(body) ? { body } : { error: 400 };
+  } catch { return { error: 400 }; }
+}
 function startAgentApi() {
   const a = config.getConfig().agentApi || {};
   if (!a.enabled) return;
   const port = Math.max(1, Math.min(65535, parseInt(a.port, 10) || 8765));
   const server = http.createServer(async (req, res) => {
-    const send = (code, obj) => {
+    let sent = false;
+    const send = (code, obj, headers = {}) => {
+      if (sent) return;
+      sent = true;
       const body = JSON.stringify(obj);
-      res.writeHead(code, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(body) });
+      res.writeHead(code, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(body), ...headers });
       res.end(body);
     };
     try {
-      if (req.method === "GET" && req.url.startsWith("/health")) {
-        const cfg = config.getConfig();
-        send(200, { ok: true, name: (cfg.pet || {}).name || "苏苏洛", agreed: !!cfg.agreed, invokeWord: (cfg.agentApi || {}).invokeWord || "" });
+      const url = new URL(req.url || "/", "http://127.0.0.1");
+      if (url.search || !["/health", "/chat", "/stop"].includes(url.pathname)) { send(404, { ok: false, error: "not found" }); return; }
+      const allowed = url.pathname === "/health" ? "GET" : "POST";
+      if (req.method !== allowed) { send(405, { ok: false, error: "method not allowed" }, { Allow: allowed }); return; }
+      const cfg = config.getConfig();
+      const apiCfg = cfg.agentApi || {};
+      const token = String(apiCfg.bearerToken || "");
+      if (token) {
+        const auth = String(req.headers.authorization || "");
+        const match = auth.match(/^Bearer ([^\s]+)$/i);
+        if (!match || !safeTokenEqual(match[1], token)) { send(401, { ok: false, error: "unauthorized" }, { "WWW-Authenticate": "Bearer" }); return; }
+      }
+      if (url.pathname === "/health") {
+        send(200, { ok: true, name: (cfg.pet || {}).name || "苏苏洛", agreed: !!cfg.agreed, invokeWord: apiCfg.invokeWord || "", authRequired: !!token });
         return;
       }
-      if (req.method === "POST" && req.url.startsWith("/chat")) {
-        if (!config.getConfig().agreed) { send(403, { ok: false, error: "请先同意《使用条款与隐私政策》" }); return; }
-        let raw = "";
-        for await (const chunk of req) raw += chunk;
-        let body = {};
-        try { body = JSON.parse(raw || "{}"); } catch { send(400, { ok: false, error: "invalid json" }); return; }
-        let text = String(body.text || "").trim();
-        const a2 = config.getConfig().agentApi || {};
-        if (a2.invokeWord) {
-          const w = String(a2.invokeWord).trim();
-          if (!text.startsWith(w)) { send(400, { ok: false, error: "消息需以调用词「" + w + "」开头" }); return; }
-          text = text.slice(w.length).trim();
-        }
-        if (!text) { send(400, { ok: false, error: "text 不能为空" }); return; }
-        const abort = new AbortController();
-        agentApiAbort = abort;
-        try {
-          const r = await chatClient.chat({
-            persona: personaCache || config.getPersonaText(),
-            history: history.recent("chat", config.getConfig().chat.maxHistoryTurns || 10),
-            text,
-            signal: abort.signal,
-            onChunk: () => {}
-          });
-          history.append({ ts: Date.now(), mode: "chat", role: "user", content: text });
-          history.append({ ts: Date.now(), mode: "chat", role: "assistant", content: r.text });
-          send(200, { ok: true, reply: r.text, emotion: r.emotion || "" });
-        } finally {
-          if (agentApiAbort === abort) agentApiAbort = null;
-        }
-        return;
-      }
-      if (req.method === "POST" && req.url.startsWith("/stop")) {
+      if (url.pathname === "/stop") {
         if (agentApiAbort) agentApiAbort.abort();
         send(200, { ok: true });
         return;
       }
-      send(404, { ok: false, error: "not found" });
+      if (!/^application\/json(?:\s*;|$)/i.test(String(req.headers["content-type"] || ""))) { send(415, { ok: false, error: "application/json required" }); return; }
+      if (!cfg.agreed) { send(403, { ok: false, error: "请先同意《使用条款与隐私政策》" }); return; }
+      const maxBytes = Math.max(1024, Math.min(1024 * 1024, Number(apiCfg.maxBodyBytes) || 65536));
+      const parsed = await readAgentJson(req, maxBytes);
+      if (parsed.error) { send(parsed.error, { ok: false, error: parsed.error === 413 ? "payload too large" : "invalid json" }); return; }
+      let text = String(parsed.body.text || "").trim();
+      if (apiCfg.invokeWord) {
+        const w = String(apiCfg.invokeWord).trim();
+        if (!text.startsWith(w)) { send(400, { ok: false, error: "消息需以调用词「" + w + "」开头" }); return; }
+        text = text.slice(w.length).trim();
+      }
+      if (!text) { send(400, { ok: false, error: "text 不能为空" }); return; }
+      const abort = new AbortController();
+      agentApiAbort = abort;
+      try {
+        const r = await chatClient.chat({ persona: personaCache || config.getPersonaText(), history: history.recent("chat", cfg.chat.maxHistoryTurns || 10), text, signal: abort.signal, onChunk: () => {} });
+        history.append({ ts: Date.now(), mode: "chat", role: "user", content: text });
+        history.append({ ts: Date.now(), mode: "chat", role: "assistant", content: r.text });
+        send(200, { ok: true, reply: r.text, emotion: r.emotion || "" });
+      } finally {
+        if (agentApiAbort === abort) agentApiAbort = null;
+      }
     } catch (e) {
       send(500, { ok: false, error: String(e.message || e) });
     }
@@ -737,6 +879,9 @@ function openVoiceStudio() {
   voiceWin = new BrowserWindow({
     width: 640,
     height: 720,
+    minWidth: 540,
+    minHeight: 560,
+    resizable: true,
     title: "苏苏洛 · 音色克隆与训练",
     autoHideMenuBar: true,
     webPreferences: {
@@ -887,6 +1032,16 @@ function sendProactive(text, emotion, { force = false } = {}) {
   sendToRenderer("pet:proactive", { text, emotion });
 }
 
+function sendScheduleDue(item) {
+  const text = "⏰ 日程提醒：" + item.title + (item.notes ? "\n" + item.notes : "");
+  sendProactive(text, item.emotion || "happy", { force: true });
+  sendToRenderer("pet:schedule-due", item);
+  if (!isWindowVisible() && Notification.isSupported()) {
+    new Notification({ title: "苏苏洛桌宠日程提醒", body: item.title + (item.notes ? "\n" + item.notes : "") }).show();
+  }
+  logTts("schedule", "触发: " + item.id + " " + item.title);
+}
+
 function savePosSafe() {
   if (win && !win.isDestroyed()) {
     const [x, y] = win.getPosition();
@@ -960,10 +1115,11 @@ async function handleAsk(sender, { id, text }) {
   const taskText = mode === "zcode" ? router.route(clean).task : clean;
 
   const abort = new AbortController();
-  activeReq = { id, abort };
+  activeReq = { id, abort, cancelled: false };
+  const isCurrent = () => activeReq && activeReq.id === id && !activeReq.cancelled;
   history.append({ ts: Date.now(), mode, role: "user", content: clean });
 
-  sender.send("pet:thinking", { id, mode });
+  if (isCurrent()) sender.send("pet:thinking", { id, mode });
   let emotion = "";
   try {
     let full = "";
@@ -972,7 +1128,7 @@ async function handleAsk(sender, { id, text }) {
         prompt: taskText,
         persona: personaCache,
         signal: abort.signal,
-        onChunk: (d) => sender.send("pet:chunk", { id, mode, text: d })
+        onChunk: (d) => { if (isCurrent()) sender.send("pet:chunk", { id, mode, text: d }); }
       });
     } else {
       const persona = personaCache || config.getPersonaText();
@@ -981,13 +1137,13 @@ async function handleAsk(sender, { id, text }) {
         history: history.recent("chat", config.getConfig().chat.maxHistoryTurns || 20),
         text: clean,
         signal: abort.signal,
-        onChunk: (d) => sender.send("pet:chunk", { id, mode, text: d })
+        onChunk: (d) => { if (isCurrent()) sender.send("pet:chunk", { id, mode, text: d }); }
       });
       full = r.text;
       emotion = r.emotion || ""; // 模型选的情绪词（≤5字，已在 chat-client 里校验过词表）
     }
     history.append({ ts: Date.now(), mode, role: "assistant", content: full });
-    sender.send("pet:done", { id, mode, full, emotion });
+    if (isCurrent()) sender.send("pet:done", { id, mode, full, emotion });
 
     // 长期记忆摘要：每 20 轮对话自动生成一次
     const _fc = config.getConfig();
@@ -1004,9 +1160,7 @@ async function handleAsk(sender, { id, text }) {
       }
     }
   } catch (err) {
-    if (err.name === "AbortError") {
-      sender.send("pet:done", { id, mode, full: "（已停止）" });
-    } else {
+    if (err.name !== "AbortError" && isCurrent()) {
       sender.send("pet:error", { id, message: String(err.message || err) });
     }
   } finally {
@@ -1018,8 +1172,8 @@ async function handleAsk(sender, { id, text }) {
 ipcMain.handle("pet:ask", (e, payload) => { handleAsk(e.sender, payload); return true; });
 ipcMain.on("pet:stop", () => {
   if (activeReq) {
+    activeReq.cancelled = true;
     activeReq.abort.abort();
-    activeReq = null;
   }
 });
 ipcMain.handle("pet:get-state", () => {
@@ -1037,15 +1191,17 @@ ipcMain.handle("pet:get-state", () => {
     moods: getMoodList(),
     agreed: !!cfg.agreed,
     scale: cfg.window.scale || 1.0,
-    agentApi: cfg.agentApi,
+    agentApi: { ...cfg.agentApi, bearerToken: undefined }, // token 原值不回传 renderer
     firstRun: !!cfg.firstRun,
     workspace: cfg.workspace,
     tts: cfg.tts || { enabled: false, voice: "", rate: 0.95, pitch: 1.1 },
     ttsCloud: { enabled: !!(cfg.ttsCloud?.enabled || cfg.ttsCosy?.enabled || cfg.ttsGenie?.enabled) },
-    winSize: { width: cfg.window.width || 170, height: cfg.window.height || 260 },
-    hasUserSprite: fs.existsSync(path.join(config.APP_DIR, "renderer", "sprites", "user", "sprite.png")),
+    winSize: { width: cfg.window.width || 260, height: cfg.window.height || 200 },
+    hasUserSprite: fs.existsSync(path.join(config.STORAGE.spritesUser, "sprite.png")),
     renderMode: cfg.renderMode === "spine" ? "spine" : "gif",
     walking: !!cfg.walking,
+    walkState: { active: walk.active, resting: walk.resting, perched: walk.perched, seated: walk.seated, face: walk.face, paused: walk.paused },
+    dimMode: !!cfg.dimMode,
     hiddenAtStart: !isWindowVisible()
   };
 });
@@ -1057,47 +1213,43 @@ ipcMain.handle("pet:reload-persona", () => {
 });
 ipcMain.handle("pet:open-config", () => shell.openPath(config.CONFIG_PATH));
 
+function refreshPetName() {
+  const name = config.fillTokens("{{petName}}");
+  if (win && !win.isDestroyed()) win.setTitle(name + "桌宠");
+  if (tray) tray.setToolTip(name + "桌宠（点击隐藏/显示）");
+  sendToAllWindows("pet:name-changed", name);
+}
+
 /* ---------- 设置窗口 IPC ---------- */
-ipcMain.handle("pet:get-settings", () => {
-  const cfg = config.getConfig();
-  return {
-    pet: cfg.pet,
-    chat: {
-      apiType: cfg.chat.apiType,
-      baseUrl: cfg.chat.baseUrl,
-      model: cfg.chat.model,
-      apiKey: cfg.chat.apiKey,
-      userName: cfg.chat.userName,
-      temperature: cfg.chat.temperature,
-      maxTokens: cfg.chat.maxTokens,
-      maxHistoryTurns: cfg.chat.maxHistoryTurns
-    },
-    tts: cfg.tts,
-    ttsCloud: cfg.ttsCloud,
-    ttsCosy: cfg.ttsCosy,
-    ttsGenie: cfg.ttsGenie,
-    zcodeEnabled: !!cfg.zcodeEnabled,
-    zcodeCli: cfg.zcodeCli,
-    agreed: !!cfg.agreed,
-    scale: cfg.window.scale || 1.0,
-    agentApi: cfg.agentApi,
-    hotkey: cfg.hotkey,
-    startHidden: !!cfg.startHidden,
-    uiLang: cfg.uiLang || "zh",
-    renderMode: cfg.renderMode === "spine" ? "spine" : "gif",
-    walking: !!cfg.walking,
-    persona: config.getPersonaText(),
-    hasPersonaDefault: fs.existsSync(config.PERSONA_DEFAULT_PATH),
-    keySource: cfg._keySource
-  };
-});
+ipcMain.handle("pet:generate-agent-token", () => crypto.randomBytes(32).toString("base64url"));
+ipcMain.handle("pet:get-settings", () => config.buildSettingsView());
 ipcMain.handle("pet:save-settings", (_e, patch) => {
   if (!patch || typeof patch !== "object") return false;
   try {
+    const secretPatch = patch.secrets || {};
+    delete patch.secrets;
+    if (patch.chat && Object.prototype.hasOwnProperty.call(patch.chat, "apiKey")) {
+      secretPatch.chatApiKey = { action: "replace", value: patch.chat.apiKey };
+      delete patch.chat.apiKey;
+    }
+    if (patch.ttsCosy && Object.prototype.hasOwnProperty.call(patch.ttsCosy, "apiKey")) {
+      secretPatch.ttsCosyApiKey = { action: "replace", value: patch.ttsCosy.apiKey };
+      delete patch.ttsCosy.apiKey;
+    }
+    if (patch.agentApi && String(patch.agentApi.bearerToken || "").trim()) {
+      secretPatch.agentBearerToken = { action: "replace", value: patch.agentApi.bearerToken };
+      delete patch.agentApi.bearerToken;
+    }
+    const secretValues = {};
+    if (secretPatch.chatApiKey && secretPatch.chatApiKey.action === "replace") secretValues.chatApiKey = String(secretPatch.chatApiKey.value || "");
+    if (secretPatch.ttsCosyApiKey && secretPatch.ttsCosyApiKey.action === "replace") secretValues.ttsCosyApiKey = String(secretPatch.ttsCosyApiKey.value || "");
+    if (secretPatch.agentBearerToken && secretPatch.agentBearerToken.action === "replace") secretValues.agentBearerToken = String(secretPatch.agentBearerToken.value || "");
+    if (Object.keys(secretValues).length) config.replaceSecrets(secretValues);
     const before = config.getConfig();
     config.saveConfig(patch);
     refreshTrayMenu();
     const after = config.getConfig();
+    if ((after.pet && after.pet.name) !== (before.pet && before.pet.name)) refreshPetName();
     if (after.renderMode !== before.renderMode) {
       sendToRenderer("pet:render-mode-changed", after.renderMode);
       syncWalkingEngine(); // 切回 GIF 时自动停走；切回 Spine 且开关开着则恢复
@@ -1124,6 +1276,21 @@ ipcMain.handle("pet:reset-persona", () => {
   }
 });
 ipcMain.handle("pet:test-chat", (_e, overrides) => chatClient.testConnection(overrides || {}));
+
+/* ---------- 显式凭据导入与密钥清除（renderer 永远接触不到明文） ---------- */
+const credentialImport = require("./src/credential-import");
+ipcMain.handle("pet:scan-importable-credentials", () => credentialImport.scan());
+ipcMain.handle("pet:import-credential", (_e, req) => credentialImport.importCredential(req || {}));
+ipcMain.handle("pet:clear-secret", (_e, slot) => {
+  const map = { chat: "chatApiKey", ttsCosy: "ttsCosyApiKey", agent: "agentBearerToken" };
+  const key = map[slot];
+  if (!key) return { ok: false, message: "未知的密钥槽位" };
+  try {
+    return { ok: true, status: config.replaceSecrets({ [key]: "" }), message: "已清除" };
+  } catch (e) {
+    return { ok: false, message: String(e.message || e), status: config.secretStatus() };
+  }
+});
 
 ipcMain.handle("pet:list-models", async (_e, o = {}) => {
   // 读取 API 端口的可用模型列表（OpenAI 兼容 GET /v1/models；Anthropic GET /v1/models）
@@ -1160,7 +1327,8 @@ ipcMain.handle("pet:list-models", async (_e, o = {}) => {
 ipcMain.handle("pet:open-tts-guide", (_e, fileName) => { openTtsGuide(fileName); return true; });
 ipcMain.handle("pet:clear-history", () => {
   try {
-    fs.writeFileSync(path.join(config.APP_DIR, "data", "history.jsonl"), "", "utf8");
+    fs.mkdirSync(path.dirname(config.STORAGE.history), { recursive: true });
+    fs.writeFileSync(config.STORAGE.history, "", "utf8");
     return true;
   } catch { return false; }
 });
@@ -1186,14 +1354,46 @@ ipcMain.handle("pet:voice-stt-b64", async (_e, { audioB64, lang }) => {
   }
 });
 
-// 日程提醒
+// 日程提醒（持久化 schedule 引擎）
+ipcMain.handle("pet:get-schedules", () => schedules.list());
+ipcMain.handle("pet:add-schedule", (_e, item) => { try { return { ok: true, item: schedules.add(item) }; } catch (err) { return { ok: false, error: String(err.message || err) }; } });
+ipcMain.handle("pet:cancel-schedule", (_e, id) => schedules.cancel(String(id || "")));
+ipcMain.handle("pet:complete-schedule", (_e, id) => schedules.complete(String(id || "")));
+ipcMain.handle("pet:snooze-schedule", (_e, { id, minutes }) => schedules.snooze(String(id || ""), minutes));
+ipcMain.handle("pet:open-schedule", () => { openSchedule(); return true; });
 ipcMain.handle("pet:set-reminder", (_e, { text, at }) => {
-  return features.setReminder(text, at, (msg) => {
-    sendProactive(msg, "happy", { force: true });
-  });
+  const date = new Date(Number(at));
+  if (!Number.isFinite(date.getTime())) return { ok: false, message: "提醒时间无效" };
+  try {
+    const item = schedules.add({ title: text, date: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`, time: `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`, recurrence: "none", emotion: "happy" }, { type: "chat" });
+    return { ok: true, message: "提醒已保存", item };
+  } catch (err) { return { ok: false, message: String(err.message || err) }; }
 });
-ipcMain.handle("pet:get-reminders", () => features.getReminders());
-ipcMain.handle("pet:cancel-reminder", (_e, index) => features.cancelReminder(index));
+ipcMain.handle("pet:get-reminders", () => schedules.list().filter((s) => s.source?.type === "chat"));
+ipcMain.handle("pet:cancel-reminder", (_e, id) => schedules.cancel(String(id || "")));
+
+ipcMain.handle("pet:pick-schedule-workbook", async () => {
+  const r = await dialog.showOpenDialog(scheduleWin || win, { title: "选择日程 Excel", filters: [{ name: "Excel", extensions: ["xlsx"] }], properties: ["openFile"] });
+  return r.canceled ? "" : r.filePaths[0];
+});
+ipcMain.handle("pet:import-schedule-workbook", (_e, filePath) => {
+  try {
+    if (!filePath || path.extname(filePath).toLowerCase() !== ".xlsx" || !fs.existsSync(filePath) || fs.statSync(filePath).size > 5 * 1024 * 1024) throw new Error("Excel 文件无效或超过 5MB");
+    const wb = XLSX.readFile(filePath, { cellFormula: false, cellHTML: false, cellText: true });
+    if (wb.SheetNames.length !== 1) throw new Error("Excel 必须只包含一个工作表");
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "", raw: false });
+    if (!rows.length || rows.length > 500) throw new Error("Excel 需包含 1~500 条日程");
+    const items = rows.map((r, i) => ({ title: r.title, date: r.date, time: r.time, recurrence: r.recurrence || "none", enabled: r.enabled, emotion: r.emotion || "happy", notes: r.notes || "", externalId: r.externalId || `xlsx-${i + 2}` }));
+    const saved = items.map((item) => schedules.add(item, { type: "xlsx", fileName: path.basename(filePath), row: items.indexOf(item) + 2 }));
+    return { ok: true, count: saved.length };
+  } catch (e) { return { ok: false, error: String(e.message || e) }; }
+});
+ipcMain.handle("pet:export-schedule-template", async () => {
+  const r = await dialog.showSaveDialog(scheduleWin || win, { title: "保存日程 Excel 模板", defaultPath: "日程模板.xlsx", filters: [{ name: "Excel", extensions: ["xlsx"] }] });
+  if (r.canceled || !r.filePath) return false;
+  const ws = XLSX.utils.json_to_sheet([{ title: "喝药", date: "2026-08-25", time: "09:30", recurrence: "daily", enabled: "true", emotion: "happy", notes: "饭后服用", externalId: "med-001" }]);
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "日程"); XLSX.writeFile(wb, r.filePath); return true;
+});
 
 // 番茄钟
 ipcMain.handle("pet:pomodoro-start", (_e, { workMin, restMin }) => {
@@ -1257,13 +1457,29 @@ function dragSeatUpdate(final = false) {
   let magnet = null;                                // 本次吸附类型："taskbar"|"icon"|null
   let ny = b.y, nx = b.x;
 
-  if (final || !desktopIconMode()) {
+  const freeDragMode = config.getConfig().layer === "desktop";
+  if (final || !freeDragMode) {
     if (Math.abs(feet - waBottom) <= 48) {
-      seated = true;                                   // 任务栏磁吸
+      seated = true;                                   // 任务栏完整坐姿磁吸
       magnet = "taskbar";
-      // 下沉量与 applySeatPosition 一致：小幅拖动放回带内时（changed=false 无人自愈）也保持完整坐姿
+      walk.taskbarHang = false;
       ny = waBottom + walk.groundGap - b.height + getSeatSink();
       nx = Math.min(Math.max(b.x, walkMinX(wa)), wa.x + wa.width - b.width);
+    } else if (freeDragMode && final && feet > waBottom - 120 && feet < waBottom + 80) {
+      // 任务栏半挂：保留释放高度，仅有限下探，不强制塞入坐姿下沉量。
+      walk.taskbarHang = true;
+      walk.resting = true;
+      walk.seated = false;
+      walk.sunk = false;
+      walk.freeStand = true;
+      // 半挂只允许在可见工作区内，避免透明窗口底部落到屏幕外被裁切。
+      const visibleFeetY = Math.min(feet + walk.groundGap, waBottom);
+      ny = Math.round(Math.max(wa.y, visibleFeetY - b.height + 22));
+      nx = Math.min(Math.max(b.x, walkMinX(wa)), wa.x + wa.width - b.width);
+      walkSetPosition(nx, ny, "taskbar-half-hang");
+      walkBroadcast();
+      applyLayer();
+      return false;
     } else if (desktopIconMode()) {
       // 桌面层级＋已授权：松手贴近真实桌面图标顶(±44px)才坐上
       const charCx = (walk.charInset + b.width - 2) / 2;
@@ -1299,6 +1515,18 @@ function dragSeatUpdate(final = false) {
 
   const changed = seated !== walk.seated;
   walk.seated = seated;
+  if (!seated && final && freeDragMode) {
+    walk.perched = false;
+    walk.iconRest = false;
+    walk.gotoPerch = false;
+    walk.returning = false;
+    walk.iconTarget = false;
+    walk.resting = true;
+    walk.freeStand = true;
+    clearTimeout(walk.phaseTimer);
+    walk.phaseTimer = null;
+    walkSchedulePhase(randInt(15000, 35000));
+  }
   if (seated) {
     walk.resting = true;
     walk.freeStand = false;
@@ -1311,7 +1539,7 @@ function dragSeatUpdate(final = false) {
     if (!seated && desktopIconMode()) {       // 桌面模式离开吸附区＝自由放置：保持松手位置站姿，不自愈回任务栏
       walk.resting = true;
       walk.freeStand = true;
-    } else if (!(seated && magnet === "icon")) {
+    } else if (!(seated && magnet === "icon") && !freeDragMode) {
       // 图标吸附的位置已是精确落点（脚踩图标顶），不能再用任务栏贴地定位覆盖；
       // 其余情况（任务栏磁吸/置顶模式）按地面线自愈
       applySeatPosition();
@@ -1342,6 +1570,10 @@ const walk = {
   freeStand: false, // 桌面层级下被自由放置在桌面上（站姿待命，不被相位机拉回任务栏）
   pausedAt: 0,      // 进入拖拽暂停的时刻（用于 mouseup 丢失自愈）
   returning: false, // 坐完正回到地面
+  flight: null,    // 拖拽抛掷中的短生命周期物理状态
+  jump: null,      // 缓动跳窗状态
+  perchBarrier: null, // 当前驻留的窗口屏障快照
+  taskbarHang: false, // 用户拖拽到任务栏带内的半挂状态
   dir: 1,           // 漫游方向
   targetX: null,
   perchTopY: 0,
@@ -1350,6 +1582,27 @@ const walk = {
 };
 const WALK_TICK_MS = 40;
 const WALK_SPEED = 1.2;                        // 每 tick 像素 ≈ 30px/s
+function walkSpeed() {                         // 托盘速度档位倍率（借鉴 Ark-Pets 可调移速）
+  return WALK_SPEED * (Number(config.getConfig().walkSpeedMul) || 1);
+}
+/** 行走引擎统一落点：坐标出现 NaN/Infinity 时拦截并记诊断日志。
+ *  win.setPosition 收到非有限值会抛 "Error processing argument…"，
+ *  未捕获异常会弹模态错误框冻结主进程（2026-08-24 walkTick:2148 实测发生）。 */
+function walkSetPosition(x, y, where) {
+  if (!win || win.isDestroyed()) return false;
+  const px = Math.max(1, Math.round(Number(x))), py = Math.round(Number(y));
+  if (!Number.isSafeInteger(px) || !Number.isSafeInteger(py) || Math.abs(px) > 1000000 || Math.abs(py) > 1000000) {
+    logTts("walk", "拦截非法窗口坐标(" + where + "): x=" + px + " y=" + py);
+    return false;
+  }
+  try { win.setPosition(px, py); return true; }
+  catch (e) {
+    let bounds = "";
+    try { bounds = " bounds=" + JSON.stringify(win.getBounds()); } catch { /* 忽略 */ }
+    logTts("walk", "setPosition 失败(" + where + "): x=" + px + " y=" + py + bounds + " err=" + (e && e.message || e));
+    return false;
+  }
+}
 const randInt = (a, b) => Math.floor(a + Math.random() * (b - a + 1));
 
 function walkBroadcast() {
@@ -1362,6 +1615,117 @@ function walkBroadcast() {
 function walkSchedulePhase(ms) {
   clearTimeout(walk.phaseTimer);
   walk.phaseTimer = setTimeout(walkOnPhaseEnd, ms);
+}
+
+function cancelFlight() {
+  if (!walk.flight) return false;
+  walk.flight = null;
+  return true;
+}
+function easeOutCubic(t) {
+  const n = Math.max(0, Math.min(1, t));
+  return 1 - Math.pow(1 - n, 3);
+}
+function beginWalkJump(targetX, targetY) {
+  if (!win || win.isDestroyed()) return false;
+  const b = win.getBounds();
+  walk.jump = { sx: b.x, sy: b.y, tx: Math.round(targetX), ty: Math.round(targetY), started: Date.now(), duration: 350 };
+  clearTimeout(walk.phaseTimer);
+  walk.phaseTimer = null;
+  return true;
+}
+function cancelWalkJump() {
+  if (!walk.jump) return false;
+  walk.jump = null;
+  return true;
+}
+
+function startFlight(vx, vy) {
+  if (!win || win.isDestroyed() || !walk.active || walk.sleeping || !win.isVisible()) return false;
+  const speed = Math.hypot(vx, vy);
+  if (!Number.isFinite(speed) || speed <= 200) return false;
+  const limit = Math.min(1, 1200 / speed);
+  clearTimeout(walk.phaseTimer);
+  walk.phaseTimer = null;
+  walk.paused = false;
+  walk.pausedAt = 0;
+  walk.resting = true;
+  walk.seated = false;
+  walk.perched = false;
+  walk.iconRest = false;
+  walk.iconTarget = false;
+  walk.freeStand = false;
+  walk.gotoPerch = false;
+  walk.returning = false;
+  walk.targetX = null;
+  walk.flight = { vx: vx * limit, vy: vy * limit, bounces: 0 };
+  walkBroadcast();
+  applyLayer();
+  logTts("walk", `抛掷: vx=${Math.round(vx * limit)} vy=${Math.round(vy * limit)}`);
+  return true;
+}
+
+function walkFlightTick() {
+  const flight = walk.flight;
+  if (!flight || !win || win.isDestroyed()) return false;
+  if (!win.isVisible() || walk.sleeping) { cancelFlight(); return true; }
+  const dt = WALK_TICK_MS / 1000;
+  const b = win.getBounds();
+  const wa = screen.getDisplayMatching(b).workArea;
+  const minX = walkMinX(wa);
+  const maxX = Math.max(minX, wa.x + wa.width - b.width);
+  const groundY = Math.max(wa.y, wa.y + wa.height - b.height) + walk.groundGap;
+  const barrier = barrierFloorFor(b, b.x, wa);
+  const floorY = barrier ? barrier.top + walk.groundGap - b.height : groundY;
+
+  flight.vy = Math.min(1200, flight.vy + 900 * dt);
+  flight.vx *= 0.995;
+  let nx = b.x + flight.vx * dt;
+  let ny = b.y + flight.vy * dt;
+  if (nx < minX || nx > maxX) {
+    nx = Math.min(Math.max(nx, minX), maxX);
+    flight.vx *= -0.35;
+  }
+  if (ny < wa.y) {
+    ny = wa.y;
+    if (flight.vy < 0) flight.vy *= -0.35;
+  }
+  const landingBarrier = barrierFloorFor(b, nx, wa);
+  const landingFloorY = landingBarrier ? landingBarrier.top + walk.groundGap - b.height : groundY;
+  if (ny < landingFloorY) {
+    walkSetPosition(nx, ny, "flight-move"); // 坐标异常时自动拦截跳过，下一 tick 重新读取
+    return true;
+  }
+
+  if (!walkSetPosition(nx, landingFloorY, "flight-land")) { // 坐标异常：放弃本次抛掷，恢复地面节奏
+    cancelFlight();
+    walk.resting = true;
+    walkSchedulePhase(sitPhaseMs());
+    return true;
+  }
+  if (flight.vy > 250) {
+    flight.vy *= -0.35;
+    flight.bounces += 1;
+    return true;
+  }
+  cancelFlight();
+  walk.resting = true;
+  if (landingBarrier) {
+    walk.perched = true;
+    walk.seated = false;
+    walk.sunk = false;
+    walk.perchBarrier = { hwnd: landingBarrier.hwnd, left: landingBarrier.left, right: landingBarrier.right, top: landingBarrier.top, title: landingBarrier.title };
+  } else {
+    // 物理积分已经精确落在任务栏地面；不可再由坐姿定位叠加下沉量。
+    walk.seated = true;
+    walk.sunk = true;
+  }
+  walkSetPosition(nx, landingFloorY, "flight-settle");
+  walkBroadcast();
+  sendToRenderer("pet:dropped");
+  walkSchedulePhase(sitPhaseMs());
+  logTts("walk", "抛掷落地");
+  return true;
 }
 
 /** 相位切换：走↔停↔坐窗循环；休息结束时 35% 概率尝试跳上桌面程序窗口 */
@@ -1386,8 +1750,26 @@ function getSeatSink() {
 /* ---------- 行走左边界补偿＋动作时长 ----------
  * 角色渲染在窗口右侧条带内、左侧是气泡预留区：按 charInset 放宽左边界，让角色能贴到屏幕左缘；
  * 坐/走时长在设置页调上限（保底随机），每个相位调度时实时读配置，改了立即生效。 */
+function safeSetPosition(x, y, source = "position") {
+  if (!win || win.isDestroyed()) return false;
+  const px = Math.max(1, Math.round(Number(x))), py = Math.round(Number(y));
+  if (!Number.isSafeInteger(px) || !Number.isSafeInteger(py) || Math.abs(px) > 1000000 || Math.abs(py) > 1000000) {
+    logTts("walk", source + " 坐标越界：x=" + px + " y=" + py);
+    return false;
+  }
+  try { win.setPosition(px, py); return true; }
+  catch (e) { logTts("walk", source + " setPosition 失败：" + (e && e.message || e)); return false; }
+}
+function clampWalkX(x, wa, width) {
+  const rawMax = wa.x + wa.width - width;
+  const inset = Math.max(0, Math.min(Number(walk.charInset) || 0, Math.max(0, width - 1)));
+  const minX = wa.x - inset;
+  const maxX = Math.max(minX, rawMax);
+  const value = Math.min(Math.max(Number(x), minX), maxX);
+  return { x: value, minX, maxX, rawMax, inset, collapsed: rawMax < minX };
+}
 function walkMinX(wa) {
-  return wa.x - (walk.charInset || 0);
+  return wa.x - Math.max(0, Math.min(Number(walk.charInset) || 0, 399));
 }
 function setEdgeLeft(v) {
   v = !!v;
@@ -1424,6 +1806,17 @@ function applySeatPosition() {
   applyLayer(walk.seated || walk.active); // 接触任务栏表面时保证在任务栏之上
 }
 
+function chooseWalkBehavior() {
+  const defaults = { idle: 0.45, walk: 0.40, perch: 0.15 };
+  const weights = defaults;
+  const total = weights.idle + weights.walk + weights.perch;
+  if (!(total > 0)) return "walk";
+  const r = Math.random() * total;
+  if (r < weights.idle) return "idle";
+  if (r < weights.idle + weights.walk) return "walk";
+  return "perch";
+}
+
 async function walkOnPhaseEnd() {
   if (!walk.active) return;
   if (walk.paused) {                        // 拖拽中冻结一切相位动作（防 applySeatPosition 把窗口弹回任务栏）
@@ -1437,7 +1830,7 @@ async function walkOnPhaseEnd() {
     walk.returning = true;
     walk.resting = false;
     walk.seated = false;
-    applySeatPosition();
+    walk.sunk = false;
     walkBroadcast();
     return;                                 // walkTick 完成下降后再排下一相位
   }
@@ -1450,20 +1843,30 @@ async function walkOnPhaseEnd() {
     }
   }
   if (walk.resting) {
-    if (!walk.paused && desktopIconMode()) { // 桌面层级＋已授权：优先与桌面图标互动
-      if (Math.random() < 0.7) {
+    const behavior = chooseWalkBehavior();
+    if (behavior === "perch") {
+      if (!walk.paused && desktopIconMode()) {
         if (await walkAttemptIconPerch()) return;
-        walk.resting = true;                // 图标不可用 → 就地坐下休息
-        walk.seated = true;
-        applySeatPosition();
-        walkBroadcast();
-        walkSchedulePhase(sitPhaseMs());
+      } else if (!walk.paused) {
+        walkAttemptPerch();
         return;
       }
-      walkAttemptPerch();                   // 剩余概率仍可尝试跳程序窗
+      // 屏障/图标不可用时，沿用普通待机回退。
+      walk.resting = true;
+      walk.seated = true;
+      applySeatPosition();
+      walkBroadcast();
+      walkSchedulePhase(sitPhaseMs());
       return;
     }
-    if (!walk.paused && Math.random() < 0.35) { walkAttemptPerch(); return; }
+    if (behavior === "idle") {
+      walk.resting = true;
+      walk.seated = true;
+      applySeatPosition();
+      walkBroadcast();
+      walkSchedulePhase(sitPhaseMs());
+      return;
+    }
     walk.resting = false;                   // 开始散步
     walk.seated = false;
     applySeatPosition();                    // 起身：腿从任务栏里收回来
@@ -1487,23 +1890,123 @@ function walkUpdateFace(dx) {
   }
 }
 
-/** 枚举可见应用窗口（PowerShell user32），供「坐窗口」挑选落点 */
-const PS_WINDOW_LIST =
-  "Add-Type 'using System;using System.Runtime.InteropServices;public struct RECT{public int L,T,R,B;}public class WQ{" +
-  "[DllImport(\"user32.dll\")]public static extern bool GetWindowRect(IntPtr h,out RECT r);" +
-  "[DllImport(\"user32.dll\")]public static extern bool IsWindowVisible(IntPtr h);}';" +
-  "$o=@();Get-Process|?{$_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -and $_.MainWindowTitle -notmatch '苏苏洛' }|%{" +
-  "$r=New-Object RECT;if([WQ]::GetWindowRect($_.MainWindowHandle,[ref]$r) -and [WQ]::IsWindowVisible($_.MainWindowHandle)){" +
-  "$o+=@{x=$r.L;y=$r.T;w=($r.R-$r.L);h=($r.B-$r.T)}}};" +
-  "if($o.Count -eq 0){'[]'}else{$o|ConvertTo-Json -Compress}";
-
-async function listAppWindows() {
+/** Win32 应用窗口屏障缓存（主进程坐标与 BrowserWindow 坐标统一为屏幕 DIP）。 */
+let winBarriers = [];
+let barrierTimer = null;
+let barrierApi = null;
+function initBarrierApi() {
+  if (barrierApi || !koffi || process.platform !== "win32") return barrierApi;
   try {
-    const txt = await runPowerShell(PS_WINDOW_LIST);
-    const j = JSON.parse(txt || "[]");
-    return Array.isArray(j) ? j : [j];
-  } catch { return []; }
+    const user32 = koffi.load("user32.dll");
+    const dwmapi = koffi.load("dwmapi.dll");
+    const HWND = koffi.pointer(koffi.opaque());
+    const RECT = koffi.struct("BarrierRect", { left: "int32", top: "int32", right: "int32", bottom: "int32" });
+    const EnumProc = koffi.proto("bool __stdcall EnumProc(void *hwnd, long lParam)");
+    barrierApi = {
+      HWND, RECT,
+      enumWindows: user32.func("bool __stdcall EnumWindows(EnumProc *lpEnumFunc, long lParam)"),
+      isVisible: user32.func("bool __stdcall IsWindowVisible(void *hWnd)"),
+      getRect: user32.func("bool __stdcall GetWindowRect(void *hWnd, _Out_ BarrierRect *lpRect)"),
+      getText: user32.func("int __stdcall GetWindowTextW(void *hWnd, _Out_ uint16_t *lpString, int nMaxCount)"),
+      getClass: user32.func("int __stdcall GetClassNameW(void *hWnd, _Out_ uint16_t *lpClassName, int nMaxCount)"),
+      cloaked: dwmapi.func("int __stdcall DwmGetWindowAttribute(void *hwnd, uint32_t dwAttribute, _Out_ uint32_t *pvAttribute, uint32_t cbAttribute)"),
+      EnumProc
+    };
+    return barrierApi;
+  } catch (e) {
+    barrierApi = null;
+    logTts("walk", "窗口屏障初始化失败: " + (e && e.message || e));
+    return null;
+  }
 }
+function readWide(buf, length) {
+  let end = Math.max(0, Math.min(length, buf.length / 2));
+  while (end > 0 && buf[end - 1] === 0) end--;
+  return Buffer.from(buf.buffer, buf.byteOffset, end * 2).toString("utf16le");
+}
+function winRectToDip(rect) {
+  const width = rect.right - rect.left, height = rect.bottom - rect.top;
+  const display = screen.getDisplayMatching({ x: rect.left, y: rect.top, width, height });
+  const scale = display.scaleFactor || 1;
+  const origin = display.bounds;
+  return {
+    left: Math.round(origin.x + (rect.left - origin.x * scale) / scale),
+    top: Math.round(origin.y + (rect.top - origin.y * scale) / scale),
+    right: Math.round(origin.x + (rect.right - origin.x * scale) / scale),
+    bottom: Math.round(origin.y + (rect.bottom - origin.y * scale) / scale)
+  };
+}
+function refreshWinBarriers() {
+  const api = initBarrierApi();
+  if (!api || !win || win.isDestroyed()) { winBarriers = []; return []; }
+  try {
+    const next = [];
+    const cb = (hwnd) => {
+      if (!hwnd || !api.isVisible(hwnd)) return true;
+      const rect = {};
+      if (!api.getRect(hwnd, rect)) return true;
+      const w = rect.right - rect.left, h = rect.bottom - rect.top;
+      if (w < 150 || h < 100) return true;
+      const titleBuf = new Uint16Array(512), classBuf = new Uint16Array(256);
+      const titleLen = api.getText(hwnd, titleBuf, titleBuf.length);
+      const classLen = api.getClass(hwnd, classBuf, classBuf.length);
+      const title = readWide(titleBuf, titleLen), cls = readWide(classBuf, classLen);
+      if (!title || title.includes("苏苏洛") || /^(WorkerW|Progman|Shell_TrayWnd)$/.test(cls)) return true;
+      const cloak = new Uint32Array(1);
+      if (api.cloaked(hwnd, 14, cloak, 4) === 0 && cloak[0]) return true;
+      const dip = winRectToDip(rect);
+      next.push({ top: dip.top, left: dip.left, right: dip.right, bottom: dip.bottom, hwnd, title });
+      return true;
+    };
+    api.enumWindows(cb, 0);
+    winBarriers = next;
+    invalidatePerchIfNeeded();
+    logTts("walk", "窗口屏障刷新: " + next.length + " 个");
+  } catch (e) {
+    winBarriers = [];
+    logTts("walk", "窗口屏障刷新失败: " + (e && e.message || e));
+  }
+  return winBarriers;
+}
+function barrierFloorFor(b, x, wa) {
+  const cx = x + b.width / 2;
+  const candidates = winBarriers.filter((r) =>
+    r.right > x + 12 && r.left < x + b.width - 12 &&
+    r.top > wa.y + 20 && r.top < wa.y + wa.height
+  );
+  if (!candidates.length) return null;
+  const r = candidates.reduce((best, item) => item.top < best.top ? item : best);
+  if (cx < r.left - b.width / 2 || cx > r.right + b.width / 2) return null;
+  return r;
+}
+
+function barrierRects() {
+  return winBarriers.map((r) => ({ x: r.left, y: r.top, w: r.right - r.left, h: r.bottom - r.top, top: r.top, right: r.right, title: r.title, hwnd: r.hwnd }));
+}
+function hwndKey(hwnd) {
+  try { return String(hwnd); } catch { return ""; }
+}
+function barrierIsCurrent(p) {
+  return !!p && winBarriers.some((r) => hwndKey(r.hwnd) === hwndKey(p.hwnd) && Math.abs(r.top - p.top) <= 2 && Math.abs(r.left - p.left) <= 2 && Math.abs(r.right - p.right) <= 2);
+}
+function invalidatePerchIfNeeded() {
+  if (!walk.perched || !walk.perchBarrier || barrierIsCurrent(walk.perchBarrier)) return;
+  walk.perched = false;
+  walk.perchBarrier = null;
+  walk.returning = true;
+  walk.resting = false;
+  walk.seated = false;
+  walk.targetX = null;
+  cancelWalkJump();
+  walkBroadcast();
+  logTts("walk", "窗口屏障失效，返回地面");
+}
+
+/** 兼容旧调用方：窗口候选由屏障缓存提供。 */
+async function listAppWindows() {
+  return barrierRects().map((r) => ({ x: r.x, y: r.top, w: r.w, h: r.h, right: r.right, title: r.title, hwnd: r.hwnd }));
+}
+
 
 /* ---------- 桌面图标感知（需 features.desktopIcons 授权，默认关） ----------
  * 只读桌面图标的屏幕坐标（Win32 SysListView32 + ReadProcessMemory，不读内容、不上传），
@@ -1615,10 +2118,15 @@ async function listDesktopIcons(force = false) {
   }
   try {
     const j = JSON.parse(txt || "[]");
-    const scale = screen.getPrimaryDisplay().scaleFactor || 1; // Win32 返回物理像素，换算成窗口用的逻辑像素(DIP)
+    const display = screen.getPrimaryDisplay();
+    const scale = display.scaleFactor || 1;
+    const origin = display.bounds;
     const list = (Array.isArray(j) ? j : [])
       .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
-      .map((p) => ({ x: Math.round(p.x / scale), y: Math.round(p.y / scale) }));
+      .map((p) => ({
+        x: Math.round(origin.x + (p.x - origin.x * scale) / scale),
+        y: Math.round(origin.y + (p.y - origin.y * scale) / scale)
+      }));
     desktopIconCache = { at: Date.now(), list };
     logTts("walk", "桌面图标感知: " + list.length + " 个 (scale=" + scale + ")");
     return list;
@@ -1647,6 +2155,8 @@ async function walkAttemptIconPerch() {
     walk.iconTarget = true;
     walk.gotoPerch = true;
     walk.resting = false;
+    walk.seated = false;
+    walk.sunk = false;
     walkBroadcast();
     logTts("walk", "跳上桌面图标: " + JSON.stringify(t));
     return true;
@@ -1662,12 +2172,12 @@ function walkAttemptPerch() {
       if (!win || win.isDestroyed()) return;
       const b = win.getBounds();
       const wa = screen.getDisplayMatching(b).workArea;
-      const wins = await listAppWindows();
+      const wins = barrierRects();
       const cands = wins.filter((r) =>
         r.w >= 280 && r.h >= 140 &&
-        r.y >= wa.y + 60 &&                          // 太靠上的窗口坐上去会出屏
-        r.y - b.height >= wa.y + 6 &&                // 上方要放得下整个小人
-        r.x < wa.x + wa.width && r.x + r.w > wa.x    // 在当前屏幕内
+        r.y >= wa.y + 60 &&
+        r.y - b.height >= wa.y + 6 &&
+        r.x < wa.x + wa.width && r.x + r.w > wa.x
       );
       if (!cands.length) {                           // 没有合适窗口 → 坐下休息
         logTts("walk", "无合适窗口可坐，就地休息"); // 失败可观测：避免静默长坐无从排查
@@ -1679,12 +2189,15 @@ function walkAttemptPerch() {
         return;
       }
       const t = cands[Math.floor(Math.random() * cands.length)];
-      walk.perchTopY = t.y;
+      walk.perchBarrier = { hwnd: t.hwnd, left: t.x, right: t.x + t.w, top: t.y, title: t.title };
+      walk.perchTopY = t.y - b.height + walk.groundGap;
       walk.targetX = Math.min(Math.max(t.x + t.w / 2 - b.width / 2, wa.x), wa.x + wa.width - b.width);
       walk.gotoPerch = true;
       walk.resting = false;
+      walk.seated = false;
+      walk.sunk = false;
       walkBroadcast();
-      logTts("walk", "跳上窗口: " + JSON.stringify(t));
+      logTts("walk", "跳上窗口: " + JSON.stringify({ x: t.x, y: t.y, w: t.w, h: t.h, title: t.title }));
     } catch (e) {
       logTts("walk", "坐窗口失败: " + (e && e.message || e));
       walk.resting = true;
@@ -1703,6 +2216,46 @@ function walkTick() {
     walkBroadcast(); // 自愈解除暂停，同步渲染层动画
     logTts("walk", "拖拽暂停超时，自动恢复");
   }
+  if (walkFlightTick()) return;
+  if (walk.jump) {
+    const j = walk.jump;
+    const p = easeOutCubic((Date.now() - j.started) / j.duration);
+    const nx = Math.round(j.sx + (j.tx - j.sx) * p);
+    const ny = Math.round(j.sy + (j.ty - j.sy) * p);
+    if (!walkSetPosition(nx, ny, "jump-ease")) { // 坐标异常：放弃本次跳跃，自愈回地面节奏
+      walk.jump = null;
+      walk.gotoPerch = false;
+      walk.returning = false;
+      walk.resting = true;
+      walkSchedulePhase(sitPhaseMs());
+      return;
+    }
+    if (p < 1) return;
+    walk.jump = null;
+    if (walk.gotoPerch) {
+      walk.gotoPerch = false;
+      const onIcon = walk.iconTarget;
+      if (onIcon && Math.random() < 0.45) {
+        walk.iconRest = true;
+        walk.resting = true;
+      } else {
+        walk.perched = true;
+        walk.resting = true;
+      }
+      if (walk.perched && onIcon) walkSetPosition(j.tx, walk.perchTopY + getSeatSink(), "jump-perch-sink");
+      walkBroadcast();
+      applyLayer();
+      walkSchedulePhase(sitPhaseMs());
+    } else if (walk.returning) {
+      walk.returning = false;
+      walk.resting = true;
+      walk.seated = true;
+      applySeatPosition();
+      walkBroadcast();
+      walkSchedulePhase(sitPhaseMs());
+    }
+    return;
+  }
   if (walk.paused || walk.seated || !win.isVisible()) return; // 拖拽中/坐下/隐藏到托盘时不移动
   // 自愈②：相位定时器丢失（不在任何过渡流程却无人排程）→ 自动重启循环，防永久静止
   if (!walk.paused && !walk.sleeping && !walk.phaseTimer &&
@@ -1712,47 +2265,29 @@ function walkTick() {
   }
   const b = win.getBounds();
   const wa = screen.getDisplayMatching(b).workArea;
-  const minX = walkMinX(wa); // 左边界外扩角色条带宽：角色（而非透明气泡区）贴到屏幕左缘
-  const maxX = Math.max(minX, wa.x + wa.width - b.width);
-  const groundY = Math.max(wa.y, wa.y + wa.height - b.height) + walk.groundGap; // 窗口底边允许下探任务栏区，使角色脚底贴地
-  let x = b.x;
+  const xRange = clampWalkX(b.x, wa, b.width);
+  const minX = xRange.minX;
+  const maxX = xRange.maxX;
+  const groundY = Math.max(wa.y, wa.y + wa.height - b.height) + walk.groundGap;
+  let x = xRange.x;
+  if (xRange.collapsed && !walk._loggedCollapsedRange) {
+    walk._loggedCollapsedRange = true;
+    logTts("walk", "水平范围坍缩，使用可见边界：rawMax=" + xRange.rawMax + " minX=" + xRange.minX + " inset=" + xRange.inset);
+  } else if (!xRange.collapsed) {
+    walk._loggedCollapsedRange = false;
+  }
 
   /* —— 去/回窗口：水平走到正下方后「一步跳」上去/跳下来，不做长距离垂直移动 —— */
   if ((walk.gotoPerch || walk.returning) && !walk.sleeping) {
     const tx = walk.targetX;
     if (tx != null && Math.abs(tx - x) > 2) {      // 水平接近窗口正下方
-      const nx = Math.abs(tx - x) < WALK_SPEED ? tx : x + Math.sign(tx - x) * WALK_SPEED;
+      const nx = Math.abs(tx - x) < walkSpeed() ? tx : x + Math.sign(tx - x) * walkSpeed();
       walkUpdateFace(Math.sign(nx - x));
-      win.setPosition(Math.round(nx), b.y);
+      walkSetPosition(nx, b.y, "walk-approach");
       return;
     }
-    // 到位 → 瞬间跳上窗顶（Sit）/ 跳回地面，避免在空中播放走路动画
-    const ty = walk.returning ? groundY : walk.perchTopY;
-    win.setPosition(Math.round(tx != null ? tx : x), Math.round(ty));
-    if (walk.gotoPerch) {
-      walk.gotoPerch = false;
-      const onIcon = walk.iconTarget;
-      if (onIcon && Math.random() < 0.45) {         // 图标上随机改为站立（Relax 待机）
-        walk.iconRest = true;
-        walk.resting = true;
-      } else {
-        walk.perched = true;                        // 坐着（Sit）
-        walk.resting = true;
-      }
-      if (walk.perched && onIcon) {                 // 图标坐姿＝任务栏同款：臀坐图标沿、腿垂进图标格
-        win.setPosition(Math.round(tx != null ? tx : x), Math.round(walk.perchTopY + getSeatSink()));
-      }
-      walkBroadcast();
-      applyLayer();                                 // 已离开任务栏表面：桌面层级下让位程序窗口
-      walkSchedulePhase(sitPhaseMs());
-    } else {
-      walk.returning = false;
-      walk.resting = true;
-      walk.seated = true; // 落地坐下
-      applySeatPosition();
-      walkBroadcast();
-      walkSchedulePhase(sitPhaseMs());
-    }
+    // 到位后启动约 350ms 缓动跳跃，完成时再提交坐/回地状态
+    beginWalkJump(tx != null ? tx : x, walk.returning ? groundY : walk.perchTopY);
     return;
   }
 
@@ -1760,25 +2295,21 @@ function walkTick() {
   if (walk.resting || walk.sleeping) return;        // 放松/睡觉：站着不动
 
   walkUpdateFace(walk.dir);                         // 朝向跟随实际位移方向
-  let nx = x + walk.dir * WALK_SPEED;
+  let nx = x + walk.dir * walkSpeed();
   if (nx <= minX || nx >= maxX) {                   // 到屏幕边折返（左侧已按角色条带补偿）
     walk.dir *= -1;
     nx = Math.min(Math.max(nx, minX), maxX);
   }
-  /* —— 桌面层级＋已授权：前进方向近处没有桌面图标就不硬走，就地坐下休息 —— */
-  if (desktopIconMode() && desktopIconCache.list.length) {
-    const lo = Math.min(x, nx) - 40, hi = Math.max(x, nx) + 140;
-    if (!desktopIconCache.list.some((p) => p.x >= lo && p.x <= hi)) {
-      walk.resting = true;
-      walk.seated = true;
-      applySeatPosition();
-      walkBroadcast();
-      walkSchedulePhase(sitPhaseMs());
-      return;
-    }
-  }
+  /* 桌面图标缓存仅用于跳图标目标；缓存缺口不应打断普通地面行走。 */
   setEdgeLeft(nx < wa.x - 2);                       // 探出屏幕左侧：气泡切头顶模式
-  win.setPosition(Math.round(nx), Math.round(groundY));
+  const px = Math.round(nx), py = Math.round(groundY);
+  if (!Number.isSafeInteger(px) || !Number.isSafeInteger(py) || Math.abs(px) > 1000000 || Math.abs(py) > 1000000) {
+    logTts("walk", "walkTick 坐标越界，跳过本 tick：x=" + px + " y=" + py +
+      " dir=" + walk.dir + " speedMul=" + config.getConfig().walkSpeedMul +
+      " groundGap=" + walk.groundGap + " bounds=" + JSON.stringify(b) + " workArea=" + JSON.stringify(wa));
+    return;
+  }
+  safeSetPosition(px, py, "walkTick");
 }
 
 function startWalkingEngine() {
@@ -1809,6 +2340,8 @@ function startWalkingEngine() {
 
 function stopWalkingEngine(silent = false) {
   if (!walk.active) return; // 停止行走保持当前坐姿（seated 不重置，仍坐在任务栏上）
+  cancelFlight();
+  cancelWalkJump();
   if (walk.iconRest || walk.perched || walk.gotoPerch || walk.returning) {
     // 正在图标/窗顶时关掉行走：清掉空中状态，落回任务栏坐下
     walk.iconRest = false;
@@ -1860,10 +2393,11 @@ ipcMain.handle("pet:set-walking", (_e, on) => {
   return { ok: true };
 });
 ipcMain.on("pet:walking-pause", (_e, p) => {
+  if (p) { cancelFlight(); cancelWalkJump(); walk.taskbarHang = false; } // 鼠标重新抓住时立即停止飞行/跳跃/半挂
   walk.paused = !!p;
   walk.pausedAt = p ? Date.now() : 0;
   if (walk.active) walkBroadcast(); // 暂停/恢复即时同步渲染层动画（暂停时切站立待机）
-  if (!p && walk.active) {
+  if (!p && walk.active && !walk.flight && !walk.jump) {
     // 松手/恢复：若之前处于坐窗流程中被拖走，就地转入「回到地面」下降流程
     if (walk.perched || walk.gotoPerch || walk.returning || walk.iconRest) {
       walk.perched = false;
@@ -1872,6 +2406,8 @@ ipcMain.on("pet:walking-pause", (_e, p) => {
       walk.gotoPerch = false;
       walk.returning = true;
       walk.resting = false;
+      walk.seated = false;
+      walk.sunk = false;
       walk.targetX = null; // 水平保持当前 x，只垂直落地
       clearTimeout(walk.phaseTimer);
       walkBroadcast();
@@ -1884,7 +2420,20 @@ ipcMain.on("pet:walking-pause", (_e, p) => {
     }
   }
 });
-ipcMain.on("pet:set-sleeping", (_e, v) => { walk.sleeping = !!v; }); // 睡觉时行走引擎原地待命
+ipcMain.on("pet:throw", (_e, vx, vy) => {
+  vx = Number(vx); vy = Number(vy);
+  if (Number.isFinite(vx) && Number.isFinite(vy) && startFlight(vx, vy)) return;
+  // 渲染层甩动后不再发送 walkingPause(false)；拒绝飞行时必须立即恢复，不能等 60 秒看门狗。
+  if (walk.paused) {
+    walk.paused = false;
+    walk.pausedAt = 0;
+    if (walk.active) walkBroadcast();
+  }
+});
+ipcMain.on("pet:set-sleeping", (_e, v) => {
+  walk.sleeping = !!v;
+  if (walk.sleeping) { cancelFlight(); cancelWalkJump(); }
+}); // 睡觉时行走引擎原地待命
 ipcMain.on("pet:set-ground-gap", (_e, px) => {
   const v = Number(px);
   if (Number.isFinite(v)) walk.groundGap = Math.max(0, Math.min(80, Math.round(v)));
@@ -1930,7 +2479,7 @@ ipcMain.handle("pet:import-font", async () => { // 选本地字体文件→复�
   if (!r.filePaths || !r.filePaths.length) return null;
   const name = path.basename(r.filePaths[0]);
   if (!/\.(ttf|otf|woff2?)$/i.test(name)) return null;
-  const dir = path.join(config.APP_DIR, "renderer", "fonts", "user");
+  const dir = config.STORAGE.fontsUser;
   fs.mkdirSync(dir, { recursive: true });
   fs.copyFileSync(r.filePaths[0], path.join(dir, name));
   const prev = (config.getConfig().appearance || {}).customFonts || [];
@@ -1939,15 +2488,54 @@ ipcMain.handle("pet:import-font", async () => { // 选本地字体文件→复�
   return { customFonts: (config.getConfig().appearance || {}).customFonts || [] };
 });
 
+/** 皮肤目录 → 中文显示名（托盘菜单用；新皮肤目录名需手动加进这张表，缺了会回退到英文目录名） */
+const SPINE_CN = {
+  "002_amiya": "阿米娅",
+  "002_amiya_epoque_4": "阿米娅·忒斯特收藏 II",
+  "002_amiya_test_1": "阿米娅·忒斯特收藏 IV",
+  "002_amiya_winter_1": "阿米娅·忒斯特收藏 I",
+  "1001_amiya2_casc_1": "阿米娅·CASC",
+  "1001_amiya2_sale_16": "阿米娅·忒斯特收藏 XVIII",
+  "1037_amiya3": "阿米娅(升变)",
+  "1037_amiya3_sale_13": "阿米娅(升变)·忒斯特收藏 XIV",
+  "172_svrash": "银灰",
+  "172_svrash_ambiencesynesthesia_4": "银灰·音律联觉 IV",
+  "172_svrash_snow_1": "银灰·冰原信使 I",
+  "172_svrash_summer_4": "银灰·珊瑚海岸 IV",
+  "2015_dusk": "夕",
+  "2015_dusk_nian_12": "夕·0011制造 XII",
+  "2015_dusk_nian_7": "夕·0011制造 VI",
+  "2025_shu": "黍",
+  "2025_shu_nian_11": "黍·0011制造 XI",
+  "254_vodfox": "巫恋",
+  "254_vodfox_witch_2": "巫恋·巫异盛宴 II",
+  "254_vodfox_yun_8": "巫恋·0011韵系列 VIII",
+  "358_lisa": "铃兰",
+  "358_lisa_epoque_22": "铃兰·时代 XXII",
+  "358_lisa_lxh_1": "铃兰·罗小黑战记",
+  "358_lisa_wild_3": "铃兰·生命之地 III",
+  "391_rosmon": "迷迭香",
+  "391_rosmon_epoque_17": "迷迭香·时代 XVII",
+  "391_rosmon_sale_16": "迷迭香·忒斯特收藏 XVIII",
+  "4042_lumen": "流明",
+  "4042_lumen_ambiencesynesthesia_3": "流明·音律联觉 III",
+  "4042_lumen_sanrio_2": "流明·三丽鸥家族 II",
+  "4179_monstr": "Mon3tr",
+  "4179_monstr_boc_11": "Mon3tr·斗争血脉 XI",
+  "4235_thumpy": "珊比",
+  "summer": "苏苏洛·夏卉",
+  "winter": "苏苏洛·寒冬"
+};
+
 /** 扫描全部可用 Spine 皮肤：内置苏苏洛 + spine/user/ 下每个含 .atlas+.skel/.json 的模型（支持子文件夹分皮肤） */
 function detectSpineModels() {
   const list = [{
     id: "builtin",
-    name: "Sussurro",
+    name: "苏苏洛",
     atlas: "spine/sussurro/build_char_298_susuro.atlas",
     skel: "spine/sussurro/build_char_298_susuro.skel"
   }];
-  const userDir = path.join(config.APP_DIR, "renderer", "spine", "user");
+  const userDir = config.STORAGE.spineUser;
   const scan = (relDir) => {
     let entries = [];
     try { entries = fs.readdirSync(path.join(userDir, relDir), { withFileTypes: true }); } catch { return; }
@@ -1961,9 +2549,9 @@ function detectSpineModels() {
       const prefix = relDir ? relDir + "/" : "";
       list.push({
         id: prefix + base,
-        name: base.replace(/^(build_char_\d+_)/, "").replace(/_/g, " "),
-        atlas: "spine/user/" + prefix + e.name,
-        skel: "spine/user/" + prefix + skelName
+        name: SPINE_CN[relDir] || base.replace(/^(build_char_\d+_)/, "").replace(/_/g, " "),
+        atlas: "pet-user://spine/user/" + prefix + e.name,
+        skel: "pet-user://spine/user/" + prefix + skelName
       });
     }
   };
@@ -1996,7 +2584,12 @@ const SKIN_PERSON_NAMES = {
   "4042": { zh: "流明", en: "Lumen", ja: "ルーメン" },
   "4235": { zh: "珊比", en: "Thumpy", ja: "タンピー" },
   "003": { zh: "凯尔希", en: "Kal'tsit", ja: "ケルシー" },
-  "1052": { zh: "凯尔希", en: "Kal'tsit", ja: "ケルシー" }
+  "1052": { zh: "凯尔希", en: "Kal'tsit", ja: "ケルシー" },
+  "254": { zh: "巫恋", en: "Shamare", ja: "シャマール" },
+  "358": { zh: "铃兰", en: "Suzuran", ja: "スズラン" },
+  "2015": { zh: "夕", en: "Dusk", ja: "ダスク" },
+  "2025": { zh: "黍", en: "Shu", ja: "シュウ" },
+  "4179": { zh: "Mon3tr", en: "Mon3tr", ja: "Mon3tr" }
 };
 const SKIN_CHAR_NAMES = { // 角色（形态）中文名；未收录的用目录代号
   "002_amiya": "本体",
@@ -2009,7 +2602,11 @@ const SKIN_CHAR_NAMES = { // 角色（形态）中文名；未收录的用目录
   "391_rosmon": "本体",
   "4042_lumen": "本体",
   "4235_thumpy": "本体",
-  "298_susuro": "本体"
+  "298_susuro": "本体",
+  "254_vodfox": "本体",
+  "358_lisa": "本体",
+  "2015_dusk": "本体",
+  "2025_shu": "本体"
 };
 function skinParseDir(dir) { // "002_amiya_epoque#4" → {num:"002", ch:"amiya", skin:"epoque#4"}
   const m = String(dir || "").match(/^(\d{3,4})_([a-z0-9]+)(?:_(.+))?$/i);
@@ -2030,14 +2627,27 @@ ipcMain.on("pet:set-size", (_e, w, h) => {
   const ws = Math.max(120, Math.min(1200, Math.round(w || 170)));
   const hs = Math.max(120, Math.min(900, Math.round(h || 260)));
   win.setSize(ws, hs);
-  try { // 保持在屏幕工作区内，避免放大后跑出屏幕
-    const wa = screen.getDisplayMatching(win.getBounds()).workArea;
-    const [x, y] = win.getPosition();
-    win.setPosition(Math.min(Math.max(x, wa.x), wa.x + wa.width - ws),
-                    Math.min(Math.max(y, wa.y), wa.y + wa.height - hs + 80)); // +80 允许坐姿下沉
-  } catch { /* 忽略 */ }
+  setTimeout(() => clampPetToWorkArea("窗口尺寸"), 120);
 });
 let ttsQueue = Promise.resolve(); // 合成串行队列：GSV/Genie 单模型串行处理，并发施压是毛刺诱因之一
+const gsvBreaker = { failures: 0, openedAt: 0, cooldownMs: 60000 };
+function gsvAvailableNow() {
+  if (!gsvBreaker.openedAt) return true;
+  if (Date.now() - gsvBreaker.openedAt >= gsvBreaker.cooldownMs) {
+    logTts("gsv", "冷却结束，允许一次恢复探测");
+    gsvBreaker.openedAt = 0;
+    return true;
+  }
+  return false;
+}
+function recordGsvResult(ok) {
+  if (ok) { gsvBreaker.failures = 0; return; }
+  gsvBreaker.failures += 1;
+  if (gsvBreaker.failures >= 2) {
+    gsvBreaker.openedAt = Date.now();
+    logTts("gsv", "连续失败 " + gsvBreaker.failures + " 次，进入 60 秒冷却并回退中文语音");
+  }
+}
 ipcMain.handle("pet:tts-clone", (_e, text) => {
   const task = ttsQueue.then(() => ttsCloneImpl(text));
   ttsQueue = task.then(() => {}, () => {}); // 单次失败不中断后续排队
@@ -2049,9 +2659,8 @@ async function ttsCloneImpl(text) {
   try {
     const dumpWav = (b64) => { // 调试转储：保存最终交付的音频，便于排查播放端问题
       try {
-        const dir = path.join(config.APP_DIR, "data");
-        fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(path.join(dir, "tts_last.wav"), Buffer.from(b64, "base64"));
+        fs.mkdirSync(config.STORAGE.audio, { recursive: true });
+        fs.writeFileSync(path.join(config.STORAGE.audio, "tts_last.wav"), Buffer.from(b64, "base64"));
       } catch { /* 转储失败不影响主流程 */ }
     };
     const cfg = config.getConfig();
@@ -2069,30 +2678,36 @@ async function ttsCloneImpl(text) {
       // 日语模式：优先本地 GPT-SoVITS 日语合成（苏苏洛音色）。
       // 微调模型一次只能生成一句，因此按句切分逐句合成后拼接，保证完整读完回复。
       const g = cfg.ttsGsv || {};
-      if (g.enabled) {
+      if (g.enabled && gsvAvailableNow()) {
         const up = await ensureGsvServer(g);
         if (up) {
           const sents = splitJaSentences(sanitizeJaText(jaText));
           const parts = [];
+          let failed = false;
           for (const s of sents) {
             const b64 = await gsvTtsJa(g, s);
-            if (b64) parts.push(b64);
-            else logTts("gsv", "单句失败（跳过）: " + String(s).slice(0, 30));
+            if (!b64) { failed = true; logTts("gsv", "单句失败，整段回退: " + String(s).slice(0, 30)); break; }
+            parts.push(b64);
           }
-          if (parts.length) {
-            const merged = mergeWavBase64(parts); // 单句也走一遍：统一做首尾静音裁剪
+          if (!failed && parts.length === sents.length) {
+            const merged = mergeWavBase64(parts);
             if (merged) {
+              recordGsvResult(true);
               logTts("route", `gsv-ja ok ${parts.length}/${sents.length}句 len=${merged.length}`);
               dumpWav(merged);
               return merged;
             }
           }
-          logTts("route", "gsv-ja 失败 → 回退中文链路");
+          recordGsvResult(false);
+          logTts("route", "gsv-ja 整段失败 → 回退中文链路");
         } else {
+          recordGsvResult(false);
           logTts("route", "gsv-ja 服务不可用 → 回退中文链路");
         }
+      } else if (g.enabled) {
+        logTts("route", "gsv-ja 冷却中 → 回退中文链路");
       }
-      ttsText = clean; // 日语服务不可用 → 退回中文合成
+      ttsText = clean;
     }
     if (q.enabled) {
       const up = await ensureGenieServer(q);
@@ -2133,14 +2748,30 @@ async function ttsCloneImpl(text) {
 }
 
 /* ---------- 本地 Genie (GPT-SoVITS) TTS（ttsGenie） ---------- */
+function resolveTtsEndpoint(engine, fallbackPort) {
+  try {
+    const url = new URL(String(engine.server || `http://127.0.0.1:${fallbackPort}`));
+    if (url.username || url.password || url.hash || !["http:", "https:"].includes(url.protocol)) return null;
+    const host = url.hostname.toLowerCase();
+    const loopback = host === "127.0.0.1" || host === "::1" || host === "localhost";
+    if (!loopback && (!engine.allowRemote || url.protocol !== "https:")) return null;
+    url.pathname = url.pathname.replace(/\/+$/, "");
+    return { base: url.toString().replace(/\/$/, ""), loopback, autoStart: loopback && engine.autoStart !== false };
+  } catch { return null; }
+}
 let genieServerChecked = false;
 let genieServerUp = false;
+let genieEnsurePromise = null;
 
 /** 确保本地 Genie TTS 服务器在运行（最多等 ~240 秒模型加载）；返回是否可用 */
 async function ensureGenieServer(q) {
   if (genieServerChecked) return genieServerUp;
+  if (genieEnsurePromise) return genieEnsurePromise;
+  genieEnsurePromise = (async () => {
   genieServerChecked = true;
-  const base = String(q.server || "").replace(/\/+$/, "");
+  const endpoint = resolveTtsEndpoint(q, 9881);
+  if (!endpoint) { logTts("genie", "拒绝非 loopback 或未授权的远端端点"); return false; }
+  const base = endpoint.base;
   const health = async () => {
     try {
       const r = await fetch(base + "/health", { signal: AbortSignal.timeout(2000) });
@@ -2148,6 +2779,10 @@ async function ensureGenieServer(q) {
     } catch { return false; }
   };
   if (await health()) { genieServerUp = true; logTts("genie", "服务器已在运行"); return true; }
+  if (!endpoint.autoStart) {
+    logTts("genie", "远端端点未响应，跳过本地拉起");
+    return false;
+  }
   if (!q.python || !q.serverScript) {
     logTts("genie", "配置不完整（python/serverScript）");
     return false;
@@ -2169,6 +2804,12 @@ async function ensureGenieServer(q) {
   }
   logTts("genie", "等待超时（150s 未就绪）");
   return false;
+  })();
+  try {
+    return await genieEnsurePromise;
+  } finally {
+    genieEnsurePromise = null;
+  }
 }
 
 /** 调本地服务器合成克隆音色；返回 base64，失败返回空。
@@ -2217,6 +2858,7 @@ async function genieTts(q, clean) {
 let gsvServerChecked = false;
 let gsvServerUp = false;
 let gsvEnsurePromise = null; // 拉起流程单飞：进行中的拉起由后续调用共享等待
+let gsvWarmupPromise = null;
 
 /** 确保 GPT-SoVITS 日语推理服务器在运行（端口 9880）；返回是否可用。
  *  启动预热与第一句话可能同时触发本函数：拉起进行中时后来者必须共用同一次等待，
@@ -2229,14 +2871,25 @@ function ensureGsvServer(g) {
 async function ensureGsvServerImpl(g) {
   if (gsvServerChecked) return gsvServerUp;
   gsvServerChecked = true;
-  const base = String(g.server || "").replace(/\/+$/, "");
+  const endpoint = resolveTtsEndpoint(g, 9880);
+  if (!endpoint) { logTts("gsv", "拒绝非 loopback 或未授权的远端端点"); return false; }
+  const base = endpoint.base;
   const alive = async () => {
     try {
       const r = await fetch(base + "/set_model", { signal: AbortSignal.timeout(2000) });
       return r.status === 400 || r.ok; // 服务器在线即返回 400/200
     } catch { return false; }
   };
-  if (await alive()) { gsvServerUp = true; logTts("gsv", "服务器已在运行"); warmupGsv(g); return true; }
+  if (await alive()) {
+    gsvServerUp = true;
+    logTts("gsv", "服务器已在运行");
+    await warmupGsv(g);
+    return true;
+  }
+  if (!endpoint.autoStart) {
+    logTts("gsv", "远端端点未响应，跳过本地拉起");
+    return false;
+  }
   if (!g.python || !g.serverScript) {
     logTts("gsv", "配置不完整（python/serverScript）");
     return false;
@@ -2272,7 +2925,12 @@ async function ensureGsvServerImpl(g) {
   const deadline = Date.now() + (g.startTimeout || 240000);
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 3000));
-    if (await alive()) { gsvServerUp = true; logTts("gsv", "服务器就绪"); warmupGsv(g); return true; }
+    if (await alive()) {
+      gsvServerUp = true;
+      logTts("gsv", "服务器就绪");
+      await warmupGsv(g);
+      return true;
+    }
   }
   logTts("gsv", "等待超时");
   return false;
@@ -2437,18 +3095,19 @@ let gsvAutoRestarting = false; // 自动重启进行中（防嵌套）
 let gsvWarmingUp = false;      // 预热进行中（防重入）
 let gsvCrashRecoveryAt = 0;    // 上次崩溃自愈时刻（60s 节流，防连环重启）
 function warmupGsv(g) {
-  if (gsvWarmingUp) return Promise.resolve(true);
+  if (gsvWarmupPromise) return gsvWarmupPromise;
   if (gsvAutoRestarting) return Promise.resolve(false);
   gsvWarmingUp = true;
-  return (async () => {
+  gsvWarmupPromise = (async () => {
     try {
       const b64 = await gsvTtsJa(g, "テスト、おはようございます");
-      logTts("gsv", b64 ? "预热完成" : "预热输出异常（每句自愈仍会兜底）");
+      logTts("gsv", b64 ? "预热完成" : "预热输出异常，暂时回退中文语音");
       return !!b64;
     } finally {
       gsvWarmingUp = false;
     }
-  })();
+  })().finally(() => { gsvWarmupPromise = null; });
+  return gsvWarmupPromise;
 }
 
 /* ---------- 手动重启日语 TTS 服务 ---------- */
@@ -2670,7 +3329,7 @@ async function translateToJa(text) {
   const c = cfg.chat || {};
   if (!c.apiKey || !c.baseUrl || String(c.apiType || "openai") === "anthropic") return "";
   const base = String(c.baseUrl || "").replace(/\/+$/, "");
-  const sys = "你是中日翻译器。把用户输入的中文翻译成自然流畅、口语化的日语。只输出译文本身，不要任何解释、引号或多余内容。";
+  const sys = "你是中日翻译器。把用户输入的中文翻译成自然流畅、口语化的日语。只输出译文本身，不要任何解释、引号或多余内容。强制术语：任何‘博士’一律输出为英文 doctor，不得输出日语‘博士’。";
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       const resp = await fetch(base + "/chat/completions", {
@@ -2694,7 +3353,8 @@ async function translateToJa(text) {
       } else {
         const j = await resp.json();
         const out = String((j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || "").trim();
-        if (out && out.length > 0 && out.length < 400) return out;
+        const forced = out.replace(/博士/g, "doctor");
+        if (forced && forced.length > 0 && forced.length < 400) return forced;
         logTts("ja", "翻译返回为空" + (attempt < 2 ? "，重试" : ""));
       }
     } catch (e) {
@@ -2708,18 +3368,39 @@ async function translateToJa(text) {
 /* ---------- 云端语音合成助手 ---------- */
 function logTts(event, msg) {
   try {
-    fs.appendFileSync(path.join(config.APP_DIR, "data", "tts.log"),
-      new Date().toISOString() + " [" + event + "] " + msg + "\n");
+    const file = path.join(config.STORAGE.logs, "tts.log");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    if (fs.existsSync(file) && fs.statSync(file).size > 2 * 1024 * 1024) {
+      const prev = file + ".1";
+      try { fs.unlinkSync(prev); } catch { /* 忽略 */ }
+      fs.renameSync(file, prev);
+    }
+    fs.appendFileSync(file, new Date().toISOString() + " [" + event + "] " + msg + "\n");
   } catch { /* 日志失败不影响主流程 */ }
+}
+
+function runPythonWithTimeout(args, options, timeoutMs, label) {
+  return new Promise((resolve, reject) => {
+    const child = spawn("python", args, { windowsHide: true, ...options });
+    let settled = false, err = "";
+    const finish = (fn, value) => { if (settled) return; settled = true; clearTimeout(timer); fn(value); };
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch { /* 忽略 */ }
+      finish(reject, new Error(label + " 超时"));
+    }, timeoutMs);
+    child.stderr?.on("data", (d) => { err += d; });
+    child.on("error", (e) => finish(reject, e));
+    child.on("close", (code) => code === 0 ? finish(resolve) : finish(reject, new Error(label + " 退出 " + code + ": " + err.slice(-300))));
+  });
 }
 
 async function cosyTts(cosy, clean) {
   const tag = Date.now() + "-" + Math.random().toString(36).slice(2, 8);
-  const reqFile = path.join(config.APP_DIR, "data", "tts_cosy_req_" + tag + ".json");
-  const outFile = path.join(config.APP_DIR, "data", "tts_cosy_" + tag + ".mp3");
+  fs.mkdirSync(config.STORAGE.audio, { recursive: true });
+  const reqFile = path.join(config.STORAGE.audio, "tts_cosy_req_" + tag + ".json");
+  const outFile = path.join(config.STORAGE.audio, "tts_cosy_" + tag + ".mp3");
   try {
     fs.writeFileSync(reqFile, JSON.stringify({
-      apiKey: cosy.apiKey,
       model: cosy.model || "cosyvoice-v3.5-plus",
       voice: cosy.voice,
       text: clean,
@@ -2728,43 +3409,34 @@ async function cosyTts(cosy, clean) {
       pitch: cosy.pitch,
       volume: cosy.volume
     }));
-    await new Promise((resolve, reject) => {
-      const child = spawn("python", [path.join(config.APP_DIR, "scripts", "cosy_tts.py"), reqFile], { windowsHide: true });
-      let err = "";
-      child.stderr.on("data", (d) => { err += d; });
-      child.on("error", (e) => reject(e));
-      child.on("close", (code) => code === 0 ? resolve() : reject(new Error("CosyVoice 退出 " + code + ": " + err.slice(-300))));
-    });
+    await runPythonWithTimeout([path.join(config.APP_DIR, "scripts", "cosy_tts.py"), reqFile], { env: { ...process.env, DASHSCOPE_API_KEY: cosy.apiKey } }, 120000, "CosyVoice");
     const buf = fs.readFileSync(outFile);
     return buf.length >= 100 ? buf.toString("base64") : "";
   } catch (e) {
     logTts("cosy", "fail: " + (e && e.message || e));
     return "";
   } finally {
-    fs.unlink(reqFile, () => {});
-    fs.unlink(outFile, () => {});
+    try { fs.unlinkSync(reqFile); } catch { /* 忽略 */ }
+    try { fs.unlinkSync(outFile); } catch { /* 忽略 */ }
   }
 }
 
 async function edgeTts(c, clean) {
-  const tmp = path.join(config.APP_DIR, "data", "tts_tmp.mp3");
+  fs.mkdirSync(config.STORAGE.audio, { recursive: true });
+  const tmp = path.join(config.STORAGE.audio, "tts_edge_" + Date.now() + "-" + Math.random().toString(36).slice(2, 8) + ".mp3");
   try {
-    await new Promise((resolve, reject) => {
-      const args = ["-m", "edge_tts", "--voice", c.voice || "zh-CN-XiaoxiaoNeural",
-                    "--text", clean, "--write-media", tmp];
-      if (c.rate) args.push("--rate=" + c.rate);
-      if (c.pitch) args.push("--pitch=" + c.pitch);
-      const child = spawn("python", args, { windowsHide: true });
-      let err = "";
-      child.stderr.on("data", (d) => { err += d; });
-      child.on("error", (e) => reject(e));
-      child.on("close", (code) => code === 0 ? resolve() : reject(new Error("edge-tts 退出 " + code + ": " + err.slice(0, 200))));
-    });
+    const args = ["-m", "edge_tts", "--voice", c.voice || "zh-CN-XiaoxiaoNeural",
+                  "--text", clean, "--write-media", tmp];
+    if (c.rate) args.push("--rate=" + c.rate);
+    if (c.pitch) args.push("--pitch=" + c.pitch);
+    await runPythonWithTimeout(args, {}, 120000, "edge-tts");
     const buf = fs.readFileSync(tmp);
     return buf.length >= 100 ? buf.toString("base64") : "";
   } catch (e) {
     logTts("edge", "fail: " + (e && e.message || e));
     return "";
+  } finally {
+    try { fs.unlinkSync(tmp); } catch { /* 忽略 */ }
   }
 }
 
@@ -2796,14 +3468,34 @@ if (!gotLock) {
   });
 
   app.whenReady().then(() => {
+    try {
+      const secretInfo = config.initializeSecretStorage(safeStorage);
+      logTts("security", "safeStorage=" + (secretInfo.chatApiKey?.available ? "available" : "unavailable") + " chat=" + (secretInfo.chatApiKey?.saved ? "saved" : "missing") + " cosy=" + (secretInfo.ttsCosyApiKey?.saved ? "saved" : "missing"));
+    } catch (e) {
+      logTts("security", "safeStorage 初始化失败（保留旧配置）: " + (e && e.message || e));
+    }
+    personaCache = config.getPersonaText();
+    registerUserAssetProtocol();
     // 允许渲染层访问麦克风（语音输入功能）
     const { session } = require("electron");
-    session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
-      callback(permission === "media");
+    session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === "media");
+    session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+      const isPetWindow = !!win && !win.isDestroyed() && webContents.id === win.webContents.id;
+      callback(isPetWindow && permission === "media");
     });
 
     createWindow();
     createTray();
+    schedules.initialize(sendScheduleDue);
+    refreshPetName();
+    screen.on("display-added", () => scheduleDisplayClamp("新增显示器"));
+    screen.on("display-removed", () => scheduleDisplayClamp("移除显示器"));
+    screen.on("display-metrics-changed", (_event, _display, changed) => {
+      if (changed.includes("bounds") || changed.includes("workArea") || changed.includes("scaleFactor")) scheduleDisplayClamp("显示器参数变化");
+    });
+    refreshWinBarriers();
+    clearInterval(barrierTimer);
+    barrierTimer = setInterval(refreshWinBarriers, 3000);
     syncWalkingEngine(); // 配置了 Spine+行走时，启动即开始桌面行走
 
     // 预热本地 Genie TTS 服务器（后台加载模型，不阻塞开窗；声音关闭时不拉起）
@@ -2894,6 +3586,9 @@ if (!gotLock) {
 
   app.on("before-quit", () => {
     quitting = true;
+    schedules.stop();
+    clearInterval(barrierTimer);
+    barrierTimer = null;
     savePosSafe();
   });
 }

@@ -12,6 +12,7 @@
     "test:chat": "node src/chat-client.js --test",
     "test:zcode": "node src/zcode-client.js --test",
     "test:router": "node src/router.js --test",
+    "test:secrets": "node scripts/test-config-secrets.js",
     "gen:icon": "node scripts/gen-icon-ico.js"
   },
   "license": "SEE LICENSE IN LICENSE",
@@ -23,8 +24,10 @@
     "markdownlint-cli2": "^0.23.2"
   },
   "dependencies": {
+    "koffi": "^3.1.6",
     "omggif": "^1.0.10",
     "pixi-spine": "^4.0.5",
-    "pixi.js": "^7.4.2"
+    "pixi.js": "^7.4.2",
+    "xlsx": "^0.18.5"
   }
 }

@@ -1,5 +1,6 @@
 /* 苏苏洛桌宠样式（小尺寸版） */
 * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
+input, textarea, #bubble-text { user-select: text; }
 
 html, body {
   background: transparent;
@@ -26,8 +27,8 @@ html, body {
   background: rgba(255, 255, 255, 0.96);
   border: 1.5px solid #cfe3f2;
   border-radius: 11px;
-  padding: 5px 9px 12px;
-  font-size: var(--chat-fz, 11px); /* 聊天字号：设置页可调（CSS 变量，输入框同步） */
+  padding: 8px 44px 14px 11px;
+  font-size: max(12px, var(--chat-fz, 11px));
   line-height: 1.5;
   color: #44505c;
   box-shadow: 0 2px 8px rgba(90, 140, 180, 0.22);
@@ -80,11 +81,12 @@ html, body {
   position: absolute;
   top: 2px;
   right: 20px;
-  width: 16px;
-  height: 16px;
-  font-size: 10px;
-  background: rgba(142, 199, 232, 0.55);
-  color: #3c5a70;
+  width: 20px;
+  height: 20px;
+  font-size: 12px;
+  border-radius: 7px;
+  background: rgba(47, 143, 135, 0.14);
+  color: #28635f;
   z-index: 7;
 }
 .btn-zoom:hover { background: #8ec7e8; color: #fff; }
@@ -93,11 +95,12 @@ html, body {
   position: absolute;
   top: 2px;
   right: 2px;
-  width: 16px;
-  height: 16px;
-  font-size: 10px;
-  background: rgba(142, 199, 232, 0.55);
-  color: #3c5a70;
+  width: 20px;
+  height: 20px;
+  font-size: 12px;
+  border-radius: 7px;
+  background: rgba(47, 143, 135, 0.14);
+  color: #28635f;
   z-index: 7;
 }
 .btn-close:hover { background: #e88a8a; color: #fff; }
@@ -209,7 +212,8 @@ body.enlarged #input { font-size: calc(var(--chat-fz, 11px) + 1px); }
 }
 .btn:hover { transform: scale(1.08); }
 .btn:active { transform: scale(0.95); }
-.btn:hover { background: #6fb3dc; }
+.btn:focus-visible, .mode-chip:focus-visible { outline: 2px solid #2f8f87; outline-offset: 2px; }
+.btn:hover { background: #2f8f87; }
 .btn-stop { background: #e8a0a0; }
 .btn-stop.hidden { display: none; }
 .btn-stop:hover { background: #dd8585; }
@@ -227,4 +231,19 @@ body.enlarged #input { font-size: calc(var(--chat-fz, 11px) + 1px); }
 @keyframes micPulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(232, 96, 96, 0.5); }
   50% { box-shadow: 0 0 0 6px rgba(232, 96, 96, 0); }
+}
+/* 统一桌宠交互层的视觉令牌，保持透明窗口与命中区域不变 */
+.bubble { border-color: rgba(47, 143, 135, .32); box-shadow: 0 8px 22px rgba(30, 77, 77, .18); }
+.bubble::-webkit-resizer { background: linear-gradient(135deg, transparent 0 44%, rgba(47, 143, 135, .9) 44% 55%, transparent 55% 64%, rgba(47, 143, 135, .9) 64% 73%, transparent 73%); }
+.input-bar { border-color: rgba(47, 143, 135, .32); box-shadow: 0 8px 18px rgba(30, 77, 77, .16); }
+.btn { background: #2f8f87; }
+.btn-tts, .btn-mic { background: #b8d9d5; }
+.btn-tts:hover, .btn-mic:hover { background: #2f8f87; }
+.mode-chip { color: #28635f; background: #dff1ed; }
+.mode-chip.task { background: #fff1dc; color: #89602e; }
+.mode-chip.zcode { background: #e5f4e8; color: #32704b; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble:not(.hidden), .thinking span, .btn-mic.recording { animation: none; }
+  .btn { transition: none; }
 }

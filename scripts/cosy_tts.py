@@ -4,6 +4,7 @@ req.json: {"apiKey":.., "model":.., "voice":.., "text":.., "out":.., "rate":.., 
 成功退出码 0；失败非 0，错误摘要写入 stderr。
 """
 import json
+import os
 import sys
 import traceback
 
@@ -14,7 +15,9 @@ def main():
     import dashscope
     from dashscope.audio.tts_v2 import SpeechSynthesizer, AudioFormat
 
-    dashscope.api_key = cfg["apiKey"]
+    dashscope.api_key = os.environ.get("DASHSCOPE_API_KEY", "")
+    if not dashscope.api_key:
+        raise RuntimeError("缺少 DASHSCOPE_API_KEY")
     params = {"format": AudioFormat.MP3_48000HZ_MONO_256KBPS}
     if cfg.get("rate") and cfg["rate"] != 1.0:
         params["rate"] = cfg["rate"]

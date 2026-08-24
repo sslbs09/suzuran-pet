@@ -19,3 +19,5 @@ renderer/sprites/default/
 renderer/spine/user/*
 !renderer/spine/user/README-把模型放这里.txt
 .watchdog-notes.md
+__pycache__/
+*.pyc

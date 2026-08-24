@@ -2,76 +2,50 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: file: blob:; media-src 'self' data: blob:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' pet-user: data: file: blob:; media-src 'self' data: blob:">
 <title>苏苏洛 · 表情管理</title>
+<link rel="stylesheet" href="ui.css" />
 <link rel="stylesheet" href="settings.css" />
 <style>
-  body { max-width: 720px; margin: 0 auto; }
-  .mood-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 12px;
-  }
-  .mood-card {
-    background: #fff;
-    border: 1px solid #e3eef6;
-    border-radius: 10px;
-    padding: 10px;
-    text-align: center;
-  }
-  .mood-card:hover { border-color: #8ec7e8; }
-  .name-row { display: flex; gap: 4px; align-items: center; justify-content: center; margin-bottom: 6px; }
-  .name-row input {
-    width: 84px; padding: 3px 6px; text-align: center; font-size: 13px; font-weight: 600;
-    color: #5f8db0; border: 1px solid transparent; background: transparent;
-  }
-  .name-row input:hover, .name-row input:focus {
-    border-color: #8ec7e8; background: #fff; outline: none; border-radius: 5px;
-  }
-  .name-row .btn-rename {
-    padding: 2px 7px; font-size: 11px; border-radius: 5px;
-  }
-  .mood-preview {
-    width: 100px; height: 100px; margin: 0 auto 8px;
-    background: #f4f8fb; border-radius: 8px;
-    display: flex; align-items: center; justify-content: center;
-    overflow: hidden; border: 1px dashed #cfe0ec;
-  }
-  .mood-preview img { max-width: 96px; max-height: 96px; object-fit: contain; }
-  .mood-preview.empty::after { content: "无表情"; color: #a8bfcf; font-size: 12px; }
-  .mood-file { font-size: 11px; color: #9ab3c6; margin-bottom: 8px; word-break: break-all; }
-  .mood-card .actions { display: flex; gap: 5px; justify-content: center; flex-wrap: wrap; }
-  .mood-card button { padding: 3px 9px; font-size: 11px; }
-  .tag-new { display: inline-block; background: #ffe9c2; color: #b57a24; border-radius: 4px; font-size: 10px; padding: 0 5px; margin-left: 4px; }
+  .moods-page .ui-shell { max-width: 780px; }
+  .mood-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; }
+  .mood-card { padding: 12px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-md); background: var(--ui-surface); text-align: center; transition: transform 160ms var(--ui-ease), border-color 160ms ease, box-shadow 160ms ease; }
+  .mood-card:hover { transform: translateY(-2px); border-color: var(--ui-accent); box-shadow: var(--ui-shadow); }
+  .name-row { display: flex; gap: 5px; align-items: center; justify-content: center; margin-bottom: 8px; }
+  .name-row input { width: 88px; padding: 4px 6px; border-color: transparent; background: transparent; color: var(--ui-accent-strong); font-weight: 650; text-align: center; }
+  .name-row input:hover, .name-row input:focus { border-color: var(--ui-line-strong); background: var(--ui-surface-soft); outline: none; }
+  .name-row .btn-rename { min-height: 28px; padding: 3px 8px; font-size: 11px; }
+  .mood-preview { width: 108px; height: 108px; display: flex; align-items: center; justify-content: center; margin: 0 auto 9px; overflow: hidden; border: 1px dashed var(--ui-line-strong); border-radius: var(--ui-radius-sm); background: var(--ui-surface-soft); }
+  .mood-preview img { max-width: 102px; max-height: 102px; object-fit: contain; }
+  .mood-preview.empty::after { content: "无表情"; color: var(--ui-subtle); font-size: 12px; }
+  .mood-file { margin-bottom: 9px; color: var(--ui-subtle); font-size: 11px; word-break: break-all; }
+  .mood-card .actions { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+  .mood-card button { min-height: 28px; padding: 4px 9px; font-size: 11px; }
+  .tag-new { display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 5px; background: #fff1d9; color: var(--ui-warm); font-size: 10px; }
 </style>
 </head>
-<body>
-  <header>
-    <h1>🎨 表情管理（换装）</h1>
-    <div class="sub">每个情绪单独一个格子：点「选择 GIF」填入你自己的表情，随时可「恢复默认」。<b>包内默认仍是苏苏洛原版表情</b>，改坏了也能一键还原。</div>
-  </header>
+<body class="ui-page moods-page">
+  <div class="ui-shell">
+    <header class="ui-header">
+      <h1>🎨 表情管理（换装）</h1>
+      <div class="sub">每个情绪单独一个格子：点「选择 GIF」填入你自己的表情，随时可「恢复默认」。<b>包内默认仍是苏苏洛原版表情</b>，改坏了也能一键还原。</div>
+    </header>
 
-  <div class="note" style="margin-bottom:14px;">
-    💡 <b>名字就是用途</b>：直接点表情名字输入框改（≤5 字），GIF 文件不变；「设为情绪」= AI 会根据对话用它，「设为待机」= 休息循环用。所有修改立即生效。
+    <div class="note" style="margin-bottom:14px;">💡 <b>名字就是用途</b>：直接点表情名字输入框改（≤5 字），GIF 文件不变；「设为情绪」= AI 会根据对话用它，「设为待机」= 休息循环用。所有修改立即生效。</div>
+
+    <section>
+      <h2>＋ 自定义情绪</h2>
+      <p class="hint">没有想要的情绪？自己加一个（≤5 个字，最多共 30 个），比如「摸鱼」「干饭」「犯困」——然后给它选一个 GIF，AI 会在合适的时候用它。</p>
+      <div class="row">
+        <label class="col"><span>情绪词（≤5 个字）</span><input id="new-mood" type="text" maxlength="5" placeholder="例：摸鱼" /></label>
+        <button id="btn-add-mood" type="button" class="primary">＋ 添加情绪</button>
+        <span id="add-result" class="result"></span>
+      </div>
+    </section>
+
+    <div id="mood-grid" class="mood-grid"></div>
+    <p class="foot" id="dir-hint">苏苏洛桌宠 · 表情管理</p>
   </div>
-
-  <section>
-    <h2>＋ 自定义情绪</h2>
-    <p class="hint">没有想要的情绪？自己加一个（≤5 个字，最多共 30 个），比如「摸鱼」「干饭」「犯困」——然后给它选一个 GIF，AI 会在合适的时候用它。</p>
-    <div class="row">
-      <label class="col">
-        <span>情绪词（≤5 个字）</span>
-        <input id="new-mood" type="text" maxlength="5" placeholder="例：摸鱼" />
-      </label>
-      <button id="btn-add-mood" type="button" class="primary">＋ 添加情绪</button>
-      <span id="add-result" class="result"></span>
-    </div>
-  </section>
-
-  <div id="mood-grid" class="mood-grid"></div>
-
-  <p class="foot" id="dir-hint">苏苏洛桌宠 · 表情管理</p>
-
 <script src="moods.js"></script>
 </body>
 </html>

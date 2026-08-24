@@ -2,16 +2,16 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval'; worker-src 'self' blob:; connect-src 'self' data: blob:; img-src 'self' data: file: blob:; media-src 'self' data: blob:"> <!-- unsafe-eval/blob/data：PIXI/pixi-spine 着色器编译、Worker 与占位纹理必需；本窗口只加载本地文件 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval'; worker-src 'self' blob:; connect-src 'self' pet-user: data: blob:; img-src 'self' pet-user: data: file: blob:; font-src 'self' pet-user: data:; media-src 'self' data: blob:"> <!-- unsafe-eval/blob/data：PIXI/pixi-spine 着色器编译、Worker 与占位纹理必需；本窗口只加载本地文件 -->
 <title>苏苏洛桌宠</title>
 <link rel="stylesheet" href="pet.css" />
 </head>
 <body>
 <div class="pet-root">
   <!-- 对话气泡 -->
-  <div id="bubble" class="bubble hidden">
-    <button id="btn-close" class="btn btn-close" title="收起对话框" data-i18n-title="ui.closeTitle">×</button>
-    <button id="btn-zoom" class="btn btn-zoom" title="放大/还原对话框" data-i18n-title="ui.zoomTitle">⤢</button>
+  <div id="bubble" class="bubble hidden" role="status" aria-live="polite">
+    <button id="btn-close" class="btn btn-close" title="收起对话框" aria-label="收起对话框" data-i18n-title="ui.closeTitle">×</button>
+    <button id="btn-zoom" class="btn btn-zoom" title="放大/还原对话框" aria-label="放大或还原对话框" data-i18n-title="ui.zoomTitle">⤢</button>
     <div id="bubble-text"></div>
     <div id="thinking-dots" class="thinking hidden"><span>.</span><span>.</span><span>.</span></div>
   </div>
@@ -25,12 +25,12 @@
 
   <!-- 输入栏 -->
   <div id="input-bar" class="input-bar hidden">
-    <span id="mode-chip" class="mode-chip" title="点击切换模式" data-i18n-title="ui.modeChipTitle">💬</span>
-    <input id="input" type="text" placeholder="和苏苏洛说点什么…" data-i18n-placeholder="ui.placeholder" autocomplete="off" />
-    <button id="btn-mic" class="btn btn-mic" title="按住说话" data-i18n-title="ui.micTitle">🎤</button>
-    <button id="btn-stop" class="btn hidden" title="停止" data-i18n-title="ui.stopTitle">■</button>
-    <button id="btn-tts" class="btn btn-tts" title="语音开关" data-i18n-title="ui.ttsTitle">🔊</button>
-    <button id="btn-send" class="btn">➤</button>
+    <span id="mode-chip" class="mode-chip" title="点击切换模式" role="button" tabindex="0" aria-label="切换聊天模式" data-i18n-title="ui.modeChipTitle">💬</span>
+    <input id="input" type="text" placeholder="和苏苏洛说点什么…" aria-label="聊天输入框" data-i18n-placeholder="ui.placeholder" autocomplete="off" />
+    <button id="btn-mic" class="btn btn-mic" title="按住说话" aria-label="按住说话" data-i18n-title="ui.micTitle">🎤</button>
+    <button id="btn-stop" class="btn hidden" title="停止" aria-label="停止生成" data-i18n-title="ui.stopTitle">■</button>
+    <button id="btn-tts" class="btn btn-tts" title="语音开关" aria-label="切换语音" data-i18n-title="ui.ttsTitle">🔊</button>
+    <button id="btn-send" class="btn" title="发送" aria-label="发送消息">➤</button>
   </div>
 </div>
 <script src="i18n.js"></script>

@@ -1,168 +1,38 @@
-/* ============================================================
-   苏苏洛设置窗口 · 现代简洁风
-   设计令牌：中性灰阶 + 蓝色主色；4/8px 间距节奏；卡片式分区
-   ============================================================ */
-:root {
-  --gray-50:  #f9fafb;
-  --gray-100: #f2f4f7;
-  --gray-200: #e4e7ec;
-  --gray-300: #d0d5dd;
-  --gray-400: #98a2b3;
-  --gray-500: #667085;
-  --gray-600: #475467;
-  --gray-700: #344054;
-  --gray-900: #101828;
-  --primary-50:  #eff6ff;
-  --primary-100: #dbeafe;
-  --primary-500: #3b82f6;
-  --primary-600: #2563eb;
-  --primary-700: #1d4ed8;
-  --green-600: #16a34a;
-  --red-500:   #ef4444;
-  --red-50:    #fef2f2;
-  --radius-s: 6px;
-  --radius-m: 10px;
-  --radius-l: 14px;
-  --shadow-card: 0 1px 2px rgba(16, 24, 40, .05), 0 1px 3px rgba(16, 24, 40, .08);
-}
+/* 设置页组件层：颜色与页面节奏复用 renderer/ui.css */
 * { margin: 0; padding: 0; box-sizing: border-box; }
-
-body {
-  font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
-  background: var(--gray-50);
-  color: var(--gray-700);
-  padding: 20px 20px 26px;
-  line-height: 1.55;
-  font-size: 13px;
+.settings-page { --gray-50: var(--ui-bg); --gray-100: var(--ui-surface-soft); --gray-200: var(--ui-line); --gray-300: var(--ui-line-strong); --gray-400: var(--ui-subtle); --gray-500: var(--ui-muted); --gray-600: var(--ui-muted); --gray-700: var(--ui-ink); --gray-900: var(--ui-ink); --primary-500: var(--ui-accent); --primary-600: var(--ui-accent-strong); --primary-700: var(--ui-accent-strong); --red-500: var(--ui-danger); --red-50: var(--ui-danger-soft); }
+.settings-page .ui-shell { width: min(100%, 960px); }
+.settings-page header { margin-bottom: 18px; }
+.settings-page h1 { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--ui-ink); font-size: 21px; font-weight: 650; }
+.settings-page .sub { margin-top: 6px; color: var(--ui-muted); font-size: 12px; }
+.settings-page section { padding: 18px; }
+.settings-page h2 { color: var(--ui-ink); font-size: 14px; }
+.settings-page .row { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; align-items: end; }
+.settings-page .col { grid-column: span 4; display: flex; min-width: 0; flex-direction: column; gap: 5px; }
+.settings-page .col.grow { grid-column: span 6; }
+.settings-page .col span { color: var(--ui-muted); font-size: 12px; font-weight: 550; }
+.settings-page .keybox { display: flex; gap: 6px; }
+.settings-page .keybox input { flex: 1; }
+.settings-page .keybox .mini { width: 38px; flex: 0 0 38px; padding: 7px 0; }
+.settings-page input[type="range"] { width: 100%; accent-color: var(--ui-accent); }
+.settings-page input[type="checkbox"] { width: 15px; height: 15px; margin-right: 6px; vertical-align: -2px; accent-color: var(--ui-accent); }
+.settings-page .actions { display: flex; grid-column: 1 / -1; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
+.settings-page .actions button { margin: 0; }
+.settings-page .result { color: var(--ui-muted); font-size: 12px; }
+.settings-page .result.ok { color: var(--ui-success); font-weight: 600; }
+.settings-page .result.err { color: var(--ui-danger); font-weight: 600; }
+.settings-page .hint { color: var(--ui-muted); }
+.settings-page .foot { margin-top: 12px; }
+.settings-page #genie-fields { display: none; }
+.settings-page #genie-fields.show { display: block; }
+@media (max-width: 720px) {
+  .settings-page .col, .settings-page .col.grow { grid-column: 1 / -1; }
+  .settings-page .row { gap: 10px; }
 }
 
-/* ---------- 页头 ---------- */
-header { margin-bottom: 14px; }
-h1 {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--gray-900);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  letter-spacing: .2px;
-}
-.sub { color: var(--gray-400); font-size: 12px; margin-top: 2px; }
-
-/* ---------- 分区卡片 ---------- */
-section {
-  background: #fff;
-  border: 1px solid var(--gray-200);
-  border-radius: var(--radius-l);
-  box-shadow: var(--shadow-card);
-  padding: 16px 18px;
-  margin-bottom: 14px;
-}
-h2 {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--gray-900);
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--gray-100);
-  letter-spacing: .3px;
-}
-
-/* ---------- 表单行 ---------- */
-.row { display: flex; gap: 12px; margin-bottom: 12px; align-items: flex-end; flex-wrap: wrap; }
-.col { display: flex; flex-direction: column; gap: 5px; min-width: 130px; }
-.col.grow { flex: 1; }
-.col span { font-size: 12px; color: var(--gray-500); font-weight: 500; }
-.col label { cursor: pointer; }
-
-input, select, textarea {
-  padding: 7px 10px;
-  border: 1px solid var(--gray-300);
-  border-radius: var(--radius-s);
-  font-size: 13px;
-  color: var(--gray-700);
-  background: #fff;
-  width: 100%;
-  transition: border-color .15s, box-shadow .15s;
-}
-input:hover, select:hover, textarea:hover { border-color: var(--gray-400); }
-input:focus, select:focus, textarea:focus {
-  outline: none;
-  border-color: var(--primary-500);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, .14);
-}
-textarea { resize: vertical; font-family: Consolas, "Microsoft YaHei", monospace; line-height: 1.5; }
-
-/* 复选框行 */
-.row label.col,
-label.col { gap: 5px; }
-input[type="checkbox"] {
-  width: 15px; height: 15px;
-  accent-color: var(--primary-500);
-  vertical-align: -2px;
-  margin-right: 6px;
-}
-
-/* API Key 输入组 */
-.keybox { display: flex; gap: 6px; }
-.keybox input { flex: 1; }
-.keybox .mini { width: 36px; flex: 0 0 36px; padding: 7px 0; }
-
-/* ---------- 按钮 ---------- */
-button {
-  padding: 7px 14px;
-  border: 1px solid var(--gray-300);
-  border-radius: var(--radius-s);
-  background: #fff;
-  color: var(--gray-700);
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
-  transition: background .15s, border-color .15s, box-shadow .15s;
-}
-button:hover { background: var(--gray-50); border-color: var(--gray-400); }
-button:active { transform: translateY(1px); }
-button.primary {
-  background: var(--primary-500);
-  border-color: var(--primary-500);
-  color: #fff;
-  box-shadow: 0 1px 2px rgba(37, 99, 235, .35);
-}
-button.primary:hover { background: var(--primary-600); border-color: var(--primary-600); }
-button.danger { color: var(--red-500); border-color: #fecdca; }
-button.danger:hover { background: var(--red-50); border-color: var(--red-500); }
-
-.actions { align-items: center; margin-top: 12px; margin-bottom: 0; }
-.actions button { margin-right: 2px; }
-
-/* ---------- 反馈与提示 ---------- */
-.result { font-size: 12px; color: var(--gray-500); }
-.result.ok { color: var(--green-600); font-weight: 500; }
-.result.err { color: var(--red-500); font-weight: 500; }
-.hint {
-  font-size: 12px;
-  color: var(--gray-500);
-  margin-top: 10px;
-  padding: 8px 10px;
-  background: var(--gray-100);
-  border-radius: var(--radius-s);
-}
-.hint code {
-  background: #fff;
-  border: 1px solid var(--gray-200);
-  padding: 1px 5px;
-  border-radius: 4px;
-  font-size: 11px;
-  color: var(--gray-700);
-}
-.foot { text-align: center; color: var(--gray-400); font-size: 11px; margin-top: 8px; }
-
-/* ---------- 条件显隐 ---------- */
-#genie-fields { display: none; }
-#genie-fields.show { display: block; }
-
-/* ---------- 滚动条（窗口内滚动更细腻） ---------- */
-::-webkit-scrollbar { width: 10px; }
-::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 5px; border: 2px solid var(--gray-50); }
-::-webkit-scrollbar-thumb:hover { background: var(--gray-400); }
-::-webkit-scrollbar-track { background: transparent; }
+/* ---------- ⑤ 密钥与凭据安全 ---------- */
+.settings-page .cred-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 14px; padding: 10px 14px; border: 1px solid var(--ui-line); border-left: 3px solid var(--ui-accent); border-radius: 8px; background: var(--ui-surface-soft); color: var(--ui-muted); font-size: 12px; line-height: 1.6; }
+.settings-page .cred-status { padding: 7px 10px; border: 1px solid var(--ui-line); border-radius: 8px; background: var(--ui-bg); color: var(--ui-ink); font-size: 13px; font-weight: 600; }
+.settings-page .cred-status.ok { color: var(--ui-success); }
+.settings-page .cred-status.warn { color: #b45309; }
+.settings-page .cred-status.err { color: var(--ui-danger); }

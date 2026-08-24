@@ -39,6 +39,10 @@ contextBridge.exposeInMainWorld("petAPI", {
   setSeatSink: (px) => ipcRenderer.invoke("pet:set-seat-sink", px),
   setCharInset: (px) => ipcRenderer.send("pet:set-char-inset", px),
   onEdgeLeft: (cb) => ipcRenderer.on("pet:edge-left", (_e, v) => cb(v)),
+  onSetDim: (cb) => ipcRenderer.on("pet:set-dim", (_e, v) => cb(v)), // 半透明模式开关
+  onNameChanged: (cb) => ipcRenderer.on("pet:name-changed", (_e, name) => cb(name)),
+  throwPet: (vx, vy) => ipcRenderer.send("pet:throw", Number(vx) || 0, Number(vy) || 0), // 拖拽抛掷
+  onDropped: (cb) => ipcRenderer.on("pet:dropped", () => cb()), // 抛掷落地通知
   getWalkTiming: () => ipcRenderer.invoke("pet:get-walk-timing"),
   setWalkTiming: (patch) => ipcRenderer.invoke("pet:set-walk-timing", patch),
   getAppearance: () => ipcRenderer.invoke("pet:get-appearance"),
@@ -48,6 +52,7 @@ contextBridge.exposeInMainWorld("petAPI", {
   agreeTerms: () => ipcRenderer.invoke("pet:agree-terms"),
   refuseTerms: () => ipcRenderer.invoke("pet:refuse-terms"),
   openTerms: () => ipcRenderer.invoke("pet:open-terms"),
+  openQuickstart: () => ipcRenderer.invoke("pet:open-quickstart"),
 
   // 新功能：语音输入
   voiceStt: (audioPath, lang) => ipcRenderer.invoke("pet:voice-stt", { audioPath, lang }),
@@ -56,7 +61,17 @@ contextBridge.exposeInMainWorld("petAPI", {
   // 新功能：日程提醒
   setReminder: (text, at) => ipcRenderer.invoke("pet:set-reminder", { text, at }),
   getReminders: () => ipcRenderer.invoke("pet:get-reminders"),
-  cancelReminder: (index) => ipcRenderer.invoke("pet:cancel-reminder", index),
+  cancelReminder: (id) => ipcRenderer.invoke("pet:cancel-reminder", id),
+  getSchedules: () => ipcRenderer.invoke("pet:get-schedules"),
+  addSchedule: (item) => ipcRenderer.invoke("pet:add-schedule", item),
+  cancelSchedule: (id) => ipcRenderer.invoke("pet:cancel-schedule", id),
+  completeSchedule: (id) => ipcRenderer.invoke("pet:complete-schedule", id),
+  snoozeSchedule: (id, minutes) => ipcRenderer.invoke("pet:snooze-schedule", { id, minutes }),
+  openSchedule: () => ipcRenderer.invoke("pet:open-schedule"),
+  pickScheduleWorkbook: () => ipcRenderer.invoke("pet:pick-schedule-workbook"),
+  importScheduleWorkbook: (filePath) => ipcRenderer.invoke("pet:import-schedule-workbook", filePath),
+  exportScheduleTemplate: () => ipcRenderer.invoke("pet:export-schedule-template"),
+  onScheduleDue: (cb) => ipcRenderer.on("pet:schedule-due", (_e, item) => cb(item)),
 
   // 新功能：番茄钟
   pomodoroStart: (workMin, restMin) => ipcRenderer.invoke("pet:pomodoro-start", { workMin, restMin }),
@@ -79,6 +94,7 @@ contextBridge.exposeInMainWorld("petAPI", {
 
   // 设置窗口
   getSettings: () => ipcRenderer.invoke("pet:get-settings"),
+  generateAgentToken: () => ipcRenderer.invoke("pet:generate-agent-token"),
   saveSettings: (patch) => ipcRenderer.invoke("pet:save-settings", patch),
   savePersona: (text) => ipcRenderer.invoke("pet:save-persona", text),
   resetPersona: () => ipcRenderer.invoke("pet:reset-persona"),
@@ -86,6 +102,11 @@ contextBridge.exposeInMainWorld("petAPI", {
   listModels: (opts) => ipcRenderer.invoke("pet:list-models", opts),
   openTtsGuide: (fileName) => ipcRenderer.invoke("pet:open-tts-guide", fileName),
   clearHistory: () => ipcRenderer.invoke("pet:clear-history"),
+
+  // 凭据导入与密钥清除（scan 只返回指纹，import/clear 在主进程内完成，原值不经过 renderer）
+  scanCredentials: () => ipcRenderer.invoke("pet:scan-importable-credentials"),
+  importCredential: (req) => ipcRenderer.invoke("pet:import-credential", req),
+  clearSecret: (slot) => ipcRenderer.invoke("pet:clear-secret", slot),
 
   // 音色克隆与训练
   pickFile: () => ipcRenderer.invoke("pet:pick-file"),

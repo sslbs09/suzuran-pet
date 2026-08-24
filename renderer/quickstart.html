@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:">
+<title>苏苏洛 · 快速开始（新手教程）</title>
+<link rel="stylesheet" href="ui.css" />
+<style>
+  .qs-page .ui-shell { max-width: 780px; }
+  .qs-page table { width: 100%; border-collapse: separate; border-spacing: 0; overflow: hidden; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-md); background: var(--ui-surface); box-shadow: var(--ui-shadow); }
+  .qs-page td { padding: 9px 12px; vertical-align: top; border-bottom: 1px solid var(--ui-line); }
+  .qs-page tr:last-child td { border-bottom: 0; }
+  .qs-page td.k { width: 30%; color: var(--ui-accent-strong); font-weight: 650; white-space: nowrap; }
+  .qs-page td.k.wrap { white-space: normal; }
+  .qs-page ol, .qs-page ul { padding-left: 22px; line-height: 1.9; }
+  .qs-page li { margin: 2px 0; }
+  .qs-page code { padding: 1px 6px; border-radius: 5px; background: var(--ui-accent-soft); color: var(--ui-accent-strong); font-size: 12px; }
+  .qs-page .step { font-weight: 650; color: var(--ui-accent-strong); }
+  .qs-page .note { margin-top: 10px; }
+  .qs-page .back { display: inline-block; margin-top: 14px; }
+  @media (max-width: 560px) { .qs-page td { display: block; width: auto !important; } .qs-page td.k { padding-bottom: 3px; white-space: normal; } .qs-page td:not(.k) { padding-top: 3px; } }
+</style>
+</head>
+<body class="ui-page qs-page">
+  <div class="ui-shell">
+    <header class="ui-header"><h1>🐣 快速开始 · 新手教程</h1><div class="sub">写给第一次用桌宠的你：会「双击、点点点」就能跟着做</div></header>
+
+    <h2>① 开机：三步让它出现</h2>
+    <ol>
+      <li><span class="step">解压</span>：压缩包右键 →「全部解压」（建议放桌面）。</li>
+      <li><span class="step">双击</span> <code>苏苏洛桌宠 1.1 正式版.exe</code>。弹蓝色警告就点「更多信息」→「仍要运行」（程序没买签名，不是病毒）。</li>
+      <li><span class="step">等 10 秒</span>：小狐狸出现！首次启动自动弹设置和条款页，点「同意」继续。</li>
+    </ol>
+    <p class="note">⚠️ 没弹出来？看屏幕<b>右下角任务栏</b>找 🦊 小图标，双击它。</p>
+
+    <h2>② 喂门票：API Key 从哪里拿、怎么填</h2>
+    <p>桌宠要把你的话转给<b>大模型公司</b>才能回你。<b>API Key 就是一张门票</b>：一串 <code>sk-…</code> 开头的长字符，<b>不要给任何人看</b>。多数公司送免费额度，聊几百句可能只要几毛钱。</p>
+    <table>
+      <tr><td class="k">DeepSeek（推荐）</td><td>去 <code>platform.deepseek.com</code> 注册 → 左侧「API keys」→「创建」→ 复制那串 <code>sk-…</code>（窗口关了就看不到了，先存记事本）</td></tr>
+      <tr><td class="k">其他服务商</td><td>智谱 <code>open.bigmodel.cn</code> · Kimi <code>platform.moonshot.cn</code> · 百炼 <code>bailian.console.aliyun.com</code> · 硅基流动 <code>cloud.siliconflow.cn</code> —— 都是注册后在「API Key / 密钥」页面创建</td></tr>
+      <tr><td class="k">完全免费方案</td><td><b>Ollama 本地</b>：<code>ollama.com</code> 下载安装 → 命令行 <code>ollama pull qwen2.5:7b</code> → 桌宠预设选 Ollama，Key 留空。免费断网可用，但需要电脑配置还行</td></tr>
+    </table>
+    <p class="note"><b>拿到钥匙后，填进桌宠只要 2 分钟：</b></p>
+    <ol>
+      <li>右键任务栏 🦊 图标 →「⚙️ 设置」。</li>
+      <li>「① 聊天 API」→ 服务商预设选 <b>DeepSeek</b>（地址模型自动填好）→ 把钥匙<b>粘贴</b>进「API Key」输入框。</li>
+      <li>点「🔌 测试连接」→ 看到 ✅ 连接成功 → 点「💾 保存 API 设置」。</li>
+      <li><b>单击小狐狸</b> → 输入框打个招呼 → 回车，它会回你啦 🎉</li>
+    </ol>
+
+    <h2>③ 懒人通道：一键导入已有钥匙</h2>
+    <p>电脑上本来就在用 ZCode / 阿里云百炼？桌宠可以直接<b>复制</b>已存好的钥匙：</p>
+    <ol>
+      <li>设置拉到最下面「<b>⑤ 密钥与凭据安全</b>」。</li>
+      <li>点「🔍 扫描本机可导入凭据」（只显示指纹 <code>sk-a…z9</code>，不显示完整钥匙）。</li>
+      <li>选中一把 → 选用途（聊天 Key / CosyVoice Key）→「⬇ 导入所选凭据」→ 确定。</li>
+    </ol>
+    <p class="note">💡 导入只是复制一份锁进桌宠自己的保险箱，原文件一个字都不会被改动。</p>
+
+    <h2>④ 日常怎么玩</h2>
+    <table>
+      <tr><td class="k">聊天</td><td>单击小狐狸 → 输入框打字 → 回车；「■」按钮打断回复</td></tr>
+      <tr><td class="k">搬家 / 抛掷</td><td>按住拖动；用力一甩会飞出去再落地（摔不坏）</td></tr>
+      <tr><td class="k">收起 / 叫出</td><td>右键小狐狸隐藏；随时按 <code>Alt + Shift + S</code> 叫回来</td></tr>
+      <tr><td class="k">换小人走路</td><td>设置 →「④ 其他」→ 渲染模式选 <b>Spine 小人模型</b> → 勾选「🚶 桌面行走」；托盘「🧩 小人皮肤」换角色</td></tr>
+      <tr><td class="k">放自己的模型</td><td>把 <code>.atlas + .skel + .png</code> 放进<br><code>C:\Users\你的用户名\AppData\Roaming\苏苏洛桌宠 1.1 正式版\assets\spine\user\</code><br>重启即出现在皮肤菜单</td></tr>
+      <tr><td class="k">开声音</td><td>设置 →「③ 语音」打开总开关；系统语音零配置，克隆音色看「语音部署与训练指南」</td></tr>
+    </table>
+
+    <h2>⑤ 故障小诊所（对症下药）</h2>
+    <table>
+      <tr><td class="k wrap">双击没反应 / 被拦</td><td>点「更多信息」→「仍要运行」；确认解压完整，别放 C 盘根目录</td></tr>
+      <tr><td class="k wrap">说「未配置 API Key」</td><td>门票还没喂：照上面 ② 填 Key → 测试 → 保存</td></tr>
+      <tr><td class="k wrap">测试连接出红字</td><td><b>401</b>=钥匙抄错，回官网重建一张；<b>402/欠费</b>=去充值或换免费家；<b>404</b>=模型名错，点「🔍 获取模型列表」自动选；<b>超时</b>=查网络</td></tr>
+      <tr><td class="k wrap">聊天石沉大海</td><td>输入框开了吗 → 是不是欠费 → 重启桌宠（托盘右键退出再双击 exe）</td></tr>
+      <tr><td class="k wrap">桌宠不见了</td><td>点任务栏 🦊 图标，或按 <code>Alt + Shift + S</code></td></tr>
+      <tr><td class="k wrap">点不到桌宠</td><td>周围透明区点不到是正常设计；瞄准<b>小狐狸身体</b>点，或从托盘重新显示</td></tr>
+      <tr><td class="k wrap">弹「A JavaScript error」</td><td>桌宠打了个喷嚏，不是电脑坏了：点「确定」→ 重新打开 exe。新版已装「防摔垫」，反复出现再报告（记下时间）</td></tr>
+      <tr><td class="k wrap">语音没声音</td><td>设置里语音总开关 + 输入栏 🔊 都开了吗？系统语音最稳</td></tr>
+      <tr><td class="k wrap">人设/设置改乱了</td><td>设置 →「② 人设」→「↩ 恢复默认人设」；「🗑 清除聊天记录」清历史</td></tr>
+    </table>
+
+    <h2>⑥ 密钥安全 & 求助</h2>
+    <ul>
+      <li>钥匙存在<b>你电脑的加密保险箱</b>（Windows 系统级加密），配置文件里看不到明文；状态看「⑤ 密钥与凭据安全」徽标，可随时清除。</li>
+      <li><b>三不原则</b>：不发群里、不截图给别人、不填来路不明的软件。</li>
+      <li>找人求助说清四件事：<b>症状（截图）+ 时间 + 做过什么 + 日志</b>（<code>%APPDATA%\苏苏洛桌宠 1.1 正式版\logs\tts.log</code>）。</li>
+    </ul>
+
+    <a class="back" href="help.html">← 返回使用说明</a>
+    <p class="foot">—— 苏苏洛桌宠 · 1.1 正式版 ——</p>
+  </div>
+</body>
+</html>

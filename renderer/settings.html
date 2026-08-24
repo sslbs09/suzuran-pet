@@ -4,13 +4,21 @@
 <meta charset="UTF-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:">
 <title>苏苏洛 · 设置</title>
+<link rel="stylesheet" href="ui.css" />
 <link rel="stylesheet" href="settings.css" />
 </head>
-<body>
+<body class="ui-page settings-page">
+  <div class="ui-shell">
   <header>
     <h1 data-i18n="set.title">🦊 苏苏洛 · 设置</h1>
     <div class="sub" id="key-source">—</div>
   </header>
+
+  <!-- 非阻塞提示：曾隐式读取外部凭据的历史行为变更（点“知道了”后不再出现） -->
+  <div id="cred-notice" class="cred-banner" style="display:none;">
+    <span>ℹ️ 旧版本可能在启动时自动读取过本机 ZCode / DashScope 的外部凭据。现已改为<b>仅显式导入</b>：应用不会再隐式访问外部凭据，只有你在下方主动导入后，才会把凭据复制进本应用的安全存储并在对应服务调用时使用。</span>
+    <button id="btn-dismiss-notice" type="button">知道了，不再提示</button>
+  </div>
 
   <!-- ============ 1. 聊天 API ============ -->
   <section>
@@ -67,6 +75,10 @@
           <input id="api-key" type="password" placeholder="sk-…（Ollama 本地可留空）" />
           <button id="btn-toggle-key" type="button" class="mini" title="显示/隐藏" data-i18n-title="set.keyToggleTitle">👁</button>
         </div>
+      </label>
+      <label class="col">
+        <span>桌宠名称</span>
+        <input id="pet-name" type="text" maxlength="24" placeholder="苏苏洛" />
       </label>
       <label class="col">
         <span data-i18n="set.userName">桌宠对你的称呼</span>
@@ -238,6 +250,18 @@
       </label>
     </div>
     <div class="row">
+      <label class="col grow">
+        <span>Agent Bearer Token（留空兼容旧脚本；设置后所有请求都必须携带 Authorization: Bearer）</span>
+        <input id="agent-token" type="password" autocomplete="off" placeholder="未启用认证" />
+      </label>
+      <label class="col">
+        <span>请求体上限（KB）</span>
+        <input id="agent-max-body" type="number" min="1" max="1024" value="64" />
+      </label>
+      <div class="actions"><button id="btn-agent-token" type="button">生成/重新生成 Token</button></div>
+    </div>
+    <p class="hint">安全提示：端口、开关、Token 与请求体上限在保存后需要重启桌宠生效。启用 Token 后，本机脚本须在每个请求中发送 <code>Authorization: Bearer &lt;Token&gt;</code>。</p>
+    <div class="row">
       <label class="col"><input id="feat-clipboard" type="checkbox" /><span data-i18n="set.featClipboard">📋 剪贴板感知（读取复制内容并反应）</span></label>
       <label class="col"><input id="feat-sysmon" type="checkbox" /><span data-i18n="set.featSysmon">📊 系统监控播报（CPU/内存异常时提醒）</span></label>
     </div>
@@ -290,11 +314,15 @@
         </select>
       </label>
       <label class="col">
+        <span>日程与提醒</span>
+        <button id="btn-open-schedule" type="button">📅 打开日程安排</button>
+      </label>
+      <label class="col">
         <span data-i18n="set.importFont">导入本地字体（ttf/otf/woff）</span>
         <button id="btn-import-font" type="button">📂 <span data-i18n="set.importFontBtn">选择字体文件并应用</span></button>
       </label>
     </div>
-    <p class="hint" data-i18n="set.spineHint">💡 懒人换模型：把任意 Spine 模型的 .atlas + .skel（或 .json）+ .png 放入 resources/app/renderer/spine/user/ 文件夹，重启即自动替换，无需任何配置</p>
+    <p class="hint" data-i18n="set.spineHint">💡 懒人换模型：把任意 Spine 模型的 .atlas + .skel（或 .json）+ .png 放入用户数据目录的 assets/spine/user/ 文件夹，重启即自动替换，无需任何配置</p>
     <p class="hint" data-i18n="set.agentHint">其他 agent / 脚本可调用：<code>POST http://127.0.0.1:8765/chat</code>，请求体 <code>{"text":"苏苏洛 帮我…"}</code>；<code>GET /health</code> 查状态。仅监听本机，不对局域网开放。</p>
     <div class="row actions">
       <button id="btn-save-other" type="button" class="primary" data-i18n="set.save">💾 保存</button>
@@ -306,6 +334,55 @@
     <p class="hint" data-i18n="set.taskHint">任务模式（/zcode 前缀操控电脑）默认关闭：想开启请打开 config.json，把 <code>zcodeEnabled</code> 改为 <code>true</code> 并配置 <code>zcodeCli</code> 路径（需自行安装 ZCode）。</p>
     <p class="foot" id="version" data-i18n="set.version">苏苏洛桌宠 · 1.1 正式版</p>
   </section>
+  <!-- ============ 5. 密钥与凭据安全 ============ -->
+  <section>
+    <h2>⑤ 密钥与凭据安全</h2>
+    <div class="row">
+      <label class="col grow">
+        <span>聊天 API Key 状态</span>
+        <div id="status-chat-key" class="cred-status">—</div>
+      </label>
+      <label class="col grow">
+        <span>CosyVoice Key 状态</span>
+        <div id="status-cosy-key" class="cred-status">—</div>
+      </label>
+      <label class="col grow">
+        <span>Agent Token 状态</span>
+        <div id="status-agent-token" class="cred-status">—</div>
+      </label>
+    </div>
+    <div class="row actions">
+      <button id="btn-clear-chat-key" type="button" class="danger">清除聊天 Key</button>
+      <button id="btn-clear-cosy-key" type="button" class="danger">清除 Cosy Key</button>
+      <button id="btn-clear-agent-token" type="button" class="danger" title="清除并重启后，Agent API 恢复为空 token 兼容模式（本机脚本无需认证）">清除 Agent Token</button>
+      <span id="clear-result" class="result"></span>
+    </div>
+    <p class="hint">清除只删除本应用加密存储中的密钥，不会改动任何外部应用的文件。Agent Token 清除并重启后回到「空 token 兼容模式」（仅监听 127.0.0.1 的旧脚本仍可调用）。</p>
+
+    <h2 style="margin-top:16px;">从本机其他应用显式导入凭据</h2>
+    <p class="hint">确认说明：导入会把指定<b>本地来源</b>中的凭据复制到受 Windows DPAPI 保护的本应用存储，仅在对应服务调用时使用。原值不会被显示、修改或上传，来源文件保持不变。</p>
+    <div class="row">
+      <label class="col grow">
+        <span>可导入凭据（扫描结果只显示指纹，不显示完整密钥）</span>
+        <select id="cred-source">
+          <option value="">（请先点击下方「扫描」）</option>
+        </select>
+      </label>
+      <label class="col">
+        <span>导入用途</span>
+        <select id="cred-slot">
+          <option value="chat">聊天 API Key</option>
+          <option value="ttsCosy">CosyVoice Key</option>
+        </select>
+      </label>
+    </div>
+    <div class="row actions">
+      <button id="btn-scan-creds" type="button">🔍 扫描本机可导入凭据</button>
+      <button id="btn-import-cred" type="button" class="primary" disabled>⬇ 导入所选凭据</button>
+      <span id="import-result" class="result"></span>
+    </div>
+  </section>
+  </div>
 
 <script src="i18n.js"></script>
 <script src="settings.js"></script>

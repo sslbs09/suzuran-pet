@@ -5,10 +5,11 @@
 
 const fs = require("fs");
 const path = require("path");
+const storage = require("./storage");
 const config = require("./config");
 
-const DATA_DIR = path.join(config.APP_DIR, "data");
-const HISTORY_FILE = path.join(DATA_DIR, "history.jsonl");
+const HISTORY_FILE = storage.PATHS.history;
+const DATA_DIR = path.dirname(HISTORY_FILE);
 
 function load() {
   const rows = [];

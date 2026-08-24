@@ -218,7 +218,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, b"not found", "text/plain")
 
     def do_POST(self):
-        global FAIL_MSG
+        global FAIL_MSG, LAST_REF_AUDIO
         if self.path == "/set_reference":
             # 热切换默认参考音频（音色克隆）：{ref_audio, ref_text} → 立即生效并持久化到 config.json
             if not engine_ready:
@@ -243,6 +243,7 @@ class Handler(BaseHTTPRequestHandler):
                         audio_text=ref_text,
                         language=LANGUAGE,
                     )
+                    LAST_REF_AUDIO = ref_audio
                 # 持久化，重启后依然生效
                 try:
                     cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8")) if CONFIG_FILE.exists() else {}
@@ -286,7 +287,8 @@ class Handler(BaseHTTPRequestHandler):
                     )
                     LAST_REF_AUDIO = ref_audio
                     log("参考音频已切换: " + ref_audio)
-                tmp = tempfile.mktemp(suffix=".wav")
+                fd, tmp = tempfile.mkstemp(suffix=".wav")
+                os.close(fd)
                 try:
                     genie.tts(
                         character_name=CHARACTER,

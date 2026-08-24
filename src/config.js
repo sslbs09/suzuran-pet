@@ -10,10 +10,13 @@
 const fs = require("fs");
 const path = require("path");
 
-const APP_DIR = path.dirname(__dirname); // 分享版应用目录
-const CONFIG_PATH = path.join(APP_DIR, "config.json");
-const PERSONA_PATH = path.join(APP_DIR, "persona.md");
-const PERSONA_DEFAULT_PATH = path.join(APP_DIR, "persona.default.md");
+const storage = require("./storage");
+const secrets = require("./secrets");
+const APP_DIR = storage.APP_DIR; // 只读程序资源目录
+const STORAGE = storage.initializeStorage();
+const CONFIG_PATH = STORAGE.config;
+const PERSONA_PATH = STORAGE.persona;
+const PERSONA_DEFAULT_PATH = STORAGE.personaDefault;
 const ZCODE_V2_CONFIG = path.join(process.env.USERPROFILE || "C:\\Users\\xsbil", ".zcode", "v2", "config.json");
 const DEFAULT_WORKSPACE = path.join(process.env.USERPROFILE || "C:\\Users\\xsbil", ".zcode", "workspace", "default");
 
@@ -44,9 +47,11 @@ const DEFAULTS = {
   agreed: false,                            // 是否已同意《使用条款与隐私政策》（不同意无法使用）
   moods: DEFAULT_MOODS,                     // 情绪表：name=文件名，label=情绪词（≤5字，模型按它选），emotion=true 才会进模型情绪词表
   agentApi: {                               // 本地 Agent 调用接口（仅 127.0.0.1）
-    enabled: true,
+    enabled: false,
     port: 8765,
-    invokeWord: ""                          // 自定义调用词：非空时 /chat 要求消息以该词开头
+    invokeWord: "",                         // 自定义调用词：非空时 /chat 要求消息以该词开头
+    bearerToken: "",                        // 空=兼容旧脚本不认证；设置后所有路由都需 Bearer token
+    maxBodyBytes: 65536
   },
   zcodeCli: "",                             // 空 → 自动探测（分享版默认关闭）
   workspace: DEFAULT_WORKSPACE,
@@ -88,6 +93,8 @@ const DEFAULTS = {
   ttsGenie: { // 本地 Genie (GPT-SoVITS) 克隆音色（需按「语音部署与训练指南」部署）
     enabled: false,
     server: "http://127.0.0.1:9881",
+    allowRemote: false,
+    autoStart: true,
     python: "",          // 如 E:\GenieTTS\venv\Scripts\pythonw.exe
     serverScript: "",    // 如 E:\GenieTTS\genie_tts_server.py
     refAudio: "",        // 克隆参考音频（空 = 服务器默认）
@@ -98,6 +105,8 @@ const DEFAULTS = {
   ttsGsv: { // 日语语音引擎（GPT-SoVITS v2ProPlus 本地推理，配合 speakJa 日语模式；无日语 G2P 的 Genie 说不了日语）
     enabled: true,
     server: "http://127.0.0.1:9880",
+    allowRemote: false,
+    autoStart: true,
     python: "",          // 如 D:\GPT-SoVITS\runtime\python.exe
     serverScript: "",    // 如 D:\GPT-SoVITS\api.py
     sovitsPath: "",      // 训练好的 SoVITS 模型 .pth
@@ -111,6 +120,7 @@ const DEFAULTS = {
   startHidden: false,
   greetingOnStart: true, // 启动时自动问候（气泡 + 语音），可在设置里关闭,
   uiLang: "zh", // 界面语言：zh=中文 | en=English | ja=日本語（聊天内容始终为中文）
+  security: { externalCredNoticeSeen: false }, // 曾隐式读取外部凭据的非阻塞提示：用户点“知道了”后不再显示
   features: { // 功能开关（每个敏感权限单独授权，默认关闭）
     clipboardWatch: false,    // 剪贴板感知：读取系统剪贴板内容并反应
     systemMonitor: false,     // 系统监控播报：CPU/内存异常时角色语音提醒
@@ -193,49 +203,100 @@ function getConfig(force = false) {
   const pet = loadPetConfig();
   const cfg = deepMerge(DEFAULTS, pet);
 
+  cfg.chat.apiKey = secrets.get("chatApiKey") || cfg.chat.apiKey || "";
+  cfg.ttsCosy.apiKey = secrets.get("ttsCosyApiKey") || cfg.ttsCosy.apiKey || "";
+  cfg.agentApi.bearerToken = secrets.get("agentBearerToken") || cfg.agentApi.bearerToken || "";
   if (!cfg.zcodeCli) cfg.zcodeCli = detectZcodeCli();
-  if (!cfg.chat.apiKey) {
-    const { apiKey, providerId, baseURL } = detectApiKeyFromZcode();
-    if (apiKey) {
-      cfg.chat.apiKey = apiKey;
-      cfg._keySource = providerId ? `自动复用 ZCode 配置 (${providerId})` : "自动复用 ZCode 配置";
-      if (/deepseek/i.test(String(providerId))) {
-        cfg.chat.baseUrl = "https://api.deepseek.com/v1";
-      } else if (baseURL && /anthropic/i.test(String(baseURL))) {
-        cfg.chat.baseUrl = baseURL.replace(/\/anthropic\/?$/i, "") + "/v1";
-      }
-    } else {
-      cfg._keySource = "未配置（请在设置中填写 API Key）";
-    }
-  } else {
-    cfg._keySource = "config.json";
-  }
-  if (!cfg.ttsCosy.apiKey) cfg.ttsCosy.apiKey = detectDashScopeKey();
+  cfg._keySource = cfg.chat.apiKey ? (secrets.status("chatApiKey").saved ? "安全本地存储" : "config.json") : "未配置（请在设置中填写或显式导入 API Key）";
   cfg._configPath = CONFIG_PATH;
   cache = cfg;
   return cfg;
 }
 
+function initializeSecretStorage(safeStorage) {
+  const raw = loadPetConfig();
+  const info = secrets.initialize(safeStorage);
+  if (!info.chatApiKey.available) return info;
+  const migrated = secrets.migratePlaintext(raw);
+  if (migrated.migrated) {
+    if (raw.chat) delete raw.chat.apiKey;
+    if (raw.ttsCosy) delete raw.ttsCosy.apiKey;
+    if (raw.agentApi) delete raw.agentApi.bearerToken;
+    storage.atomicWrite(CONFIG_PATH, JSON.stringify(raw, null, 2));
+  }
+  cache = null;
+  return secrets.status();
+}
+function secretStatus() { return secrets.status(); }
+function replaceSecrets(values) { const out = secrets.replace(values); cache = null; return out; }
+
+/**
+ * 设置页快照（pet:get-settings 的返回体）。
+ * 密钥槽位一律不回传原值：chat.apiKey / ttsCosy.apiKey / agentApi.bearerToken 置为 undefined，
+ * renderer 只能拿到 secretStatus() 的 saved/unreadable/available 布尔状态。
+ */
+function buildSettingsView() {
+  const cfg = getConfig();
+  return {
+    pet: cfg.pet,
+    chat: {
+      apiType: cfg.chat.apiType,
+      baseUrl: cfg.chat.baseUrl,
+      model: cfg.chat.model,
+      userName: cfg.chat.userName,
+      temperature: cfg.chat.temperature,
+      maxTokens: cfg.chat.maxTokens,
+      maxHistoryTurns: cfg.chat.maxHistoryTurns
+    },
+    tts: cfg.tts,
+    ttsCloud: cfg.ttsCloud,
+    ttsCosy: { ...cfg.ttsCosy, apiKey: undefined },
+    ttsGenie: cfg.ttsGenie,
+    zcodeEnabled: !!cfg.zcodeEnabled,
+    zcodeCli: cfg.zcodeCli,
+    agreed: !!cfg.agreed,
+    scale: cfg.window.scale || 1.0,
+    agentApi: { ...cfg.agentApi, bearerToken: undefined },
+    secretStatus: secrets.status(),
+    security: cfg.security || { externalCredNoticeSeen: false },
+    hotkey: cfg.hotkey,
+    startHidden: !!cfg.startHidden,
+    uiLang: cfg.uiLang || "zh",
+    renderMode: cfg.renderMode === "spine" ? "spine" : "gif",
+    walking: !!cfg.walking,
+    persona: getPersonaText(),
+    hasPersonaDefault: fs.existsSync(PERSONA_DEFAULT_PATH),
+    keySource: cfg._keySource
+  };
+}
+
+function normalizePetName(value) {
+  const name = String(value || "").trim().replace(/\s+/g, " ");
+  return name ? name.slice(0, 24) : "苏苏洛";
+}
+
 function saveConfig(patch) {
+  if (patch?.pet && Object.prototype.hasOwnProperty.call(patch.pet, "name")) {
+    patch = { ...patch, pet: { ...patch.pet, name: normalizePetName(patch.pet.name) } };
+  }
   const cfg = getConfig(true);
   const merged = deepMerge(cfg, patch);
   const clean = JSON.parse(JSON.stringify(merged));
   delete clean._keySource;
   delete clean._configPath;
-  // 关键：不要把「自动探测/复用的 Key」写进配置文件（只在运行时生效，避免泄露本机其他软件的密钥）
-  // 只有用户显式填写的 Key（patch 里带 chat.apiKey / ttsCosy.apiKey）才允许落盘
-  const user = loadPetConfig();
-  if (!patch?.chat?.apiKey && !user?.chat?.apiKey) clean.chat.apiKey = "";
-  if (!patch?.ttsCosy?.apiKey && !user?.ttsCosy?.apiKey) clean.ttsCosy.apiKey = "";
-  if (!patch?.zcodeCli && !user?.zcodeCli) clean.zcodeCli = ""; // 自动探测的 CLI 路径也不落盘
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(clean, null, 2), "utf8");
+  // 运行时解密的值绝不可因普通设置保存重新写回 config.json。
+  delete clean.chat.apiKey;
+  delete clean.ttsCosy.apiKey;
+  delete clean.agentApi.bearerToken;
+  if (!patch?.zcodeCli && !loadPetConfig()?.zcodeCli) clean.zcodeCli = "";
+  storage.atomicWrite(CONFIG_PATH, JSON.stringify(clean, null, 2));
   cache = null;
 }
 
 /** 把人设/规则文本里的 {{petName}}、{{userName}} 替换成实际称呼 */
 function fillTokens(text) {
   const cfg = getConfig();
-  const petName = (cfg.pet && cfg.pet.name) || "苏苏洛";
+  const petName = normalizePetName(cfg.pet && cfg.pet.name);
   const userName = (cfg.chat && cfg.chat.userName) || "主人";
   return String(text || "")
     .replace(/\{\{\s*petName\s*\}\}/g, petName)
@@ -262,8 +323,9 @@ function resetPersona() {
 }
 
 module.exports = {
-  APP_DIR, CONFIG_PATH, PERSONA_PATH, PERSONA_DEFAULT_PATH,
+  APP_DIR, STORAGE, CONFIG_PATH, PERSONA_PATH, PERSONA_DEFAULT_PATH,
   getConfig, saveConfig, getPersonaText, savePersonaText, resetPersona,
+  initializeSecretStorage, secretStatus, replaceSecrets, buildSettingsView,
   fillTokens, detectZcodeCli, detectApiKeyFromZcode
 };
 
