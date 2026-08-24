@@ -262,6 +262,7 @@
 - [x] 移除上一版已裁切像素后的二次 `visibleK` 缩放；`visibleCanvasGap` 仅用于 groundGap。
 - [x] 部署日志已实际出现 `姿势限框 ×0.93`，普通姿势仍有 `fit k=1.000`；部署进程正常。
 - [ ] 仍需人工切换受影响横姿、Relax/Move/Sit/Interact 与不同缩放档位观察完整显示。
+- [x] fit 漂移修复：每次姿势校准先重置 Spine position，再根据当前结构 bounds 一次性居中/贴底；不再累加旧 x/y，避免动画混合期间头脚逐步漂移。已部署重启，Spine 初始化正常。
 
 
 

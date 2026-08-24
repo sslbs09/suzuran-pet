@@ -8,6 +8,14 @@
 "use strict";
 
 const petEl = document.getElementById("pet");
+
+/* ---------- 渲染层未捕获错误上报（临时诊断：渲染层启动即挂时能在 tts.log 看到原因） ---------- */
+window.addEventListener("error", (e) => {
+  try { window.petAPI && window.petAPI.playback("[render-error] " + (e.message || "?") + " @" + String(e.filename || "").split("/").pop() + ":" + e.lineno); } catch { /* 忽略 */ }
+});
+window.addEventListener("unhandledrejection", (e) => {
+  try { const r = e.reason; window.petAPI && window.petAPI.playback("[render-reject] " + ((r && r.message) || r || "?")); } catch { /* 忽略 */ }
+});
 const spriteEl = document.getElementById("sprite");
 const bubbleEl = document.getElementById("bubble");
 const bubbleText = document.getElementById("bubble-text");
@@ -39,39 +47,51 @@ let walkState = { active: false, resting: true, perched: false, seated: false, f
 
 function spineHas(name) { return !!spineObj && !!spineObj.spineData.animations.find((a) => a.name === name); }
 
+/* ---------- 动画切换（Spine） ---------- */
+function setSpineAnim(name, loop) {
+  if (!spineObj) return;
+  spineObj.state.setAnimation(0, name, loop);
+}
+function addSpineAnim(name, loop) {
+  if (!spineObj) return;
+  spineObj.state.addAnimation(0, name, loop, 0);
+}
+
 /** 播放新动画后测量姿势包围盒并自适应（坐姿/睡姿超出画布任意一边都会被裁掉） */
 let spineFitTimers = [];
+let spineFitGeneration = 0;
+let spineFitStableHits = 0;
 function scheduleFitSpine() {
+  spineFitGeneration += 1;
+  spineFitStableHits = 0;
+  spineAutoScaled = false;
   spineFitTimers.forEach(clearTimeout);
-  spineFitTimers = [150, 500, 1000].map((ms) => setTimeout(fitSpinePose, ms)); // 动画过渡期多次校准
+  const generation = spineFitGeneration;
+  spineFitTimers = [150, 500, 1000, 1800, 2800, 4200].map((ms) => setTimeout(() => fitSpinePose(generation), ms));
 }
 let spineBoost = 1; // >1 表示该模型包围盒远大于可见内容（空白/特效区），fit 校准需跳过缩小保护
 let spineXoff = 0;  // 可见主体偏在包围盒一侧时的水平居中修正（占包围盒宽度比例，face=-1 时自动镜像）
 let spineManual = false;   // 该皮肤是否手动调过 boostTable（true 则不做像素级自动放大）
 let spineAutoScaled = false; // 本次加载是否已做过像素级自动放大（只做一次，防反复放大）
-function fitSpinePose() {
+function fitSpinePose(generation = spineFitGeneration) {
   try {
-    if (!spineObj || !spineApp || renderMode !== "spine") return;
-    fitSpinePose._n = (fitSpinePose._n || 0) + 1; // 第几次校准：前两次姿势未稳，不做自动放大判定
+    if (!spineObj || !spineApp || renderMode !== "spine" || generation !== spineFitGeneration) return;
     const W = spineApp.screen.width, H = spineApp.screen.height;
+    const safe = 4;
+    const baseline = Math.abs(spineBaseScaleX);
+    // 每次先回到未裁切的基准缩放，再测量当前动画帧，不能使用上一帧缩小后的 bounds。
+    spineObj.position.set(0, 0);
+    spineObj.scale.set(baseline * (walkState.face === -1 ? -1 : 1), baseline);
     spineObj.updateTransform();
     let b = spineObj.getBounds();
     if (!(b.width > 0) || !(b.height > 0)) return;
-    let mag = Math.abs(spineBaseScaleX);
-    const safe = 4;
-    const rawK = Math.min(1, (W - safe * 2) / b.width, (H - safe * 2) / b.height);
-    // 手动 boost 的普通姿势可能含大块 metadata 空白；仅在结构 bounds 明显超出画布时临时 containment。
-    const k = spineBoost > 1 && rawK > 0.6 ? 1 : rawK;
-    if (k < 1) mag *= k;
+    const k = Math.min(1, (W - safe * 2) / b.width, (H - safe * 2) / b.height);
+    const mag = baseline * k;
     spineObj.scale.set(mag * (walkState.face === -1 ? -1 : 1), mag);
-    // TODO 心跳诊断（临时）：fit 首次执行记录
-    if (!fitSpinePose._logged) {
-      fitSpinePose._logged = true;
-      try { window.petAPI.playback && window.petAPI.playback(`[spine] fit mag=${mag.toFixed(4)} k=${k.toFixed(3)} bw=${Math.round(b.width)} bh=${Math.round(b.height)} boost=${spineBoost}`); } catch { /* 忽略 */ }
-    }
+    spineObj.position.set(0, 0);
     spineObj.updateTransform();
     b = spineObj.getBounds();
-    // 底边贴地、水平居中：保证耳朵/手脚不被四边裁剪
+    // 每次 fit 都从当前 bounds 重新定位，避免 x/y 累加导致动画切换后逐渐漂移。
     spineObj.x += (W - b.width) / 2 - b.x;
     if (spineXoff) spineObj.x += spineXoff * b.width * (walkState.face === -1 ? -1 : 1);
     spineObj.y += H - (b.y + b.height);
@@ -94,7 +114,7 @@ function fitSpinePose() {
       rt.destroy(true);
       if (x1 >= 0) {
         const vx0 = x0 * fx, vx1 = (x1 + step) * fx, vy0 = y0 * fy, vy1 = (y1 + step) * fy;
-        if (fitSpinePose._n >= 2 && !spineManual && !spineAutoScaled && (vy1 - vy0) < H * 0.55) {
+        if (generation === spineFitGeneration && ++spineFitStableHits >= 2 && !spineManual && !spineAutoScaled && (vy1 - vy0) < H * 0.55) {
           // 可见内容不足画布高度一半 → 自动放大到接近满高（上限 3 倍，只做一次）
           const kk = Math.min(5, Math.max(1, H * 0.9 / (vy1 - vy0)));
           spineObj.scale.set(spineObj.scale.x * kk, spineObj.scale.y * kk);
@@ -112,9 +132,8 @@ function fitSpinePose() {
         } else {
           visibleCanvasGapHits = 0;
         }
-        spineObj.x += W / 2 - (vx0 + vx1) / 2; // 可见主体水平居中
-        // 像素采样的底边在 Sit/过渡帧可能漏掉细腿，不能再用于垂直贴地，否则会把脚推到 canvas 外裁切。
-        void vy0; void vy1;
+        // alpha 只用于稳定 groundGap；结构 bounds 已完成唯一的居中/贴底，禁止再次修正 x。
+        void vx0; void vx1; void vy0; void vy1;
       }
     } catch { /* 采样失败不影响基础定位 */ }
   } catch { /* 测量失败不影响渲染 */ }
@@ -129,10 +148,11 @@ function relDirOf() { try { return decodeURIComponent((spinePaths.skel || "")).s
 let visibleCanvasGap = 0;
 let visibleCanvasGapCandidate = 0;
 let visibleCanvasGapHits = 0;
+let geometryReportTimer = null;
 function reportGroundGap() {
   try {
     if (!petEl || !document.documentElement) return;
-    const inset = Math.max(0, Math.min(119, Math.round(Number(petEl.offsetLeft) || 0)));
+    const inset = Math.max(0, Math.min(400, Math.round(Number(petEl.offsetLeft) || 0))); // 左边界补偿：与主进程 setCharInset 上限一致，放开 119 硬限避免左侧“空气墙”
     const layoutGap = (document.documentElement.clientHeight || 0) - ((Number(petEl.offsetTop) || 0) + (Number(petEl.offsetHeight) || 0));
     const gap = Math.max(0, Math.min(80, Math.round(layoutGap + visibleCanvasGap)));
     window.petAPI.setGroundGap(gap);
@@ -148,10 +168,13 @@ function scheduleGeometryReport() {
   });
 }
 
-/** 行走朝向：face=-1 时镜像翻转（假设模型原始朝右；若实际相反改此处符号即可） */
+/** 行走朝向：face=-1 时镜像翻转（假设模型原始朝右；若实际相反改此处符号即可）
+ *  注意：fitSpinePose 可能已按姿势 containment 缩小 scale（mag < spineBaseScaleX），
+ *  翻转必须保持等比——以当前 scale.y 的绝对值为基准，只改符号，否则会左右拉伸。 */
 function spineFaceDir(face) {
   if (!spineObj) return;
-  const sx = Math.abs(spineBaseScaleX) * (face === -1 ? -1 : 1);
+  const sy = Math.abs(spineObj.scale.y);
+  const sx = sy * (face === -1 ? -1 : 1);
   if (spineObj.scale.x !== sx) {
     spineObj.scale.x = sx;
     scheduleFitSpine(); // 翻转后包围盒镜像，主体偏移方向也跟着反，需重新居中
@@ -344,7 +367,7 @@ async function initSpine(epoch = renderModeEpoch) {
     // 播放默认动画
     const animName = spineAnimForMood("idle");
     if (animName) {
-      spineObj.state.setAnimation(0, animName, true);
+      setSpineAnim(animName, true, "init");
       scheduleFitSpine();
     }
 
@@ -407,7 +430,7 @@ function applyWalkState(s) {
     const sit = ["Sit", "sit"].find((n) => spineHas(n));
     const target = sit || spinePhaseAnim();
     if (target && spineObj.state.getCurrent(0)?.animation?.name !== target) {
-      spineObj.state.setAnimation(0, target, true);
+      setSpineAnim(target, true, "seat-phase");
       scheduleFitSpine();
     }
     return;
@@ -417,7 +440,7 @@ function applyWalkState(s) {
     if (wasActive && !busy) {
       const idle = spineAnimForMood("idle");
       if (idle && spineObj.state.getCurrent(0)?.animation?.name !== idle) {
-        spineObj.state.setAnimation(0, idle, true);
+        setSpineAnim(idle, true, "stop-idle");
         scheduleFitSpine();
       }
     }
@@ -426,7 +449,7 @@ function applyWalkState(s) {
   if (busy) return;                       // 聊天表情优先，不打断
   const target = spinePhaseAnim();
   if (target && spineObj.state.getCurrent(0)?.animation?.name !== target) {
-    spineObj.state.setAnimation(0, target, true);
+    setSpineAnim(target, true, "walk-phase");
     scheduleFitSpine();
   }
 }
@@ -439,8 +462,8 @@ function playSpineInteract() {
   const next = spinePhaseAnim();
   if (!next) return;
   spineObj.state.clearTrack(0);
-  spineObj.state.setAnimation(0, inter, false);
-  spineObj.state.addAnimation(0, next, true, 0);
+  setSpineAnim(inter, false, "poke");
+  addSpineAnim(next, true, "poke-resume");
   scheduleFitSpine();
 }
 
@@ -449,10 +472,10 @@ function setSpineMood(mood) {
   if (!spineObj || renderMode !== "spine") return;
   if (Date.now() < animDemoUntil) return; // 动作试演中，不被情绪切换打断
   // 坐下状态：待机回落/轮换保持坐姿，不被顶回站姿（聊天情绪仍可短暂覆盖）
-  if (walkState.seated && (mood === "idle" || mood === undefined)) {
+  if ((walkState.seated || walkState.perched) && (mood === "idle" || mood === undefined)) {
     const sit = ["Sit", "sit"].find((n) => spineHas(n));
     if (sit && spineObj.state.getCurrent(0)?.animation?.name !== sit) {
-      spineObj.state.setAnimation(0, sit, true);
+      setSpineAnim(sit, true, "sit-guard");
       scheduleFitSpine();
     }
     return;
@@ -461,14 +484,14 @@ function setSpineMood(mood) {
   if (walkState.active && !walkState.resting && !busy && mood === "idle" && spineHas("Move")) {
     spineFaceDir(walkState.face);
     if (spineObj.state.getCurrent(0)?.animation?.name !== "Move") {
-      spineObj.state.setAnimation(0, "Move", true);
+      setSpineAnim("Move", true, "walk-mood");
       scheduleFitSpine();
     }
     return;
   }
   const animName = spineAnimForMood(mood === "idle" ? "idle" : mood);
   if (animName && spineObj.state.getCurrent(0)?.animation?.name !== animName) {
-    spineObj.state.setAnimation(0, animName, true);
+    setSpineAnim(animName, true, "mood:" + mood);
     scheduleFitSpine();
   }
 }
@@ -615,19 +638,21 @@ function showError(msg) {
   busy = false;
   updateControls();
   setTimeout(() => { bubbleEl.classList.remove("error"); }, 6000);
+  scheduleBubbleHide(8000); // 错误气泡：等“唔……出错了”播完再隐藏，避免残留
 }
 
 function toast(msg) {
   showBubble();
   hideThinking();
   bubbleText.textContent = msg;
-  setTimeout(() => hideBubble(), 2600);
+  scheduleBubbleHide(2600); // 语音/思考中不提前关掉气泡（防止误关正在显示的聊天回复）
 }
 
 /* ---------- TTS 语音 ---------- */
 let ttsConfig = { enabled: true, voice: "", rate: 0.95, pitch: 1.1 };
 let zhVoice = null;
 let ttsCloudOn = true; // 云端语音开关（来自 config，失败自动回退系统语音）
+let emotionalVoice = true; // 情绪语音开关（来自 features.emotionalVoice：语速/音调/语气词）
 
 function initTts() {
   const pick = () => {
@@ -651,6 +676,21 @@ function stripForSpeech(text) {
     .replace(/[*_`#>【】"'""]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/* ---------- 情绪语气词注入（实验性）：让 TTS 按情绪带着语气朗读，比后处理变调自然 ---------- */
+const EMOTION_SPEECH = {
+  "开心": "呀！",
+  "惊喜": "哇！",
+  "生气": "哼！",
+  "委屈": "呜…",
+  "思考": "嗯…",
+  "傲娇": "哼！"
+};
+function emotionizeText(text, emotion) {
+  const tail = EMOTION_SPEECH[emotion];
+  if (!tail || !text) return text;
+  return String(text).replace(/[。！？…~～\s]+$/, "") + tail;
 }
 
 function speakSystem(clean, rateOverride, pitchOverride) {
@@ -688,10 +728,13 @@ const EMOTION_VOICE = {
 
 function scheduleBubbleHide(delayMs = 5000) {
   if (bubbleHideTimer) clearTimeout(bubbleHideTimer);
+  let waits = 0;
   const check = () => {
-    if (isSpeakingAudio) {
-      // 还在说话，1秒后再检查
-      setTimeout(() => { if (!busy) hideBubble(); }, 1000);
+    if (busy || isSpeakingAudio) {
+      // 还在思考/说话：等语音播完或回复结束后再隐藏，防止气泡提前消失
+      //（原实现 1s 后只查 busy，长语音时语音未结束气泡就被关了）
+      if (++waits > 240) { hideBubble(); return; } // 防死循环：最多再等 4 分钟
+      bubbleHideTimer = setTimeout(check, 1000);
     } else {
       hideBubble();
     }
@@ -714,15 +757,16 @@ function stopTts() {
 
 async function speak(text, emotion) {
   if (!ttsConfig.enabled) return;
-  const clean = stripForSpeech(text);
+  let clean = stripForSpeech(text);
+  if (emotionalVoice) clean = emotionizeText(clean, emotion); // 情绪语气词注入（仅朗读，气泡仍显示原文）
   if (!clean) return;
   const now = Date.now();
   if (clean === lastSpoken.text && now - lastSpoken.ts < 10000) {
     window.petAPI.playback("重复文本已跳过: " + clean.slice(0, 30));
     return;
   }
-  // 情绪语音参数
-  const ev = EMOTION_VOICE[emotion] || {};
+  // 情绪语音参数（关闭时用默认语速/音调）
+  const ev = emotionalVoice ? (EMOTION_VOICE[emotion] || {}) : {};
   const speakRate = (ttsConfig.rate || 0.9) * (ev.rate || 1.0);
   const speakPitch = (ttsConfig.pitch || 1.1) * (ev.pitch || 1.0);
 
@@ -773,7 +817,7 @@ async function speak(text, emotion) {
     }
   }
   window.petAPI.playback("回退系统语音");
-  speakSystem(clean, speakRate, speakPitch);
+  speakSystem(clean.replace(/博士/g, "刀客塔"), speakRate, speakPitch); // 游戏习惯称呼（仅语音，气泡仍显示原文）
 }
 
 /* ---------- 对话框：放大/还原 + 尺寸记忆 ---------- */
@@ -928,7 +972,7 @@ window.petAPI.onDone(({ mode, full, emotion }) => {
   const nm = emotion ? labelToName(String(emotion).trim()) : "";
   setMood(nm || "happy");
   setTimeout(() => { if (!busy) setMood("idle"); }, 2600);
-  setTimeout(() => { if (!busy && !isSpeakingAudio) hideBubble(); }, 90000);
+  scheduleBubbleHide(90000); // 回复气泡：等语音播完再隐藏，防止提前消失
   updateControls();
   resetSleepTimer();
 });
@@ -958,7 +1002,7 @@ if (window.petAPI.onDropped) {
   window.petAPI.onDropped(() => playSpineInteract());
 }
 if (window.petAPI.onEdgeLeft) {
-  window.petAPI.onEdgeLeft((v) => bubbleEl.classList.toggle("top", !!v)); // 探出屏幕左侧：气泡挪到头顶
+  window.petAPI.onEdgeLeft((v) => document.body.classList.toggle("edge-left", !!v)); // 角色贴屏幕左缘：条带切左侧、气泡翻右侧
 }
 if (window.petAPI.onRenderModeChanged) {
   window.petAPI.onRenderModeChanged(async (m) => {
@@ -993,7 +1037,7 @@ if (window.petAPI.onPlayAnim) {
   window.petAPI.onPlayAnim((name) => { // 托盘「动作试演」点播
     if (!spineObj || renderMode !== "spine" || !spineHas(name)) return;
     animDemoUntil = Date.now() + 15000; // 播 15 秒，期间行走相位不抢动画
-    spineObj.state.setAnimation(0, name, true);
+    setSpineAnim(name, true, "demo");
     scheduleFitSpine();
   });
 }
@@ -1251,6 +1295,8 @@ window.addEventListener("mouseup", () => {
   const wasDrag = state.moved;
   dragState = null;
   petEl.classList.remove("dragging");
+  const velocity = wasDrag ? dragVelocity(state) : null;
+  const speed = velocity ? Math.round(Math.hypot(velocity.vx, velocity.vy)) : 0;
   if (!wasDrag) {
     toggleInputBar();
     playSpineInteract(); // 单击互动：还原基建里点一下干员的反应动作
@@ -1258,14 +1304,26 @@ window.addEventListener("mouseup", () => {
     clearTimeout(pokeResumeTimer);
     pokeResumeTimer = setTimeout(() => { if (!dragState) window.petAPI.walkingPause(false); }, 2600);
   } else {
-    const velocity = dragVelocity(state);
-    if (velocity && Math.hypot(velocity.vx, velocity.vy) > THROW_MIN_SPEED) {
+    if (velocity && speed > THROW_MIN_SPEED) {
       window.petAPI.throwPet(velocity.vx, velocity.vy);
     } else {
       window.petAPI.walkingPause(false);
     }
   }
 });
+
+/* ---------- 等比缩放自愈兜底：渲染层所有缩放写入都应是等比的，
+   一旦发现 |scale.x| 与 scale.y 失配（非等比拉伸残留），立即恢复均匀缩放。 ---------- */
+setInterval(() => {
+  try {
+    if (!spineObj || renderMode !== "spine") return;
+    const sx = Math.abs(spineObj.scale.x), sy = Math.abs(spineObj.scale.y);
+    if (!(sx > 1e-6) || !(sy > 1e-6)) return;
+    if (Math.abs(sx / sy - 1) <= 0.02) return;
+    spineObj.scale.x = (spineObj.scale.x < 0 ? -1 : 1) * sy; // 保持朝向与当前 fit 高度缩放，恢复等比
+    scheduleFitSpine(); // 缩放变了，重新居中/贴底
+  } catch { /* 忽略 */ }
+}, 200);
 
 /* ---------- 点击穿透：透明区域不挡下层应用 ----------
    只有鼠标在 桌宠/气泡/输入栏 上时才放行鼠标事件，其余穿透给下层应用；
@@ -1297,6 +1355,7 @@ function applyPetName(name) {
   applyDim(!!state.dimMode); // 半透明模式初始状态
   if (state.tts) ttsConfig = { ...ttsConfig, ...state.tts };
   if (state.ttsCloud) ttsCloudOn = !!state.ttsCloud.enabled;
+  if (typeof state.emotionalVoice === "boolean") emotionalVoice = state.emotionalVoice;
   if (state.winSize) { winSize = { width: Number(state.winSize.width) || 260, height: Number(state.winSize.height) || 200 }; }
   applyBubbleSize();
   reportGroundGap(); // 上报角色脚底与窗口底边空隙，供主进程贴地补偿
@@ -1333,6 +1392,6 @@ function applyPetName(name) {
     showBubble();
     bubbleText.textContent = state.personaOpening;
     speak(state.personaOpening);
-    setTimeout(() => { if (!busy) hideBubble(); }, 20000);
+    scheduleBubbleHide(20000); // 开场白：语音播完再隐藏，防止长开场白被提前收起
   }
 })();

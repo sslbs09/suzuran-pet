@@ -58,6 +58,8 @@ let activeReq = null; // { id, abort }
 let forcedMode = "auto"; // auto | chat | zcode
 let personaCache = config.getPersonaText();
 let quitting = false;
+let renderCrashCount = 0;      // 渲染进程崩溃自动重载计数（60s 内连崩 3 次停止自愈）
+let renderCrashWindowAt = 0;
 
 /* ---------- 隐藏 / 显示 ---------- */
 function isWindowVisible() {
@@ -187,6 +189,24 @@ function createWindow() {
   win.webContents.on("will-navigate", (event) => event.preventDefault());
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.loadFile(path.join(config.APP_DIR, "renderer", "index.html"));
+  // 渲染进程异常退出（崩溃/OOM/被系统回收）：自动重载恢复，防桌宠无声消失；60s 内连续 3 次则停止自愈
+  win.webContents.on("render-process-gone", (_e, details) => {
+    const now = Date.now();
+    if (now - renderCrashWindowAt > 60000) { renderCrashWindowAt = now; renderCrashCount = 0; }
+    renderCrashCount += 1;
+    // 全量崩溃详情（exitCode/reason/内存），minidump 在 userData 下由 crashReporter 收集
+    const d = details || {};
+    logTts("render", "渲染进程异常退出 reason=" + (d.reason || "?") +
+      " exitCode=" + d.exitCode + " 第" + renderCrashCount + "次（60s内），自动重载");
+    if (renderCrashCount > 3) { logTts("render", "渲染进程连续崩溃，停止自动重载（可手动重启桌宠）"); return; }
+    try {
+      win.reload();
+      setTimeout(() => {
+        if (walk.active) walkBroadcast();
+        if (walk.edgeLeft) sendToRenderer("pet:edge-left", true); // 重载后恢复翻边布局，避免条带位置不一致
+      }, 3000);
+    } catch (e2) { logTts("render", "自动重载失败: " + (e2 && e2.message || e2)); }
+  });
   // 初始即开启点击穿透（透明区域不挡下层应用），由渲染层按需放行
   win.setIgnoreMouseEvents(true, { forward: true });
 
@@ -195,8 +215,13 @@ function createWindow() {
 
   // 位置持久化
   const savePos = () => {
-    if (!win || win.isDestroyed()) return;
+    if (!win || win.isDestroyed() || !win.isVisible()) return;
     const [x, y] = win.getPosition();
+    // 屏幕外/异常位置不保存（被拖出屏幕后重启会恢复到屏幕外；跳过让下次启动钳回正常位置）
+    try {
+      const wa = screen.getDisplayMatching(win.getBounds()).workArea;
+      if (y > wa.y + wa.height || y + 40 < wa.y) return;
+    } catch { /* 忽略，照常保存 */ }
     config.saveConfig({ window: { x, y } });
   };
   win.on("moved", debounce(savePos, 500));
@@ -1050,7 +1075,26 @@ function savePosSafe() {
 }
 
 /* ---------- 对话核心 ---------- */
-async function handleAsk(sender, { id, text }) {
+/** 对话期间暂停散步（busy 时渲染层不切 Move 动画，若窗口仍移动会出现“坐着滑行”）：
+ *  进入对话暂停、结束（done/error/中止/快捷回复）统一在 finally 恢复。 */
+function chatPauseWalk(p) {
+  if (!walk.active) return;
+  walk.chatPaused = !!p;
+  if (p) { cancelFlight(); cancelWalkJump(); walk.taskbarHang = false; }
+  walk.paused = walk.dragPaused || walk.chatPaused;
+  walk.pausedAt = 0; // 对话暂停不参与拖拽 60s 自愈
+  walkBroadcast();
+  logTts("walk", p ? "对话暂停散步" : "对话结束恢复散步");
+}
+async function handleAsk(sender, payload) {
+  chatPauseWalk(true);
+  try {
+    await handleAskInner(sender, payload);
+  } finally {
+    chatPauseWalk(false);
+  }
+}
+async function handleAskInner(sender, { id, text }) {
   if (!config.getConfig().agreed) {
     sender.send("pet:error", { id, message: "请先阅读并同意《使用条款与隐私政策》后使用" });
     return;
@@ -1195,6 +1239,7 @@ ipcMain.handle("pet:get-state", () => {
     firstRun: !!cfg.firstRun,
     workspace: cfg.workspace,
     tts: cfg.tts || { enabled: false, voice: "", rate: 0.95, pitch: 1.1 },
+    emotionalVoice: !!(cfg.features && cfg.features.emotionalVoice !== false), // 情绪语音开关（语速/音调/语气词）
     ttsCloud: { enabled: !!(cfg.ttsCloud?.enabled || cfg.ttsCosy?.enabled || cfg.ttsGenie?.enabled) },
     winSize: { width: cfg.window.width || 260, height: cfg.window.height || 200 },
     hasUserSprite: fs.existsSync(path.join(config.STORAGE.spritesUser, "sprite.png")),
@@ -1222,10 +1267,22 @@ function refreshPetName() {
 
 /* ---------- 设置窗口 IPC ---------- */
 ipcMain.handle("pet:generate-agent-token", () => crypto.randomBytes(32).toString("base64url"));
-ipcMain.handle("pet:get-settings", () => config.buildSettingsView());
+ipcMain.handle("pet:get-settings", () => {
+  const view = config.buildSettingsView();
+  try { view.autoLaunch = app.getLoginItemSettings().openAtLogin; } catch { view.autoLaunch = false; }
+  return view;
+});
 ipcMain.handle("pet:save-settings", (_e, patch) => {
   if (!patch || typeof patch !== "object") return false;
   try {
+    if (Object.prototype.hasOwnProperty.call(patch, "autoLaunch")) { // 开机自启（系统级，不入 config）
+      const al = !!patch.autoLaunch;
+      delete patch.autoLaunch;
+      try {
+        app.setLoginItemSettings({ openAtLogin: al, openAsHidden: !!config.getConfig().startHidden });
+        logTts("settings", "开机自启: " + (al ? "开" : "关"));
+      } catch (e) { logTts("settings", "设置开机自启失败: " + (e && e.message || e)); }
+    }
     const secretPatch = patch.secrets || {};
     delete patch.secrets;
     if (patch.chat && Object.prototype.hasOwnProperty.call(patch.chat, "apiKey")) {
@@ -1458,15 +1515,15 @@ function dragSeatUpdate(final = false) {
   let ny = b.y, nx = b.x;
 
   const freeDragMode = config.getConfig().layer === "desktop";
-  if (final || !freeDragMode) {
-    if (Math.abs(feet - waBottom) <= 48) {
+  if (final) { // 拖动中完全不磁吸（含置顶模式），松手才判定——降低任务栏吸附感
+    if (Math.abs(feet - waBottom) <= 12) {          // 任务栏完整坐姿磁吸（48→24→12：进一步降低吸附权重）
       seated = true;                                   // 任务栏完整坐姿磁吸
       magnet = "taskbar";
       walk.taskbarHang = false;
       ny = waBottom + walk.groundGap - b.height + getSeatSink();
       nx = Math.min(Math.max(b.x, walkMinX(wa)), wa.x + wa.width - b.width);
-    } else if (freeDragMode && final && feet > waBottom - 120 && feet < waBottom + 80) {
-      // 任务栏半挂：保留释放高度，仅有限下探，不强制塞入坐姿下沉量。
+    } else if (freeDragMode && final && feet > waBottom - 40 && feet < waBottom + 20) {
+      // 任务栏半挂：保留释放高度，仅有限下探，不强制塞入坐姿下沉量（原 -120/+80 → -40/+20 收窄）
       walk.taskbarHang = true;
       walk.resting = true;
       walk.seated = false;
@@ -1554,7 +1611,9 @@ function dragSeatUpdate(final = false) {
    地面 = 任务栏上沿；水平左右走动、走走停停；偶尔跳到桌面程序窗口顶上坐下休息（Sit）。 ---------- */
 const walk = {
   active: false,    // 引擎运行中（配置开关 + spine 模式才为 true）
-  paused: false,    // 渲染层拖拽等临时暂停
+  paused: false,    // 当前是否暂停（= dragPaused || chatPaused）
+  dragPaused: false, // 拖拽暂停（来源1：mousedown/松开）
+  chatPaused: false, // 用户对话期间暂停（来源2：避免 busy 时动画不切 Move，Sit 被窗口带着滑行）
   sleeping: false,  // 渲染层睡觉状态：原地待命不移动
   face: 1,          // 视觉朝向：+1 右 / -1 左（按实际水平位移计算）
   resting: true,    // true=原地不动（地面 Relax / 窗顶 Sit） false=走动（Move）
@@ -1590,7 +1649,8 @@ function walkSpeed() {                         // 托盘速度档位倍率（借
  *  未捕获异常会弹模态错误框冻结主进程（2026-08-24 walkTick:2148 实测发生）。 */
 function walkSetPosition(x, y, where) {
   if (!win || win.isDestroyed()) return false;
-  const px = Math.max(1, Math.round(Number(x))), py = Math.round(Number(y));
+  // 允许 x 为负（角色条带左移贴屏幕左缘，charInset 补偿），只拦截 NaN/越界；曾强制 x≥1 导致左侧“空气墙”
+  const px = Math.round(Number(x)) || 0, py = Math.round(Number(y)) || 0; // ||0 归一化 -0（Electron setPosition(-0) 会 conversion failure）
   if (!Number.isSafeInteger(px) || !Number.isSafeInteger(py) || Math.abs(px) > 1000000 || Math.abs(py) > 1000000) {
     logTts("walk", "拦截非法窗口坐标(" + where + "): x=" + px + " y=" + py);
     return false;
@@ -1599,7 +1659,10 @@ function walkSetPosition(x, y, where) {
   catch (e) {
     let bounds = "";
     try { bounds = " bounds=" + JSON.stringify(win.getBounds()); } catch { /* 忽略 */ }
-    logTts("walk", "setPosition 失败(" + where + "): x=" + px + " y=" + py + bounds + " err=" + (e && e.message || e));
+    if (Date.now() - (walkSetPosition._lastLog || 0) > 5000) { // 节流
+      walkSetPosition._lastLog = Date.now();
+      logTts("walk", "setPosition 失败(" + where + "): x=" + px + " y=" + py + bounds + " err=" + (e && e.message || e) + " raw=(" + x + "," + y + ")");
+    }
     return false;
   }
 }
@@ -1752,13 +1815,20 @@ function getSeatSink() {
  * 坐/走时长在设置页调上限（保底随机），每个相位调度时实时读配置，改了立即生效。 */
 function safeSetPosition(x, y, source = "position") {
   if (!win || win.isDestroyed()) return false;
-  const px = Math.max(1, Math.round(Number(x))), py = Math.round(Number(y));
+  // 允许 x 为负（贴屏幕左缘），只拦截 NaN/越界
+  const px = Math.round(Number(x)) || 0, py = Math.round(Number(y)) || 0; // ||0 归一化 -0
   if (!Number.isSafeInteger(px) || !Number.isSafeInteger(py) || Math.abs(px) > 1000000 || Math.abs(py) > 1000000) {
     logTts("walk", source + " 坐标越界：x=" + px + " y=" + py);
     return false;
   }
   try { win.setPosition(px, py); return true; }
-  catch (e) { logTts("walk", source + " setPosition 失败：" + (e && e.message || e)); return false; }
+  catch (e) {
+    if (Date.now() - (safeSetPosition._lastLog || 0) > 5000) { // 节流：防连续失败刷爆日志
+      safeSetPosition._lastLog = Date.now();
+      logTts("walk", source + " setPosition 失败：" + (e && e.message || e) + " px=" + px + " py=" + py + " raw=(" + x + "," + y + ")");
+    }
+    return false;
+  }
 }
 function clampWalkX(x, wa, width) {
   const rawMax = wa.x + wa.width - width;
@@ -1773,10 +1843,20 @@ function walkMinX(wa) {
 }
 function setEdgeLeft(v) {
   v = !!v;
-  if (walk.edgeLeft !== v) {
-    walk.edgeLeft = v;
-    sendToRenderer("pet:edge-left", v); // 渲染层据此把气泡切到头顶模式
+  if (walk.edgeLeft === v) return;
+  // 气泡翻边：角色条带从窗口右缘切到左缘（或反向），同步平移窗口保持角色屏幕位置不变
+  // （条带位移 = 窗口宽-124；配合渲染层 body.edge-left 的 .pet left:2）
+  let delta = 0, width = 0;
+  try { if (win && !win.isDestroyed()) { width = win.getBounds().width; delta = width - 124; } } catch { /* 忽略 */ }
+  walk.edgeLeft = v;
+  walk.charInset = v ? 2 : Math.max(0, width - 122); // 同步条带切换后的布局偏移（避免判定/边界用旧值）
+  if (delta > 0 && win && !win.isDestroyed()) {
+    try {
+      const [x, y] = win.getPosition();
+      win.setPosition(Math.round(x + (v ? delta : -delta)), y);
+    } catch { /* 忽略 */ }
   }
+  sendToRenderer("pet:edge-left", v); // 渲染层据此把角色条带切到左侧、气泡翻到右侧
 }
 function timingSec(key, min, max) {
   const n = Number((config.getConfig().walkTiming || {})[key]);
@@ -2209,8 +2289,34 @@ function walkAttemptPerch() {
 
 function walkTick() {
   if (!win || win.isDestroyed()) return;
-  // 自愈①：拖拽 mouseup 丢失导致 paused 卡死——60s 无移动事件自动解除
-  if (walk.paused && walk.pausedAt && Date.now() - walk.pausedAt > 60000 && Date.now() - (dbgLastMoveTs || 0) > 5000) {
+  // 左缘翻边判定（坐下/静止在左缘也要切；拖拽/飞行/跳跃中不切防干扰）
+  // 用「角色条带左缘」判断而非窗口 x：切边/切回时窗口被平移 ±276，用窗口 x 会立即再次触发形成左右横跳
+  if (!walk.paused && !walk.sleeping && !walk.flight && !walk.jump) {
+    try {
+      const eb = win.getBounds();
+      const ewa = screen.getDisplayMatching(eb).workArea;
+      // 垂直兜底：窗口底超出工作区（被拖出屏幕/掉出屏幕）→ 钳回地面线
+      const groundY = Math.max(ewa.y, ewa.y + ewa.height - eb.height) + (walk.groundGap || 0);
+      if (eb.y > groundY + 120) {
+        if (Date.now() - (walk._vLog || 0) > 10000) { walk._vLog = Date.now(); logTts("walk", `垂直出屏钳回: y=${eb.y}→${Math.round(groundY)}`); }
+        win.setPosition(eb.x, Math.round(groundY));
+        if (walk.seated) applySeatPosition(); // 应坐姿时再校正下沉
+      }
+      const inset = walk.edgeLeft ? 2 : (Number(walk.charInset) || 0);
+      let charLeft = eb.x + inset;
+      // 出屏兜底：角色条带左缘 < 屏幕左缘 → 钳回贴边（崩溃/状态错乱后角色滑出屏幕）
+      if (charLeft < ewa.x) {
+        const fixX = ewa.x - inset;
+        if (Date.now() - (walk._dbgAt || 0) > 10000) { walk._dbgAt = Date.now(); logTts("walk", `出屏钳回: x=${eb.x}→${fixX} edgeLeft=${walk.edgeLeft} inset=${inset}`); }
+        win.setPosition(Math.round(fixX), eb.y);
+        charLeft = ewa.x;
+      }
+      if (walk.edgeLeft) { if (charLeft > ewa.x + 80) setEdgeLeft(false); }
+      else if (charLeft <= ewa.x + 2) setEdgeLeft(true);
+    } catch { /* 忽略 */ }
+  }
+  // 自愈①：拖拽 mouseup 丢失导致 paused 卡死——60s 无移动事件自动解除（对话暂停不受此影响）
+  if (walk.paused && walk.pausedAt && !walk.chatPaused && Date.now() - walk.pausedAt > 60000 && Date.now() - (dbgLastMoveTs || 0) > 5000) {
     walk.paused = false;
     walk.pausedAt = 0;
     walkBroadcast(); // 自愈解除暂停，同步渲染层动画
@@ -2301,7 +2407,7 @@ function walkTick() {
     nx = Math.min(Math.max(nx, minX), maxX);
   }
   /* 桌面图标缓存仅用于跳图标目标；缓存缺口不应打断普通地面行走。 */
-  setEdgeLeft(nx < wa.x - 2);                       // 探出屏幕左侧：气泡切头顶模式
+  /* 桌面图标缓存仅用于跳图标目标；缓存缺口不应打断普通地面行走。 */
   const px = Math.round(nx), py = Math.round(groundY);
   if (!Number.isSafeInteger(px) || !Number.isSafeInteger(py) || Math.abs(px) > 1000000 || Math.abs(py) > 1000000) {
     logTts("walk", "walkTick 坐标越界，跳过本 tick：x=" + px + " y=" + py +
@@ -2394,8 +2500,9 @@ ipcMain.handle("pet:set-walking", (_e, on) => {
 });
 ipcMain.on("pet:walking-pause", (_e, p) => {
   if (p) { cancelFlight(); cancelWalkJump(); walk.taskbarHang = false; } // 鼠标重新抓住时立即停止飞行/跳跃/半挂
-  walk.paused = !!p;
+  walk.dragPaused = !!p;
   walk.pausedAt = p ? Date.now() : 0;
+  walk.paused = walk.dragPaused || walk.chatPaused; // 拖拽/对话任一暂停都停住
   if (walk.active) walkBroadcast(); // 暂停/恢复即时同步渲染层动画（暂停时切站立待机）
   if (!p && walk.active && !walk.flight && !walk.jump) {
     // 松手/恢复：若之前处于坐窗流程中被拖走，就地转入「回到地面」下降流程
@@ -2424,8 +2531,9 @@ ipcMain.on("pet:throw", (_e, vx, vy) => {
   vx = Number(vx); vy = Number(vy);
   if (Number.isFinite(vx) && Number.isFinite(vy) && startFlight(vx, vy)) return;
   // 渲染层甩动后不再发送 walkingPause(false)；拒绝飞行时必须立即恢复，不能等 60 秒看门狗。
-  if (walk.paused) {
-    walk.paused = false;
+  if (walk.dragPaused) {
+    walk.dragPaused = false;
+    walk.paused = walk.chatPaused; // 对话暂停不受拖拽恢复影响
     walk.pausedAt = 0;
     if (walk.active) walkBroadcast();
   }
@@ -2436,7 +2544,11 @@ ipcMain.on("pet:set-sleeping", (_e, v) => {
 }); // 睡觉时行走引擎原地待命
 ipcMain.on("pet:set-ground-gap", (_e, px) => {
   const v = Number(px);
-  if (Number.isFinite(v)) walk.groundGap = Math.max(0, Math.min(80, Math.round(v)));
+  if (!Number.isFinite(v)) return;
+  const next = Math.max(0, Math.min(80, Math.round(v)));
+  if (next === walk.groundGap) return;
+  walk.groundGap = next;
+  if (!walk.paused && !walk.flight && !walk.jump && walk.seated) applySeatPosition();
 });
 ipcMain.on("pet:set-char-inset", (_e, px) => { // 渲染层上报：窗口左缘到角色左缘的距离
   const v = Number(px);
@@ -2665,9 +2777,11 @@ async function ttsCloneImpl(text) {
     };
     const cfg = config.getConfig();
     const clean = String(text || "").slice(0, 200);
+    // 游戏习惯称呼：中文朗读用“刀客塔”；日语翻译仍用原文“博士”（让翻译器输出ドクター）
+    const cleanZh = clean.replace(/博士/g, "刀客塔");
     const q = cfg.ttsGenie || {};
     // 日语语音模式（speakJa）：先把中文翻译成日语，再用 GPT-SoVITS（ttsGsv）日语微调音色说话；文字/聊天保持中文
-    let ttsText = clean;
+    let ttsText = cleanZh;
     let jaText = "";
     if (q.speakJa) {
       const ja = await translateToJa(clean);
@@ -2683,23 +2797,26 @@ async function ttsCloneImpl(text) {
         if (up) {
           const sents = splitJaSentences(sanitizeJaText(jaText));
           const parts = [];
-          let failed = false;
+          let skipped = 0;
           for (const s of sents) {
             const b64 = await gsvTtsJa(g, s);
-            if (!b64) { failed = true; logTts("gsv", "单句失败，整段回退: " + String(s).slice(0, 30)); break; }
-            parts.push(b64);
+            if (b64) { parts.push(b64); continue; }
+            skipped += 1;
+            logTts("gsv", `单句失败跳过（${skipped}/${sents.length}）: ${String(s).slice(0, 24)}`);
           }
-          if (!failed && parts.length === sents.length) {
+          if (parts.length) { // 部分成功也交付（失败句跳过），避免一句毛刺整段变中文
             const merged = mergeWavBase64(parts);
             if (merged) {
               recordGsvResult(true);
-              logTts("route", `gsv-ja ok ${parts.length}/${sents.length}句 len=${merged.length}`);
+              logTts("route", skipped
+                ? `gsv-ja 部分成功 ${parts.length}/${sents.length}句（跳过${skipped}）len=${merged.length}`
+                : `gsv-ja ok ${parts.length}/${sents.length}句 len=${merged.length}`);
               dumpWav(merged);
               return merged;
             }
           }
           recordGsvResult(false);
-          logTts("route", "gsv-ja 整段失败 → 回退中文链路");
+          logTts("route", "gsv-ja 无可用句 → 回退中文链路");
         } else {
           recordGsvResult(false);
           logTts("route", "gsv-ja 服务不可用 → 回退中文链路");
@@ -2707,7 +2824,7 @@ async function ttsCloneImpl(text) {
       } else if (g.enabled) {
         logTts("route", "gsv-ja 冷却中 → 回退中文链路");
       }
-      ttsText = clean;
+      ttsText = cleanZh;
     }
     if (q.enabled) {
       const up = await ensureGenieServer(q);
@@ -2736,7 +2853,7 @@ async function ttsCloneImpl(text) {
     }
     const c = cfg.ttsCloud || {};
     if (c.enabled) {
-      const b64 = await edgeTts(c, clean);
+      const b64 = await edgeTts(c, cleanZh);
       if (b64) { logTts("route", "edge ok len=" + b64.length); return b64; }
       logTts("route", "edge 返回空 → 回退系统语音");
     }
@@ -2968,7 +3085,7 @@ async function gsvTtsJa(g, text) {
     return !(d > 0 && clean.length > 6 && d < expectMs * 0.75);
   };
   try {
-    const resp = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(120000) });
+    const resp = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(60000) });
     if (!resp.ok) {
       logTts("gsv", "HTTP " + resp.status);
       return "";
@@ -2981,7 +3098,7 @@ async function gsvTtsJa(g, text) {
       const d0 = wavDurationMs(buf);
       logTts("gsv", `疑似引擎毛刺（时长${Math.round(d0)}ms << 预期${expectMs}ms）→ 第${att}/3次重试`);
       await new Promise((r) => setTimeout(r, 800 * att)); // 退避重试：引擎坏状态连发更容易连环失败
-      const resp2 = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(120000) });
+      const resp2 = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(60000) });
       if (!resp2.ok) continue;
       best = Buffer.from(await resp2.arrayBuffer());
       if (best.length >= 100 && durOk(best)) return best.toString("base64");
@@ -3329,8 +3446,9 @@ async function translateToJa(text) {
   const c = cfg.chat || {};
   if (!c.apiKey || !c.baseUrl || String(c.apiType || "openai") === "anthropic") return "";
   const base = String(c.baseUrl || "").replace(/\/+$/, "");
-  const sys = "你是中日翻译器。把用户输入的中文翻译成自然流畅、口语化的日语。只输出译文本身，不要任何解释、引号或多余内容。强制术语：任何‘博士’一律输出为英文 doctor，不得输出日语‘博士’。";
+  const sys = "你是中日翻译器。把用户输入的中文翻译成自然流畅、口语化的日语。只输出译文本身，不要任何解释、引号或多余内容。强制术语：任何‘博士’一律输出为日语片假名 ドクター（玩家称呼，发音 do-ku-tā，对应游戏里的“刀客塔”），不得输出日语汉字‘博士’，也不得输出英文 doctor。";
   for (let attempt = 1; attempt <= 2; attempt++) {
+    let retryWaitMs = 1200;
     try {
       const resp = await fetch(base + "/chat/completions", {
         method: "POST",
@@ -3349,18 +3467,25 @@ async function translateToJa(text) {
       });
       if (!resp.ok) {
         const t = (await resp.text()).slice(0, 120);
-        logTts("ja", "翻译 HTTP " + resp.status + (attempt < 2 ? "，重试" : "") + ": " + t);
+        if (resp.status === 429) { // 限流：按服务端 retryAfterSeconds 等待（上限 15s），否则 1.2s 后重试必再 429
+          try {
+            const j = JSON.parse(t);
+            const ra = Number(j && j.data && j.data.retryAfterSeconds);
+            if (Number.isFinite(ra) && ra > 0) retryWaitMs = Math.min(15000, Math.round(ra * 1000));
+          } catch { /* 忽略 */ }
+        }
+        logTts("ja", "翻译 HTTP " + resp.status + (attempt < 2 ? "，" + retryWaitMs + "ms 后重试" : "") + ": " + t);
       } else {
         const j = await resp.json();
         const out = String((j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || "").trim();
-        const forced = out.replace(/博士/g, "doctor");
+        const forced = out.replace(/博士/g, "ドクター").replace(/\b[Dd]octor\b/g, "ドクター");
         if (forced && forced.length > 0 && forced.length < 400) return forced;
         logTts("ja", "翻译返回为空" + (attempt < 2 ? "，重试" : ""));
       }
     } catch (e) {
       logTts("ja", "翻译异常(" + attempt + "): " + (e && e.message || e));
     }
-    if (attempt < 2) await new Promise((r) => setTimeout(r, 1200));
+    if (attempt < 2) await new Promise((r) => setTimeout(r, retryWaitMs));
   }
   return "";
 }
@@ -3468,6 +3593,17 @@ if (!gotLock) {
   });
 
   app.whenReady().then(() => {
+    try {
+      // 崩溃收集：minidump 存到 userData/crashes（不自动上传），便于排查渲染层 crashed
+      const { crashReporter } = require("electron");
+      crashReporter.start({
+        productName: "SuzuranPet",
+        companyName: "SuzuranPet",
+        submitURL: "",
+        uploadToServer: false,
+        compress: true
+      });
+    } catch (e) { /* crashReporter 不可用不影响启动 */ }
     try {
       const secretInfo = config.initializeSecretStorage(safeStorage);
       logTts("security", "safeStorage=" + (secretInfo.chatApiKey?.available ? "available" : "unavailable") + " chat=" + (secretInfo.chatApiKey?.saved ? "saved" : "missing") + " cosy=" + (secretInfo.ttsCosyApiKey?.saved ? "saved" : "missing"));

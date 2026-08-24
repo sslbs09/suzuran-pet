@@ -56,6 +56,26 @@ html, body {
   background: linear-gradient(135deg, transparent 0 44%, rgba(142, 199, 232, .95) 44% 55%, transparent 55% 64%, rgba(142, 199, 232, .95) 64% 73%, transparent 73%);
   border-bottom-right-radius: 9px;
 }
+/* 左缘延伸区模式（主进程 edge-left 事件）：角色条带切到窗口左侧，气泡自动落在角色右侧，
+   避免被屏幕左缘裁掉（原「气泡头顶」模式废弃，改用翻边）。 */
+body.edge-left .pet {
+  right: auto;
+  left: 2px;
+}
+body.edge-left .input-bar {
+  right: auto;
+  left: 2px;                     /* 输入栏与角色同步切到窗口左侧（角色正下方） */
+}
+body.edge-left .bubble {
+  right: 4px;                     /* 气泡贴窗口右缘，落在角色右侧（角色条带已切到左侧） */
+  max-width: calc(100% - 136px);  /* 左侧 136px 为角色条带+间隙预留，不盖住角色 */
+}
+body.edge-left .bubble::after {
+  right: auto;
+  left: -7px;
+  border-left: 0;
+  border-right: 5.5px solid rgba(255, 255, 255, 0.96);  /* 尾巴朝左指向角色 */
+}
 /* 左缘延伸区模式（主进程 edge-left 事件）：气泡挪到桌宠头顶上方、尾巴朝下，避免被屏幕左缘裁掉 */
 .bubble.top {
   right: 4px;

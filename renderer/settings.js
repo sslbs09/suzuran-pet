@@ -113,6 +113,7 @@ async function toast(msg) {
   $("feat-memory").checked = f.longTermMemory !== false;
   $("feat-emotional").checked = f.emotionalVoice !== false;
   $("feat-desktop-icons").checked = !!f.desktopIcons;
+  $("auto-launch").checked = !!S.autoLaunch;
 
   // 渲染模式与桌面行走
   $("render-mode").value = S.renderMode === "spine" ? "spine" : "gif";
@@ -364,6 +365,7 @@ $("btn-save-other").addEventListener("click", async () => {
       emotionalVoice: $("feat-emotional").checked,
       desktopIcons: $("feat-desktop-icons").checked
     },
+    autoLaunch: $("auto-launch").checked, // 开机自启（系统级，主进程单独处理）
     agentApi: {
       enabled: $("agent-enabled").value === "true",
       port: parseInt($("agent-port").value, 10) || 8765,
