@@ -326,6 +326,7 @@ function refreshTrayMenu() {
     setDimMode, sitOnTaskbar, setScale, clampScale, setWalkSpeed, setCatToy,
     setFileGuard,
     openSchedule, openSettings, openMoodManager, openVoiceStudio, openTtsGuide, openQuickstart, openHelp, openAddChar,
+    openDocs,
     reloadPersona: () => { personaCache = config.getPersonaText(); sendToRenderer("pet:toast", i18n.t(lang, "tray.personaReloaded")); },
     openConfigPath: () => shell.openPath(config.CONFIG_PATH),
     openPersonaPath: () => shell.openPath(config.PERSONA_PATH),
@@ -464,6 +465,52 @@ function openPsdWindow() {
 attachCrashDiag(psdWin, "psd");
     psdWin.on("closed", () => { psdWin = null; });
 }
+
+/* ---------- 文档中心（v2.5.1）---------- */
+let docsWin = null;
+
+/** 文档清单：新手教程在 exe 旁（发布目录），其余在应用内（asar）。白名单按此固定生成。 */
+function docsManifest() {
+  const exeDir = path.dirname(process.execPath || "");
+  const appDir = config.APP_DIR;
+  const items = [];
+  try {
+    const nb = path.join(exeDir, "新手教程");
+    for (const f of fs.readdirSync(nb)) {
+      if (f.endsWith(".md")) {
+        items.push({ key: "newbie/" + f, name: f.replace(/^\d+-/, "").replace(/\.md$/, ""), group: "新手教程", file: path.join(nb, f), html: false });
+      }
+    }
+  } catch (e) { /* dev 运行无发布目录时跳过新手教程 */ }
+  const usage = path.join(appDir, "使用说明.html");
+  if (fs.existsSync(usage)) items.push({ key: "app/使用说明.html", name: "使用说明", group: "使用说明", file: usage, html: true });
+  const readme = path.join(appDir, "README.md");
+  if (fs.existsSync(readme)) items.push({ key: "app/README.md", name: "README（项目介绍）", group: "项目文档", file: readme, html: false });
+  const vg = path.join(appDir, "语音部署与训练指南", "总览.html");
+  if (fs.existsSync(vg)) items.push({ key: "app/语音指南", name: "语音部署与训练指南", group: "进阶文档", file: vg, html: true });
+  return items;
+}
+
+function openDocs() {
+  if (docsWin && !docsWin.isDestroyed()) { docsWin.focus(); return; }
+  docsWin = new BrowserWindow({ width: 940, height: 720, minWidth: 700, minHeight: 520, resizable: true, title: "苏苏洛 · 文档中心", autoHideMenuBar: true,
+    webPreferences: winChild.childWebPrefs(config.APP_DIR) });
+  docsWin.setMenuBarVisibility(false);
+  docsWin.loadFile(path.join(config.APP_DIR, "renderer", "docs.html"));
+  attachCrashDiag(docsWin, "docs");
+  docsWin.on("closed", () => { docsWin = null; });
+}
+ipcMain.handle("docs:list", () => docsManifest().map(({ key, name, group, html }) => ({ key, name, group, html })));
+ipcMain.handle("docs:read", (_e, key) => {
+  try {
+    const it = docsManifest().find((d) => d.key === key);
+    if (!it) return { ok: false, error: "文档不存在" };
+    if (it.html) return { ok: true, html: true, url: "file://" + it.file.split(path.sep).join("/") };
+    return { ok: true, html: false, text: fs.readFileSync(it.file, "utf8") };
+  } catch (e) { return { ok: false, error: e && e.message }; }
+});
+ipcMain.handle("pet:open-docs", () => { openDocs(); return true; });
+
 ipcMain.handle("pet:psd-open", () => { openPsdWindow(); return true; });
 ipcMain.handle("pet:psd-save", (_e, dataUrl, label) => { // 保存扁平化 PNG 到用户数据目录
   try {

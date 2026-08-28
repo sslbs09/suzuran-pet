@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval'; img-src 'self' data: blob:; font-src 'self' data:; base-uri 'none'; object-src 'none'; frame-src 'self' file: data:;">
+<title>苏苏洛 · 文档中心</title>
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<div id="docs-app">
+  <aside id="docs-sidebar">
+    <div class="docs-logo">📖 文档中心</div>
+    <nav id="docs-nav"></nav>
+  </aside>
+  <main id="docs-main">
+    <div id="docs-welcome" class="docs-pane">
+      <h1>苏苏洛桌宠 · 文档中心</h1>
+      <p>左边选一份文档，右边看内容。这里把桌宠的使用说明、新手教程和进阶指南都收在一起了。</p>
+      <p class="docs-tip">小提示：语音引擎相关的问题，先看《日语语音保姆级》和《语音部署与训练指南》。</p>
+    </div>
+    <div id="docs-content" class="docs-pane" hidden></div>
+    <iframe id="docs-iframe" hidden></iframe>
+    <div id="docs-loading" class="docs-pane" hidden>加载中…</div>
+  </main>
+</div>
+<script src="docs.js"></script>
+</body>
+</html>
