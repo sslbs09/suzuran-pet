@@ -154,6 +154,31 @@ async function toast(msg) {
   $("proactive-chat").addEventListener("change", () => window.petAPI.setProactiveChat($("proactive-chat").checked));
   $("personify").checked = S.personify !== false;
   $("personify").addEventListener("change", () => window.petAPI.setPersonify($("personify").checked));
+  // Live2D 模型列表（v2.5.1）：点选即切换（主进程保存并广播重载）
+  async function loadLive2dSkins() {
+    try {
+      const skins = await window.petAPI.live2dList();
+      const box = $("live2d-skins-list");
+      if (!box) return;
+      if (!skins || !skins.length) { box.textContent = "（暂无模型）"; return; }
+      box.textContent = "";
+      skins.forEach((s) => {
+        const label = document.createElement("label");
+        label.style.display = "block";
+        const radio = document.createElement("input");
+        radio.type = "radio";
+        radio.name = "live2d-skin";
+        radio.checked = s.id === (S.live2dSkinId || "") || (!S.live2dSkinId && s.id.startsWith("builtin/"));
+        label.appendChild(radio);
+        label.appendChild(document.createTextNode(" " + s.name));
+        radio.addEventListener("change", () => { if (radio.checked) window.petAPI.live2dSelect(s.id); });
+        box.appendChild(label);
+      });
+    } catch { const b = $("live2d-skins-list"); if (b) b.textContent = "加载失败"; }
+  }
+  loadLive2dSkins();
+  if (window.petAPI.onLive2dChanged) window.petAPI.onLive2dChanged(() => loadLive2dSkins());
+
   // 2.5D 已导入皮肤列表（§14 追加 96：每项可删除，删除当前皮肤自动退出 2.5D 模式）
   async function loadRigSkins() {
     try {
@@ -210,6 +235,7 @@ function applyRenderModeUI(mode) {
   if (hint) {
     hint.textContent = mode === "spine" ? "Spine 模式：下方显示行走/模型相关选项（人物皮肤、桌面行走、动作试演等）。"
       : mode === "rig" ? "2.5D 模式：下方显示角色相关选项（皮肤、大小、跟随鼠标、全局跟踪）。"
+      : mode === "live2d" ? "Live2D 模式：选择模型目录（把 .model3.json 所在文件夹放进 userData/assets/live2d/ 即可出现）。"
       : "GIF 模式：经典表情，无行走与模型选项。";
   }
 }

@@ -70,6 +70,8 @@ contextBridge.exposeInMainWorld("petAPI", {
   docsRead: (key) => ipcRenderer.invoke("docs:read", key),
   openDocs: () => ipcRenderer.invoke("pet:open-docs"),
   live2dList: () => ipcRenderer.invoke("pet:live2d-list"), // Live2D 模型扫描（v2.5.1）
+  live2dSelect: (id) => ipcRenderer.invoke("pet:live2d-select", id),
+  onLive2dChanged: (cb) => ipcRenderer.on("pet:live2d-changed", (_e, id) => cb(id)),
   psdOpen: () => ipcRenderer.invoke("pet:psd-open"), // PSD 角色工具窗口（v2.1）
   psdSave: (dataUrl, label) => ipcRenderer.invoke("pet:psd-save", dataUrl, label),
   // PSD 2.5D 角色皮肤（v2.2）

@@ -533,6 +533,11 @@ ipcMain.handle("pet:live2d-list", () => {
     (dir, mf) => "pet-user://live2d/" + encodeURIComponent(dir) + "/" + encodeURIComponent(mf));
   return out;
 });
+ipcMain.handle("pet:live2d-select", (_e, id) => {
+  config.saveConfig({ live2dSkinId: String(id || "") });
+  sendToRenderer("pet:live2d-changed", String(id || ""));
+  return true;
+});
 
 ipcMain.handle("pet:psd-open", () => { openPsdWindow(); return true; });
 ipcMain.handle("pet:psd-save", (_e, dataUrl, label) => { // 保存扁平化 PNG 到用户数据目录
@@ -1432,6 +1437,7 @@ ipcMain.handle("pet:get-state", () => {
     winSize: { width: cfg.window.width || 260, height: cfg.window.height || 200 },
     hasUserSprite: fs.existsSync(path.join(config.STORAGE.spritesUser, "sprite.png")),
     renderMode: renderModeMod.renderModeOf(cfg.renderMode),
+    live2dSkinId: cfg.live2dSkinId || "",
     rigSkinId: cfg.rigSkinId || "", // PSD 2.5D 皮肤
     rigScale: Number(cfg.rigScale) > 0 ? Number(cfg.rigScale) : 1.0,
     rigMouseFollow: cfg.rigMouseFollow !== false, // 2.5D 头部/眼睛跟随鼠标

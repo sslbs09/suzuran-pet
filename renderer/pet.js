@@ -129,7 +129,7 @@ function destroyRig() {
 /* ---------- Live2D 渲染模式（v2.5.1）：live2d-runtime.js 自治，这里只做显示归属与生命周期 ---------- */
 let live2dActive = false;
 
-async function initLive2d() {
+async function initLive2d(preferId) {
   const canvas = document.getElementById("live2d-canvas");
   if (!canvas || !window.Live2DRuntime) return false;
   let skins = [];
@@ -138,7 +138,7 @@ async function initLive2d() {
     window.petAPI.playback && window.petAPI.playback("[live2d] 未找到模型（内置缺失且 userData/assets/live2d/ 为空）");
     return false;
   }
-  const pick = skins[0]; // v1：默认第一个（内置示例优先），皮肤选择 UI 后续迭代
+  const pick = (preferId && skins.find((s) => s.id === preferId)) || skins.find((s) => s.id.startsWith("builtin/")) || skins[0];
   try {
     await window.Live2DRuntime.init(canvas, pick.url);
     live2dActive = true;
@@ -1432,13 +1432,22 @@ if (window.petAPI.onRenderModeChanged) {
       const ok = await initRig(rigSkinId || (await window.petAPI.getState()).rigSkinId);
       if (!ok) { renderMode = "gif"; spriteEl.style.display = ""; }
     } else if (m === "live2d") { // 切到 Live2D（v2.5.1）
-      const ok = await initLive2d();
+      const ok = await initLive2d((await window.petAPI.getState()).live2dSkinId);
       if (!ok) { renderMode = "gif"; spriteEl.style.display = ""; }
     } else {
       if (rigSkinId) { rigSkinId = ""; destroyRig(); }
       await setRenderMode(m === "spine" ? "spine" : "gif");
     }
     setMood(lastMood || "idle"); // 切换后恢复当前情绪
+  });
+}
+if (window.petAPI.onLive2dChanged) {
+  window.petAPI.onLive2dChanged(async (id) => { // 同模式换模型：重载
+    if (!live2dActive) return;
+    destroyLive2d();
+    const ok = await initLive2d(id);
+    if (!ok) { renderMode = "gif"; spriteEl.style.display = ""; }
+    setMood(lastMood || "idle");
   });
 }
 
@@ -2021,7 +2030,7 @@ function applyPetName(name) {
   if (state.renderMode === "rig" || state.rigSkinId) {
     await initRig(state.rigSkinId);
   } else if (state.renderMode === "live2d") {
-    const ok = await initLive2d();
+    const ok = await initLive2d(state.live2dSkinId);
     if (!ok) { renderMode = "gif"; spriteEl.style.display = ""; }
   } else if (state.renderMode === "spine") {
     await setRenderMode("spine");
