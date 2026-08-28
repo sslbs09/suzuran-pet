@@ -488,6 +488,8 @@ function docsManifest() {
   if (fs.existsSync(readme)) items.push({ key: "app/README.md", name: "README（项目介绍）", group: "项目文档", file: readme, html: false });
   const vg = path.join(appDir, "语音部署与训练指南", "总览.html");
   if (fs.existsSync(vg)) items.push({ key: "app/语音指南", name: "语音部署与训练指南", group: "进阶文档", file: vg, html: true });
+  const apiguide = path.join(appDir, "API接入指南.html");
+  if (fs.existsSync(apiguide)) items.push({ key: "app/API接入指南.html", name: "API 接入指南（学生白嫖版）", group: "进阶文档", file: apiguide, html: true });
   return items;
 }
 
