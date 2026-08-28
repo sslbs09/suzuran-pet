@@ -397,3 +397,8 @@ body.theme-dark .bubble { background: rgba(35, 44, 49, 0.96); border-color: #2e3
 body.theme-dark .input-bar { background: rgba(35, 44, 49, 0.96); border-color: #2e3a40; }
 body.theme-dark .input-bar #input { background: transparent; color: #e8eef0; }
 body.theme-dark .info-panel { background: rgba(35, 44, 49, 0.96); color: #e8eef0; border-color: #2e3a40; }
+body.theme-dark .info-head { color: #57bcb4; }
+body.theme-dark .info-companion { background: #243036; }
+body.theme-dark .info-sched { border-bottom-color: #2e3a40; }
+body.theme-dark .info-empty { color: #7d939a; }
+body.theme-dark .info-sched-time { color: #57bcb4; }
