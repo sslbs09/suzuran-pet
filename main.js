@@ -511,6 +511,27 @@ ipcMain.handle("docs:read", (_e, key) => {
 });
 ipcMain.handle("pet:open-docs", () => { openDocs(); return true; });
 
+/* ---------- Live2D 模型扫描（v2.5.1）---------- */
+/** 列出可用 Live2D 模型：内置示例（asar 内 renderer/live2d/models/）+ 用户模型（userData assets/live2d/） */
+ipcMain.handle("pet:live2d-list", () => {
+  const out = [];
+  const scan = (base, prefix, nameSuffix, urlOf) => {
+    try {
+      for (const dir of fs.readdirSync(base)) {
+        const full = path.join(base, dir);
+        if (!fs.statSync(full).isDirectory()) continue;
+        const mf = fs.readdirSync(full).find((f) => f.endsWith(".model3.json"));
+        if (mf) out.push({ id: prefix + dir, name: dir + nameSuffix, url: urlOf(dir, mf) });
+      }
+    } catch (e) { /* 目录不存在则跳过 */ }
+  };
+  scan(path.join(config.APP_DIR, "renderer", "live2d", "models"), "builtin/", "（内置示例）",
+    (dir, mf) => "live2d/models/" + encodeURIComponent(dir) + "/" + encodeURIComponent(mf));
+  scan(path.join(config.STORAGE.userDir, "assets", "live2d"), "user/", "",
+    (dir, mf) => "pet-user://live2d/" + encodeURIComponent(dir) + "/" + encodeURIComponent(mf));
+  return out;
+});
+
 ipcMain.handle("pet:psd-open", () => { openPsdWindow(); return true; });
 ipcMain.handle("pet:psd-save", (_e, dataUrl, label) => { // 保存扁平化 PNG 到用户数据目录
   try {

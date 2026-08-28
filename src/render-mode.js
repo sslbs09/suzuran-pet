@@ -1,12 +1,12 @@
 /**
  * render-mode.js — 渲染模式（纯逻辑，2026-08-27 从 main.js 拆出，可单测）
- * - 渲染模式归一化：gif / spine / rig 三态，未知值回落 gif
+ * - 渲染模式归一化：gif / spine / rig / live2d 四态，未知值回落 gif
  * - 模式切换贴地坐标：窗口底边对齐工作区底（+groundGap），水平钳回工作区范围
  *   （main.js「模式切换贴地」逻辑；与 walkGeo.groundLine 同族，正常窗口下等价）
  */
 "use strict";
 
-const RENDER_MODES = ["gif", "spine", "rig"];
+const RENDER_MODES = ["gif", "spine", "rig", "live2d"];
 
 /** 渲染模式归一化：合法三态原样返回，其余（含未配置/未知值）回落 gif */
 function renderModeOf(value) {

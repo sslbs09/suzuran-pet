@@ -191,7 +191,7 @@ async function toast(msg) {
   loadRigSkins();
 
   // 渲染模式与桌面行走
-  $("render-mode").value = S.renderMode === "spine" ? "spine" : S.renderMode === "rig" ? "rig" : "gif";
+  $("render-mode").value = S.renderMode === "spine" ? "spine" : S.renderMode === "rig" ? "rig" : S.renderMode === "live2d" ? "live2d" : "gif";
   $("walking-opt").checked = !!S.walking;
   applyRenderModeUI($("render-mode").value);
   $("render-mode").addEventListener("change", () => applyRenderModeUI($("render-mode").value));

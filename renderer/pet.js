@@ -125,6 +125,42 @@ function destroyRig() {
   window.petAPI.setSize(winSize.width || 260, winSize.height || 200);
   if (appearanceCfg) applyAppearance(appearanceCfg); // 关闭 rig 后恢复 gif/spine 的气泡宽度设置
 }
+
+/* ---------- Live2D 渲染模式（v2.5.1）：live2d-runtime.js 自治，这里只做显示归属与生命周期 ---------- */
+let live2dActive = false;
+
+async function initLive2d() {
+  const canvas = document.getElementById("live2d-canvas");
+  if (!canvas || !window.Live2DRuntime) return false;
+  let skins = [];
+  try { skins = await window.petAPI.live2dList(); } catch { /* 忽略 */ }
+  if (!skins || !skins.length) {
+    window.petAPI.playback && window.petAPI.playback("[live2d] 未找到模型（内置缺失且 userData/assets/live2d/ 为空）");
+    return false;
+  }
+  const pick = skins[0]; // v1：默认第一个（内置示例优先），皮肤选择 UI 后续迭代
+  try {
+    await window.Live2DRuntime.init(canvas, pick.url);
+    live2dActive = true;
+    spriteEl.style.display = "none";
+    if (spineApp && spineApp.view) spineApp.view.style.display = "none";
+    if (rigRuntime) { rigCanvas.classList.add("hidden"); }
+    canvas.classList.remove("hidden");
+    window.petAPI.playback && window.petAPI.playback("[live2d] 模型就绪: " + pick.name);
+    return true;
+  } catch (e) {
+    window.petAPI.playback && window.petAPI.playback("[live2d] 加载失败: " + (e && e.message || e));
+    return false;
+  }
+}
+
+function destroyLive2d() {
+  if (!live2dActive) return;
+  live2dActive = false;
+  try { window.Live2DRuntime.destroy(); } catch { /* 忽略 */ }
+  const canvas = document.getElementById("live2d-canvas");
+  if (canvas) canvas.classList.add("hidden");
+}
 function rigShow() { if (rigCanvas) rigCanvas.classList.remove("hidden"); }
 function rigHide() { if (rigCanvas) rigCanvas.classList.add("hidden"); }
 function rigPresetForMood(mood) {
@@ -597,6 +633,8 @@ async function setRenderMode(mode) {
   if (mode === renderMode && !(mode === "spine" && !spineApp)) return;
   const epoch = ++renderModeEpoch;
   renderMode = mode;
+
+  if (mode !== "live2d") destroyLive2d(); // 离开 Live2D：先销毁再走原逻辑
 
   if (mode === "spine") {
     const ok = await initSpine(epoch);
@@ -1391,6 +1429,9 @@ if (window.petAPI.onRenderModeChanged) {
     if (m === "rig") { // 切到 2.5D：需要皮肤（无则回 gif）
       const ok = await initRig(rigSkinId || (await window.petAPI.getState()).rigSkinId);
       if (!ok) { renderMode = "gif"; spriteEl.style.display = ""; }
+    } else if (m === "live2d") { // 切到 Live2D（v2.5.1）
+      const ok = await initLive2d();
+      if (!ok) { renderMode = "gif"; spriteEl.style.display = ""; }
     } else {
       if (rigSkinId) { rigSkinId = ""; destroyRig(); }
       await setRenderMode(m === "spine" ? "spine" : "gif");
@@ -1975,6 +2016,9 @@ function applyPetName(name) {
   // PSD 2.5D（v2.2）优先且独占：renderMode=rig 或 rigSkinId 非空时 Spine 不初始化，二者完全独立
   if (state.renderMode === "rig" || state.rigSkinId) {
     await initRig(state.rigSkinId);
+  } else if (state.renderMode === "live2d") {
+    const ok = await initLive2d();
+    if (!ok) { renderMode = "gif"; spriteEl.style.display = ""; }
   } else if (state.renderMode === "spine") {
     await setRenderMode("spine");
     if (state.walkState) applyWalkState(state.walkState);

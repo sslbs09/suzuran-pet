@@ -180,6 +180,18 @@ body.enlarged #input { font-size: calc(var(--chat-fz, 11px) + 1px); }
   z-index: 4;
 }
 .rig-canvas.hidden { display: none; }
+
+/* Live2D 画布（v2.5.1）：全窗显示，尺寸由 live2d-runtime.js 按像素管理 */
+.live2d-canvas {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 4;
+  pointer-events: auto; /* 点击播动作 */
+}
+.live2d-canvas.hidden { display: none; }
 /* rig 模式：隐藏 GIF/Spine 角色条带（2.5D 独立显示，互不干扰） */
 body.rig-mode #pet { display: none; }
 /* rig 角色始终占满窗口高度（大小由窗口高度联动控制，rigScale 调窗口尺寸，角色不超出画布） */
