@@ -536,6 +536,49 @@ ipcMain.handle("pet:live2d-list", () => {
   return out;
 });
 let rendererReloadAt = 0;
+ipcMain.handle("pet:swipe-move", (_e, dir) => { // Swipes：版本切换（-1/+1），content 同步为选中版本供上下文使用
+  const entry = history.updateLast("chat", "assistant", (r) => {
+    const total = (r.swipes || [r.content]).length;
+    const cur = Number(r.swipeIndex) || 0;
+    const next = Math.min(total - 1, Math.max(0, cur + (Number(dir) >= 0 ? 1 : -1)));
+    if (next !== cur) { r.swipeIndex = next; r.content = (r.swipes || [r.content])[next]; }
+  });
+  if (!entry) return null;
+  sendToRenderer("pet:swipe-changed", { content: entry.content, index: entry.swipeIndex || 0, total: (entry.swipes || [entry.content]).length });
+  return { content: entry.content, index: entry.swipeIndex || 0, total: (entry.swipes || [entry.content]).length };
+});
+ipcMain.handle("pet:regenerate", async () => { // Swipes：重新生成最后一条回复（新版本 append）
+  if (!win || win.isDestroyed()) return null;
+  const cfg = config.getConfig();
+  if (!cfg.chat.apiKey) return null;
+  const rows = history.recent("chat", (cfg.chat.maxHistoryTurns || 20) + 1);
+  if (!rows.length || rows[rows.length - 1].role !== "assistant") return null;
+  const hist = rows.slice(0, -1); // 上下文去掉旧回复
+  const text = (() => { for (let i = hist.length - 1; i >= 0; i--) if (hist[i].role === "user") return hist[i].content; return ""; })();
+  if (!text) return null;
+  sendToRenderer("pet:thinking", { mode: "chat" });
+  try {
+    const r = await chatClient.chat({
+      persona: personaCache || config.getPersonaText(), history: hist, text,
+      state: petStateNote(),
+      onChunk: (d) => sendToRenderer("pet:chunk", { mode: "chat", text: d })
+    });
+    let newFull = r.text || "";
+    const mi = newFull.indexOf("【情绪");
+    if (mi >= 0) newFull = newFull.slice(0, mi);
+    const entry = history.updateLast("chat", "assistant", (x) => {
+      x.swipes = Array.isArray(x.swipes) && x.swipes.length ? x.swipes : [x.content];
+      x.swipes.push(newFull);
+      x.swipeIndex = x.swipes.length - 1;
+      x.content = newFull;
+      x.ts = Date.now();
+    });
+    if (!entry) return null;
+    sendToRenderer("pet:done", { mode: "chat", full: newFull, emotion: r.emotion || "",
+      swipes: entry.swipes, swipeIndex: entry.swipeIndex });
+    return { full: newFull };
+  } catch (e) { logTts("chat", "regenerate 失败: " + (e && e.message || e)); sendToRenderer("pet:done", { mode: "chat", full: "", emotion: "" }); return null; }
+});
 ipcMain.handle("pet:set-theme", (_e, theme) => {
   const v = ["auto", "light", "dark"].includes(theme) ? theme : "auto";
   config.saveConfig({ theme: v });
@@ -1404,8 +1447,11 @@ async function handleAskInner(sender, { id, text }) {
       emotion = r.emotion || ""; // 模型选的情绪词（≤5字，已在 chat-client 里校验过词表）
       if (emotion) lastReplyEmotion = emotion; // 情绪衔接（B2）
     }
-    history.append({ ts: Date.now(), mode, role: "assistant", content: full });
-    if (isCurrent()) sender.send("pet:done", { id, mode, full, emotion });
+    const isChat = mode === "chat";
+    history.append(Object.assign({ ts: Date.now(), mode, role: "assistant", content: full },
+      isChat ? { swipes: [full], swipeIndex: 0 } : {}));
+    if (isCurrent()) sender.send("pet:done", Object.assign({ id, mode, full, emotion },
+      isChat ? { swipes: [full], swipeIndex: 0 } : {}));
 
     // 长期记忆摘要：每 20 轮对话自动生成一次
     const _fc = config.getConfig();

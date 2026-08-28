@@ -112,6 +112,29 @@ rig 物理摆动暂缓。理由：rig 的基础显示问题（耳朵不显示/�
 修复：输入框底改 `var(--ui-surface)`（浅色 #fff 不变，深色自动深底）；note 提示框加深色覆盖；schedule-item 变量化。settings.css:52 的开关白圆点是正常设计未动。
 教训：ui.css 变量层覆盖了 8 个窗口，但变量层**自身**还有 3 处硬编码浅色漏网——下次加主题先全量 grep 硬编码色值。
 
+## 第 4 轮：酒馆学习（Swipes + 动作斜体，✅ 代码完成待用户 UI 验收）
+
+
+
+用户选定学习 SillyTavern 的两样：
+1. **Swipes**：回复可重新生成多版本，气泡上 ‹ n/m › 切换；上下文构建使用各消息"当前选中版本"
+2. **动作斜体渲染**：RP 输出的 *动作* 与（动作）在气泡里渲染为斜体灰字，朗读自动剥离
+
+实现要点（备忘）：
+- history 消息结构加 `swipes: [..]` + `swipeIndex`（向后兼容：无字段=单版本）
+- main.js 新 IPC `pet:regenerate`：对最后一条回复重新请求，新版本 append
+- 气泡 UI：多版本时显示 ‹ n/m › + ↻；打字机改 segments 渲染（parseRpSegments：*..*/（..）→ 斜体 span）
+- 朗读剥离：stripForSpeech 增加 *动作* 剥离（（..）已有）
+
+## 第 4 轮实现记录
+
+- `history.js`：updateLast(mode, role, fn)（JSONL 全量重写，原子 tmp+rename）
+- `main.js`：done append 带 swipes（仅 chat 模式）；`pet:swipe-move`（切换+content 同步选中版供上下文）、`pet:regenerate`（流式重生成新版本 append，persona 用 personaCache）
+- `renderer/pet.js`：parseRpSegments/renderRpSlice（*动作*与（动作）→ 斜体 span，打字机增量富渲染）；done 用 innerHTML 富渲染 + swipeState；swipe-bar（‹ n/m › ↻）事件 + onSwipeChanged 热更新；stripForSpeech 加 *动作* 剥离（不朗读）
+- 已修 heredoc 转义坑两次（
+ 写成真实换行断正则——老坑，写含转义的 JS 用 chr(92) 构造或 Write 工具）
+- 实测：Agent /chat 回复带 RP 格式 ✓；**气泡 UI 的 ‹›/↻/斜体需用户操作验收**（Agent HTTP 路径不带 swipes 属预期）
+
 ## 验收与 push（用户醒来后）
 
 1. 用户验收各功能（拖拽/皮肤切换/情绪反应等）

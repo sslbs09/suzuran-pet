@@ -402,3 +402,20 @@ body.theme-dark .info-companion { background: #243036; }
 body.theme-dark .info-sched { border-bottom-color: #2e3a40; }
 body.theme-dark .info-empty { color: #7d939a; }
 body.theme-dark .info-sched-time { color: #57bcb4; }
+
+/* RP 动作斜体 + Swipes 切换条（v2.5.1，酒馆学习） */
+.rp-action { font-style: italic; opacity: 0.72; }
+.swipe-bar {
+  position: absolute;
+  right: 10px;
+  bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  color: #8a7365;
+  user-select: none;
+}
+.swipe-bar.hidden { display: none; }
+.swipe-bar button { background: none; border: none; cursor: pointer; color: #8a7365; font-size: 13px; padding: 0 4px; line-height: 1; }
+.swipe-bar button:hover { color: #c96a3c; }

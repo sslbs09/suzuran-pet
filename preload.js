@@ -72,6 +72,9 @@ contextBridge.exposeInMainWorld("petAPI", {
   live2dList: () => ipcRenderer.invoke("pet:live2d-list"), // Live2D 模型扫描（v2.5.1）
   reloadRenderer: () => ipcRenderer.invoke("pet:reload-renderer"), // 渲染层自愈
   setTheme: (theme) => ipcRenderer.invoke("pet:set-theme", theme),
+  swipeMove: (dir) => ipcRenderer.invoke("pet:swipe-move", dir),
+  regenerate: () => ipcRenderer.invoke("pet:regenerate"),
+  onSwipeChanged: (cb) => ipcRenderer.on("pet:swipe-changed", (_e, s) => cb(s)),
   onThemeChanged: (cb) => ipcRenderer.on("pet:theme-changed", (_e, th) => cb(th)),
   live2dSelect: (id) => ipcRenderer.invoke("pet:live2d-select", id),
   onLive2dChanged: (cb) => ipcRenderer.on("pet:live2d-changed", (_e, id) => cb(id)),

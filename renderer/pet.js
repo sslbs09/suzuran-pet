@@ -890,7 +890,7 @@ function startReveal(full, offset) {
   typing = true;
   revealTimer = setInterval(() => {
     offset = Math.min(full.length, offset + 3);
-    bubbleText.textContent = full.slice(0, offset);
+    bubbleText.innerHTML = renderRpSlice(full, offset);
     if (offset >= full.length) stopReveal();
   }, 14);
 }
@@ -1011,8 +1011,35 @@ function initTts() {
 }
 
 /** 朗读前清洗：去 emoji / 舞台动作括号 / 记号 */
+/* RP 富渲染（酒馆学习 v2.5.1）：*动作* 与（动作）渲染为斜体灰字 */
+function parseRpSegments(text) {
+  const src = String(text || "");
+  const segs = [];
+  const re = /\*([^*\n]{1,80})\*|（([^（)\n]{1,80})）/g;
+  let last = 0, m;
+  while ((m = re.exec(src))) {
+    if (m.index > last) segs.push({ text: src.slice(last, m.index), rp: false });
+    segs.push({ text: m[1] !== undefined ? "*" + m[1] + "*" : "（" + m[2] + "）", rp: true });
+    last = m.index + m[0].length;
+  }
+  if (last < src.length) segs.push({ text: src.slice(last), rp: false });
+  return segs;
+}
+function escHtml(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function renderRpSlice(full, n) { // 前 n 个字符的富渲染（打字机增量用）
+  let html = "", left = Math.max(0, n);
+  for (const s of parseRpSegments(full)) {
+    if (left <= 0) break;
+    const part = s.text.slice(0, left);
+    left -= s.text.length;
+    html += s.rp ? '<span class="rp-action">' + escHtml(part) + "</span>" : escHtml(part);
+  }
+  return html;
+}
+
 function stripForSpeech(text) {
   return String(text || "")
+    .replace(/\*[^*\n]{1,80}\*/g, "")      // 去 *动作*（RP 富渲染斜体，不朗读）
     .replace(/（[^）]*）/g, "")            // 去（舞台动作）
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, "") // 去 emoji
     .replace(/[*_`#>【】"'""]/g, "")
@@ -1403,7 +1430,21 @@ window.petAPI.onChunk(({ id, mode, text }) => {
   }
 });
 
-window.petAPI.onDone(({ mode, full, emotion }) => {
+let swipeState = null; // Swipes：{index,total}（当前回复的多版本状态）
+function renderSwipeBar() {
+  const bar = document.getElementById("swipe-bar");
+  if (!bar) return;
+  const pos = document.getElementById("swipe-pos");
+  const multi = swipeState && swipeState.total > 1;
+  bar.classList.toggle("hidden", !swipeState);
+  if (!swipeState) return;
+  if (pos) pos.textContent = multi ? (swipeState.index + 1) + "/" + swipeState.total : "";
+  const prev = document.getElementById("swipe-prev");
+  const next = document.getElementById("swipe-next");
+  if (prev) prev.style.visibility = multi && swipeState.index > 0 ? "" : "hidden";
+  if (next) next.style.visibility = multi && swipeState.index < swipeState.total - 1 ? "" : "hidden";
+}
+window.petAPI.onDone(({ mode, full, emotion, swipes, swipeIndex }) => {
   hideThinking();
   busy = false;
   maybeFlushPendingSend(); // 生成防抖：回合结束，补发等待中的新消息
@@ -1415,8 +1456,10 @@ window.petAPI.onDone(({ mode, full, emotion }) => {
   } else {
     replyBuffer = full || replyBuffer;
     stopReveal();
-    bubbleText.textContent = replyBuffer;
-    speak(replyBuffer, emoLabel);
+    bubbleText.innerHTML = renderRpSlice(replyBuffer, replyBuffer.length);
+    swipeState = (swipes && swipes.length) ? { index: swipeIndex || 0, total: swipes.length } : null;
+    renderSwipeBar();
+    speak(stripForSpeech(replyBuffer), emoLabel);
   }
   // 模型理解出的情绪 → 对应 GIF（没有匹配就用开心）
   const nm = emotion ? labelToName(String(emotion).trim()) : "";
@@ -1461,7 +1504,24 @@ if (window.petAPI.onWalking) {
   window.petAPI.onWalking((s) => applyWalkState(s));
 }
 if (window.petAPI.onDropped) {
-  window.petAPI.onDropped(() => {
+  if (document.getElementById("swipe-bar")) {
+  document.getElementById("swipe-prev").addEventListener("click", () => window.petAPI.swipeMove(-1));
+  document.getElementById("swipe-next").addEventListener("click", () => window.petAPI.swipeMove(1));
+  document.getElementById("swipe-regen").addEventListener("click", () => {
+    if (busy) return;
+    showThinking();
+    window.petAPI.regenerate();
+  });
+}
+if (window.petAPI.onSwipeChanged) {
+  window.petAPI.onSwipeChanged((s) => { // 切换版本：更新气泡（不重复朗读）
+    swipeState = s;
+    replyBuffer = s.content;
+    bubbleText.innerHTML = renderRpSlice(s.content, s.content.length);
+    renderSwipeBar();
+  });
+}
+window.petAPI.onDropped(() => {
   if (live2dActive) { try { window.Live2DRuntime.poke(); } catch { /* 忽略 */ } return; } // Live2D：放下抖一下
   if (!(rigSkinId && rigRuntime)) playSpineInteract(); // 2.5D 模式不播 Spine 互动
 });
