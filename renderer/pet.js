@@ -1031,6 +1031,21 @@ function emotionizeText(text, emotion) {
   return String(text).replace(/[。！？…~～\s]+$/, "") + tail;
 }
 
+/* 苏苏洛原声预设（游戏语音切片，随包 renderer/sounds/）：引擎不可用时的替代反馈 */
+let presetAudio = null;
+function playPresetVoice() {
+  stopTts();
+  try {
+    const idx = 1 + Math.floor(Math.random() * 5);
+    const names = ["017", "018", "021", "023", "025"];
+    presetAudio = new Audio("sounds/preset-" + names[(idx - 1) % names.length] + ".wav");
+    isSpeakingAudio = true;
+    presetAudio.onended = () => { isSpeakingAudio = false; };
+    presetAudio.onerror = () => { isSpeakingAudio = false; };
+    presetAudio.play().catch(() => { isSpeakingAudio = false; });
+  } catch (e) { isSpeakingAudio = false; }
+}
+
 function speakSystem(clean, rateOverride, pitchOverride) {
   stopTts();
   try {
@@ -1221,9 +1236,10 @@ async function speak(text, emotion) {
       window.petAPI.playback("播放失败: " + (e && e.message || e));
     }
   }
-  if (mySession !== speakSession) return; // 等待/失败期间来了新消息：不回退系统语音（不然旧句会用系统音补读）
-  window.petAPI.playback("回退系统语音");
-  speakSystem(clean.replace(/博士/g, "刀客塔"), speakRate, speakPitch); // 游戏习惯称呼（仅语音，气泡仍显示原文）
+  if (mySession !== speakSession) return; // 等待/失败期间来了新消息：不回退（不然旧句会用兜底音补读）
+  // 引擎全不可用 → 播放苏苏洛原声预设切片（游戏语音，替代难听的系统合成音）
+  window.petAPI.playback("语音引擎不可用 → 播放原声预设");
+  playPresetVoice();
   } finally {
     if (mySession === speakSession) speakActive = false; // 只由最新会话收口流式接收窗口
   }
