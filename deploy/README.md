@@ -76,3 +76,20 @@ Get-AuthenticodeSignature -FilePath "<exe>"   # 确认 Signer 出现
 
 - 蜜标 `_honeytoken_*.json` 与翻译缓存不在产物内（首启按需生成），无需处理。
 - 每次发版同步 `deploy/config.template.json` 与 config.js 的新增字段（跑一次 §1.2 生成逻辑核对）。
+## 6. GitHub 发布（v2.5.0 起，每次发版按序）
+
+```bash
+# 1) 版本号（package.json version）与 exe 文件名保持一致（如 2.5.0）
+# 2) 提交 + 打 tag + 推送（git 直连 GitHub，勿配代理）
+git add -A && git commit -m "release: vX.Y.Z —— 变更摘要"
+git tag vX.Y.Z && git push origin main && git push origin vX.Y.Z
+# 3) 创建 Release（curl API，用 git credential fill 取 token）
+#    → POST /repos/sslbs09/suzuran-pet/releases，body 写发布说明
+# 4) 上传资产（GitHub 单文件上限 2GB）：
+#    - 完整包（含 engines/ 约 9.5GB）超限 → 放 E:\SuzuranPetGit\release\vX.Y.Z\，网盘/其他渠道分发
+#    - 轻量版（deploy/publish-lite.ps1 排除 engines，约 235MB）→ 传 GitHub
+# 5) 完整包位置与说明写进 Release body
+```
+
+- git 认证走 Windows 凭据管理器（`git credential fill` 可提取 token 供 API 用）。
+- 代理注意：git 直连可用；Clash 代理（127.0.0.1:7897）仅下载用，git 配置 http.proxy 反而会超时。
