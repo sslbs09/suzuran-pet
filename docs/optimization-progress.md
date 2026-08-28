@@ -2012,6 +2012,26 @@ cn-qanyi 配额不足（账号层），需用户在设置①补充额度或更�
 
 **VM 完整链路（最终）**：全新安装 → 出厂 config 自动回填 engines 路径（ttsGenie.python/ttsGsv.python/模型路径）→ venv home 修复生效 → onnxruntime 加载成功 → Genie 引擎"服务器就绪、预热已就绪" → **真实中文合成 HTTP 200（169KB，2.64s，32kHz 正常语音）**。
 
+### §14 追加 111：Live2D 渲染模式 v1（第四渲染态，2026-08-29，已部署实测）
+
+**背景**：用户调研 live2d-widget 后要求评估并集成（docs/LIVE2D-INTEGRATION-PLAN.md 项目稿）。v1 目标：桌宠能显示 Live2D 模型，先用内置示例模型跑通链路，素材后续再解决。
+
+**选型**：`pixi-live2d-display-lipsyncpatch@0.5.0-ls-8`（MIT，社区版，peer 支持 pixi ^7 与桌宠 pixi 7.4.2 匹配；官方 0.4.0 只支持 pixi 6）。不用 live2d-widget（GPL-3.0 传染）。Cubism Core（207KB，Live2D 专有许可）随包捆绑、不入 git 仓库。测试模型 haru（Cubism 4，Live2D 官方示例素材，17 文件 3MB）入 git。
+
+**实现（v1 范围：显示 + 自动 Idle + 点击动作）**：
+- `src/render-mode.js`：RENDER_MODES 加第四态 `"live2d"`；
+- `renderer/live2d-runtime.js`：自治模块（照 3D 时代教训，单点可回滚），暴露 `Live2DRuntime.init/destroy`——透明 PIXI Application 全窗、模型按窗口高 88% 等比贴底居中、resize 跟随；
+- `renderer/index.html`：live2d-canvas + 三个脚本（Core → pixi-live2d → runtime）；
+- `renderer/pet.js`：`initLive2d/destroyLive2d` 生命周期，`onRenderModeChanged` 与启动恢复各加 live2d 分支，离开模式统一销毁；
+- `main.js`：`pet:live2d-list` IPC 扫描两处模型源（asar 内置 + `userData/assets/live2d/`，后者走 pet-user: 协议）；
+- 设置页渲染模式下拉加「Live2D 角色（实验，内置示例模型）」。
+
+**踩坑**：①vision 截图判读先拍到旧图（cap-rig.ps1 还匹配 1.1 进程名、且脚本是 UTF-8 无 BOM 被 PS5.1 按 ANSI 读）——脚本转 UTF-16LE 并改匹配 2.5 后抓到；②asar 内关键词检测曾把两个关键词拼接搜索导致误报缺失，分开查即正常。
+
+**验证**：切 live2d 模式日志 `[live2d] 模型就绪: haru（内置示例）`；PrintWindow 抓窗 + vision 判读：角色完整渲染、等比贴底居中、无变形无黑块；切回 spine 干净（5 进程 + /health + 日志零错误）。Core 的 wasm 在现有 CSP（script-src unsafe-eval）下正常运行，CSP 无需改动。
+
+**v1 已知限制（后续迭代候选）**：皮肤选择 UI（当前默认第一个模型）；行走/坐姿动画联动；窗口尺寸策略（暂用当前窗口，模型 88% 贴底）；Cubism 2 老模型支持（当前只 3/4/5）。
+
 **注意**：GPT-SoVITS v2Pro 与 GenieTTS 推理引擎不在包内（v2Pro 是商业发布包，整套再分发有授权风险），新用户按《语音部署与训练指南》自备引擎，模型用随包的即可，不用训练。
 
 ## 11. 后续优化重点项目（Roadmap，2026-08-26 由用户指定）
