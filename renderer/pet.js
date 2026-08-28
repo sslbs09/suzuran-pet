@@ -140,6 +140,7 @@ async function initLive2d(preferId) {
   }
   const pick = (preferId && skins.find((s) => s.id === preferId)) || skins.find((s) => s.id.startsWith("builtin/")) || skins[0];
   try {
+    bindCtxLost(canvas, "live2d");
     await window.Live2DRuntime.init(canvas, pick.url);
     live2dActive = true;
     document.body.classList.add("live2d-mode");
@@ -162,6 +163,15 @@ function destroyLive2d() {
   try { window.Live2DRuntime.destroy(); } catch { /* 忽略 */ }
   const canvas = document.getElementById("live2d-canvas");
   if (canvas) canvas.classList.add("hidden");
+}
+
+function bindCtxLost(canvas, tag) { // 低配核显 WebGL 上下文丢失 → 上报 + 自愈重载
+  if (!canvas) return;
+  canvas.addEventListener("webglcontextlost", (e) => {
+    e.preventDefault();
+    window.petAPI.playback && window.petAPI.playback("[gpu] WebGL 上下文丢失: " + tag);
+    window.petAPI.reloadRenderer && window.petAPI.reloadRenderer();
+  });
 }
 
 function setLive2dMood(mood) {
@@ -506,6 +516,7 @@ async function initSpine(epoch = renderModeEpoch) {
       autoDensity: true // 画布物理分辨率提升但 CSS 尺寸保持不变
     });
     spineApp.view.id = "spine-canvas";
+    bindCtxLost(spineApp.view, "spine");
     spineApp.view.classList.add("spine-canvas");
 
     // 替换 GIF img 为 Spine canvas

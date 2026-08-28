@@ -535,6 +535,23 @@ ipcMain.handle("pet:live2d-list", () => {
     (dir, mf) => "pet-user://live2d/" + encodeURIComponent(dir) + "/" + encodeURIComponent(mf));
   return out;
 });
+let rendererReloadAt = 0;
+ipcMain.handle("pet:reload-renderer", () => { // WebGL 上下文丢失等场景的渲染层自愈（60s 节流）
+  const now = Date.now();
+  if (!win || win.isDestroyed() || now - rendererReloadAt < 60000) return false;
+  rendererReloadAt = now;
+  logTts("render", "渲染层自愈：webContents.reload（WebGL 上下文丢失/渲染异常）");
+  win.webContents.reload();
+  return true;
+});
+app.whenReady().then(() => { // 低配/软件渲染提示（无硬加速能跑但慢）
+  try {
+    const st = app.getGPUFeatureStatus();
+    if (String(st.webgl || "").includes("software") || String(st.webgl || "") === "disabled") {
+      logTts("render", "GPU 状态: webgl=" + (st.webgl || "?") + "（软件渲染/无硬件加速，动画可能卡顿，建议更新显卡驱动）");
+    }
+  } catch { /* 忽略 */ }
+});
 ipcMain.handle("pet:live2d-select", (_e, id) => {
   config.saveConfig({ live2dSkinId: String(id || "") });
   sendToRenderer("pet:live2d-changed", String(id || ""));
