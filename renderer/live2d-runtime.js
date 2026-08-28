@@ -79,10 +79,24 @@
     } catch (e) { /* 动作缺失不影响主流程 */ }
   }
 
+  let lastPokeAt = 0;
+  function poke() { // 戳一戳/放下：随机播一个 Tap 动作（800ms 节流）
+    if (!model || !active) return;
+    const now = Date.now();
+    if (now - lastPokeAt < 800) return;
+    lastPokeAt = now;
+    try {
+      const taps = (model.internalModel && model.internalModel.settings) ?
+        ((model.internalModel.settings.motions || {})["Tap"] || []) : [];
+      if (taps.length) model.motion("Tap", Math.floor(Math.random() * taps.length), 3);
+    } catch (e) { /* 忽略 */ }
+  }
+
   window.Live2DRuntime = {
     init,
     destroy,
     setMood,
+    poke,
     get active() { return active; },
     /** 供错误上报/诊断 */
     version: "v1.1"

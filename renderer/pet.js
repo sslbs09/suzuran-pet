@@ -1429,7 +1429,10 @@ if (window.petAPI.onWalking) {
   window.petAPI.onWalking((s) => applyWalkState(s));
 }
 if (window.petAPI.onDropped) {
-  window.petAPI.onDropped(() => { if (!(rigSkinId && rigRuntime)) playSpineInteract(); }); // 2.5D 模式不播 Spine 互动
+  window.petAPI.onDropped(() => {
+  if (live2dActive) { try { window.Live2DRuntime.poke(); } catch { /* 忽略 */ } return; } // Live2D：放下抖一下
+  if (!(rigSkinId && rigRuntime)) playSpineInteract(); // 2.5D 模式不播 Spine 互动
+});
 }
 if (window.petAPI.onEdgeLeft) {
   window.petAPI.onEdgeLeft((v) => document.body.classList.toggle("edge-left", !!v)); // 角色贴屏幕左缘：条带切左侧、气泡翻右侧

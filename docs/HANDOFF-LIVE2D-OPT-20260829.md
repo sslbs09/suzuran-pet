@@ -16,8 +16,8 @@
 | 2 | Live2D 皮肤选择 UI | ✅ 完成（实测通过） |
 | 3 | Live2D 情绪联动（setMood → 表情/动作） | ✅ 完成（live2d 模式运行验证） |
 | 4 | 发布包重打（含 Live2D + API 指南）+ VM 复测 | ⬜ |
-| 5 | Live2D 行走/坐姿联动（最小版：放下播动作） | ⬜ |
-| 6 | rig 物理摆动 | ⬜ |
+| 5 | Live2D 放下/戳一戳动作联动（最小版） | ✅ 完成（poke 随机 Tap） |
+| 6 | rig 物理摆动 | ⏭️ 跳过（见下方说明） |
 | 7 | CHANGELOG / README 补 2.5.0 账 | ⬜ |
 | 8 | Cubism 2 支持 / 安全测试 | 长期池，本轮不做（安全测试受用户约束：须 VM 隔离 + 专门安排） |
 
@@ -51,6 +51,15 @@
 - `renderer/pet.js`：setMood 分发加 `live2dActive` 分支 → setLive2dMood
 - 注意：haru 的 Tap 动作具体观感未逐个核对，映射表 `MOOD_MOTION` 在 live2d-runtime.js 顶部，按实际效果调 index 即可
 - 实测：live2d 模式启动正常（模型就绪日志 + 5 进程），点击角色的 Tap 反应为库自带
+
+## 第 5 项实现记录（✅ 完成）
+
+- `live2d-runtime.js` 加 `poke()`：随机 Tap 动作（800ms 节流）；`pet.js` onDropped（放下/扔出落地）时触发
+- 实测：live2d 模式运行正常
+
+## 第 6 项跳过说明（⏭️）
+
+rig 物理摆动暂缓。理由：rig 的基础显示问题（耳朵不显示/图层错位，§107/108）用户已明确放弃修复、保持原始状态；在未修的地基上加物理摆动，观感收益存疑且加深实验耦合。建议：待 rig 显示问题重新提上日程时一并做；Live2D 侧不需要——haru 自带 physics3.json 已自动生效。用户醒来若坚持要，可做最小版：rig-runtime tick 里对 headwear/ears 图层加正弦微摆（独立于显示 bug）。
 
 ## 验收与 push（用户醒来后）
 
