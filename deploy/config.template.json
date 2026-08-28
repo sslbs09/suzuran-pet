@@ -1,0 +1,228 @@
+{
+  "pet": {
+    "name": "苏苏洛"
+  },
+  "agreed": false,
+  "moods": [
+    {
+      "name": "idle1",
+      "label": "待机1",
+      "emotion": false
+    },
+    {
+      "name": "idle2",
+      "label": "待机2",
+      "emotion": false
+    },
+    {
+      "name": "idle3",
+      "label": "发呆",
+      "emotion": true
+    },
+    {
+      "name": "idle4",
+      "label": "喝饮料",
+      "emotion": true
+    },
+    {
+      "name": "idle5",
+      "label": "送花",
+      "emotion": true
+    },
+    {
+      "name": "idle6",
+      "label": "手工",
+      "emotion": true
+    },
+    {
+      "name": "idle7",
+      "label": "展示",
+      "emotion": true
+    },
+    {
+      "name": "happy",
+      "label": "开心",
+      "emotion": true
+    },
+    {
+      "name": "wow",
+      "label": "惊喜",
+      "emotion": true
+    },
+    {
+      "name": "think",
+      "label": "思考",
+      "emotion": true
+    },
+    {
+      "name": "wave",
+      "label": "挥手",
+      "emotion": true
+    },
+    {
+      "name": "angry",
+      "label": "生气",
+      "emotion": true
+    },
+    {
+      "name": "cry",
+      "label": "委屈",
+      "emotion": true
+    },
+    {
+      "name": "sleep",
+      "label": "睡觉",
+      "emotion": true
+    },
+    {
+      "name": "kiss",
+      "label": "飞吻",
+      "emotion": true
+    },
+    {
+      "name": "work",
+      "label": "工作",
+      "emotion": true
+    },
+    {
+      "name": "tsundere",
+      "label": "傲娇",
+      "emotion": true
+    },
+    {
+      "name": "surprised",
+      "label": "惊讶",
+      "emotion": true
+    },
+    {
+      "name": "dizzy",
+      "label": "晕",
+      "emotion": true
+    }
+  ],
+  "agentApi": {
+    "enabled": true,
+    "port": 8765,
+    "invokeWord": "",
+    "bearerToken": "",
+    "maxBodyBytes": 65536
+  },
+  "zcodeCli": "E:\\ZCODE\\resources\\glm\\zcode.cjs",
+  "workspace": "",
+  "zcodeEnabled": false,
+  "firstRunAt": null,
+  "chat": {
+    "apiType": "openai",
+    "baseUrl": "https://api.deepseek.com/v1",
+    "model": "deepseek-chat",
+    "userName": "主人",
+    "temperature": 0.85,
+    "maxTokens": 800,
+    "maxHistoryTurns": 20,
+    "sampling": {
+      "topP": 0.9,
+      "minP": 0.05,
+      "repeatPenalty": 1.1,
+      "presencePenalty": 0.1,
+      "frequencyPenalty": 0.1
+    }
+  },
+  "window": {
+    "x": 638,
+    "y": 356,
+    "width": 260,
+    "height": 200,
+    "scale": 1
+  },
+  "renderMode": "gif",
+  "layer": "top",
+  "spineSkinId": "",
+  "rigSkinId": "",
+  "rigScale": 1,
+  "rigMouseFollow": true,
+  "mouseTrackGlobal": false,
+  "catToy": false,
+  "walkGlobal": false,
+  "softRender": false,
+  "fileGuard": false,
+  "proactiveChat": true,
+  "personify": true,
+  "walking": false,
+  "walkTiming": {
+    "sitMaxSec": 30,
+    "walkMaxSec": 20
+  },
+  "appearance": {
+    "fontFamily": "",
+    "fontSize": 0,
+    "bubbleWidth": 0,
+    "customFonts": []
+  },
+  "firstRun": true,
+  "tts": {
+    "enabled": true,
+    "voice": "",
+    "rate": 0.9,
+    "pitch": 1.1
+  },
+  "ttsCloud": {
+    "enabled": false,
+    "voice": "zh-CN-XiaoxiaoNeural",
+    "rate": "+8%",
+    "pitch": "+0Hz"
+  },
+  "ttsCosy": {
+    "enabled": false,
+    "apiKey": "",
+    "model": "cosyvoice-v3.5-plus",
+    "voice": "",
+    "rate": 1,
+    "pitch": 1,
+    "volume": 100
+  },
+  "ttsGenie": {
+    "enabled": true,
+    "server": "http://127.0.0.1:9881",
+    "allowRemote": false,
+    "autoStart": true,
+    "python": "",
+    "serverScript": "",
+    "refAudio": "",
+    "refText": "",
+    "speakJa": false,
+    "startTimeout": 240000
+  },
+  "ttsGsv": {
+    "enabled": true,
+    "server": "http://127.0.0.1:9880",
+    "allowRemote": false,
+    "autoStart": true,
+    "python": "",
+    "serverScript": "",
+    "sovitsPath": "",
+    "gptPath": "",
+    "refAudio": "",
+    "refText": "",
+    "device": "",
+    "startTimeout": 240000
+  },
+  "hotkey": "Alt+Shift+S",
+  "startHidden": false,
+  "greetingOnStart": true,
+  "uiLang": "zh",
+  "security": {
+    "externalCredNoticeSeen": false
+  },
+  "features": {
+    "clipboardWatch": false,
+    "systemMonitor": false,
+    "screenAwareness": false,
+    "desktopIcons": false,
+    "longTermMemory": true,
+    "emotionalVoice": true,
+    "pomodoro": true,
+    "proactiveInterval": 8
+  },
+  "_keySource": "未配置（请在设置中填写或显式导入 API Key）",
+  "_configPath": "C:\\Users\\xsbil\\AppData\\Roaming\\SuzuranPet\\config.json"
+}

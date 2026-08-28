@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'">
+<title>苏苏洛 · 添加人物</title>
+<link rel="stylesheet" href="ui.css" />
+<style>
+  .addchar-page .ui-shell { max-width: 560px; }
+  .model-list { max-height: 180px; overflow: auto; border: 1px solid var(--ui-line); border-radius: 6px; padding: 6px 10px; background: var(--ui-surface); font-size: 13px; }
+  .model-list .cur { color: var(--ui-accent-strong); font-weight: 650; }
+  #status { min-height: 20px; margin: 10px 0 4px; font-size: 13px; }
+</style>
+</head>
+<body class="ui-page addchar-page">
+  <div class="ui-shell">
+    <header class="ui-header"><h1>➕ 添加人物</h1><div class="sub">导入其他角色的 Spine 模型，让桌宠换人</div></header>
+    <p class="hint" style="margin:0 0 8px;">模型需要 <b>.atlas + .skel（或 .json）+ .png</b> 三个文件（游戏导出/拆包得到）。选择一个包含这三个文件的文件夹即可导入，导入后会自动切换到新人物。</p>
+    <button id="btn-import" type="button" class="primary">📂 选择模型文件夹并导入</button>
+    <div id="status"></div>
+    <h2 style="margin-top:14px;">当前已有的人物</h2>
+    <div class="model-list" id="model-list">加载中…</div>
+    <p class="foot" style="margin-top:12px;">—— 苏苏洛桌宠 · 添加人物 ——</p>
+  </div>
+  <script src="addchar.js"></script>
+</body>
+</html>

@@ -34,7 +34,6 @@ html, body {
   box-shadow: 0 2px 8px rgba(90, 140, 180, 0.22);
   z-index: 5;
   word-break: break-word;
-  white-space: pre-wrap;
   max-height: calc(100% - 30px);
   overflow: auto; /* 可滚动 + 右下角拖拽调大小 */
   resize: both;
@@ -59,11 +58,9 @@ html, body {
 /* 左缘延伸区模式（主进程 edge-left 事件）：角色条带切到窗口左侧，气泡自动落在角色右侧，
    避免被屏幕左缘裁掉（原「气泡头顶」模式废弃，改用翻边）。 */
 body.edge-left .pet {
-  right: auto;
-  left: 2px;
+  left: 2px; /* 条带切到窗口左缘——与主进程 setEdgeLeft 一步平移同一 tick 原子完成 */
 }
 body.edge-left .input-bar {
-  right: auto;
   left: 2px;                     /* 输入栏与角色同步切到窗口左侧（角色正下方） */
 }
 body.edge-left .bubble {
@@ -94,7 +91,9 @@ body.edge-left .bubble::after {
 }
 .bubble.task { font-family: Consolas, "Courier New", monospace; font-size: calc(var(--chat-fz, 11px) - 1px); }
 .bubble.hidden { display: none; }
-#bubble-text { padding-right: 14px; }
+/* pre-wrap 只放正文容器：气泡本体保持 normal——否则 index.html 里按钮间的缩进换行
+   会被保留成幻影空行，把正文推出气泡外（rig 模式「留白」根因） */
+#bubble-text { padding-right: 14px; white-space: pre-wrap; }
 
 /* 放大/还原按钮（气泡右上角） */
 .btn-zoom {
@@ -161,7 +160,7 @@ body.enlarged #input { font-size: calc(var(--chat-fz, 11px) + 1px); }
 /* ---------- 桌宠形象 ---------- */
 .pet {
   position: absolute;
-  right: 2px;     /* 桌宠靠右，给左侧气泡让位 */
+  left: calc(100% - 122px); /* 靠右（等价 right:2px）：居左定位便于翻边时条带瞬切（无过渡，与主进程一步平移同 tick 原子切换） */
   bottom: 26px;   /* 悬浮在输入栏上方 */
   width: 120px;
   height: 120px;
@@ -169,6 +168,69 @@ body.enlarged #input { font-size: calc(var(--chat-fz, 11px) + 1px); }
   z-index: 3;
 }
 .pet.dragging { cursor: grabbing; }
+/* PSD 2.5D 角色画布（v2.2）：独立大画布——rig 模式全窗口、角色贴底居中显示 */
+.rig-canvas {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  height: 100%;
+  max-width: 100%;
+  object-fit: contain; /* 保持角色宽高比，不拉伸 */
+  z-index: 4;
+}
+.rig-canvas.hidden { display: none; }
+/* rig 模式：隐藏 GIF/Spine 角色条带（2.5D 独立显示，互不干扰） */
+body.rig-mode #pet { display: none; }
+/* rig 角色始终占满窗口高度（大小由窗口高度联动控制，rigScale 调窗口尺寸，角色不超出画布） */
+body.rig-mode .rig-canvas {
+  height: 100%;
+  transform-origin: bottom center;
+}
+/* ---------- rig 模式独立聊天框（v2.2）：与 gif/spine 完全分开，气泡在左上角，
+   桌宠贴屏幕左缘时翻到右上角；输入框在底部。角色画布占窗口高度 88%。 ---------- */
+body.rig-mode .rig-canvas {
+  height: 88%;
+  transform-origin: bottom center;
+}
+body.rig-mode .bubble {
+  top: 8px;
+  left: 8px;
+  right: auto;
+  bottom: auto;
+  width: 62%;                    /* 填满左上角，不占太大空间 */
+  height: auto;                  /* 高度随内容自适应，空内容时贴合不产生大片空白 */
+  min-height: 20px;
+  max-width: calc(100% - 16px);
+  max-height: calc(34% - 8px);   /* 上限需 > min-height 否则被击穿成细条；角色画布居中窄条，少量重叠可接受 */
+  font-size: max(12px, var(--chat-fz, 11px));
+  padding: 6px 34px 8px 10px;    /* 压缩内边距；右侧留按钮空间 */
+  line-height: 1.45;
+}
+body.rig-mode.edge-left .bubble { left: auto; right: 8px; } /* 贴屏幕左缘 → 气泡右上角 */
+body.rig-mode .bubble::after { display: none; }
+/* rig 模式 ⤢ 放大：角色临时缩小让位，气泡占更大区域（能看到完整内容），角色不放大 */
+body.rig-mode.enlarged .rig-canvas { height: 45%; }
+body.rig-mode.enlarged .bubble {
+  width: calc(100% - 16px);
+  height: auto;
+  max-width: calc(100% - 16px);
+  max-height: calc(50% - 8px);
+}
+body.rig-mode .input-bar {
+  bottom: 8px;
+  top: auto;
+  right: auto;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 280px;
+}
+body.rig-mode .info-panel {
+  top: 8px;
+  bottom: auto;
+  right: 8px;
+  left: auto;
+}
 #sprite {
   width: 100%;
   height: 100%;
@@ -177,22 +239,54 @@ body.enlarged #input { font-size: calc(var(--chat-fz, 11px) + 1px); }
   image-rendering: auto;
 }
 
+/* ---------- 信息版（陪伴时间 + 今日日程，v2.1） ---------- */
+.info-panel {
+  position: absolute;
+  right: 128px;         /* 与气泡同侧（角色左侧），底部抬到输入栏上方 */
+  bottom: 45px;         /* 输入栏上方（原 160px 在 200px 高的小窗口里把面板顶出窗口顶，导致显示不全/无法滚动） */
+  width: min(230px, calc(100% - 132px)); /* 默认（角色在右）：左侧可用约 128px，宽度自适应避免左缘出窗口被裁（原 230px 左缘跑到 -98px） */
+  max-height: 60%;
+  overflow-y: auto;
+  touch-action: pan-y;  /* 触屏/触摸板上下滑动滚动内容 */
+  background: rgba(255, 255, 255, 0.97);
+  border: 1.5px solid #cfe3f2;
+  border-radius: 11px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #44505c;
+  box-shadow: 0 2px 8px rgba(90, 140, 180, 0.22);
+  z-index: 8;
+}
+body.edge-left .info-panel { right: 4px; width: 230px; } /* 翻边时与气泡一起到右侧（右侧空间足够，保持原宽） */
+.info-panel.hidden { display: none; }
+.info-head { font-weight: bold; margin-bottom: 6px; color: #2f8f87; cursor: move; user-select: none; }
+.info-panel.info-dragging { opacity: 0.85; }
+.info-companion { margin-bottom: 8px; padding: 6px 8px; background: #eef7f5; border-radius: 8px; }
+.info-schedules .info-sched { padding: 3px 0; border-bottom: 1px dashed #e3ecf3; }
+.info-schedules .info-sched:last-child { border-bottom: none; }
+.info-schedules .info-empty { color: #98a6b3; }
+.info-sched-time { color: #2f8f87; font-weight: bold; margin-right: 6px; }
+
 /* ---------- 输入栏 ---------- */
 .input-bar {
   position: absolute;
-  right: 2px;     /* 与桌宠同右边缘 → 正下方居中 */
+  left: calc(100% - 138px); /* 靠右（等价 right:2px，宽136px），居左定位便于翻边时瞬切 */
   bottom: 4px;    /* 紧靠桌宠下方 */
   display: flex;
   align-items: center;
-  gap: 4px;
-  width: 120px;   /* 与桌宠同宽 */
+  gap: 3px;
+  width: 136px;   /* 上限：右侧角色条带从 ~138px 起，输入栏不能更宽否则盖住角色；内容靠隐藏次要按钮释放空间 */
   background: rgba(255, 255, 255, 0.97);
   border: 1.5px solid #cfe3f2;
   border-radius: 15px;
-  padding: 3px 6px;
+  padding: 3px 5px;
   box-shadow: 0 2px 8px rgba(90, 140, 180, 0.25);
   z-index: 6;
 }
+/* 次要按钮隐藏（托盘/设置页有对应功能）：释放输入框空间，避免内容溢出 */
+.mode-chip { display: none !important; }
+#btn-tts { display: none !important; }
 .input-bar.hidden { display: none; }
 
 .mode-chip {
@@ -214,7 +308,7 @@ body.enlarged #input { font-size: calc(var(--chat-fz, 11px) + 1px); }
   font-size: var(--chat-fz, 11px);
   color: #333;
   padding: 2px;
-  min-width: 0;
+  min-width: 40px;  /* 保证输入框有足够打字空间（次要按钮已隐藏） */
 }
 
 .btn {
@@ -267,3 +361,7 @@ body.enlarged #input { font-size: calc(var(--chat-fz, 11px) + 1px); }
   .bubble:not(.hidden), .thinking span, .btn-mic.recording { animation: none; }
   .btn { transition: none; }
 }
+
+/* v2.5.10 宽皮肤（如迷迭香第三皮肤 300px 画布）：气泡右缘避开更宽的角色条带 */
+body.wide-skin .bubble { right: 308px; max-width: calc(100% - 314px); }
+body.wide-skin.edge-left .bubble { right: 4px; max-width: calc(100% - 314px); }

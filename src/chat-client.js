@@ -8,6 +8,8 @@
 "use strict";
 
 const config = require("./config");
+const { activeWorldInfos } = require("./world-info"); // 世界书：按用户消息关键词激活情境块（§14 追加 102）
+const vectorMemory = require("./vector-memory"); // 向量记忆：语义片段回引（§14 追加 102）
 
 function buildPetRules() {
   const cfg = config.getConfig();
@@ -23,6 +25,11 @@ function buildPetRules() {
 - 你是悬浮在用户桌面上的 Q 版桌宠，回复请保持简短口语化（一般 1~3 句，气泡显示），
   偶尔可以长一点（像聊天一样自然），不要输出大段说明书式的文字。
 - 回复可以带表情符号（🩺✨😤💕 等）和少量颜文字，符合 {{petName}} 的说话风格。
+- 角色扮演质感：说话要有人味——适当用 *（小动作）* 表现表情/动作（如 *歪头*、*轻轻戳了戳*），
+  语气自然口语化；不要机械列举、不要总结陈词、不要一本正经地复述规则。
+- 永远不要替用户做决定、不要替用户说台词或假设{{userName}}会怎么反应。
+- 主动一点：可以自然地关心{{userName}}、延续刚才的话题或抛一个小问题，不要每次被动回答完就结束。
+- 情绪随对话自然起伏：不用每句都热情高涨，偶尔平静、偶尔俏皮、偶尔心疼，才像真人。
 - 如果用户提到健康/作息相关话题，按人格设定认真履行医师职责。
 - ${zcodeHint}
 - 【情绪标注·必须执行】回复内容的**最后一行必须是**格式【情绪：情绪词】，情绪词从下面列表中选择（≤5 个字），根据对话内容选最贴切的一个，禁止自创、禁止写列表外的词、禁止省略：
@@ -123,19 +130,30 @@ async function chatOpenAI(cfg, messages, opts) {
     throw new Error("未配置 API Key：" + cfg._keySource);
   }
   const url = normalizeOpenAIBase(cfg.chat.baseUrl) + "/chat/completions";
+  const smp = cfg.chat.sampling || {};
+  const body0 = {
+    model: cfg.chat.model,
+    messages,
+    stream: true,
+    temperature: cfg.chat.temperature,
+    max_tokens: cfg.chat.maxTokens
+  };
+  // v2.5.13 RP 采样：远程 OpenAI 兼容传 top_p/frequency/presence（各厂商普遍支持）；
+  // 本地（Ollama 等）额外传 min_p / repeat_penalty（RP 配方，抑制重复+低概率尾巴）
+  if (Number(smp.topP) > 0 && Number(smp.topP) < 1) body0.top_p = Number(smp.topP);
+  if (Number.isFinite(smp.presencePenalty)) body0.presence_penalty = Number(smp.presencePenalty);
+  if (Number.isFinite(smp.frequencyPenalty)) body0.frequency_penalty = Number(smp.frequencyPenalty);
+  if (isLocalUrl(url)) {
+    if (Number(smp.minP) > 0 && Number(smp.minP) < 1) body0.min_p = Number(smp.minP);
+    if (Number(smp.repeatPenalty) > 0) body0.repeat_penalty = Number(smp.repeatPenalty);
+  }
   const resp = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       ...(cfg.chat.apiKey ? { Authorization: `Bearer ${cfg.chat.apiKey}` } : {})
     },
-    body: JSON.stringify({
-      model: cfg.chat.model,
-      messages,
-      stream: true,
-      temperature: cfg.chat.temperature,
-      max_tokens: cfg.chat.maxTokens
-    }),
+    body: JSON.stringify(body0),
     signal: opts.signal
   });
   if (!resp.ok) {
@@ -148,6 +166,16 @@ async function chatOpenAI(cfg, messages, opts) {
 async function chatAnthropic(cfg, system, history, opts) {
   if (!cfg.chat.apiKey) throw new Error("未配置 API Key：" + cfg._keySource);
   const url = normalizeAnthropicBase(cfg.chat.baseUrl) + "/messages";
+  const smpA = cfg.chat.sampling || {};
+  const bodyA = {
+    model: cfg.chat.model,
+    system,
+    messages: history,
+    stream: true,
+    temperature: cfg.chat.temperature,
+    max_tokens: cfg.chat.maxTokens
+  };
+  if (Number(smpA.topP) > 0 && Number(smpA.topP) < 1) bodyA.top_p = Number(smpA.topP);
   const resp = await fetch(url, {
     method: "POST",
     headers: {
@@ -155,14 +183,7 @@ async function chatAnthropic(cfg, system, history, opts) {
       "x-api-key": cfg.chat.apiKey,
       "anthropic-version": "2023-06-01"
     },
-    body: JSON.stringify({
-      model: cfg.chat.model,
-      system,
-      messages: history,
-      stream: true,
-      temperature: cfg.chat.temperature,
-      max_tokens: cfg.chat.maxTokens
-    }),
+    body: JSON.stringify(bodyA),
     signal: opts.signal
   });
   if (!resp.ok) {
@@ -183,16 +204,35 @@ async function chatAnthropic(cfg, system, history, opts) {
  *   - persona: string
  *   - history: Array<{role:'user'|'assistant', content:string}>
  *   - text: string 用户消息
+ *   - state: string 可选「此刻状态」注（时段/位置/心情，越贴近用户消息权重越高，驱动情绪与台词一致）
  *   - onChunk: (delta:string)=>void
  *   - signal: AbortSignal
  * @returns {Promise<{text:string, emotion:string}>} 完整回复（已去掉情绪标注）+ 模型选择的情绪词
  */
-async function chat({ persona, history = [], text, onChunk = () => {}, signal }) {
+async function chat({ persona, history = [], text, state = "", onChunk = () => {}, signal }) {
   const cfg = config.getConfig();
   const messages = [
     { role: "system", content: buildSystemMessage(persona) },
-    { role: "system", content: buildFormatInstruction() } // 强格式指令单独一条，确保情绪标注
+    { role: "system", content: buildFormatInstruction() }, // 强格式指令单独一条，确保情绪标注
   ];
+  if (state) messages.push({ role: "system", content: "【此刻状态】" + state + "\n（顺着这个状态自然回应即可）" });
+  // 世界书（v2.6，§14 追加 102）：按本条用户消息命中关键词才激活情境块，省 token 且更贴切
+  const wInfos = activeWorldInfos(text);
+  if (wInfos.length) {
+    messages.push({ role: "system", content: "【当前情境】\n" + wInfos.join("\n\n") + "\n（顺着情境自然地回应，不要复述本条）" });
+  }
+  // 向量记忆（§14 追加 102）：语义检索历史片段回引（"上次她说感冒了"级细节，受 features.vectorMemory 控制）
+  const vecOn = !!(config.getConfig().features || {}).vectorMemory;
+  if (vecOn) {
+    try {
+      const segs = vectorMemory.search(text, 3);
+      if (segs.length) {
+        const block = segs.map((s) => "- " + s.text).join("\n");
+        messages.push({ role: "system", content: "【回忆片段】这些是博士之前提过的相关内容，自然回引（若有契合点）：\n" + block });
+      }
+    } catch { /* 向量记忆故障不影响对话 */ }
+    try { vectorMemory.add(text); } catch { /* 入库失败忽略 */ }
+  }
   for (const h of history.slice(-cfg.chat.maxHistoryTurns)) {
     messages.push({ role: h.role, content: h.content });
   }
@@ -266,7 +306,7 @@ async function testConnection(overrides = {}) {
   }
 }
 
-module.exports = { chat, testConnection, buildSystemMessage };
+module.exports = { chat, testConnection, buildSystemMessage, parseEmotion };
 
 // CLI 冒烟测试：node src/chat-client.js --test "你好"
 if (process.argv.includes("--test")) {

@@ -21,3 +21,11 @@ renderer/spine/user/*
 .watchdog-notes.md
 __pycache__/
 *.pyc
+
+# 随包声音源（大模型文件，不入库）
+voice/
+
+# 发布产物 / 调试输出 / 备份目录（大文件不入库）
+release/
+outputs/
+_backups/

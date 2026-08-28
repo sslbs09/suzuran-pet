@@ -51,8 +51,8 @@
     <p>💡 <b>程序内一键完成：</b>托盘 →「🎙️ 音色克隆与训练」窗口 → 选参考音频、填原文 →「试听」→「应用音色」即可，下面步骤交给程序处理。</p>
     <ol>
       <li>准备一段 <b>3~10 秒</b>的干净人声 wav：单人、无背景音乐、无杂音、语速正常（本指南 <code>example_audio\</code> 里有一份苏苏洛示例）</li>
-      <li>把音频放到 <code>E:\GenieTTS\ref\ref_sussurro.wav</code></li>
-      <li>把这段音频的<b>逐字原文</b>填到 <code>E:\GenieTTS\config.json</code> 的 <code>refText</code>（必须一字不差，越准越像）</li>
+      <li>把音频放到 <code>D:GenieTTS\ref\ref_sussurro.wav</code></li>
+      <li>把这段音频的<b>逐字原文</b>填到 <code>D:GenieTTS\config.json</code> 的 <code>refText</code>（必须一字不差，越准越像）</li>
       <li>重启服务器即可</li>
     </ol>
     <div class="note">原理：GPT-SoVITS 用参考音频的声纹 + 情感来「模仿」说话。参考音频越干净、越接近日常说话，效果越好。<br>
@@ -76,25 +76,25 @@
     </ol>
     <h3>第 3 步：转 ONNX（用 Genie）</h3>
     <p>先装 torch（转模型需要）：</p>
-    <pre>E:\GenieTTS\venv\Scripts\pip install torch --index-url https://download.pytorch.org/whl/cpu</pre>
+    <pre>D:GenieTTS\venv\Scripts\pip install torch --index-url https://download.pytorch.org/whl/cpu</pre>
     <p>再写个小脚本转换：</p>
     <pre>import os
-os.environ["GENIE_DATA_DIR"] = r"E:\GenieTTS\GenieData"
+os.environ["GENIE_DATA_DIR"] = r"D:GenieTTS\GenieData"
 import genie_tts as genie
 
 genie.convert_to_onnx(
-    torch_pth_path=r"E:\GenieTTS\my_model\你的角色.pth",   # SoVITS 模型
-    torch_ckpt_path=r"E:\GenieTTS\my_model\你的角色.ckpt", # GPT 模型
-    output_dir=r"E:\GenieTTS\my_model\onnx",               # 输出的 ONNX 目录
+    torch_pth_path=r"D:GenieTTS\my_model\你的角色.pth",   # SoVITS 模型
+    torch_ckpt_path=r"D:GenieTTS\my_model\你的角色.ckpt", # GPT 模型
+    output_dir=r"D:GenieTTS\my_model\onnx",               # 输出的 ONNX 目录
 )
-print("转换完成，输出在", r"E:\GenieTTS\my_model\onnx")</pre>
+print("转换完成，输出在", r"D:GenieTTS\my_model\onnx")</pre>
     <h3>第 4 步：让服务器用你的模型</h3>
-    <p>编辑 <code>E:\GenieTTS\config.json</code>：</p>
+    <p>编辑 <code>D:GenieTTS\config.json</code>：</p>
     <pre>{
   "character": "sussurro",
   "language": "Chinese",
-  "modelDir": "E:\\GenieTTS\\my_model\\onnx",   ← 指向转换出的 ONNX 目录
-  "refAudio": "E:\\GenieTTS\\ref\\ref_sussurro.wav",
+  "modelDir": "D:\\GenieTTS\\my_model\\onnx",   ← 指向转换出的 ONNX 目录
+  "refAudio": "D:\\GenieTTS\\ref\\ref_sussurro.wav",
   "refText": "参考音频原文",
   "hfEndpoint": "https://hf-mirror.com"
 }</pre>

@@ -24,8 +24,8 @@
 | 项目 | 路径 |
 | --- | --- |
 | 源码 | `E:\SuzuranPetGit` |
-| 实际部署 | `C:\Users\xsbil\Desktop\苏苏洛桌宠-1.1.0正式版\resources\app\` |
-| exe | `C:\Users\xsbil\Desktop\苏苏洛桌宠-1.1.0正式版\苏苏洛桌宠 1.1 正式版.exe` |
+| 实际部署 | `E:\SuzuranPetGit\release\v2.5\苏苏洛桌宠 2.5 正式版\resources\app\` |
+| exe | `E:\SuzuranPetGit\release\v2.5\苏苏洛桌宠 2.5 正式版\苏苏洛桌宠 1.1 正式版.exe` |
 | userData | `C:\Users\xsbil\AppData\Roaming\苏苏洛桌宠 1.1 正式版\` |
 | 日志 | userData `logs\tts.log` |
 | 截图 | `C:\Users\xsbil\Pictures\Screenshots\` |
@@ -252,11 +252,11 @@ node --check main.js
 
 ```powershell
 $repo='E:\SuzuranPetGit'
-$app='C:\Users\xsbil\Desktop\苏苏洛桌宠-1.1.0正式版\resources\app'
+$app='E:\SuzuranPetGit\release\v2.5\苏苏洛桌宠 2.5 正式版\resources\app'
 Copy-Item "$repo\renderer\pet.js" "$app\renderer\pet.js" -Force
 Copy-Item "$repo\main.js" "$app\main.js" -Force
 taskkill /F /IM '苏苏洛桌宠 1.1 正式版.exe'
-Start-Process 'C:\Users\xsbil\Desktop\苏苏洛桌宠-1.1.0正式版\苏苏洛桌宠 1.1 正式版.exe'
+Start-Process 'E:\SuzuranPetGit\release\v2.5\苏苏洛桌宠 2.5 正式版\苏苏洛桌宠 1.1 正式版.exe'
 Start-Sleep 12
 Get-Content "$env:APPDATA\苏苏洛桌宠 1.1 正式版\logs\tts.log" -Tail 50
 ```

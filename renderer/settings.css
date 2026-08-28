@@ -36,3 +36,22 @@
 .settings-page .cred-status.ok { color: var(--ui-success); }
 .settings-page .cred-status.warn { color: #b45309; }
 .settings-page .cred-status.err { color: var(--ui-danger); }
+
+/* ---------- iOS 风格滑动开关（v2.2） ---------- */
+.settings-page .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.settings-page .switch {
+  position: relative; display: inline-block; width: 44px; height: 26px; flex: none;
+}
+.settings-page .switch input { opacity: 0; width: 0; height: 0; }
+.settings-page .switch .slider {
+  position: absolute; cursor: pointer; inset: 0; background: #c8ccd0; border-radius: 26px;
+  transition: background .2s;
+}
+.settings-page .switch .slider::before {
+  content: ""; position: absolute; width: 22px; height: 22px; left: 2px; top: 2px;
+  background: #fff; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,.25);
+  transition: transform .2s;
+}
+.settings-page .switch input:checked + .slider { background: var(--ui-accent, #2f8f87); }
+.settings-page .switch input:checked + .slider::before { transform: translateX(18px); }
+.settings-page .rig-skin-hint { color: var(--ui-muted, #6d8494); font-size: 11px; margin-top: 2px; }

@@ -1,7 +1,7 @@
 {
   "character": "sussurro",
   "language": "Chinese",
-  "refAudio": "E:\\GenieTTS\\ref\\ref_sussurro.wav",
+  "refAudio": "D:\\GenieTTS\\ref\\ref_sussurro.wav",
   "refText": "你好呀，新手星，我是苏苏洛，罗德岛的医疗干员。今天也要好好休息哦。",
   "hfEndpoint": "https://hf-mirror.com"
 }

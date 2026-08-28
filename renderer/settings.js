@@ -50,6 +50,12 @@ async function toast(msg) {
   $("pet-name").value = (S.pet && S.pet.name) || "苏苏洛";
   $("user-name").value = S.chat.userName || "主人";
   $("temperature").value = S.chat.temperature ?? 0.85;
+  const smp0 = (S.chat && S.chat.sampling) || {};
+  $("smp-topp").value = smp0.topP ?? 0.9;
+  $("smp-minp").value = smp0.minP ?? 0.05;
+  $("smp-reppen").value = smp0.repeatPenalty ?? 1.1;
+  $("smp-presence").value = smp0.presencePenalty ?? 0.1;
+  $("smp-frequency").value = smp0.frequencyPenalty ?? 0.1;
   $("max-tokens").value = S.chat.maxTokens ?? 800;
   $("max-history").value = S.chat.maxHistoryTurns ?? 20;
 
@@ -114,14 +120,99 @@ async function toast(msg) {
   $("feat-emotional").checked = f.emotionalVoice !== false;
   $("feat-desktop-icons").checked = !!f.desktopIcons;
   $("auto-launch").checked = !!S.autoLaunch;
+  // 2.5D 角色开关（v2.2）
+  $("rig-switch").checked = !!S.rigSkinId;
+  // 2.5D 角色大小
+  const rs = Number(S.rigScale) > 0 ? Number(S.rigScale) : 1;
+  $("rig-scale").value = String(rs);
+  $("rig-scale-val").textContent = Math.round(rs * 100) + "%";
+  $("rig-scale").addEventListener("input", () => {
+    const v = Number($("rig-scale").value);
+    $("rig-scale-val").textContent = Math.round(v * 100) + "%";
+    window.petAPI.setRigScale(v); // 实时生效
+  });
+  // 2.5D 头部/眼睛跟随鼠标（v2.2.1 实验性）
+  $("rig-mouse").checked = S.rigMouseFollow !== false;
+  $("rig-mouse").addEventListener("change", () => window.petAPI.setRigMouseFollow($("rig-mouse").checked));
+  // 全局鼠标跟踪（v2.2.1 实验性，需显式许可默认关）
+  $("rig-mouse-global").checked = !!S.mouseTrackGlobal;
+  $("rig-mouse-global").addEventListener("change", () => window.petAPI.setMouseTrackGlobal($("rig-mouse-global").checked));
+  // 逗猫棒（v2.2.1 实验性，需显式许可默认关）
+  $("cat-toy").checked = !!S.catToy;
+  $("cat-toy").addEventListener("change", () => window.petAPI.setCatToy($("cat-toy").checked));
+  // 桌面全域行走（实验，默认关）：边界配置即时生效（walkTick 每帧读）
+  $("walk-global").checked = !!S.walkGlobal;
+  $("walk-global").addEventListener("change", () => window.petAPI.setWalkGlobal($("walk-global").checked));
+  // 软件渲染（默认关，重启生效）：无独显/驱动异常环境兜底
+  $("soft-render").checked = !!S.softRender;
+  $("soft-render").addEventListener("change", () => window.petAPI.setSoftRender($("soft-render").checked));
+  // 蜜标监控（默认关）
+  $("file-guard").checked = !!S.fileGuard;
+  $("file-guard").addEventListener("change", () => window.petAPI.setFileGuard($("file-guard").checked));
+  // 主动搭话 / 人格化（v2.3，单独开关默认开）
+  $("proactive-chat").checked = S.proactiveChat !== false;
+  $("proactive-chat").addEventListener("change", () => window.petAPI.setProactiveChat($("proactive-chat").checked));
+  $("personify").checked = S.personify !== false;
+  $("personify").addEventListener("change", () => window.petAPI.setPersonify($("personify").checked));
+  // 2.5D 已导入皮肤列表（§14 追加 96：每项可删除，删除当前皮肤自动退出 2.5D 模式）
+  async function loadRigSkins() {
+    try {
+      const skins = await window.petAPI.rigSkins();
+      const box = $("rig-skins-list");
+      if (!skins || !skins.length) { box.textContent = "（暂无，去 PSD 工具导入）"; return; }
+      box.innerHTML = "";
+      skins.forEach((s) => {
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;align-items:center;gap:6px;padding:2px 0;";
+        const radio = document.createElement("input");
+        radio.type = "radio";
+        radio.name = "rig-skin";
+        radio.checked = s.id.toLowerCase() === (S.rigSkinId || "").toLowerCase();
+        radio.addEventListener("change", () => { if (radio.checked) window.petAPI.rigSet(s.id); });
+        const label = document.createElement("span");
+        label.textContent = s.id + ((s.id.toLowerCase() === (S.rigSkinId || "").toLowerCase()) ? "（当前）" : "");
+        label.style.fontSize = "12px";
+        const del = document.createElement("button");
+        del.textContent = "🗑";
+        del.title = "删除此皮肤";
+        del.style.cssText = "font-size:11px;padding:0 4px;cursor:pointer;margin-left:auto;";
+        del.addEventListener("click", async () => {
+          if (!window.confirm("删除已导入的皮肤「" + s.id + "」？此操作不可恢复")) return;
+          const r = await window.petAPI.rigDelete(s.id);
+          if (!r || !r.ok) { window.alert((r && r.message) || "删除失败"); return; }
+          if (r.clearedCurrent) { S.rigSkinId = ""; $("rig-switch").checked = false; }
+          loadRigSkins(); // 局部刷新列表，不重载整页（不丢其他未保存设置）
+        });
+        row.appendChild(radio); row.appendChild(label); row.appendChild(del);
+        box.appendChild(row);
+      });
+    } catch { $("rig-skins-list").textContent = "加载失败"; }
+  }
+  loadRigSkins();
 
   // 渲染模式与桌面行走
-  $("render-mode").value = S.renderMode === "spine" ? "spine" : "gif";
+  $("render-mode").value = S.renderMode === "spine" ? "spine" : S.renderMode === "rig" ? "rig" : "gif";
   $("walking-opt").checked = !!S.walking;
+  applyRenderModeUI($("render-mode").value);
+  $("render-mode").addEventListener("change", () => applyRenderModeUI($("render-mode").value));
 
   renderKeyStatuses();
   maybeShowCredNotice();
 })();
+
+// 渲染模式联动：先选模式，仅显示该模式支持的选项（data-rm="gif|spine|rig" 标记，支持空格分隔多模式）
+function applyRenderModeUI(mode) {
+  document.querySelectorAll("[data-rm]").forEach((el) => {
+    const modes = String(el.dataset.rm || "").split(/\s+/).filter(Boolean);
+    el.style.display = modes.includes(mode) ? "" : "none";
+  });
+  const hint = $("rm-hint");
+  if (hint) {
+    hint.textContent = mode === "spine" ? "Spine 模式：下方显示行走/模型相关选项（人物皮肤、桌面行走、动作试演等）。"
+      : mode === "rig" ? "2.5D 模式：下方显示角色相关选项（皮肤、大小、跟随鼠标、全局跟踪）。"
+      : "GIF 模式：经典表情，无行走与模型选项。";
+  }
+}
 
 /* ---------- 预设 ---------- */
 $("preset").addEventListener("change", () => {
@@ -143,6 +234,13 @@ function readChat() {
       model: $("model").value.trim(),
       userName: $("user-name").value.trim() || "主人",
       temperature: parseFloat($("temperature").value) || 0.85,
+      sampling: {
+        topP: parseFloat($("smp-topp").value) || 0.9,
+        minP: parseFloat($("smp-minp").value) || 0.05,
+        repeatPenalty: parseFloat($("smp-reppen").value) || 1.1,
+        presencePenalty: parseFloat($("smp-presence").value) || 0.1,
+        frequencyPenalty: parseFloat($("smp-frequency").value) || 0.1
+      },
       maxTokens: parseInt($("max-tokens").value, 10) || 800,
       maxHistoryTurns: parseInt($("max-history").value, 10) || 20
     },
@@ -238,7 +336,8 @@ $("btn-restart-gsv").addEventListener("click", async () => {
     success: L("set.gsvOk"),
     timeout: L("set.gsvTimeout"),
     synth: L("set.gsvSynthFail"),
-    disabled: L("set.gsvDisabled")
+    disabled: L("set.gsvDisabled"),
+    nopath: L("set.gsvNoPath")
   };
   setResult(out, msgs[r && r.code] || L("set.gsvTimeout"), !!(r && r.ok));
 });
@@ -373,11 +472,41 @@ $("btn-save-other").addEventListener("click", async () => {
       bearerToken: $("agent-token").value.trim(),
       maxBodyBytes: Math.max(1024, Math.min(1024 * 1024, (parseInt($("agent-max-body").value, 10) || 64) * 1024))
     },
-    renderMode: $("render-mode").value === "spine" ? "spine" : "gif",
-    walking: $("walking-opt").checked
+    renderMode: $("render-mode").value,
+    walking: $("walking-opt").checked,
+    rigScale: Number($("rig-scale").value) || 1.0, // 2.5D 角色大小
+    rigMouseFollow: $("rig-mouse").checked !== false, // 2.5D 头部/眼睛跟随鼠标
+    mouseTrackGlobal: $("rig-mouse-global").checked, // 全局鼠标跟踪（需显式许可）
+    catToy: $("cat-toy").checked, // 逗猫棒（需显式许可）
+    fileGuard: $("file-guard").checked, // 蜜标监控
+    proactiveChat: $("proactive-chat").checked, // 主动搭话（v2.3 单独开关）
+    personify: $("personify").checked // 人格化（v2.3 单独开关）
   });
+  // 渲染模式联动：选「2.5D」需有皮肤；选 gif/spine 则关闭 2.5D
+  const rm = $("render-mode").value;
+  if (rm === "rig") {
+    const skins = await window.petAPI.rigSkins();
+    if (!skins || !skins.length) { setResult($("other-result"), "请先在「🧩 PSD 角色工具」导入 PSD 皮肤", false); return; }
+    await window.petAPI.rigSet(S.rigSkinId || skins[0].id);
+    $("rig-switch").checked = true;
+  } else if (S.rigSkinId) {
+    await window.petAPI.rigSet("");
+    $("rig-switch").checked = false;
+  }
   // 立即应用桌宠大小（不等重启）
   if (r === true) await window.petAPI.setScale(scale);
+  // 2.5D 角色开关（v2.2）：勾选状态变化才处理
+  const wantRig = $("rig-switch").checked;
+  const hadRig = !!S.rigSkinId;
+  if (wantRig !== hadRig) {
+    if (wantRig) {
+      const skins = await window.petAPI.rigSkins();
+      if (skins && skins.length) await window.petAPI.rigSet(skins[0].id);
+      else { $("rig-switch").checked = false; setResult($("other-result"), "没有 PSD 皮肤，请先在「🧩 PSD 角色工具」导入", false); return; }
+    } else {
+      await window.petAPI.rigSet("");
+    }
+  }
   setResult($("other-result"), r === true ? L("set.saved") : L("set.saveFailed"), r === true);
 });
 
@@ -532,3 +661,122 @@ async function clearSecretFlow(slot, label) {
 $("btn-clear-chat-key").addEventListener("click", () => clearSecretFlow("chat", "聊天 Key"));
 $("btn-clear-cosy-key").addEventListener("click", () => clearSecretFlow("ttsCosy", "Cosy Key"));
 $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agent", "Agent Token"));
+
+/* ---------- 记忆管理（v2.5.2）：查看/删除/清空 ---------- */
+(async () => {
+  const statsEl = document.getElementById("mem-stats");
+  const listEl = document.getElementById("mem-list");
+  const btnClear = document.getElementById("mem-clear");
+  if (!statsEl || !listEl || !btnClear) return;
+  const refresh = async () => {
+    try {
+      const r = await window.petAPI.getMemory();
+      if (!r || !Array.isArray(r.facts) || !r.facts.length) {
+        statsEl.textContent = "暂无已记住的信息——聊天中提到的称谓/喜好/生日/健康/安排会自动记住（本地加密）";
+        listEl.innerHTML = "";
+        return;
+      }
+      const bondPart = r.bond ? "｜🥰 羁绊 Lv." + r.bond.level + " · 已陪伴 " + r.bond.days + " 天" : "";
+      statsEl.textContent = "已记住 " + r.facts.length + " 条" + (r.summary ? "（含对话摘要）" : "") + bondPart;
+      listEl.innerHTML = "";
+      r.facts.forEach((f) => {
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;align-items:center;gap:8px;padding:3px 0;font-size:13px;";
+        const label = document.createElement("span");
+        label.style.cssText = "flex:1;";
+        label.textContent = "· " + f.text;
+        const edit = document.createElement("button");
+        edit.textContent = "✎";
+        edit.title = "编辑这条";
+        edit.style.cssText = "border:none;background:transparent;cursor:pointer;color:#2980b9;font-size:14px;padding:0 4px;";
+        edit.addEventListener("click", async () => {
+          const nt = prompt("编辑这条记忆：", f.text);
+          if (nt === null) return;
+          const r = await window.petAPI.updateMemoryFact(f.id, nt);
+          if (!r || !r.ok) { window.alert((r && r.message) || "编辑失败"); return; }
+          refresh();
+        });
+        const del = document.createElement("button");
+        del.textContent = "✕";
+        del.title = "删除这条";
+        del.style.cssText = "border:none;background:transparent;cursor:pointer;color:#c0392b;font-size:14px;padding:0 4px;";
+        del.addEventListener("click", async () => {
+          await window.petAPI.deleteMemoryFact(f.id);
+          refresh();
+        });
+        row.appendChild(label);
+        row.appendChild(edit);
+        row.appendChild(del);
+        listEl.appendChild(row);
+      });
+    } catch { statsEl.textContent = "记忆读取失败"; }
+  };
+  btnClear.addEventListener("click", async () => {
+    if (!confirm("确定清空全部记忆吗？她会忘记所有记得的事。")) return;
+    await window.petAPI.clearMemory();
+    refresh();
+  });
+  refresh();
+})();
+
+/* ---------- 情绪音色试听（v2.6）：走真实 GSV 日语链路 + 参考音频，含实时播放参数模拟 ---------- */
+(function () {
+  if (!window.petAPI || !window.petAPI.emotionAudition) return;
+  // 按钮 → 情绪键（voice-refs.json 的键名）与播放速率（基础语速 × 情绪倍率，钳到 [0.9,1.1]，与渲染层一致）
+  const AUD = {
+    "btn-aud-default":   { key: "__default__", rateMul: 1.0 },
+    "btn-aud-coquetry":  { key: "撒娇", rateMul: 1.10 },
+    "btn-aud-tsundere":  { key: "傲娇", rateMul: 1.06 },
+    "btn-aud-surprised": { key: "惊讶", rateMul: 1.0 },
+    "btn-aud-gentle":    { key: "温柔", rateMul: 0.94 },
+    "btn-aud-happy":     { key: "开心", rateMul: 1.12 },
+  };
+  let audAudio = null;
+  for (const [id, cfg] of Object.entries(AUD)) {
+    const btn = document.getElementById(id);
+    if (!btn) continue;
+    btn.addEventListener("click", async () => {
+      const res = document.getElementById("aud-result");
+      if (!res) return;
+      if (audAudio) { try { audAudio.pause(); } catch { /* 忽略 */ } audAudio = null; }
+      res.textContent = "合成中…";
+      try {
+        const r = await window.petAPI.emotionAudition(cfg.key);
+        if (!r || !r.ok) { res.textContent = (r && r.message) || "合成失败"; return; }
+        const base = Number((document.getElementById("tts-rate") || {}).value) || 0.95;
+        const audio = new Audio("data:audio/wav;base64," + r.b64);
+        audio.playbackRate = Math.max(0.9, Math.min(1.1, base * cfg.rateMul));
+        audAudio = audio;
+        res.textContent = "播放中…";
+        audio.onended = () => { res.textContent = "播放完成"; };
+        audio.onerror = () => { res.textContent = "播放失败"; };
+        await audio.play().catch(() => { res.textContent = "播放失败（请检查 GSV 服务）"; });
+      } catch (e) {
+        res.textContent = "合成失败：" + (e && e.message || e);
+      }
+    });
+  }
+})();
+
+/* ---------- 情绪音色分档开关（v2.6）：停用档用默认音色/默认语气 ---------- */
+(function () {
+  const TONES = ["撒娇", "傲娇", "惊讶", "温柔", "开心"];
+  if (!window.petAPI || !window.petAPI.setEmotionVoice) return;
+  const apply = () => {
+    for (const k of TONES) {
+      const el = document.getElementById("tone-" + k);
+      if (!el) continue;
+      el.checked = (S && S.emotionVoice && S.emotionVoice[k] !== undefined) ? !!S.emotionVoice[k] : true;
+    }
+  };
+  let tries = 0;
+  const wait = setInterval(() => {
+    tries++;
+    if (S && S.emotionVoice) { apply(); clearInterval(wait); }
+    else if (tries > 12) { apply(); clearInterval(wait); }
+  }, 300);
+  for (const k of TONES) {
+    const el = document.getElementById("tone-" + k);
+    if (el) el.addEventListener("change", () => window.petAPI.setEmotionVoice(k, el.checked));
+  }
+})();

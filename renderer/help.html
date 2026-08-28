@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'">
 <title>苏苏洛使用说明</title>
 <link rel="stylesheet" href="ui.css" />
 <style>
@@ -27,6 +27,8 @@
     <table><tr><td class="k">单击小狐狸</td><td>打开 / 关闭输入栏（聊天框）</td></tr><tr><td class="k">按住拖动</td><td>移动桌宠（对话框跟随）</td></tr><tr><td class="k">右键小狐狸</td><td>隐藏到托盘（<span class="tag">Alt+Shift+S</span> 全局隐藏/显示）</td></tr><tr><td class="k">透明区域</td><td>点击穿透，完全不影响其他应用操作</td></tr><tr><td class="k">托盘图标</td><td>单击隐藏/显示；右键有「设置 / 使用说明 / 语音部署与训练 / 重载人设 / 退出」</td></tr></table>
     <h2>聊天</h2>
     <table><tr><td class="k">直接输入文字</td><td>日常聊天，苏苏洛用罗德岛医师口吻回你</td></tr><tr><td class="k"><span class="tag">■</span> 停止按钮</td><td>中断当前回复</td></tr><tr><td class="k">聊天记忆</td><td>自动记住最近若干轮对话（可在设置里调整）</td></tr></table>
+    <h2>v2.3 互动与人格化</h2>
+    <table><tr><td class="k">摸头</td><td><b>快速连点小狐狸（2 秒内点 2 次）</b>＝摸头：她会开心回应（❤＋台词＋动画）。单击仍照常开关聊天框</td></tr><tr><td class="k">人格化嘀咕</td><td>被抛掷 / 睡醒 / 坐上窗口 / 被抓住时，她会小声嘀咕一句，像真的活着（设置 →「💬 主动与人格化」可单独关）</td></tr><tr><td class="k">主动搭话</td><td>闲置太久她会主动开口找你聊天，台词按时段变化（设置 →「💬 主动与人格化」可单独关）</td></tr><tr><td class="k">观察 AI 工作流</td><td>其他 AI / 脚本通过她的本地接口干活时，她会安静在旁边陪着、偶尔点评一句（无需设置）</td></tr><tr><td class="k">入口位置</td><td>以上两个开关都在 <b>设置 →「💬 主动与人格化（v2.3）」</b>（设置页最上方区块）</td></tr></table>
     <h2>语音（可选，默认关闭）</h2>
     <table><tr><td class="k">默认状态</td><td>语音关闭，桌宠用文字气泡交流，无需任何额外安装</td></tr><tr><td class="k">想开语音？</td><td>托盘 →「🎤 语音部署与训练」打开指南，按方案选一个（系统语音零配置 / edge-tts / 本地克隆音色 / 百炼 CosyVoice）</td></tr><tr><td class="k">🔊/🔇 按钮</td><td>输入栏右侧一键开关语音</td></tr></table>
     <div class="note">💡 小提示：没配 API Key 时首次启动会自动弹出设置窗口；换肤/改人设都不需要重启，托盘「重载人设」立即生效。</div>

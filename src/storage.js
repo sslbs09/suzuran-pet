@@ -20,6 +20,8 @@ const PATHS = {
   spritesDefault: path.join(USER_DIR, "assets", "sprites", "default"),
   fontsUser: path.join(USER_DIR, "assets", "fonts", "user"),
   spineUser: path.join(USER_DIR, "assets", "spine", "user"),
+  psdExport: path.join(USER_DIR, "assets", "psd-export"), // PSD 角色工具导出目录（v2.1）
+  rigUser: path.join(USER_DIR, "assets", "rig", "user"), // PSD 2.5D 角色皮肤目录（v2.2）
   secrets: path.join(USER_DIR, "secrets.v1.json"),
   marker: path.join(USER_DIR, ".storage-migration-v1.json")
 };
@@ -50,6 +52,19 @@ function initializeStorage() {
     try { copyIfMissing(from, to, migrated); } catch (e) { failed.push({ from, message: e.message }); }
   }
   fs.writeFileSync(PATHS.marker, JSON.stringify({ version: 1, at: new Date().toISOString(), migrated, failed }, null, 2), "utf8");
+  // §14 追加 94：首启迁移强制 agreed=false——安装根 config.json 模板常携带开发者/曾使用者的
+  // 同意状态（宿主已同意过），全新用户不能因此跳过《使用条款》弹窗（合规）。迁移标记已写，
+  // 仅本次生效；已存在的用户（标记在）不受影响。
+  try {
+    const cfgPath = PATHS.config;
+    if (cfgPath && fs.existsSync(cfgPath)) {
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+      if (cfg && cfg.agreed) {
+        cfg.agreed = false;
+        fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), "utf8"); // Node utf8 写回无 BOM
+      }
+    }
+  } catch { /* 迁移期配置修正失败不影响启动 */ }
   return PATHS;
 }
 

@@ -1,7 +1,7 @@
 {
   "name": "suzuran-pet",
   "productName": "苏苏洛桌宠 1.1 正式版",
-  "version": "1.1.0",
+  "version": "2.5.0",
   "description": "苏苏洛桌宠 1.1 正式版 - 可配置 API、人设、情绪与本地语音（支持日语语音模式、中英日界面）",
   "main": "main.js",
   "scripts": {
@@ -24,6 +24,8 @@
     "markdownlint-cli2": "^0.23.2"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.0.8",
+    "ag-psd": "^31.0.2",
     "koffi": "^3.1.6",
     "omggif": "^1.0.10",
     "pixi-spine": "^4.0.5",

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: blob:; connect-src 'self' data: blob:; font-src 'self' data:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'">
+<title>苏苏洛 · PSD 角色工具</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 14px 18px;
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    font-size: 13px; color: #33414e; background: #f4f8fb;
+  }
+  h1 { font-size: 16px; margin: 0 0 10px; color: #2f8f87; }
+  .drop {
+    border: 2px dashed #9cc4d8; border-radius: 10px;
+    padding: 26px 12px; text-align: center; color: #6d8494;
+    background: #fff; cursor: pointer; transition: border-color .15s;
+  }
+  .drop.over { border-color: #2f8f87; background: #eef7f5; }
+  .row { display: flex; gap: 10px; margin: 10px 0; align-items: center; flex-wrap: wrap; }
+  button {
+    border: 1px solid #bcd4e4; background: #fff; border-radius: 8px;
+    padding: 6px 14px; cursor: pointer; font-size: 13px;
+  }
+  button:hover { background: #eef7f5; }
+  button.primary { background: #2f8f87; color: #fff; border-color: #2f8f87; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .cols { display: flex; gap: 14px; margin-top: 12px; }
+  .col { flex: 1; min-width: 0; background: #fff; border-radius: 10px; padding: 12px; border: 1px solid #e3ecf3; }
+  .col h2 { font-size: 13px; margin: 0 0 8px; color: #44505c; }
+  #tree { max-height: 340px; overflow: auto; font-size: 12px; line-height: 1.9; }
+  #tree .lvl { padding-left: 12px; }
+  #tree .grp { color: #2f8f87; font-weight: bold; padding: 1px 6px; border-radius: 6px; background: #f0f8f6; }
+  #tree .leaf-row { cursor: pointer; padding: 1px 6px; border-radius: 6px; display: flex; align-items: center; gap: 6px; }
+  #tree .leaf-row:hover { background: #eef7f5; }
+  #tree .leaf-row.sel { background: #d8efea; outline: 1px solid #2f8f87; }
+  #tree .eye { cursor: pointer; font-size: 12px; opacity: .75; user-select: none; flex: none; }
+  #tree .eye:hover { opacity: 1; }
+  #tree .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #tree .dim { color: #98a6b3; font-size: 11px; flex: none; }
+  #preview-wrap { text-align: center; min-height: 200px; }
+  #preview { max-width: 100%; max-height: 360px; image-rendering: pixelated; background: repeating-conic-gradient(#f0f3f6 0 25%, #fff 0 50%) 0 0/16px 16px; border-radius: 6px; }
+  .meta { color: #98a6b3; font-size: 12px; margin-top: 8px; }
+  .tip { background: #eef7f5; border-radius: 8px; padding: 10px 12px; margin-top: 12px; font-size: 12px; color: #4a6a70; line-height: 1.7; }
+  #status { font-size: 12px; color: #2f8f87; margin-top: 8px; min-height: 18px; }
+  #status.err { color: #c4553c; }
+</style>
+</head>
+<body>
+  <h1>🧩 PSD 角色工具</h1>
+  <div class="drop" id="drop">
+    拖入 .psd 文件，或 <b>点击选择</b><br/>
+    <span class="meta">解析图层 → 扁平化预览 → 导出 PNG（可作静态立绘/皮肤素材）</span>
+  </div>
+  <input type="file" id="file" accept=".psd" style="display:none" />
+  <div class="row">
+    <button id="btn-flatten" class="primary" disabled>🖼 扁平化预览</button>
+    <button id="btn-rig" class="primary" disabled>🎬 2.5D 动态预览</button>
+    <button id="btn-export" disabled>💾 导出 PNG 到用户目录</button>
+    <button id="btn-apply-rig" class="primary" disabled>🖥 应用到桌宠</button>
+  </div>
+  <div class="row" id="layer-ops">
+    <button id="btn-layer-add" disabled>📄 导入图层…</button>
+    <button id="btn-layer-dup" disabled>⧉ 复制选中</button>
+    <button id="btn-layer-scale" disabled>🔍 选中缩放</button>
+    <input type="number" id="scale-pct" value="100" min="10" max="500" step="5" style="width:66px" disabled />%
+    <button id="btn-layer-del" disabled>🗑 删除选中</button>
+    <button id="btn-layer-undo" disabled>↩ 撤销</button>
+    <button id="btn-layer-redo" disabled>↪ 重做</button>
+    <span class="meta" id="sel-info" style="color:#2f8f87">未选择图层</span>
+  </div>
+  <input type="file" id="layer-file" accept=".png,.jpg,.jpeg,.webp,.gif" style="display:none" />
+  <div id="status"></div>
+  <div class="cols">
+    <div class="col">
+      <h2>图层结构</h2>
+      <div id="tree">尚未加载 PSD</div>
+      <div class="meta" id="meta"></div>
+    </div>
+    <div class="col">
+      <h2>预览</h2>
+      <div id="preview-wrap"><span class="meta">扁平化后预览</span></div>
+    </div>
+  </div>
+  <div class="cols">
+    <div class="col">
+      <h2>🎬 2.5D 动态预览</h2>
+      <div id="rig-wrap" style="text-align:center; min-height:200px;"><span class="meta">加载 PSD 后点「2.5D 动态预览」：自动眨眼/呼吸/发丝物理/鼠标跟随</span></div>
+      <div class="meta" id="rig-info"></div>
+    </div>
+  </div>
+  <div class="tip">
+    💡 <b>用法</b>：把分层 PSD 拖进来，查看图层结构，可逐层<b>显示/隐藏、复制、删除、缩放</b>（点选图层后操作，
+    缩放以图层内容中心为锚，数值为缩放后的百分比），然后扁平化导出整张 PNG，或点「2.5D 动态预览」实时预览自动装配
+    （眨眼/口型/发丝物理/鼠标跟随）。编辑过的图层会随「应用到桌宠」一并生效。<br/>
+    导出文件保存在用户数据目录 <code>assets/psd-export/</code> 下。
+  </div>
+<script src="../node_modules/ag-psd/dist/bundle.js"></script>
+<script src="rig/rigger.js"></script>
+<script src="rig/genericparts.js"></script>
+<script src="rig-runtime.js"></script>
+<script src="psd.js"></script>
+</body>
+</html>

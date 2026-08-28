@@ -45,6 +45,114 @@ let spineBaseScaleX = 1;     // 初始缩放；朝向翻转时取反
 // 桌面行走状态（主进程广播驱动；明日方舟基建语义：Move=走动 Relax=放松 Sit=坐窗顶 Sleep=睡觉 Interact=点击互动）
 let walkState = { active: false, resting: true, perched: false, seated: false, face: 1 };
 
+/* ---------- PSD 2.5D 角色渲染（v2.2，完全独立于 Spine）
+ * rigSkinId 非空时 2.5D 独占显示：Spine 不初始化、不参与，互不干扰。 ---------- */
+let rigSkinId = "";
+let rigRuntime = null;
+let rigCanvas = null;
+let rigLoading = false;
+let rigScale = 1.0; // 2.5D 角色显示大小（设置页滑杆）
+let rigMouseFollow = true; // 2.5D 头部/眼睛跟随鼠标（v2.2.1 实验性，设置页开关）
+let mouseTrackGlobal = false; // 全局鼠标跟踪（v2.2.1 实验性，需设置页显式许可，默认关）
+const RIG_WIN_W = 300, RIG_WIN_H = 460; // rig 模式基础窗口尺寸（rigScale=1）
+function applyRigScale(v) {
+  rigScale = Math.max(0.3, Math.min(1.5, Number(v) || 1));
+  // rig 模式：窗口高度随 rigScale 联动（角色=窗口高 100%，放大不超出画布）
+  if (rigSkinId && rigRuntime) {
+    window.petAPI.setSize(RIG_WIN_W, Math.round(RIG_WIN_H * rigScale));
+  }
+}
+function rigGenericOpts() {
+  const GP = window.GenericParts;
+  const base = GP ? { eyeL: GP.get("eyeL"), eyeR: GP.get("eyeR"), mouth: GP.get("mouth") } : {};
+  return (base.eyeL || base.mouth) ? { generic: base } : {};
+}
+/** 加载 2.5D 皮肤并独占显示（独立大画布：全窗口贴底，rig 模式窗口尺寸 + 停走）；返回是否成功 */
+async function initRig(id) {
+  rigSkinId = id || "";
+  if (!rigSkinId) { destroyRig(); return false; }
+  if (rigLoading) return false;
+  rigLoading = true;
+  try {
+    window.petAPI.playback && window.petAPI.playback("[rig] 加载 2.5D 皮肤: " + rigSkinId);
+    const res = await fetch("pet-user://rig/user/" + encodeURIComponent(rigSkinId));
+    if (!res.ok) throw new Error("加载 PSD 失败 HTTP " + res.status);
+    const buf = await res.arrayBuffer();
+    if (!window.Rigger || !window.RigRuntime) throw new Error("2.5D 运行时未加载");
+    const psd = window.agPsd.readPsd(new Uint8Array(buf), { useImageData: true, skipThumbnail: true });
+    const rig = window.Rigger.buildRig(psd, rigGenericOpts());
+    rigCanvas = document.getElementById("rig-canvas"); // 独立大画布（index.html 静态，全窗口）
+    if (!rigCanvas) {
+      rigCanvas = document.createElement("canvas");
+      rigCanvas.id = "rig-canvas";
+      rigCanvas.className = "rig-canvas";
+      document.body.appendChild(rigCanvas);
+    }
+    if (rigRuntime) { try { rigRuntime.destroy(); } catch { /* 忽略 */ } }
+    rigRuntime = window.RigRuntime.init(rigCanvas);
+    rigRuntime.applyRig(rig);
+    // v2.2.1 实验性：跟随能力自适应——换 PSD 自动评估支持级别（头+眼 / 仅头 / 无），眼睛结构缺失时自动降级、不失效
+    const follow = window.RigRuntime.detectFollow(rig);
+    rigRuntime.setAuto("mouse", rigMouseFollow && follow.level !== "none");
+    rigRuntime.setMouseMode(mouseTrackGlobal); // 全局跟踪许可开启时改用外部坐标注入
+    window.petAPI.playback && window.petAPI.playback("[rig] 跟随能力: " + (follow.level === "full" ? "头+眼" : follow.level === "head-only" ? "仅头部" : "无") + "（" + (follow.reason || "") + "）");
+    applyRigScale(rigScale); // 应用用户设定的大小
+    // 独占显示：隐藏 GIF/Spine 条带，2.5D 全窗口独立显示
+    document.body.classList.add("rig-mode");
+    // 启动时序：applyBubbleSize/applyAppearance 先于本函数执行过，会留下内联宽高；rig 布局接管前先清掉
+    bubbleEl.style.width = "";
+    bubbleEl.style.height = "";
+    rigCanvas.classList.remove("hidden");
+    // rig 模式：独立窗口尺寸（角色比例约 496:765，高度随 rigScale 联动）+ 暂停行走
+    window.petAPI.setSize(RIG_WIN_W, Math.round(RIG_WIN_H * rigScale));
+    // 2.5D 模式停走但保留用户行走意图（不持久化）：切回 Spine 时由主进程 syncWalkingEngine 恢复
+    window.petAPI.walkingEngineStop && window.petAPI.walkingEngineStop();
+    window.petAPI.playback && window.petAPI.playback("[rig] 2.5D 皮肤就绪: " + rig.layers.length + " 部件");
+    return true;
+  } catch (e) {
+    window.petAPI.playback && window.petAPI.playback("[rig] 2.5D 皮肤加载失败: " + (e && e.message || e));
+    destroyRig();
+    return false;
+  } finally { rigLoading = false; }
+}
+function destroyRig() {
+  if (rigRuntime) { try { rigRuntime.destroy(); } catch { /* 忽略 */ } rigRuntime = null; }
+  if (rigCanvas) { rigCanvas.classList.add("hidden"); }
+  // 恢复原显示与窗口
+  document.body.classList.remove("rig-mode");
+  if (spriteEl) spriteEl.style.display = "";
+  if (spineApp && spineApp.view) spineApp.view.style.display = "";
+  window.petAPI.setSize(winSize.width || 260, winSize.height || 200);
+  if (appearanceCfg) applyAppearance(appearanceCfg); // 关闭 rig 后恢复 gif/spine 的气泡宽度设置
+}
+function rigShow() { if (rigCanvas) rigCanvas.classList.remove("hidden"); }
+function rigHide() { if (rigCanvas) rigCanvas.classList.add("hidden"); }
+function rigPresetForMood(mood) {
+  if (!rigRuntime) return;
+  const map = { idle: "neutral", happy: "smile", surprised: "surprise", wave: "wink" };
+  if (map[mood]) rigRuntime.preset(map[mood]);
+  if (mood === "sleep") { rigRuntime.setParam("eyeOpenL", 0.25); rigRuntime.setParam("eyeOpenR", 0.25); }
+}
+/** 关闭 2.5D 并切回原渲染（renderMode：spine→初始化 spine，否则 GIF） */
+async function rigOffBackToBase() {
+  rigSkinId = "";
+  destroyRig();
+  if (renderMode === "spine") {
+    await setRenderMode("spine");
+  } else {
+    spriteEl.style.display = "";
+  }
+}
+/** 切换 2.5D 皮肤（id 空=关闭） */
+async function applyRigSkin(id) {
+  const ok = await initRig(id);
+  if (!ok && id) {
+    // 加载失败：回原模式
+    if (renderMode === "spine") { await setRenderMode("spine"); }
+    else spriteEl.style.display = "";
+  }
+}
+
 function spineHas(name) { return !!spineObj && !!spineObj.spineData.animations.find((a) => a.name === name); }
 
 /* ---------- 动画切换（Spine） ---------- */
@@ -64,7 +172,8 @@ let spineFitStableHits = 0;
 function scheduleFitSpine() {
   spineFitGeneration += 1;
   spineFitStableHits = 0;
-  spineAutoScaled = false;
+  // spineAutoScaled / spineFitKeepScale 跨动画保持（只在换皮肤 initSpine 时重置）：
+  // 每次动画切换都重置会让适配无限累乘放大（迷迭香实测每次相位切换 ×1.59，几次后角色暴涨出画布消失）
   spineFitTimers.forEach(clearTimeout);
   const generation = spineFitGeneration;
   spineFitTimers = [150, 500, 1000, 1800, 2800, 4200].map((ms) => setTimeout(() => fitSpinePose(generation), ms));
@@ -73,74 +182,149 @@ let spineBoost = 1; // >1 表示该模型包围盒远大于可见内容（空白
 let spineXoff = 0;  // 可见主体偏在包围盒一侧时的水平居中修正（占包围盒宽度比例，face=-1 时自动镜像）
 let spineManual = false;   // 该皮肤是否手动调过 boostTable（true 则不做像素级自动放大）
 let spineAutoScaled = false; // 本次加载是否已做过像素级自动放大（只做一次，防反复放大）
+let spineFitKeepScale = false; // 自动适配后跳过宽度守卫（宽包围盒皮肤防被每帧贴合缩回）
+let spineFigLeftCss = 0; // 自动适配皮肤：角色可见左缘在窗口内的 CSS 位置（画布加宽后行走对齐用）
 function fitSpinePose(generation = spineFitGeneration) {
   try {
     if (!spineObj || !spineApp || renderMode !== "spine" || generation !== spineFitGeneration) return;
-    const W = spineApp.screen.width, H = spineApp.screen.height;
+    let W = spineApp.screen.width, H = spineApp.screen.height;
     const safe = 4;
+    const flip = walkState.face === -1 ? -1 : 1;
     const baseline = Math.abs(spineBaseScaleX);
-    // 每次先回到未裁切的基准缩放，再测量当前动画帧，不能使用上一帧缩小后的 bounds。
-    spineObj.position.set(0, 0);
-    spineObj.scale.set(baseline * (walkState.face === -1 ? -1 : 1), baseline);
-    spineObj.updateTransform();
-    let b = spineObj.getBounds();
-    if (!(b.width > 0) || !(b.height > 0)) return;
-    const k = Math.min(1, (W - safe * 2) / b.width, (H - safe * 2) / b.height);
-    const mag = baseline * k;
-    spineObj.scale.set(mag * (walkState.face === -1 ? -1 : 1), mag);
-    spineObj.position.set(0, 0);
-    spineObj.updateTransform();
-    b = spineObj.getBounds();
-    // 每次 fit 都从当前 bounds 重新定位，避免 x/y 累加导致动画切换后逐渐漂移。
-    spineObj.x += (W - b.width) / 2 - b.x;
-    if (spineXoff) spineObj.x += spineXoff * b.width * (walkState.face === -1 ? -1 : 1);
-    spineObj.y += H - (b.y + b.height);
-    // 像素采样校准（借鉴 Ark-Pets 的 canvas_sampling）：渲染一帧按间隔采非透明像素，
-    // 用「真实可见轮廓」修正水平居中与贴地；未手动调过 boost 且明显偏小的模型自动放大一次
-    try {
-      const rt = PIXI.RenderTexture.create({ width: Math.ceil(W), height: Math.ceil(H) });
-      spineApp.renderer.render(spineObj, { renderTexture: rt, clear: true });
-      const px = spineApp.renderer.extract.pixels(rt);
-      const pw = rt.width, ph = rt.height, fx = W / pw, fy = H / ph, step = 4, thr = 32;
-      let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
-      for (let y = 0; y < ph; y += step) {
-        for (let x = 0; x < pw; x += step) {
+    const bboxBounds = () => { spineObj.position.set(0, 0); spineObj.updateTransform(); return spineObj.getBounds(); };
+    // 像素采样：可见轮廓（在给定定位状态下）
+    const sample = () => {
+      try {
+        const rt = PIXI.RenderTexture.create({ width: Math.ceil(W), height: Math.ceil(H) });
+        spineApp.renderer.render(spineObj, { renderTexture: rt, clear: true });
+        const px = spineApp.renderer.extract.pixels(rt);
+        const pw = rt.width, ph = rt.height, fx = W / pw, fy = H / ph, step = 4, thr = 32;
+        let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
+        for (let y = 0; y < ph; y += step) for (let x = 0; x < pw; x += step) {
           if (px[(y * pw + x) * 4 + 3] > thr) {
             if (x < x0) x0 = x; if (x > x1) x1 = x;
             if (y < y0) y0 = y; if (y > y1) y1 = y;
           }
         }
+        rt.destroy(true);
+        return x1 >= 0 ? { x0: x0 * fx, x1: (x1 + step) * fx, y0: y0 * fy, y1: (y1 + step) * fy } : null;
+      } catch { return null; }
+    };
+    // 包围盒粗定位（居中+贴地），返回当前可见轮廓
+    const bboxPosition = () => {
+      const b = bboxBounds();
+      if (!(b.width > 0) || !(b.height > 0)) return null;
+      spineObj.x += (W - b.width) / 2 - b.x;
+      spineObj.y += H - (b.y + b.height);
+      spineObj.updateTransform();
+      return b;
+    };
+
+    // ---- 自动适配过的皮肤：固定缩放 + 可见轮廓定位 ----
+    if (spineFitKeepScale) {
+      // 迭代平移使可见轮廓整体入画布 → 采样不被裁剪 → 按可见中心/底边精定位（贴地留 5% 边距）
+      spineObj.scale.set(baseline * flip, baseline);
+      bboxPosition();
+      let vis = null;
+      for (let iter = 0; iter < 10 && !vis; iter++) {
+        const s = sample();
+        if (!s) break;
+        const m = 2;
+        let moved = false;
+        if (s.x0 <= m) { spineObj.x += (m - s.x0) + 6; moved = true; }
+        else if (s.x1 >= W - m) { spineObj.x -= (s.x1 - (W - m)) + 6; moved = true; }
+        if (s.y0 <= m) { spineObj.y += (m - s.y0) + 6; moved = true; }
+        else if (s.y1 >= H - m) { spineObj.y -= (s.y1 - (H - m)) + 6; moved = true; }
+        if (!moved) vis = s;
+        else spineObj.updateTransform();
       }
-      rt.destroy(true);
-      if (x1 >= 0) {
-        const vx0 = x0 * fx, vx1 = (x1 + step) * fx, vy0 = y0 * fy, vy1 = (y1 + step) * fy;
-        if (generation === spineFitGeneration && ++spineFitStableHits >= 2 && !spineManual && !spineAutoScaled && (vy1 - vy0) < H * 0.55) {
-          // 可见内容不足画布高度一半 → 自动放大到接近满高（上限 3 倍，只做一次）
-          const kk = Math.min(5, Math.max(1, H * 0.9 / (vy1 - vy0)));
-          spineObj.scale.set(spineObj.scale.x * kk, spineObj.scale.y * kk);
+      if (vis) {
+        spineObj.x += W / 2 - (vis.x0 + vis.x1) / 2;
+        spineObj.y += H - vis.y1; // 贴画布底边（layoutGap 由主进程统一补偿，不再加边距避免悬浮）
+        spineFigLeftCss = petEl ? petEl.offsetLeft + vis.x0 * (petEl.clientWidth / Math.max(1, W)) : 0;
+      } else {
+        spineFigLeftCss = petEl ? petEl.offsetLeft : 0;
+      }
+      reportGroundGap();
+      scheduleGeometryReport();
+      return;
+    }
+
+    // ---- 未适配皮肤：先做适配决策 ----
+    // 适配测量必须在“无包围盒守卫”（k=1 基准）下进行：宽包围盒模型被守卫折叠后测量会被污染。
+    // 手动 boost 皮肤（boostTable 命中，如迷迭香第三皮肤）不参与自动放大——
+    // 宽模型按高度放大后宽度会超画布，曾导致腿/侧边裁剪、行走错位；保持手动缩放 + 高度画布容纳。
+    if (!spineAutoScaled && !spineManual) {
+      spineObj.scale.set(baseline * flip, baseline);
+      bboxPosition();
+      const v = sample();
+      if (v && ++spineFitStableHits >= 2 && (v.y1 - v.y0) < H * 0.75) {
+        const visH = v.y1 - v.y0, visW = v.x1 - v.x0;
+        const aspect = visH > 10 ? visW / visH : 1;
+        const kkH = H * 0.85 / visH;
+        const kkW = W * 0.85 / visW;
+        // 宽度受限（宽模型）不再加宽画布——加宽 pet 元素会盖住左侧气泡（聊天框异常）；
+        // 按高度目标放大，宽度不足部分维持原样（稳定优先）。
+        const kk = Math.min(5, Math.max(1, Math.min(kkH, kkW)));
+        if (kk > 1.05) {
           spineBaseScaleX *= kk;
           spineAutoScaled = true;
-          try { window.petAPI.playback && window.petAPI.playback(`[spine] 自动适配 vis=${Math.round(vy1-vy0)}px → ×${kk.toFixed(2)} dir=${relDirOf()}`); } catch { /* 忽略 */ }
-          fitSpinePose(); // 放大后重跑一遍本函数完成最终定位
+          spineFitKeepScale = true;
+          try { window.petAPI.playback && window.petAPI.playback(`[spine] 自动适配 vis=${Math.round(visH)}px → ×${kk.toFixed(2)} (aspect=${aspect.toFixed(2)}) dir=${relDirOf()}`); } catch { /* 忽略 */ }
+          fitSpinePose();
           return;
         }
+      }
+    }
+
+    // ---- 常规显示（未适配/无需适配）：包围盒守卫缩放 + 定位 + 贴地空隙 ----
+    {
+      spineObj.scale.set(baseline * flip, baseline);
+      const b = bboxBounds();
+      if (!(b.width > 0) || !(b.height > 0)) { reportGroundGap(); scheduleGeometryReport(); return; }
+      // §14 追加 105：宽度约束放宽 12% 余量（高度仍严格）——坐姿/Relax 等姿势包围盒略超宽（实测 125 > 120）
+      // 时不会被整体缩小 10%；可见主体居中的模型横向透明区足以容纳，日常站姿（bbox 更窄）完全不受影响。
+      const k = Math.min(1, (W * 1.12 - safe * 2) / b.width, (H - safe * 2) / b.height);
+      // §14 追加 105 诊断（限频）：守卫发生缩小（k<1）时记录姿势/包围盒，定位"坐下缩小"问题
+      if (k < 0.97) {
+        const _now = Date.now();
+        if (_now - (window.__spineGuardLogAt || 0) > 500) {
+          window.__spineGuardLogAt = _now;
+          let _anim = "?";
+          try { _anim = typeof spinePhaseAnim === "function" ? spinePhaseAnim() : "?"; } catch { /* 忽略 */ }
+          try { window.petAPI.playback && window.petAPI.playback(`[spine] guard k=${k.toFixed(3)} base=${baseline.toFixed(3)} anim=${_anim} bbox=${Math.round(b.width)}x${Math.round(b.height)} W=${W} H=${H}`); } catch { /* 忽略 */ }
+        }
+      }
+      spineObj.scale.set(baseline * k * flip, baseline * k);
+      spineObj.position.set(0, 0);
+      spineObj.updateTransform();
+      spineObj.x += (W - spineObj.getBounds().width) / 2 - spineObj.getBounds().x;
+      const b2 = spineObj.getBounds();
+      if (spineXoff) spineObj.x += spineXoff * b2.width * flip;
+      spineObj.y += H - (b2.y + b2.height);
+      const v2 = sample();
+      if (v2) {
+        const vy1 = v2.y1;
         const sampledGap = Math.max(0, Math.min(24, Math.round(H - vy1)));
         if (sampledGap <= 12) {
           if (Math.abs(sampledGap - visibleCanvasGapCandidate) <= 3) visibleCanvasGapHits += 1;
           else { visibleCanvasGapCandidate = sampledGap; visibleCanvasGapHits = 1; }
           if (visibleCanvasGapHits >= 2) visibleCanvasGap = visibleCanvasGapCandidate;
-        } else {
-          visibleCanvasGapHits = 0;
-        }
-        // alpha 只用于稳定 groundGap；结构 bounds 已完成唯一的居中/贴底，禁止再次修正 x。
-        void vx0; void vx1; void vy0; void vy1;
+        } else { visibleCanvasGapHits = 0; }
       }
-    } catch { /* 采样失败不影响基础定位 */ }
+    }
   } catch { /* 测量失败不影响渲染 */ }
   reportGroundGap();
   scheduleGeometryReport();
 }
-function relDirOf() { try { return decodeURIComponent((spinePaths.skel || "")).split("/").find((p) => /^\d{3,4}_/.test(p)) || "builtin"; } catch { return "?"; } }
+
+function relDirOf() {
+  try {
+    const segs = decodeURIComponent((spinePaths.skel || "")).split("/");
+    const uIdx = segs.lastIndexOf("user");
+    return segs.find((p) => /^\d{3,4}_/.test(p)) || (uIdx >= 0 && segs[uIdx + 1] ? segs[uIdx + 1] : "builtin");
+  } catch { return "?"; }
+}
 
 /** 上报角色脚底到窗口底边的空隙（宠物元素悬浮在输入栏上方导致），
  *  主进程贴地吸附时用它把窗口下探相应距离，让脚真正踩在任务栏/图标上 */
@@ -152,7 +336,10 @@ let geometryReportTimer = null;
 function reportGroundGap() {
   try {
     if (!petEl || !document.documentElement) return;
-    const inset = Math.max(0, Math.min(400, Math.round(Number(petEl.offsetLeft) || 0))); // 左边界补偿：与主进程 setCharInset 上限一致，放开 119 硬限避免左侧“空气墙”
+    const insetRaw = spineFitKeepScale && spineFigLeftCss > 0
+      ? spineFigLeftCss // 自动适配皮肤：角色可见左缘（画布已按宽比加宽，元素左缘 ≠ 角色左缘）
+      : Number(petEl.offsetLeft) || 0;
+    const inset = Math.max(0, Math.min(document.documentElement.clientWidth || 260, Math.round(insetRaw))); // 左边界补偿：角色条带不可能超出窗口宽，用 clientWidth 作上限（异常上报会把行走左边界扩到屏幕外导致角色“闪现”出屏）
     const layoutGap = (document.documentElement.clientHeight || 0) - ((Number(petEl.offsetTop) || 0) + (Number(petEl.offsetHeight) || 0));
     const gap = Math.max(0, Math.min(80, Math.round(layoutGap + visibleCanvasGap)));
     window.petAPI.setGroundGap(gap);
@@ -264,7 +451,6 @@ async function initSpine(epoch = renderModeEpoch) {
         if (cur.id !== "builtin") console.log("[Spine] 使用自定义皮肤:", cur.atlas);
       }
     } catch { /* 探测失败用内置 */ }
-
     // 创建 PixiJS 应用
     const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2)); // 高DPI 屏按物理像素渲染，避免整体发糊
     spineApp = new PIXI.Application({
@@ -326,7 +512,6 @@ async function initSpine(epoch = renderModeEpoch) {
     // 部分模型导出尺度/宽高比不同：按目录名加缩放修正（宽度优先约束，防横向出画布）
     const boostTable = {
       "4179_monstr_boc_11": 7.5,
-      "391_rosmon_sale_16": 4.5,
       "254_vodfox": 1.8,
       "358_lisa": 1.45,
       "2015_dusk": 2.5,
@@ -341,20 +526,33 @@ async function initSpine(epoch = renderModeEpoch) {
     };
     // 部分模型可见主体偏在包围盒一侧（如持枪姿势）：按目录名给水平居中修正（占包围盒宽度比例）
     const boostOffsetTable = {
-      "391_rosmon_sale_16": -0.14
+    };
+    // §14 追加 105：皮肤级显示倍率覆盖（瘦/窄模型手动调大；不动苏苏洛本体与通用逻辑）。
+    // 命中即按手动皮肤处理（跳过像素自动适配，走守卫最大化到画布内）。数值待用户验收后微调。
+    const SKIN_SCALE_OVERRIDE = {
+      "1035_wisdel": 1.5, // 维什戴尔默认装：用户反馈偏小（×1.25 仍小）；1.5≈91px 对齐 sale_14 观感
     };
     let boost = 1, xoff = 0, manualHit = false;
     try {
       const segs = decodeURIComponent((spinePaths.skel || "")).split("/");
-      const dirName = segs.find((p) => /^\d{3,4}_/.test(p)) || ""; // 定位 spine/user/<目录>/... 中的目录段
+      // 定位 spine/user/<目录>/... 中的目录段：数字前缀目录（官方导出名）优先；无数字前缀（summer/winter 等自定义目录）取 user 后一段
+      const uIdx = segs.lastIndexOf("user");
+      const dirName = segs.find((p) => /^\d{3,4}_/.test(p)) || (uIdx >= 0 && segs[uIdx + 1] ? segs[uIdx + 1] : "");
       boost = boostTable[dirName] || 1;
       xoff = boostOffsetTable[dirName] || 0;
       manualHit = !!boostTable[dirName];
+      // §14 追加 105：皮肤级倍率覆盖并入 boost（dirName 在此作用域内可直接用）
+      if (SKIN_SCALE_OVERRIDE[dirName] && SKIN_SCALE_OVERRIDE[dirName] !== 1) {
+        boost *= SKIN_SCALE_OVERRIDE[dirName];
+        manualHit = true;
+        try { window.petAPI.playback && window.petAPI.playback(`[spine] override ${dirName} ×${SKIN_SCALE_OVERRIDE[dirName]}`); } catch { /* 忽略 */ }
+      }
     } catch { boost = 1; xoff = 0; }
     spineBoost = boost; // fitSpinePose 据此跳过缩小保护
     spineXoff = xoff;   // fitSpinePose 据此水平居中可见主体
     spineManual = manualHit;   // 手动调过的皮肤不做像素级自动放大
     spineAutoScaled = false;   // 每次加载重置自动放大标记
+    spineFitKeepScale = false; // 每次加载重置宽度守卫豁免
     spineBaseScaleX = scale * boost;
     spineObj.scale.set(scale * boost);
     // TODO 心跳诊断（临时）：初始化关键数值，定位后移除
@@ -394,7 +592,7 @@ async function initSpine(epoch = renderModeEpoch) {
   }
 }
 
-/** 在 Spine/GIF 模式间切换 */
+/** 在 Spine/GIF 模式间切换（3D 由 3d-mode.js 自治，这里只做显示归属） */
 async function setRenderMode(mode) {
   if (mode === renderMode && !(mode === "spine" && !spineApp)) return;
   const epoch = ++renderModeEpoch;
@@ -421,6 +619,11 @@ let animDemoUntil = 0; // 动作试演期间不被行走相位打断
 function applyWalkState(s) {
   const wasActive = walkState.active;
   walkState = s || walkState;
+  // 行走激活瞬间恢复标准窗口：气泡加宽（ensureWindowWidthFor）的大窗口会破坏行走几何（charInset 超上限→出屏“闪现”）。
+  // v2.5.10：宽皮肤按其窗口宽度恢复，否则会顶掉 460 宽的宽模型布局。
+  if (walkState.active && !wasActive && !(rigSkinId && rigRuntime)) {
+    window.petAPI.setSize(winSize.width || 260, winSize.height || 200);
+  }
   if (!spineObj || renderMode !== "spine") return;
   if (isSleeping) return;                 // 睡觉中：不被行走动画打断
   spineFaceDir(walkState.face);
@@ -533,15 +736,51 @@ function setMood(mood) {
   if (mood === "sleep" && !isSleeping) { isSleeping = true; window.petAPI.setSleeping(true); }
   else if (mood !== "sleep" && isSleeping) { isSleeping = false; window.petAPI.setSleeping(false); }
 
+  // PSD 2.5D 角色（v2.2）：情绪 → 表情预设（独立于 Spine）
+  if (rigSkinId && rigRuntime) { rigPresetForMood(mood); petEl.dataset.mood = mood; return; }
+
   // Spine 模式：切换 Spine 动画而非 GIF
   if (renderMode === "spine") { setSpineMood(mood); petEl.dataset.mood = mood; return; }
 
   // GIF 模式
-  if (spriteEl.src.endsWith(file + ".gif")) return;
-  spriteEl.src = SPRITE_BASE + encodeURI(file) + ".gif?t=" + Date.now();
-  petEl.dataset.mood = mood;
-  if (mood === "sleep") awake = false;
-  scheduleMoodReset(mood);
+  const gifUrl = SPRITE_BASE + encodeURI(file) + ".gif?t=" + Date.now();
+  if (spriteEl.dataset.src === gifUrl.split("?")[0]) return; // 同一张不重复切换
+  // 预载解码后再切（ottopet 借鉴：GIF 预载进正题，避免切换瞬间空白/卡顿）
+  showGifWithPreload(gifUrl, mood, file);
+}
+
+/** 预载目标 GIF（decode 完成或超时 800ms 兜底）后切换；spine/rig 模式由调用方绕过 */
+function showGifWithPreload(gifUrl, mood, file) {
+  const im = new Image();
+  let done = false;
+  const apply = () => {
+    if (done) return;
+    done = true;
+    spriteEl.src = gifUrl;
+    spriteEl.dataset.src = gifUrl.split("?")[0];
+    petEl.dataset.mood = mood;
+    if (mood === "sleep") awake = false;
+    scheduleMoodReset(mood);
+  };
+  im.onload = apply;
+  im.onerror = apply;
+  im.src = gifUrl;
+  setTimeout(apply, 800); // 大 GIF 解码慢：先切不阻塞，后续自然渐显
+  // 后台预热下一位待机（让"闲置轮换"下一秒进正题）
+  preloadGifNext(file);
+}
+const gifPreloadCache = new Set();
+function preloadGifNext(file) {
+  try {
+    if (!file) return;
+    const idles = idleNames();
+    const idx = idles.indexOf(file);
+    const next = idx >= 0 && idles[idx + 1] ? idles[idx + 1] : (idles[0] || "");
+    if (!next || gifPreloadCache.has(next)) return;
+    gifPreloadCache.add(next);
+    const im = new Image();
+    im.src = SPRITE_BASE + encodeURI(next) + ".gif";
+  } catch { /* 预热失败不影响 */ }
 }
 
 /** 心情在指定时间后回落到 idle；持续心情（sleep/work 等）不自动回落 */
@@ -568,6 +807,7 @@ function resetSleepTimer() {
 function showBubble() {
   bubbleEl.classList.remove("hidden");
   bubbleEl.classList.remove("error", "task");
+  bubbleEl.scrollTop = 0; // 新消息从顶部显示，避免残留滚动位置让可见区落在空白段
 }
 function setBubbleMode(mode) {
   bubbleEl.classList.toggle("task", mode === "zcode");
@@ -602,12 +842,49 @@ function hideThinking() {
 }
 
 /* ---------- 发送 / 流式回传 ---------- */
+// 消息生成防抖（v2.6）：生成/合成中来的消息先缓冲（窗口内只留最后一条），当前回合结束自动补发，避免丢消息/合成堆叠
+let pendingSendText = "";
+let pendingSendTimer = null;
+function maybeFlushPendingSend() {
+  if (busy || !pendingSendText) return;
+  clearTimeout(pendingSendTimer);
+  pendingSendTimer = setTimeout(() => { // 追加 250ms 防抖：结束瞬间的连续输入合并为一条
+    const t = pendingSendText;
+    pendingSendText = "";
+    if (t) sendText(t);
+  }, 250);
+}
+function clearPendingSend() {
+  clearTimeout(pendingSendTimer);
+  pendingSendTimer = null;
+  pendingSendText = "";
+}
 async function send() {
   const text = inputEl.value.trim();
-  if (!text || busy) return;
+  if (!text) return;
   if (!agreed) {
     toast(I18N.t("pet.termsToast"));
     return;
+  }
+  if (busy) {
+    pendingSendText = text;
+    clearTimeout(pendingSendTimer);
+    pendingSendTimer = setTimeout(maybeFlushPendingSend, 300);
+    inputEl.value = "";
+    wake();
+    return;
+  }
+  await sendText(text);
+}
+
+async function sendText(text) {
+  if (!agreed) {
+    toast(I18N.t("pet.termsToast"));
+    return;
+  }
+  // 被打断反应（v2.6）：她正在说话时你开口，先小声应一句再听你的
+  if (isSpeakingAudio && ttsConfig.enabled) {
+    try { speak("啊……好好好，你先说，我听着呢！", "surprised"); } catch { /* 打断反应失败不影响主流程 */ }
   }
   inputEl.value = "";
   replyBuffer = "";
@@ -638,14 +915,14 @@ function showError(msg) {
   busy = false;
   updateControls();
   setTimeout(() => { bubbleEl.classList.remove("error"); }, 6000);
-  scheduleBubbleHide(8000); // 错误气泡：等“唔……出错了”播完再隐藏，避免残留
+  scheduleBubbleHide(10000); // 错误气泡：等“唔……出错了”播完再隐藏，避免残留
 }
 
 function toast(msg) {
   showBubble();
   hideThinking();
   bubbleText.textContent = msg;
-  scheduleBubbleHide(2600); // 语音/思考中不提前关掉气泡（防止误关正在显示的聊天回复）
+  scheduleBubbleHide(4000); // 语音/思考中不提前关掉气泡（防止误关正在显示的聊天回复）
 }
 
 /* ---------- TTS 语音 ---------- */
@@ -653,6 +930,7 @@ let ttsConfig = { enabled: true, voice: "", rate: 0.95, pitch: 1.1 };
 let zhVoice = null;
 let ttsCloudOn = true; // 云端语音开关（来自 config，失败自动回退系统语音）
 let emotionalVoice = true; // 情绪语音开关（来自 features.emotionalVoice：语速/音调/语气词）
+let emotionVoiceCfg = {};  // 情绪音色分档开关（v2.6）：{撒娇:true,…}，缺省=启用；停用档回默认音色/默认语气
 
 function initTts() {
   const pick = () => {
@@ -678,14 +956,15 @@ function stripForSpeech(text) {
     .trim();
 }
 
-/* ---------- 情绪语气词注入（实验性）：让 TTS 按情绪带着语气朗读，比后处理变调自然 ---------- */
+/* ---------- 情绪语气词注入（原始）：让 TTS 按情绪带着语气朗读，比后处理变调自然 ---------- */
 const EMOTION_SPEECH = {
   "开心": "呀！",
   "惊喜": "哇！",
   "生气": "哼！",
   "委屈": "呜…",
   "思考": "嗯…",
-  "傲娇": "哼！"
+  "傲娇": "哼！",
+  "撒娇": "嘛～"    // v2.6 撒娇更明显：句尾撒娇语气词
 };
 function emotionizeText(text, emotion) {
   const tail = EMOTION_SPEECH[emotion];
@@ -715,7 +994,7 @@ let bubbleHideTimer = null;
 // 防重复保险
 let lastSpoken = { text: "", ts: 0 };
 
-// 情绪 → 语音参数映射
+// 情绪 → 语音参数映射（原始）
 const EMOTION_VOICE = {
   "开心": { rate: 1.12, pitch: 1.12 },
   "惊喜": { rate: 1.18, pitch: 1.18 },
@@ -724,6 +1003,8 @@ const EMOTION_VOICE = {
   "思考": { rate: 0.92, pitch: 0.96 },
   "睡觉": { rate: 0.62, pitch: 0.80 },
   "傲娇": { rate: 1.06, pitch: 1.08 },
+  "撒娇": { rate: 1.10, pitch: 1.12 },   // v2.6 撒娇更明显：比默认更快更甜（配合参考音频）
+  "温柔": { rate: 0.94, pitch: 1.02 },   // v2.6 温柔档：略慢、软化
 };
 
 function scheduleBubbleHide(delayMs = 5000) {
@@ -752,29 +1033,93 @@ function stopTts() {
   if (activeAudioFinish) activeAudioFinish();
   cloneAudio = null;
   activeAudioFinish = null;
+  // v2.5.5 流式：作废排队中的 part，停止当前 part
+  ttsPartEpoch += 1;
+  ttsPartQueue = [];
+  if (ttsPartAudio) { try { ttsPartAudio.pause(); } catch { /* 忽略 */ } ttsPartAudio = null; }
+  ttsPartPlaying = false;
   isSpeakingAudio = false;
 }
 
+/* v2.5.5 逐句流式播放：主进程每合成完一句推给渲染层，先到先播（长回复感知提速） */
+let ttsPartQueue = [];
+let ttsPartPlaying = false;
+let ttsPartEpoch = 0;
+let ttsPartAudio = null;
+let ttsPartPlayedCount = 0; // 累计已播 part 数（speak 用它判断是否跳过整段合并音频）
+let speakActive = false;    // speak 进行中才接收流式 part
+
+function playNextTtsPart() {
+  if (ttsPartPlaying) return;
+  let part = ttsPartQueue.shift();
+  while (part && part.epoch !== ttsPartEpoch) part = ttsPartQueue.shift(); // 丢弃已作废 part
+  if (!part) return;
+  ttsPartPlaying = true;
+  try {
+    const isWav = part.b64.slice(0, 8) === "UklGRg==";
+    const audio = new Audio("data:" + (isWav ? "audio/wav" : "audio/mpeg") + ";base64," + part.b64);
+    ttsPartAudio = audio;
+    audio.volume = 1;
+    audio.playbackRate = Math.max(0.9, Math.min(1.1, ttsConfig.rate || 0.95));
+    isSpeakingAudio = true;
+    const done = () => {
+      if (ttsPartAudio === audio) ttsPartAudio = null;
+      ttsPartPlaying = false;
+      if (ttsPartQueue.length) {
+        // 句子间停顿 200~260ms：流式播放跳过了主进程合并时的静音间隔，这里补上自然断句
+        const pauseMs = 200 + Math.round(Math.random() * 60);
+        setTimeout(() => { if (ttsPartQueue.length) playNextTtsPart(); }, pauseMs);
+      } else {
+        isSpeakingAudio = false;
+      }
+    };
+    audio.onended = done;
+    audio.onerror = done;
+    audio.play().catch(done);
+  } catch { ttsPartPlaying = false; isSpeakingAudio = false; }
+}
+if (window.petAPI.onTtsPart) {
+  window.petAPI.onTtsPart((part) => {
+    if (!part || !part.b64 || !speakActive) return; // 非说话时段/已停止：不收
+    if (part.session !== undefined && part.session !== speakSession) return; // v2.6 旧会话的 part 让位（消息生成防抖）
+    ttsPartPlayedCount += 1;
+    ttsPartQueue.push({ b64: part.b64, epoch: ttsPartEpoch });
+    playNextTtsPart();
+  });
+}
+
+let speakSession = 0;   // 语音会话号：新消息的 speak 让旧消息的合成结果/part 作废（消息生成防抖）
 async function speak(text, emotion) {
   if (!ttsConfig.enabled) return;
+  const toneOn = !(emotionVoiceCfg[emotion] === false); // 该情绪音色分档是否启用（停用 → 默认音色/默认语气）
   let clean = stripForSpeech(text);
-  if (emotionalVoice) clean = emotionizeText(clean, emotion); // 情绪语气词注入（仅朗读，气泡仍显示原文）
+  if (emotionalVoice && toneOn) clean = emotionizeText(clean, emotion); // 情绪语气词注入（仅朗读，气泡仍显示原文）
   if (!clean) return;
   const now = Date.now();
   if (clean === lastSpoken.text && now - lastSpoken.ts < 10000) {
     window.petAPI.playback("重复文本已跳过: " + clean.slice(0, 30));
     return;
   }
-  // 情绪语音参数（关闭时用默认语速/音调）
-  const ev = emotionalVoice ? (EMOTION_VOICE[emotion] || {}) : {};
+  const mySession = ++speakSession;
+  stopTts(); // 新消息接管语音：停掉上一条的音频与排队 part，等价于旧会话全部作废
+  // 情绪语音参数（关闭/该档停用 → 默认语速/音调）
+  const ev = (emotionalVoice && toneOn) ? (EMOTION_VOICE[emotion] || {}) : {};
   const speakRate = (ttsConfig.rate || 0.9) * (ev.rate || 1.0);
   const speakPitch = (ttsConfig.pitch || 1.1) * (ev.pitch || 1.0);
-
-  // 优先云端语音（百炼克隆 / edge-tts）
+  speakActive = true; // v2.5.5 流式接收窗口
+  try {
+  // 优先克隆语音链路（Genie / GPT-SoVITS 日语 / Cosy / edge，主进程内部选择）
   if (ttsCloudOn) {
     try {
-      const b64 = await window.petAPI.speakClone(clean);
-      if (b64) {
+      const partsBefore = ttsPartPlayedCount;
+      const b64 = await window.petAPI.speakClone(clean, { emo: emotion, session: mySession }); // 情绪 → 主进程切参考音频（仅撒娇/傲娇/惊讶命中）；会话号让旧任务让位
+      if (mySession !== speakSession) return; // 等待期间来了新消息：本会话结果整体作废
+      if (b64 && ttsPartPlayedCount > partsBefore) {
+        // 已逐句流式播放：跳过整段合并音频，避免重复
+        lastSpoken = { text: clean, ts: Date.now() };
+        window.petAPI.playback("流式播放 parts=" + (ttsPartPlayedCount - partsBefore) + "（跳过合并段）");
+        return;
+      } else if (b64) {
         const isWav = b64.slice(0, 8) === "UklGRg==";
         const audio = new Audio("data:" + (isWav ? "audio/wav" : "audio/mpeg") + ";base64," + b64);
         const epoch = ++playbackEpoch;
@@ -811,13 +1156,18 @@ async function speak(text, emotion) {
       }
       window.petAPI.playback("speakClone 返回空");
     } catch (e) {
+      if (mySession !== speakSession) return; // 已被新消息取代：不再凑错误语音
       stopTts();
       console.error("云端语音播放失败:", e);
       window.petAPI.playback("播放失败: " + (e && e.message || e));
     }
   }
+  if (mySession !== speakSession) return; // 等待/失败期间来了新消息：不回退系统语音（不然旧句会用系统音补读）
   window.petAPI.playback("回退系统语音");
   speakSystem(clean.replace(/博士/g, "刀客塔"), speakRate, speakPitch); // 游戏习惯称呼（仅语音，气泡仍显示原文）
+  } finally {
+    if (mySession === speakSession) speakActive = false; // 只由最新会话收口流式接收窗口
+  }
 }
 
 /* ---------- 对话框：放大/还原 + 尺寸记忆 ---------- */
@@ -842,6 +1192,11 @@ function clampBubbleToWindow() {
 
 function applyBubbleSize() {
   try {
+    if (rigSkinId && rigRuntime) { // rig 模式：气泡尺寸交给 rig 布局 CSS，不恢复拖拽记忆/固定宽高
+      bubbleEl.style.width = "";
+      bubbleEl.style.height = "";
+      return;
+    }
     const w = parseFloat(localStorage.getItem("suzuran.bubbleW"));
     const h = parseFloat(localStorage.getItem("suzuran.bubbleH"));
     if (Number.isFinite(w) && Number.isFinite(h) && w >= 60 && h >= 24) {
@@ -860,6 +1215,16 @@ function applyBubbleSize() {
 zoomBtn.addEventListener("click", () => {
   enlarged = !enlarged;
   document.body.classList.toggle("enlarged", enlarged);
+  // 放大聊天框暂停行走：窗口尺寸剧变会打乱行走几何（charInset/minX 全变），且放大窗口下拖动后易位置错乱/消失；还原恢复
+  window.petAPI.walkingPause && window.petAPI.walkingPause(enlarged, "zoom");
+  if (rigSkinId && rigRuntime) {
+    // rig 模式：放大按钮只放大气泡，不改变窗口（rig 窗口由大小滑杆 rigScale 控制，避免角色跟着放大）
+    zoomBtn.textContent = enlarged ? "⤡" : "⤢";
+    if (enlarged) showBubble();
+    if (enlarged) { bubbleEl.style.width = ""; bubbleEl.style.height = ""; }
+    setTimeout(clampBubbleToWindow, 80);
+    return;
+  }
   window.petAPI.setSize(enlarged ? 480 : winSize.width, enlarged ? 640 : winSize.height);
   zoomBtn.textContent = enlarged ? "⤡" : "⤢";
   if (enlarged) showBubble(); // 放大时把气泡亮出来
@@ -894,8 +1259,11 @@ function injectFontFace(file) { // 导入的字体文件位于 renderer/fonts/us
   document.head.appendChild(st);
 }
 
-/** 气泡需要更宽窗口时自动加宽（宽度=气泡+角色条带余量，按 zoom 换算成窗口 DIP） */
+/** 气泡需要更宽窗口时自动加宽（宽度=气泡+角色条带余量，按 zoom 换算成窗口 DIP）
+ *  行走中保持标准窗口：大窗口会让主进程 charInset（=窗口宽-122）超上限，行走左边界扩出屏幕导致“闪现” */
 function ensureWindowWidthFor(bubbleW) {
+  if (rigSkinId && rigRuntime) return; // rig 模式：窗口尺寸由 rigScale 控制，气泡宽度调整不放大窗口/角色
+  if (walkState.active) return;        // 行走中：保持标准窗口（气泡在窗口内自适应/滚动），避免出屏
   const zoom = parseFloat(document.body.style.zoom) || 1;
   const need = Math.ceil((bubbleW + 140) * zoom);
   window.petAPI.setSize(Math.max(winSize.width, need), winSize.height);
@@ -917,7 +1285,8 @@ function applyAppearance(a) {
   const inputBar = document.getElementById("input-bar");
   if (inputBar) inputBar.style.fontFamily = ff; // 输入框与气泡同字体
   if (Number(a.bubbleWidth) > 0) {              // 固定宽度：高度恢复内容自适应
-    bubbleEl.style.width = Number(a.bubbleWidth) + "px";
+    // rig 模式气泡宽度由 rig 布局 CSS 控制（设置页固定宽度是给 gif/spine 大窗口用的，300px 窗口会溢出）
+    bubbleEl.style.width = (rigSkinId && rigRuntime) ? "" : Number(a.bubbleWidth) + "px";
     bubbleEl.style.height = "";
     if (!enlarged) ensureWindowWidthFor(Number(a.bubbleWidth));
   } else {
@@ -957,6 +1326,7 @@ window.petAPI.onChunk(({ id, mode, text }) => {
 window.petAPI.onDone(({ mode, full, emotion }) => {
   hideThinking();
   busy = false;
+  maybeFlushPendingSend(); // 生成防抖：回合结束，补发等待中的新消息
   const emoLabel = emotion ? String(emotion).trim() : "";
   if (mode === "zcode") {
     const result = (full || replyBuffer).slice(-4000);
@@ -979,8 +1349,20 @@ window.petAPI.onDone(({ mode, full, emotion }) => {
 
 window.petAPI.onError(({ message }) => {
   showError(message);
+  maybeFlushPendingSend(); // 防抖：错误后补发等待中的消息（用户想说的还是会被回答）
   speak("唔……出错了。");
 });
+
+// v2.6 主动停止：主进程中止路径不再发 done/error，收到 stopped 才复位 busy/语音，丢弃防抖缓冲
+if (window.petAPI.onStopped) {
+  window.petAPI.onStopped(() => {
+    stopTts();
+    clearPendingSend(); // 用户要静默：不补发缓冲中的消息
+    busy = false;
+    updateControls();
+    hideThinking();
+  });
+}
 
 window.petAPI.onModeChanged((m) => {
   forcedMode = m;
@@ -999,14 +1381,20 @@ if (window.petAPI.onWalking) {
   window.petAPI.onWalking((s) => applyWalkState(s));
 }
 if (window.petAPI.onDropped) {
-  window.petAPI.onDropped(() => playSpineInteract());
+  window.petAPI.onDropped(() => { if (!(rigSkinId && rigRuntime)) playSpineInteract(); }); // 2.5D 模式不播 Spine 互动
 }
 if (window.petAPI.onEdgeLeft) {
   window.petAPI.onEdgeLeft((v) => document.body.classList.toggle("edge-left", !!v)); // 角色贴屏幕左缘：条带切左侧、气泡翻右侧
 }
 if (window.petAPI.onRenderModeChanged) {
   window.petAPI.onRenderModeChanged(async (m) => {
-    await setRenderMode(m === "spine" ? "spine" : "gif");
+    if (m === "rig") { // 切到 2.5D：需要皮肤（无则回 gif）
+      const ok = await initRig(rigSkinId || (await window.petAPI.getState()).rigSkinId);
+      if (!ok) { renderMode = "gif"; spriteEl.style.display = ""; }
+    } else {
+      if (rigSkinId) { rigSkinId = ""; destroyRig(); }
+      await setRenderMode(m === "spine" ? "spine" : "gif");
+    }
     setMood(lastMood || "idle"); // 切换后恢复当前情绪
   });
 }
@@ -1032,6 +1420,37 @@ async function rebuildSpine() {
 }
 if (window.petAPI.onSpineSkinChanged) {
   window.petAPI.onSpineSkinChanged(() => rebuildSpine().then(() => setMood(lastMood || "idle")));
+}
+if (window.petAPI.onRigSkinChanged) { // v2.2：2.5D 皮肤切换（独立于 Spine）
+  window.petAPI.onRigSkinChanged((id) => {
+    if (id) initRig(id).then(() => setMood(lastMood || "idle"));
+    else rigOffBackToBase().then(() => setMood(lastMood || "idle"));
+  });
+}
+if (window.petAPI.onRigScaleChanged) { // v2.2：2.5D 角色大小实时调整
+  window.petAPI.onRigScaleChanged((v) => applyRigScale(v));
+}
+if (window.petAPI.onRigMouseFollowChanged) { // v2.2.1：2.5D 头部/眼睛跟随鼠标实时切换
+  window.petAPI.onRigMouseFollowChanged((v) => {
+    rigMouseFollow = !!v;
+    if (rigRuntime) rigRuntime.setAuto("mouse", rigMouseFollow);
+  });
+}
+if (window.petAPI.onMouseTrackGlobalChanged) { // v2.2.1：全局鼠标跟踪许可实时切换（需设置页显式开启）
+  window.petAPI.onMouseTrackGlobalChanged((v) => {
+    mouseTrackGlobal = !!v;
+    if (rigRuntime) rigRuntime.setMouseMode(mouseTrackGlobal);
+  });
+}
+if (window.petAPI.onMousePos) { // v2.2.1：主进程轮询的全局鼠标位置 → 换算为相对角色偏移注入
+  window.petAPI.onMousePos((p) => {
+    if (!rigRuntime || !mouseTrackGlobal) return;
+    const b = p.win || {};
+    if (!b.width || !b.height) return;
+    const mx = (p.x - (b.x + b.width / 2)) / (b.width / 2);
+    const my = (p.y - (b.y + b.height / 2)) / (b.height / 2);
+    rigRuntime.setExternalMouse(mx, my);
+  });
 }
 if (window.petAPI.onPlayAnim) {
   window.petAPI.onPlayAnim((name) => { // 托盘「动作试演」点播
@@ -1157,7 +1576,7 @@ async function stopRecording() {
       if (!b64) return;
 
       // 通过新的 IPC 通道发送 base64 音频
-      const result = await window.petAPI.voiceSttB64(b64, "ja");
+      const result = await window.petAPI.voiceSttB64(b64, "zh"); // 识别语种=用户语音（中文），与语音音色（日语）无关
       if (result && result.ok && result.text) {
         inputEl.value = result.text;
         inputEl.focus();
@@ -1175,6 +1594,38 @@ async function stopRecording() {
   }
 }
 
+/* ---------- 日程提醒提示音（v2.1）：双音 beep，提醒到点更有存在感 ---------- */
+let beepCtx = null;
+function playReminderBeep() {
+  try {
+    if (!beepCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      beepCtx = new AC();
+    }
+    if (beepCtx.state === "suspended") beepCtx.resume();
+    const t0 = beepCtx.currentTime;
+    const tone = (freq, start, dur, vol) => {
+      const o = beepCtx.createOscillator();
+      const g = beepCtx.createGain();
+      o.type = "sine";
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(0, t0 + start);
+      g.gain.linearRampToValueAtTime(vol, t0 + start + 0.02);
+      g.gain.setValueAtTime(vol, t0 + start + dur - 0.03);
+      g.gain.linearRampToValueAtTime(0, t0 + start + dur);
+      o.connect(g).connect(beepCtx.destination);
+      o.start(t0 + start);
+      o.stop(t0 + start + dur + 0.05);
+    };
+    tone(880, 0, 0.18, 0.35);
+    tone(1320, 0.22, 0.25, 0.35);
+  } catch { /* 忽略 */ }
+}
+if (window.petAPI && window.petAPI.onScheduleDue) {
+  window.petAPI.onScheduleDue(() => playReminderBeep());
+}
+
 /* ---------- 主动搭话（主进程发送 → 显示气泡 + 语音） ---------- */
 if (window.petAPI && window.petAPI.onProactive) {
   window.petAPI.onProactive(({ text, emotion }) => {
@@ -1183,7 +1634,7 @@ if (window.petAPI && window.petAPI.onProactive) {
     bubbleText.textContent = text;
     setMood(emotion || "idle");
     speak(text, emotion);
-    scheduleBubbleHide(15000);
+    scheduleBubbleHide(30000); // 主动消息显示 30s（用户反馈 15s 偏短）
   });
 }
 
@@ -1210,6 +1661,123 @@ window.petAPI.onTtsChanged((v) => {
 });
 window.petAPI.onRateChanged((v) => {
   ttsConfig.rate = v;
+});
+
+/* ---------- 信息版（陪伴时间 + 今日日程，v2.1） ---------- */
+const infoPanel = document.getElementById("info-panel");
+const infoCompanion = document.getElementById("info-companion");
+const infoSchedules = document.getElementById("info-schedules");
+function formatCompanion(firstRunAt) {
+  if (!firstRunAt) return "第一天陪伴 ~";
+  const days = Math.max(0, Math.floor((Date.now() - firstRunAt) / 86400000));
+  const h = Math.floor(((Date.now() - firstRunAt) % 86400000) / 3600000);
+  if (days === 0) return "已陪伴 " + Math.max(1, h) + " 小时 💗";
+  return "已陪伴 " + days + " 天 " + h + " 小时 💗";
+}
+async function openInfoPanel() {
+  if (!infoPanel) return;
+  try {
+    const info = await window.petAPI.getInfo();
+    if (infoCompanion) infoCompanion.textContent = formatCompanion(info && info.firstRunAt);
+    if (infoSchedules) {
+      const list = (info && info.today) || [];
+      infoSchedules.innerHTML = "";
+      if (!list.length) {
+        const empty = document.createElement("div");
+        empty.className = "info-empty";
+        empty.textContent = "今日暂无日程，去「📅 日程安排」添加吧";
+        infoSchedules.appendChild(empty);
+      } else {
+        for (const s of list) {
+          const row = document.createElement("div");
+          row.className = "info-sched";
+          const t = document.createElement("span");
+          t.className = "info-sched-time";
+          const dd = s.display && s.display.time ? s.display.time : (s.nextAt ? new Date(s.nextAt).toTimeString().slice(0, 5) : "");
+          t.textContent = dd;
+          row.appendChild(t);
+          row.appendChild(document.createTextNode(s.title || "日程"));
+          infoSchedules.appendChild(row);
+        }
+      }
+    }
+    infoPanel.classList.remove("hidden");
+  } catch { /* 忽略 */ }
+}
+function closeInfoPanel() { if (infoPanel) infoPanel.classList.add("hidden"); }
+const btnInfo = document.getElementById("btn-info");
+if (btnInfo) btnInfo.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (infoPanel && !infoPanel.classList.contains("hidden")) closeInfoPanel();
+  else openInfoPanel();
+});
+document.addEventListener("mousedown", (e) => {
+  if (infoPanel && !infoPanel.classList.contains("hidden") && !e.target.closest("#info-panel") && !e.target.closest("#btn-info")) closeInfoPanel();
+});
+
+// 信息版可拖动（按住头部「📋 信息版」移动面板位置；内容区滚动不受影响）
+(function () {
+  if (!infoPanel) return;
+  const head = infoPanel.querySelector(".info-head");
+  if (!head) return;
+  let dragging = null;
+  head.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault(); e.stopPropagation();
+    dragging = { sx: e.clientX, sy: e.clientY, ox: infoPanel.offsetLeft, oy: infoPanel.offsetTop };
+    infoPanel.classList.add("info-dragging");
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const nx = Math.max(2, Math.min(window.innerWidth - 40, dragging.ox + e.clientX - dragging.sx));
+    const ny = Math.max(2, Math.min(window.innerHeight - 30, dragging.oy + e.clientY - dragging.sy));
+    infoPanel.style.left = nx + "px";
+    infoPanel.style.top = ny + "px";
+    infoPanel.style.right = "auto";
+  });
+  document.addEventListener("mouseup", () => { dragging = null; infoPanel.classList.remove("info-dragging"); });
+})();
+
+// 信息版内容拖拽滚动（按住内容上下拖动滚动日程；头部拖动面板/按钮点击不拦截）
+(function () {
+  if (!infoPanel) return;
+  let ds = null;
+  infoPanel.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest(".info-head") || e.target.closest("button,a")) return;
+    ds = { y: e.clientY, top: infoPanel.scrollTop, moved: false };
+    e.preventDefault();
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (!ds) return;
+    const dy = e.clientY - ds.y;
+    if (Math.abs(dy) > 3) ds.moved = true;
+    infoPanel.scrollTop = ds.top - dy;
+  });
+  document.addEventListener("mouseup", () => { ds = null; });
+})();
+
+/* ---------- 鼠标逗宠互动（v2.1）：鼠标在角色附近停留 → 播放互动动画（冷却 8s） ---------- */
+let mouseNearAt = 0;
+let mouseInteractCooldown = 0;
+document.addEventListener("mousemove", (e) => {
+  if (renderMode !== "spine" || busy || dragState || !petEl) return;
+  const now = Date.now();
+  if (now < mouseInteractCooldown) return;
+  try {
+    const r = petEl.getBoundingClientRect();
+    const d = Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
+    if (d < 130) {
+      if (!mouseNearAt) mouseNearAt = now;
+      else if (now - mouseNearAt > 1200) {
+        mouseNearAt = 0;
+        mouseInteractCooldown = now + 8000;
+        // 2.5D：微笑回应；Spine：互动动画（各自独立）
+        if (rigSkinId && rigRuntime) rigRuntime.preset("smile");
+        else playSpineInteract();
+      }
+    } else mouseNearAt = 0;
+  } catch { /* 忽略 */ }
 });
 
 // 桌宠大小缩放（CSS zoom 整体缩放，窗口由主进程同步调整）
@@ -1263,14 +1831,17 @@ function dragVelocity(state) {
   if (dt <= 0) return null;
   return { vx: (last.x - first.x) / dt, vy: (last.y - first.y) / dt };
 }
-petEl.addEventListener("mousedown", (e) => {
+function onDragStart(e) {
   wake();
   if (e.button !== 0) return;
   clearTimeout(pokeResumeTimer);
   dragState = { sx: e.screenX, sy: e.screenY, moved: false, active: true, samples: [] };
   addDragSample(dragState, e);
   window.petAPI.walkingPause(true); // 拖拽中暂停桌面行走，松手恢复
-});
+}
+petEl.addEventListener("mousedown", onDragStart);
+const rigCanvasEl = document.getElementById("rig-canvas");
+if (rigCanvasEl) rigCanvasEl.addEventListener("mousedown", onDragStart); // rig 模式（独立大画布）也可拖动
 // 右键宠物 → 隐藏到托盘
 petEl.addEventListener("contextmenu", (e) => {
   e.preventDefault();
@@ -1289,6 +1860,18 @@ window.addEventListener("mousemove", (e) => {
     dragState.sy = e.screenY;
   }
 });
+/* ---------- 摸头互动（v2.3）：2 秒内快速连点角色 = 摸头 ---------- */
+let patSeq = null; // { at, count, barOpenedByFirst } 连击窗口
+let patFeedbackTimer = null;
+function showPatFeedback() {
+  if (!bubbleEl) return;
+  if (patFeedbackTimer) clearTimeout(patFeedbackTimer);
+  bubbleText.textContent = "❤";
+  showBubble();
+  patFeedbackTimer = setTimeout(() => {
+    if (bubbleText.textContent === "❤") hideBubble(); // 主进程台词已覆盖则不动
+  }, 2000);
+}
 window.addEventListener("mouseup", () => {
   if (!dragState) return;
   const state = dragState;
@@ -1298,9 +1881,26 @@ window.addEventListener("mouseup", () => {
   const velocity = wasDrag ? dragVelocity(state) : null;
   const speed = velocity ? Math.round(Math.hypot(velocity.vx, velocity.vy)) : 0;
   if (!wasDrag) {
-    toggleInputBar();
-    playSpineInteract(); // 单击互动：还原基建里点一下干员的反应动作
-    // 戳一戳时原地站定：等互动动作播完再继续散步
+    const now = Date.now();
+    if (!patSeq || now - patSeq.at > 2000) patSeq = { at: now, count: 0, barOpenedByFirst: false };
+    patSeq.count += 1;
+    patSeq.at = now;
+    if (patSeq.count >= 2) {
+      // 摸头：把第 1 击误开的聊天栏关回去，保持"摸头不开栏"的直觉
+      if (patSeq.barOpenedByFirst) {
+        if (!inputBar.classList.contains("hidden")) toggleInputBar();
+        patSeq.barOpenedByFirst = false;
+      }
+      playSpineInteract();
+      if (rigSkinId && rigRuntime) rigRuntime.preset("smile"); // 2.5D：微笑回应
+      showPatFeedback();
+      window.petAPI.pat && window.petAPI.pat();
+    } else {
+      toggleInputBar();
+      playSpineInteract(); // 单击互动：还原基建里点一下干员的反应动作
+      patSeq.barOpenedByFirst = !inputBar.classList.contains("hidden");
+    }
+    // 戳一戳/摸头时原地站定：等互动动作播完再继续散步
     clearTimeout(pokeResumeTimer);
     pokeResumeTimer = setTimeout(() => { if (!dragState) window.petAPI.walkingPause(false); }, 2600);
   } else {
@@ -1329,7 +1929,7 @@ setInterval(() => {
    只有鼠标在 桌宠/气泡/输入栏 上时才放行鼠标事件，其余穿透给下层应用；
    拖拽中强制放行（否则 mouseup 被穿透吞掉会导致拖拽卡死） */
 function isPetUI(el) {
-  return !!el && (el.closest("#pet") || el.closest("#bubble") || el.closest("#input-bar"));
+  return !!el && (el.closest("#pet") || el.closest("#bubble") || el.closest("#input-bar") || el.closest("#rig-canvas") || el.closest("#info-panel"));
 }
 document.addEventListener("mousemove", (e) => {
   const el = document.elementFromPoint(e.clientX, e.clientY);
@@ -1356,6 +1956,13 @@ function applyPetName(name) {
   if (state.tts) ttsConfig = { ...ttsConfig, ...state.tts };
   if (state.ttsCloud) ttsCloudOn = !!state.ttsCloud.enabled;
   if (typeof state.emotionalVoice === "boolean") emotionalVoice = state.emotionalVoice;
+  if (state.emotionVoice && typeof state.emotionVoice === "object") emotionVoiceCfg = state.emotionVoice; // 情绪音色分档
+  if (window.petAPI.onEmotionVoiceChanged) { // 设置页切换即时生效
+    window.petAPI.onEmotionVoiceChanged((ev) => { if (ev && typeof ev === "object") emotionVoiceCfg = ev; });
+  }
+  if (Number(state.rigScale) > 0) applyRigScale(state.rigScale);
+  if (typeof state.rigMouseFollow === "boolean") rigMouseFollow = state.rigMouseFollow; // 2.5D 头部/眼睛跟随鼠标
+  if (typeof state.mouseTrackGlobal === "boolean") mouseTrackGlobal = state.mouseTrackGlobal; // 全局鼠标跟踪许可
   if (state.winSize) { winSize = { width: Number(state.winSize.width) || 260, height: Number(state.winSize.height) || 200 }; }
   applyBubbleSize();
   reportGroundGap(); // 上报角色脚底与窗口底边空隙，供主进程贴地补偿
@@ -1365,7 +1972,10 @@ function applyPetName(name) {
   initTts();
 
   // Spine 小人模式（支持桌面行走）；加载失败自动回退 GIF
-  if (state.renderMode === "spine") {
+  // PSD 2.5D（v2.2）优先且独占：renderMode=rig 或 rigSkinId 非空时 Spine 不初始化，二者完全独立
+  if (state.renderMode === "rig" || state.rigSkinId) {
+    await initRig(state.rigSkinId);
+  } else if (state.renderMode === "spine") {
     await setRenderMode("spine");
     if (state.walkState) applyWalkState(state.walkState);
   }
@@ -1392,6 +2002,6 @@ function applyPetName(name) {
     showBubble();
     bubbleText.textContent = state.personaOpening;
     speak(state.personaOpening);
-    scheduleBubbleHide(20000); // 开场白：语音播完再隐藏，防止长开场白被提前收起
+    scheduleBubbleHide(30000); // 开场白：语音播完再隐藏，防止长开场白被提前收起
   }
 })();

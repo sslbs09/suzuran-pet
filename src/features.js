@@ -17,9 +17,9 @@ const STT_SCRIPT = path.join(config.APP_DIR, "scripts", "stt_whisper.py");
 
 /** 用 GSV runtime 的 faster-whisper 做语音转文字 */
 async function speechToText(audioPath, lang = "ja") {
-  // 自动探测 GSV runtime Python
+  // 自动探测 GSV runtime Python（优先随包 engines/gsv，其次常见安装位置）
   const gsvCandidates = [
-    "E:\\GSV-training\\GPT-SoVITS-v2pro-20250604\\runtime\\python.exe",
+    path.join(path.dirname(process.execPath || ""), "engines", "gsv", "runtime", "python.exe"),
     "D:\\GPT-SoVITS\\runtime\\python.exe",
     "C:\\GPT-SoVITS\\runtime\\python.exe",
   ];
@@ -48,41 +48,114 @@ async function speechToText(audioPath, lang = "ja") {
 }
 
 /* ============================================================
- * 2. 主动搭话（闲置后主动开口）
+ * 2. 主动搭话（闲置后主动开口，v2.3 增强：时段台词 + 设置开关）
  * ============================================================ */
 let proactiveTimer = null;
 let lastChatTs = Date.now();
-
-const PROACTIVE_PROMPTS = [
-  "博士，好安静呀……在忙什么呢？",
-  "（偷偷看了一眼）博士是不是忘记休息了？",
-  "我泡了药茶，博士要喝一杯吗？",
-  "（尾巴轻轻晃了晃）博士，聊聊天嘛～",
-  "工作再忙也要喝水哦，博士！",
-  "（凑近看了看）博士的脸色好像不太好……",
-  "嗯……我在想，博士今天的心情怎么样呢？",
-  "博士，要不要我给你做个例行检查？",
-  "（歪着头）刚才那个话题，然后呢？",
-  "坐太久了哦，站起来活动一下吧，博士～",
-  "今天的天气好像不错呢，博士要不要休息一下？",
-  "（小声）博士……我能再靠近一点吗？",
-];
+let proactiveEnabled = true; // 设置页「主动搭话」开关（pet:set-proactive-chat）
+let proactiveCfg = { sendFn: null, intervalMin: 8 };
 
 function touchChat() {
   lastChatTs = Date.now();
 }
 
+/** 开关（设置页切换）：关闭即停表，开启按上次参数重开 */
+function setProactiveEnabled(on) {
+  proactiveEnabled = !!on;
+  if (on) {
+    if (proactiveCfg.sendFn) startProactive(proactiveCfg.sendFn, proactiveCfg.intervalMin);
+  } else {
+    stopProactive();
+  }
+}
+
 function startProactive(sendFn, intervalMin = 8) {
+  proactiveCfg = { sendFn, intervalMin };
   stopProactive();
   const intervalMs = intervalMin * 60 * 1000;
   proactiveTimer = setInterval(() => {
+    if (!proactiveEnabled || !proactiveCfg.sendFn) return;
     const idle = Date.now() - lastChatTs;
     if (idle < intervalMs) return;
-    // 30% 概率触发（避免太频繁）
-    if (Math.random() > 0.3) return;
-    const prompt = PROACTIVE_PROMPTS[Math.floor(Math.random() * PROACTIVE_PROMPTS.length)];
+    // 35% 概率触发（避免太频繁）
+    if (Math.random() > 0.35) return;
+    const lines = require("./lines");
+    let prompt;
+    // v2.6 由头化扩展：记忆里有称谓/生日/健康/近期安排事实时，主动开口有"由头"（而非纯随机）
+    try {
+      const mem = require("./memory");
+      const facts = mem.getFactsList() || [];
+      if (facts.length) {
+        // ① 生日：今天正好是 → 一定开口（优先级最高）
+        const now = new Date();
+        const bd = facts.find((f) => f.type === "birthday" && (f.text.match(/(\d{1,2})月(\d{1,2})日/) || []).slice(1).join("|") === (now.getMonth() + 1) + "|" + now.getDate());
+        if (bd) {
+          prompt = "（咦，今天好像是博士的生日？）生日快乐呀博士！要好好犒劳一下自己哦～";
+        } else if (mem.hasHealthFact() && Math.random() < 0.3) {
+          prompt = "（想起你之前说不太舒服）……博士，身体还好吗？别忘了多喝热水，不舒服要跟我说。";
+        } else {
+          // ② 近期安排：考试/面试/答辩/加班… → 助威系
+          const ev = facts.filter((f) => f.type === "event").pop();
+          if (ev && Math.random() < 0.25) {
+            const what = (ev.text.match(/「(.+?)」/) || [])[1] || "那件重要的事";
+            prompt = "（记得你最近有" + what + "的安排）博士加油呀～我会在旁边给你打气的！";
+          } else {
+            // ③ 称谓：博士希望被这样称呼时偶尔用
+            const nm = facts.find((f) => f.type === "name");
+            const name = nm && (nm.text.match(/「(.+?)」/) || [])[1];
+            if (name && Math.random() < 0.2) {
+              prompt = "（今天也记得要这样叫博士）" + name + "～有没有按时喝水呀？";
+            }
+          }
+        }
+      }
+    } catch { /* 记忆不可用则走常规台词 */ }
+    // B-3 由头第二信号源：番茄钟快结束 / 日程临近（轻量运行信号；无信号返回 null 不打扰）
+    if (!prompt) {
+      try {
+        const { signalTopic } = require("./proactive-topic");
+        const st = signalTopic({
+          pomodoro: getPomodoroStatus(),
+          reminders: getReminders().map((r) => ({ text: r.text, remaining: r.remaining })),
+        });
+        if (st) prompt = st.text;
+      } catch { /* 信号不可用则走常规台词 */ }
+    }
+    if (!prompt) {
+      const cfg = config.getConfig();
+      const vars = { name: (cfg.pet && cfg.pet.name) || "苏苏洛", user: (cfg.chat && cfg.chat.userName) || "主人" };
+      const h = new Date().getHours();
+      // 清晨专属（5-8 点）
+      if (h >= 5 && h < 8 && Math.random() < 0.25) prompt = lines.pickTpl(lines.EARLY_MORNING_LINES, vars);
+      // 关系阶段台词（熟悉起 18% 概率）
+      if (!prompt) {
+        try {
+          const st = require("./bond").getStage();
+          if ((st.key === "fd" || st.key === "xl" || st.key === "sy") && Math.random() < 0.18) {
+            prompt = lines.pickTpl(lines.STAGE_LINES[st.key] || [], vars);
+          }
+        } catch { /* 羁绊不可用则跳过 */ }
+      }
+      // 里程碑由头：陪伴 7/30/100/整百 天
+      if (!prompt) {
+        try {
+          const days = require("./bond").getDays();
+          if ((days === 7 || days === 30 || days === 100 || (days > 0 && days % 100 === 0)) && Math.random() < 0.2) {
+            prompt = "已经陪博士 " + days + " 天了……感觉像家人一样了呢";
+          }
+        } catch { /* 忽略 */ }
+      }
+      if (!prompt) {
+        if (idle > 45 * 60 * 1000 && Math.random() < 0.4) {
+          prompt = lines.pickTpl(lines.LONG_IDLE_LINES, vars); // 超长闲置：想念系
+        } else {
+          prompt = lines.pickTpl(lines.PROACTIVE_BY_PERIOD[lines.periodOf()] || lines.PROACTIVE_BY_PERIOD.afternoon, vars);
+        }
+      }
+    }
+    if (!prompt) return;
     lastChatTs = Date.now();
-    sendFn(prompt);
+    proactiveCfg.sendFn(prompt);
   }, 60 * 1000); // 每分钟检查一次
 }
 
@@ -360,6 +433,7 @@ module.exports = {
   touchChat,
   startProactive,
   stopProactive,
+  setProactiveEnabled,
 
   // 日程提醒
   parseTime,

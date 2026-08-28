@@ -1,0 +1,22 @@
+{
+  "撒娇": {
+    "file": "voice-ref/ref_coquetry.trim.wav",
+    "text": "甲板の日差しは、やっぱりあったかいなぁ。風が頬を撫でるのも気持ちいい……"
+  },
+  "傲娇": {
+    "file": "voice-ref/ref_tsundere.trim.wav",
+    "text": "ドクターと一緒に過ごす時間は、とても、とても楽しい、と思う。"
+  },
+  "惊讶": {
+    "file": "voice-ref/ref_surprised.trim.wav",
+    "text": "この栄養食のメニュー、いったい誰が考えたのかな……お、恐ろしすぎる……"
+  },
+  "温柔": {
+    "file": "voice-ref/ref_normal.trim.wav",
+    "text": "ドクター、そろそろ休憩の時間だよ。さっきの仕事が終わってから、ずっと座りっぱなしだよね？今すぐ休んで、今すぐ。"
+  },
+  "开心": {
+    "file": "voice-ref/ref_happy.trim.wav",
+    "text": "やっぱり仕事の後は飲みたくなるよね。ジュースをとってもらっていい？ありがとう。"
+  }
+}

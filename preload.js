@@ -3,11 +3,12 @@
  */
 "use strict";
 
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("petAPI", {
   ask: (text) => ipcRenderer.invoke("pet:ask", { id: crypto.randomUUID(), text }),
   stop: () => ipcRenderer.send("pet:stop"),
+  onStopped: (cb) => ipcRenderer.on("pet:stopped", (_e, d) => cb(d)), // v2.6 主动停止通知（渲染层复位 busy）
   getState: () => ipcRenderer.invoke("pet:get-state"),
   setMode: (mode) => ipcRenderer.invoke("pet:set-mode", mode),
   reloadPersona: () => ipcRenderer.invoke("pet:reload-persona"),
@@ -28,7 +29,8 @@ contextBridge.exposeInMainWorld("petAPI", {
   setSleeping: (v) => ipcRenderer.send("pet:set-sleeping", !!v),
   setGroundGap: (px) => ipcRenderer.send("pet:set-ground-gap", px),
   setWalking: (on) => ipcRenderer.invoke("pet:set-walking", !!on),
-  walkingPause: (b) => ipcRenderer.send("pet:walking-pause", !!b),
+  walkingPause: (b, source) => ipcRenderer.send("pet:walking-pause", !!b, source || "drag"),
+  walkingEngineStop: () => ipcRenderer.send("pet:walking-engine-stop"),
   onWalking: (cb) => ipcRenderer.on("pet:walking", (_e, s) => cb(s)),
   onRenderModeChanged: (cb) => ipcRenderer.on("pet:render-mode-changed", (_e, m) => cb(m)),
   setUiLang: (lang) => ipcRenderer.invoke("pet:set-ui-lang", lang),
@@ -63,6 +65,42 @@ contextBridge.exposeInMainWorld("petAPI", {
   getReminders: () => ipcRenderer.invoke("pet:get-reminders"),
   cancelReminder: (id) => ipcRenderer.invoke("pet:cancel-reminder", id),
   getSchedules: () => ipcRenderer.invoke("pet:get-schedules"),
+  getInfo: () => ipcRenderer.invoke("pet:get-info"), // 信息版：陪伴时间 + 今日日程
+  psdOpen: () => ipcRenderer.invoke("pet:psd-open"), // PSD 角色工具窗口（v2.1）
+  psdSave: (dataUrl, label) => ipcRenderer.invoke("pet:psd-save", dataUrl, label),
+  // PSD 2.5D 角色皮肤（v2.2）
+  rigSkins: () => ipcRenderer.invoke("pet:rig-skins"),
+  rigApply: (srcPath) => ipcRenderer.invoke("pet:rig-apply", srcPath),
+  rigApplyBuffer: (name, b64) => ipcRenderer.invoke("pet:rig-apply-buffer", name, b64), // PSD 图层编辑后重序列化（v2.6）
+  rigSet: (id) => ipcRenderer.invoke("pet:rig-set", id),
+  rigDelete: (id) => ipcRenderer.invoke("pet:rig-delete", id), // 删除已导入 2.5D 皮肤（v2.6，§14 追加 96）
+  setRigScale: (v) => ipcRenderer.send("pet:set-rig-scale", v),
+  onRigScaleChanged: (cb) => ipcRenderer.on("pet:rig-scale-changed", (_e, v) => cb(v)),
+  onRigSkinChanged: (cb) => ipcRenderer.on("pet:rig-skin-changed", (_e, id) => cb(id)),
+  setRigScale: (v) => ipcRenderer.send("pet:set-rig-scale", v),
+  onRigScaleChanged: (cb) => ipcRenderer.on("pet:rig-scale-changed", (_e, v) => cb(v)),
+  setRigMouseFollow: (v) => ipcRenderer.send("pet:set-rig-mouse-follow", v),
+  setWalkGlobal: (v) => ipcRenderer.send("pet:set-walk-global", v), // 桌面全域行走（实验）
+  setSoftRender: (v) => ipcRenderer.send("pet:set-soft-render", v), // 软件渲染（重启生效）
+  setEmotionVoice: (k, on) => ipcRenderer.send("pet:set-emotion-voice", k, on), // 情绪音色分档开关
+  onEmotionVoiceChanged: (cb) => ipcRenderer.on("pet:emotion-voice-changed", (_e, ev) => cb(ev)),
+  onRigMouseFollowChanged: (cb) => ipcRenderer.on("pet:rig-mouse-follow-changed", (_e, v) => cb(v)),
+  setMouseTrackGlobal: (on) => ipcRenderer.send("pet:set-mouse-track-global", on),
+  setCatToy: (on) => ipcRenderer.send("pet:set-cat-toy", on),
+  setFileGuard: (on) => ipcRenderer.send("pet:set-file-guard", on),
+  // v2.5.7 添加人物
+  importSpine: () => ipcRenderer.invoke("pet:import-spine"),
+  // v2.5.2 记忆管理
+  getMemory: () => ipcRenderer.invoke("pet:get-memory"),
+  deleteMemoryFact: (id) => ipcRenderer.invoke("pet:delete-memory-fact", id),
+  updateMemoryFact: (id, text) => ipcRenderer.invoke("pet:update-memory-fact", id, text), // 编辑单条记忆（§14 追加 103）
+  clearMemory: () => ipcRenderer.invoke("pet:clear-memory"),
+  // v2.3 人格化/主动搭话
+  pat: () => ipcRenderer.send("pet:pat"),
+  setProactiveChat: (on) => ipcRenderer.send("pet:set-proactive-chat", on),
+  setPersonify: (on) => ipcRenderer.send("pet:set-personify", on),
+  onMouseTrackGlobalChanged: (cb) => ipcRenderer.on("pet:mouse-track-global-changed", (_e, v) => cb(v)),
+  onMousePos: (cb) => ipcRenderer.on("pet:mouse-pos", (_e, p) => cb(p)),
   addSchedule: (item) => ipcRenderer.invoke("pet:add-schedule", item),
   cancelSchedule: (id) => ipcRenderer.invoke("pet:cancel-schedule", id),
   completeSchedule: (id) => ipcRenderer.invoke("pet:complete-schedule", id),
@@ -70,6 +108,7 @@ contextBridge.exposeInMainWorld("petAPI", {
   openSchedule: () => ipcRenderer.invoke("pet:open-schedule"),
   pickScheduleWorkbook: () => ipcRenderer.invoke("pet:pick-schedule-workbook"),
   importScheduleWorkbook: (filePath) => ipcRenderer.invoke("pet:import-schedule-workbook", filePath),
+  previewScheduleWorkbook: (filePath) => ipcRenderer.invoke("pet:preview-schedule-workbook", filePath),
   exportScheduleTemplate: () => ipcRenderer.invoke("pet:export-schedule-template"),
   onScheduleDue: (cb) => ipcRenderer.on("pet:schedule-due", (_e, item) => cb(item)),
 
@@ -89,7 +128,9 @@ contextBridge.exposeInMainWorld("petAPI", {
   onScaleChanged: (cb) => ipcRenderer.on("pet:scale-changed", (_e, v) => cb(v)),
   onTermsPending: (cb) => ipcRenderer.on("pet:terms-pending", (_e) => cb()),
   onTermsAgreed: (cb) => ipcRenderer.on("pet:terms-agreed", (_e) => cb()),
-  speakClone: (text) => ipcRenderer.invoke("pet:tts-clone", text),
+  speakClone: (text, opts) => ipcRenderer.invoke("pet:tts-clone", text, opts || {}),
+  onTtsPart: (cb) => ipcRenderer.on("pet:tts-part", (_e, part) => cb(part)), // v2.5.5 逐句流式
+  setSkinWindowWidth: (px) => ipcRenderer.send("pet:set-skin-window-width", px),
   playback: (msg) => ipcRenderer.send("pet:tts-playback", msg),
 
   // 设置窗口
@@ -113,6 +154,7 @@ contextBridge.exposeInMainWorld("petAPI", {
   voiceStatus: () => ipcRenderer.invoke("pet:voice-status"),
   applyVoice: (payload) => ipcRenderer.invoke("pet:apply-voice", payload),
   previewVoice: (payload) => ipcRenderer.invoke("pet:tts-preview", payload),
+  emotionAudition: (key) => ipcRenderer.invoke("pet:emotion-audition", key), // v2.6 情绪音色试听
   openVoiceStudio: () => ipcRenderer.invoke("pet:open-voice-studio"),
 
   // 表情管理
@@ -125,6 +167,7 @@ contextBridge.exposeInMainWorld("petAPI", {
   renameMood: (payload) => ipcRenderer.invoke("pet:rename-mood", payload),
   setMoodType: (payload) => ipcRenderer.invoke("pet:set-mood-type", payload),
   onSpritesChanged: (cb) => ipcRenderer.on("pet:sprites-changed", (_e, p) => cb(p)),
+  filePath: (file) => webUtils.getPathForFile(file), // 取 File 的真实路径（Electron 43 起 File.path 已移除）
 
   onChunk: (cb) => ipcRenderer.on("pet:chunk", (_e, p) => cb(p)),
   onThinking: (cb) => ipcRenderer.on("pet:thinking", (_e, p) => cb(p)),

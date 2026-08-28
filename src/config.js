@@ -38,6 +38,8 @@ const DEFAULT_MOODS = [
   { name: "kiss", label: "飞吻", emotion: true },
   { name: "work", label: "工作", emotion: true },
   { name: "tsundere", label: "傲娇", emotion: true },
+  { name: "coquetry", label: "撒娇", emotion: true },
+  { name: "gentle", label: "温柔", emotion: true },
   { name: "surprised", label: "惊讶", emotion: true },
   { name: "dizzy", label: "晕", emotion: true }
 ];
@@ -56,6 +58,7 @@ const DEFAULTS = {
   zcodeCli: "",                             // 空 → 自动探测（分享版默认关闭）
   workspace: DEFAULT_WORKSPACE,
   zcodeEnabled: false,                      // 任务模式开关（分享版默认关）
+  firstRunAt: null,                         // 首次启动时间戳（陪伴时间统计）
   chat: {
     apiType: "openai",                      // openai（OpenAI 兼容，含 DeepSeek/Kimi/GLM/Ollama 等）| anthropic
     baseUrl: "https://api.deepseek.com/v1",
@@ -64,12 +67,29 @@ const DEFAULTS = {
     userName: "主人",                        // 桌宠对你的称呼（人设占位符 {{userName}}）
     temperature: 0.85,
     maxTokens: 800,
-    maxHistoryTurns: 20
+    maxHistoryTurns: 20,
+    sampling: { // v2.5.13 RP 采样参数（默认值按本地小模型配方；设置页可调）
+      topP: 0.9,
+      minP: 0.05,
+      repeatPenalty: 1.1,
+      presencePenalty: 0.1,
+      frequencyPenalty: 0.1
+    }
   },
   window: { x: null, y: null, width: 260, height: 200, scale: 1.0 }, // scale：桌宠显示大小（0.6~2.0）
   renderMode: "gif",                        // 渲染模式：gif=经典表情包 | spine=Spine 小人模型（支持桌面行走）
   layer: "top",                             // 显示层级：top=置顶（在所有窗口眼前）| desktop=桌面层级（可被其他窗口遮挡）
   spineSkinId: "",                          // Spine 皮肤 id（""=内置苏苏洛；spine/user/ 子文件夹名+文件基名）
+  rigSkinId: "",                            // PSD 2.5D 角色皮肤 id（""=未启用；rig/user/ 下的 .psd 文件名）
+  rigScale: 1.0,                            // PSD 2.5D 角色显示大小（0.5~1.5，设置页滑杆）
+  rigMouseFollow: true,                     // PSD 2.5D 头部/眼睛跟随鼠标（v2.2.1 实验性）
+  mouseTrackGlobal: false,                  // 全局鼠标跟踪（v2.2.1 实验性，需显式许可默认关）：读取屏幕鼠标位置，角色始终看向鼠标
+  catToy: false,                            // 逗猫棒（需显式许可默认关）：读取鼠标位置，角色追着鼠标走
+  walkGlobal: false,                        // 桌面全域行走（实验，默认关）：走到整个虚拟桌面（多显示器连屏），地面仍随所在显示器
+  softRender: false,                        // 软件渲染（默认关，重启生效）：无独显/驱动异常环境用 CPU 渲染兜底（WebGL 走 SwiftShader）
+  fileGuard: false,                          // 蜜标监控（默认关）：检测其他程序访问桌宠敏感配置区域
+  proactiveChat: true,                       // 主动搭话（默认开，设置页单独开关）：闲置后主动开口
+  personify: true,                           // 人格化（默认开，设置页单独开关）：被抛掷/睡醒/坐窗等事件时小声嘀咕
   walking: false,                           // 桌面行走开关（仅 spine 模式生效；GIF 模式下强制无效）
   walkTiming: { sitMaxSec: 30, walkMaxSec: 20 }, // 行走节奏：单次坐下/散步的最长秒数（保底随机），设置页可调
   appearance: { fontFamily: "", fontSize: 0, bubbleWidth: 0, customFonts: [] }, // 聊天外观：字体（""=默认雅黑/"custom:文件名"）、字号px(0=默认11)、气泡宽度px(0=自适应)、已导入本地字体
@@ -95,8 +115,8 @@ const DEFAULTS = {
     server: "http://127.0.0.1:9881",
     allowRemote: false,
     autoStart: true,
-    python: "",          // 如 E:\GenieTTS\venv\Scripts\pythonw.exe
-    serverScript: "",    // 如 E:\GenieTTS\genie_tts_server.py
+    python: "",          // 如 D:\GenieTTS\venv\Scripts\pythonw.exe
+    serverScript: "",    // 如 D:\GenieTTS\genie_tts_server.py
     refAudio: "",        // 克隆参考音频（空 = 服务器默认）
     refText: "",         // 参考音频的原文
     speakJa: false,      // 日语语音模式：界面文字保持中文，说话时先翻译成日语（配合本地日语微调音色）
@@ -107,8 +127,8 @@ const DEFAULTS = {
     server: "http://127.0.0.1:9880",
     allowRemote: false,
     autoStart: true,
-    python: "",          // 如 D:\GPT-SoVITS\runtime\python.exe
-    serverScript: "",    // 如 D:\GPT-SoVITS\api.py
+    python: "",          // 如 D:\GenieTTS\venv\Scripts\pythonw.exe
+    serverScript: "",    // 如 D:\GenieTTS\genie_tts_server.py
     sovitsPath: "",      // 训练好的 SoVITS 模型 .pth
     gptPath: "",         // 训练好的 GPT 模型 .ckpt
     refAudio: "",        // 日语参考音频（3~10s 干净人声）
@@ -127,6 +147,7 @@ const DEFAULTS = {
     screenAwareness: false,   // 屏幕感知：定期截屏分析（需配置视觉模型）
     desktopIcons: false,      // 桌面图标感知：只读图标位置坐标（仅本机、不上传），让她走到图标上站/坐（需桌面层级模式）
     longTermMemory: true,     // 长期记忆摘要：自动记住重要对话内容
+    vectorMemory: true,       // 向量记忆（§14 追加 102）：语义检索历史对话片段回引细节（本地哈希向量，零依赖）
     emotionalVoice: true,     // 情绪语音：根据情绪调整语速/音调
     pomodoro: true,           // 番茄钟伴侣
     proactiveInterval: 8      // 主动搭话间隔（分钟）
@@ -137,7 +158,8 @@ let cache = null;
 
 function loadPetConfig() {
   try {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+    // 容忍 BOM（记事本等以 UTF-8 BOM 保存会导致 JSON.parse 失败 → 误回收默认值）
+    return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8").replace(/^﻿/, ""));
   } catch {
     return {};
   }
@@ -252,6 +274,7 @@ function buildSettingsView() {
     ttsCloud: cfg.ttsCloud,
     ttsCosy: { ...cfg.ttsCosy, apiKey: undefined },
     ttsGenie: cfg.ttsGenie,
+    emotionVoice: cfg.emotionVoice || {}, // 情绪音色分档开关（v2.6）
     zcodeEnabled: !!cfg.zcodeEnabled,
     zcodeCli: cfg.zcodeCli,
     agreed: !!cfg.agreed,
@@ -262,7 +285,14 @@ function buildSettingsView() {
     hotkey: cfg.hotkey,
     startHidden: !!cfg.startHidden,
     uiLang: cfg.uiLang || "zh",
-    renderMode: cfg.renderMode === "spine" ? "spine" : "gif",
+    renderMode: cfg.renderMode === "spine" ? "spine" : cfg.renderMode === "rig" ? "rig" : "gif",
+    rigSkinId: cfg.rigSkinId || "", // PSD 2.5D 皮肤（v2.2）
+    rigScale: Number(cfg.rigScale) > 0 ? Number(cfg.rigScale) : 1.0,
+    rigMouseFollow: cfg.rigMouseFollow !== false, // 2.5D 头部/眼睛跟随鼠标（v2.2.1 实验性）
+    mouseTrackGlobal: !!cfg.mouseTrackGlobal, // 全局鼠标跟踪（v2.2.1 实验性，需显式许可默认关）
+    catToy: !!cfg.catToy, // 逗猫棒（需显式许可默认关）
+    proactiveChat: cfg.proactiveChat !== false, // 主动搭话（设置页单独开关）
+    personify: cfg.personify !== false, // 人格化（设置页单独开关）
     walking: !!cfg.walking,
     persona: getPersonaText(),
     hasPersonaDefault: fs.existsSync(PERSONA_DEFAULT_PATH),
@@ -279,6 +309,7 @@ function saveConfig(patch) {
   if (patch?.pet && Object.prototype.hasOwnProperty.call(patch.pet, "name")) {
     patch = { ...patch, pet: { ...patch.pet, name: normalizePetName(patch.pet.name) } };
   }
+  try { require("./file-guard").checkBeforeWrite(); } catch { /* 蜜标监控未启用 */ }
   const cfg = getConfig(true);
   const merged = deepMerge(cfg, patch);
   const clean = JSON.parse(JSON.stringify(merged));
@@ -291,6 +322,7 @@ function saveConfig(patch) {
   if (!patch?.zcodeCli && !loadPetConfig()?.zcodeCli) clean.zcodeCli = "";
   storage.atomicWrite(CONFIG_PATH, JSON.stringify(clean, null, 2));
   cache = null;
+  try { require("./file-guard").noteConfigWritten(); } catch { /* 蜜标监控未启用 */ }
 }
 
 /** 把人设/规则文本里的 {{petName}}、{{userName}} 替换成实际称呼 */
