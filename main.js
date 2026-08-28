@@ -482,6 +482,8 @@ function docsManifest() {
       }
     }
   } catch (e) { /* dev 运行无发布目录时跳过新手教程 */ }
+  const quickstart = path.join(appDir, "!!开箱必读-先看我.html");
+  if (fs.existsSync(quickstart)) items.push({ key: "app/开箱必读.html", name: "⭐ 开箱必读（三步上手）", group: "使用说明", file: quickstart, html: true });
   const usage = path.join(appDir, "使用说明.html");
   if (fs.existsSync(usage)) items.push({ key: "app/使用说明.html", name: "使用说明", group: "使用说明", file: usage, html: true });
   const readme = path.join(appDir, "README.md");
@@ -507,7 +509,7 @@ ipcMain.handle("docs:read", (_e, key) => {
   try {
     const it = docsManifest().find((d) => d.key === key);
     if (!it) return { ok: false, error: "文档不存在" };
-    if (it.html) return { ok: true, html: true, url: "file://" + it.file.split(path.sep).join("/") };
+    if (it.html) return { ok: true, html: true, url: require("url").pathToFileURL(it.file).href }; // 中文路径必须编码，否则 iframe 打不开
     return { ok: true, html: false, text: fs.readFileSync(it.file, "utf8") };
   } catch (e) { return { ok: false, error: e && e.message }; }
 });
