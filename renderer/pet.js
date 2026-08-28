@@ -163,6 +163,11 @@ function destroyLive2d() {
   const canvas = document.getElementById("live2d-canvas");
   if (canvas) canvas.classList.add("hidden");
 }
+
+function setLive2dMood(mood) {
+  if (!live2dActive || !window.Live2DRuntime) return;
+  try { window.Live2DRuntime.setMood(mood); } catch { /* 忽略 */ }
+}
 function rigShow() { if (rigCanvas) rigCanvas.classList.remove("hidden"); }
 function rigHide() { if (rigCanvas) rigCanvas.classList.add("hidden"); }
 function rigPresetForMood(mood) {
@@ -778,6 +783,9 @@ function setMood(mood) {
 
   // PSD 2.5D 角色（v2.2）：情绪 → 表情预设（独立于 Spine）
   if (rigSkinId && rigRuntime) { rigPresetForMood(mood); petEl.dataset.mood = mood; return; }
+
+  // Live2D（v2.5.1）：情绪 → 动作/表情
+  if (live2dActive) { setLive2dMood(mood); petEl.dataset.mood = mood; return; }
 
   // Spine 模式：切换 Spine 动画而非 GIF
   if (renderMode === "spine") { setSpineMood(mood); petEl.dataset.mood = mood; return; }

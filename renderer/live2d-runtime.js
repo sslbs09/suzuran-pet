@@ -58,11 +58,33 @@
     app = null;
   }
 
+  /* 情绪 → 动作映射：优先 Tap 组动作（播一次自动回 Idle），表情按名称匹配（有对应才用）。
+     映射表按 haru 标定，其他模型 Tap 数量不足时取模兜底。 */
+  const MOOD_MOTION = { happy: 0, wave: 0, like: 0, surprised: 1, angry: 1, sad: 1, shy: 1 };
+  let lastMoodAt = 0;
+
+  function setMood(mood) {
+    if (!model || !active) return;
+    if (String(mood) === "idle" || String(mood) === "sleep") return; // idle 由库自动循环，睡觉不另做动作
+    const now = Date.now();
+    if (now - lastMoodAt < 1500) return; // 动作节流：连发消息时不抽搐
+    lastMoodAt = now;
+    const idx = MOOD_MOTION[mood];
+    if (idx === undefined) return;
+    try {
+      const taps = (model.internalModel && model.internalModel.settings) ?
+        ((model.internalModel.settings.motions || {})["Tap"] || []) : [];
+      const real = taps.length ? idx % taps.length : -1;
+      if (real >= 0) model.motion("Tap", real, 3); // priority=force，播完自动回 Idle
+    } catch (e) { /* 动作缺失不影响主流程 */ }
+  }
+
   window.Live2DRuntime = {
     init,
     destroy,
+    setMood,
     get active() { return active; },
     /** 供错误上报/诊断 */
-    version: "v1"
+    version: "v1.1"
   };
 })();

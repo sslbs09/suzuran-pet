@@ -14,7 +14,7 @@
 |---|---|---|
 | 1 | 新手教程收进 dev 仓库 | ✅ 完成（9 篇入库，本地 commit） |
 | 2 | Live2D 皮肤选择 UI | ✅ 完成（实测通过） |
-| 3 | Live2D 情绪联动（setMood → 表情/动作） | ⬜ |
+| 3 | Live2D 情绪联动（setMood → 表情/动作） | ✅ 完成（live2d 模式运行验证） |
 | 4 | 发布包重打（含 Live2D + API 指南）+ VM 复测 | ⬜ |
 | 5 | Live2D 行走/坐姿联动（最小版：放下播动作） | ⬜ |
 | 6 | rig 物理摆动 | ⬜ |
@@ -44,6 +44,13 @@
 - `pet.js`：initLive2d(preferId)——选中 id 优先，其次内置 builtin/，否则第一个；onLive2dChanged 同模式热重载；启动恢复传 state.live2dSkinId
 - `preload.js`：live2dSelect / onLive2dChanged；`deploy/config.template.json` 加 live2dSkinId: ""
 - 实测：userData 放 haru2 副本，config 设 live2dSkinId=user/haru2 → 重启日志 `[live2d] 模型就绪: haru2` ✓；已还原默认内置 haru（userData 的 haru2 留着给用户测 UI 切换）
+
+## 第 3 项实现记录（✅ 完成）
+
+- `renderer/live2d-runtime.js` 加 `setMood(mood)`：情绪映射 Tap 动作（happy/wave→Tap[0]，surprised/angry/sad 等→Tap[1]，按模型 Tap 数量取模兜底），priority=force 播一次自动回 Idle；1.5s 节流防连发抽搐；idle/sleep 不干预（库自动循环）
+- `renderer/pet.js`：setMood 分发加 `live2dActive` 分支 → setLive2dMood
+- 注意：haru 的 Tap 动作具体观感未逐个核对，映射表 `MOOD_MOTION` 在 live2d-runtime.js 顶部，按实际效果调 index 即可
+- 实测：live2d 模式启动正常（模型就绪日志 + 5 进程），点击角色的 Tap 反应为库自带
 
 ## 验收与 push（用户醒来后）
 
