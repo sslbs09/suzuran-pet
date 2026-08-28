@@ -97,7 +97,13 @@ function mdToHtml(src) {
 /* ---------- 文档加载 ---------- */
 const $ = (id) => document.getElementById(id);
 
+async function applyTheme(theme) {
+  const dark = theme === "dark" || (theme !== "light" && (new Date().getHours() >= 19 || new Date().getHours() < 6));
+  document.body.classList.toggle("theme-dark", dark);
+}
+
 async function init() {
+  try { const st = await window.petAPI.getState(); applyTheme(st && st.theme); } catch { /* 忽略 */ }
   const list = await window.petAPI.docsList().catch(() => []);
   const nav = $("docs-nav");
   const byGroup = {};

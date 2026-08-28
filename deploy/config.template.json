@@ -225,5 +225,6 @@
   },
   "_keySource": "未配置（请在设置中填写或显式导入 API Key）",
   "_configPath": "C:\\Users\\xsbil\\AppData\\Roaming\\SuzuranPet\\config.json",
-  "live2dSkinId": ""
+  "live2dSkinId": "",
+  "theme": "auto"
 }

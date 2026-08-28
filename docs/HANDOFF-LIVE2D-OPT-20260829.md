@@ -97,6 +97,15 @@ rig 物理摆动暂缓。理由：rig 的基础显示问题（耳朵不显示/�
 - **苏苏洛原声预设**（用户新需求）：5 段游戏语音切片（seg_017/018/021/023/025，短句，648KB）随包 `renderer/sounds/preset-*.wav`；引擎不可用时随机播放一条替代。真声、免引擎、无授权问题（自己训练用的素材切片）
 - 影响范围：speak() 链路失败分支；戳一戳/放下（poke）目前只有动作无语音，未改
 
+## 主题系统（08-29 深夜第三轮，✅ 完成）
+
+`theme: "auto" | "light" | "dark"`（config.template 已加，默认 auto=19 点-6 点深色）：
+- **变量层深色覆盖**：ui.css 加 `body.theme-dark` 变量组——settings/help/voice/moods/schedule/terms/quickstart/addchar 8 个窗口页全自动跟随（它们全走 --ui-* 变量）
+- **桌宠本体**：pet.css 深色覆盖（气泡/输入栏/info-panel）；**文档中心**：docs.css 变量覆盖
+- **逻辑**：pet.js（启动应用 + 每分钟检查跨时段切换 + onThemeChanged 广播监听）、settings.js（下拉即时预览 + setTheme 保存广播）、docs.js（打开时应用）
+- main.js `pet:set-theme` IPC（saveConfig + 广播）；get-state 加 theme
+- 实测：config theme=dark 重启 → PrintWindow 抓窗 + vision 判读 **DARK theme** ✓；已还原 auto
+
 ## 验收与 push（用户醒来后）
 
 1. 用户验收各功能（拖拽/皮肤切换/情绪反应等）

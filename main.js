@@ -536,6 +536,12 @@ ipcMain.handle("pet:live2d-list", () => {
   return out;
 });
 let rendererReloadAt = 0;
+ipcMain.handle("pet:set-theme", (_e, theme) => {
+  const v = ["auto", "light", "dark"].includes(theme) ? theme : "auto";
+  config.saveConfig({ theme: v });
+  sendToRenderer("pet:theme-changed", v);
+  return true;
+});
 ipcMain.handle("pet:reload-renderer", () => { // WebGL 上下文丢失等场景的渲染层自愈（60s 节流）
   const now = Date.now();
   if (!win || win.isDestroyed() || now - rendererReloadAt < 60000) return false;
@@ -1466,6 +1472,7 @@ ipcMain.handle("pet:get-state", () => {
     hasUserSprite: fs.existsSync(path.join(config.STORAGE.spritesUser, "sprite.png")),
     renderMode: renderModeMod.renderModeOf(cfg.renderMode),
     live2dSkinId: cfg.live2dSkinId || "",
+    theme: cfg.theme || "auto",
     rigSkinId: cfg.rigSkinId || "", // PSD 2.5D 皮肤
     rigScale: Number(cfg.rigScale) > 0 ? Number(cfg.rigScale) : 1.0,
     rigMouseFollow: cfg.rigMouseFollow !== false, // 2.5D 头部/眼睛跟随鼠标

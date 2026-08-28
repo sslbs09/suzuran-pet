@@ -71,6 +71,8 @@ contextBridge.exposeInMainWorld("petAPI", {
   openDocs: () => ipcRenderer.invoke("pet:open-docs"),
   live2dList: () => ipcRenderer.invoke("pet:live2d-list"), // Live2D 模型扫描（v2.5.1）
   reloadRenderer: () => ipcRenderer.invoke("pet:reload-renderer"), // 渲染层自愈
+  setTheme: (theme) => ipcRenderer.invoke("pet:set-theme", theme),
+  onThemeChanged: (cb) => ipcRenderer.on("pet:theme-changed", (_e, th) => cb(th)),
   live2dSelect: (id) => ipcRenderer.invoke("pet:live2d-select", id),
   onLive2dChanged: (cb) => ipcRenderer.on("pet:live2d-changed", (_e, id) => cb(id)),
   psdOpen: () => ipcRenderer.invoke("pet:psd-open"), // PSD 角色工具窗口（v2.1）

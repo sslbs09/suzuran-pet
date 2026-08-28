@@ -119,3 +119,24 @@ body.ui-page {
 @media (prefers-reduced-motion: reduce) {
   .ui-page *, .ui-page *::before, .ui-page *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* 深色主题（v2.5.1）：body.theme-dark 覆盖变量层，全部 ui-page 窗口跟随 */
+body.theme-dark {
+  --ui-bg: #1b2226;
+  --ui-surface: #232c31;
+  --ui-surface-soft: #20282c;
+  --ui-ink: #e8eef0;
+  --ui-muted: #9db2b7;
+  --ui-subtle: #7d939a;
+  --ui-line: #2e3a40;
+  --ui-line-strong: #3a4a51;
+  --ui-accent: #3aa89f;
+  --ui-accent-strong: #57bcb4;
+  --ui-accent-soft: #24383a;
+  --ui-warm: #d69a58;
+  --ui-danger: #e07a7f;
+  --ui-danger-soft: #3a2a2b;
+  --ui-success: #46a878;
+  --ui-shadow: 0 12px 30px rgba(0, 0, 0, .35), 0 2px 6px rgba(0, 0, 0, .25);
+  --ui-focus: 0 0 0 3px rgba(58, 168, 159, .25);
+}

@@ -165,6 +165,11 @@ function destroyLive2d() {
   if (canvas) canvas.classList.add("hidden");
 }
 
+function applyTheme(theme) { // 主题：auto=19 点-6 点深色
+  const dark = theme === "dark" || (theme !== "light" && (new Date().getHours() >= 19 || new Date().getHours() < 6));
+  document.body.classList.toggle("theme-dark", dark);
+}
+
 function bindCtxLost(canvas, tag) { // 低配核显 WebGL 上下文丢失 → 上报 + 自愈重载
   if (!canvas) return;
   canvas.addEventListener("webglcontextlost", (e) => {
@@ -2062,6 +2067,10 @@ function applyPetName(name) {
   updateChip();
   updateTtsButton();
   initTts();
+
+  applyTheme(state.theme);
+  setInterval(() => applyTheme(state.theme), 60000); // auto 模式跨时段自动切换
+  if (window.petAPI.onThemeChanged) window.petAPI.onThemeChanged((th) => { state.theme = th; applyTheme(th); });
 
   // Spine 小人模式（支持桌面行走）；加载失败自动回退 GIF
   // PSD 2.5D（v2.2）优先且独占：renderMode=rig 或 rigSkinId 非空时 Spine 不初始化，二者完全独立

@@ -391,3 +391,9 @@ body.edge-left .info-panel { right: 4px; width: 230px; } /* 翻边时与气泡�
 /* v2.5.10 宽皮肤（如迷迭香第三皮肤 300px 画布）：气泡右缘避开更宽的角色条带 */
 body.wide-skin .bubble { right: 308px; max-width: calc(100% - 314px); }
 body.wide-skin.edge-left .bubble { right: 4px; max-width: calc(100% - 314px); }
+
+/* 深色主题（v2.5.1）：气泡/输入栏/信息面板 */
+body.theme-dark .bubble { background: rgba(35, 44, 49, 0.96); border-color: #2e3a40; color: #e8eef0; }
+body.theme-dark .input-bar { background: rgba(35, 44, 49, 0.96); border-color: #2e3a40; }
+body.theme-dark .input-bar #input { background: transparent; color: #e8eef0; }
+body.theme-dark .info-panel { background: rgba(35, 44, 49, 0.96); color: #e8eef0; border-color: #2e3a40; }

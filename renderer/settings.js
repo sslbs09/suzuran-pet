@@ -220,6 +220,21 @@ async function toast(msg) {
   $("walking-opt").checked = !!S.walking;
   applyRenderModeUI($("render-mode").value);
   $("render-mode").addEventListener("change", () => applyRenderModeUI($("render-mode").value));
+  // 主题颜色（v2.5.1）：切换即时保存并全窗生效（auto=19 点-6 点深色）
+  const themeSel = $("theme-select");
+  if (themeSel) {
+    themeSel.value = S.theme === "dark" || S.theme === "light" ? S.theme : "auto";
+    applyThemeToPage(themeSel.value);
+    themeSel.addEventListener("change", () => {
+      applyThemeToPage(themeSel.value); // 本页即时预览
+      window.petAPI.setTheme(themeSel.value);
+    });
+    if (window.petAPI.onThemeChanged) window.petAPI.onThemeChanged((th) => { applyThemeToPage(th); themeSel.value = th === "dark" || th === "light" ? th : "auto"; });
+  }
+  function applyThemeToPage(theme) {
+    const dark = theme === "dark" || (theme !== "light" && (new Date().getHours() >= 19 || new Date().getHours() < 6));
+    document.body.classList.toggle("theme-dark", dark);
+  }
 
   renderKeyStatuses();
   maybeShowCredNotice();
