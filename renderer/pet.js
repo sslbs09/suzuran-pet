@@ -142,6 +142,7 @@ async function initLive2d() {
   try {
     await window.Live2DRuntime.init(canvas, pick.url);
     live2dActive = true;
+    document.body.classList.add("live2d-mode");
     spriteEl.style.display = "none";
     if (spineApp && spineApp.view) spineApp.view.style.display = "none";
     if (rigRuntime) { rigCanvas.classList.add("hidden"); }
@@ -157,6 +158,7 @@ async function initLive2d() {
 function destroyLive2d() {
   if (!live2dActive) return;
   live2dActive = false;
+  document.body.classList.remove("live2d-mode");
   try { window.Live2DRuntime.destroy(); } catch { /* 忽略 */ }
   const canvas = document.getElementById("live2d-canvas");
   if (canvas) canvas.classList.add("hidden");
@@ -1883,6 +1885,8 @@ function onDragStart(e) {
 petEl.addEventListener("mousedown", onDragStart);
 const rigCanvasEl = document.getElementById("rig-canvas");
 if (rigCanvasEl) rigCanvasEl.addEventListener("mousedown", onDragStart); // rig 模式（独立大画布）也可拖动
+const live2dCanvasEl = document.getElementById("live2d-canvas");
+if (live2dCanvasEl) live2dCanvasEl.addEventListener("mousedown", onDragStart); // live2d 模式（独立大画布）也可拖动
 // 右键宠物 → 隐藏到托盘
 petEl.addEventListener("contextmenu", (e) => {
   e.preventDefault();
@@ -1970,7 +1974,7 @@ setInterval(() => {
    只有鼠标在 桌宠/气泡/输入栏 上时才放行鼠标事件，其余穿透给下层应用；
    拖拽中强制放行（否则 mouseup 被穿透吞掉会导致拖拽卡死） */
 function isPetUI(el) {
-  return !!el && (el.closest("#pet") || el.closest("#bubble") || el.closest("#input-bar") || el.closest("#rig-canvas") || el.closest("#info-panel"));
+  return !!el && (el.closest("#pet") || el.closest("#bubble") || el.closest("#input-bar") || el.closest("#rig-canvas") || el.closest("#live2d-canvas") || el.closest("#info-panel"));
 }
 document.addEventListener("mousemove", (e) => {
   const el = document.elementFromPoint(e.clientX, e.clientY);

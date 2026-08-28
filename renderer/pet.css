@@ -237,6 +237,20 @@ body.rig-mode .input-bar {
   transform: translateX(-50%);
   width: 280px;
 }
+body.live2d-mode .input-bar {
+  bottom: 8px;
+  top: auto;
+  right: auto;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 280px;
+}
+body.live2d-mode .info-panel {
+  top: 8px;
+  bottom: auto;
+  right: 8px;
+  left: auto;
+}
 body.rig-mode .info-panel {
   top: 8px;
   bottom: auto;
