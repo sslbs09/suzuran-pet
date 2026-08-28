@@ -98,7 +98,7 @@ body.ui-page {
   padding: 8px 10px;
   border: 1px solid var(--ui-line-strong);
   border-radius: var(--ui-radius-sm);
-  background: #fff;
+  background: var(--ui-surface);
   color: var(--ui-ink);
 }
 .ui-page input:not([type="checkbox"]):not([type="range"]):hover, .ui-page select:hover, .ui-page textarea:hover { border-color: var(--ui-accent); }
@@ -140,3 +140,5 @@ body.theme-dark {
   --ui-shadow: 0 12px 30px rgba(0, 0, 0, .35), 0 2px 6px rgba(0, 0, 0, .25);
   --ui-focus: 0 0 0 3px rgba(58, 168, 159, .25);
 }
+
+body.theme-dark .ui-page .note { border-color: #4a4030; background: #2e2a20; color: #d6b98a; }

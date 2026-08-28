@@ -106,6 +106,12 @@ rig 物理摆动暂缓。理由：rig 的基础显示问题（耳朵不显示/�
 - main.js `pet:set-theme` IPC（saveConfig + 广播）；get-state 加 theme
 - 实测：config theme=dark 重启 → PrintWindow 抓窗 + vision 判读 **DARK theme** ✓；已还原 auto
 
+## 深色"白框白字"修复（08-29 深夜，✅）
+
+用户反馈深色下白框内白字看不清。根因：`ui.css` 的输入框/下拉/文本域硬编码 `background:#fff`（深色下文字是浅色 var(--ui-ink) → 白底白字）；`schedule.css` 日志条目同款。
+修复：输入框底改 `var(--ui-surface)`（浅色 #fff 不变，深色自动深底）；note 提示框加深色覆盖；schedule-item 变量化。settings.css:52 的开关白圆点是正常设计未动。
+教训：ui.css 变量层覆盖了 8 个窗口，但变量层**自身**还有 3 处硬编码浅色漏网——下次加主题先全量 grep 硬编码色值。
+
 ## 验收与 push（用户醒来后）
 
 1. 用户验收各功能（拖拽/皮肤切换/情绪反应等）
