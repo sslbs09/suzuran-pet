@@ -1350,6 +1350,15 @@ async function handleAskInner(sender, { id, text }) {
   // 长期记忆（v2.5）：规则式提取事实（称谓/喜好/生日/健康/近期安排），仅本机存储
   if (config.getConfig().features && config.getConfig().features.longTermMemory) {
     try { memory.addFacts(memory.extractFacts(clean)); } catch { /* 记忆失败不影响对话 */ }
+    // 显式记忆指令（RP 深化）："记住/帮我记一下 xxx" → 必记，不受规则提取宁缺毋滥影响
+    const mm = String(clean || "").match(/^(?:请你?|帮我?|麻烦)?(?:记住|记一下|记牢|记着)[：:，,。！!\s]*(.{2,120})$/);
+    if (mm) {
+      try {
+        const fact = mm[1].trim().replace(/[。！!]$/, "");
+        memory.addFacts([{ type: "manual", text: "博士特意让我记住：「" + fact + "」" }]);
+        sendToRenderer("pet:toast", "📌 好的，我记住了");
+      } catch { /* 忽略 */ }
+    }
   }
   // 羁绊（v2.5.13）：聊天 +1 经验；升级时 toast + 跨关系阶段解锁专属台词（B-1）
   try {
