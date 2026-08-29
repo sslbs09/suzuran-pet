@@ -141,7 +141,8 @@ async function initLive2d(preferId) {
   const pick = (preferId && skins.find((s) => s.id === preferId)) || skins.find((s) => s.id.startsWith("builtin/")) || skins[0];
   try {
     window.petAPI.walkingEngineStop && window.petAPI.walkingEngineStop(); // Live2D 不行走，停引擎（照 rig 一致性）
-    window.petAPI.setSize(300, 460); // live2d 专属窗口：模型贴底 + 输入栏完整显示（280px）
+    const s0 = live2dScaleFactor || 1;
+    window.petAPI.setSize(Math.round(300 * s0), Math.round(460 * s0)); // live2d 专属窗口（随滑条等比）
     bindCtxLost(canvas, "live2d");
     await window.Live2DRuntime.init(canvas, pick.url);
     applyLive2dScale(live2dScaleFactor);
@@ -191,6 +192,9 @@ let live2dScaleFactor = 1.0;
 function applyLive2dScale(v) {
   live2dScaleFactor = Number(v) > 0 ? Number(v) : 1.0;
   try { window.Live2DRuntime && window.Live2DRuntime.setScale(live2dScaleFactor); } catch { /* 忽略 */ }
+  if (live2dActive) { // 等比窗口：滑条放大时窗口同步变大，模型不裁剪（照 rig 的窗口随 scale 思路）
+    window.petAPI.setSize(Math.round(300 * live2dScaleFactor), Math.round(460 * live2dScaleFactor));
+  }
 }
 
 function setLive2dMood(mood) {
@@ -1320,7 +1324,9 @@ zoomBtn.addEventListener("click", () => {
     setTimeout(clampBubbleToWindow, 80);
     return;
   }
-  window.petAPI.setSize(enlarged ? 480 : winSize.width, enlarged ? 640 : winSize.height);
+  const restoreW = live2dActive ? 300 : winSize.width; // live2d 专属窗口：还原回 300×460 而非旧记忆尺寸
+  const restoreH = live2dActive ? 460 : winSize.height;
+  window.petAPI.setSize(enlarged ? 480 : restoreW, enlarged ? 640 : restoreH);
   zoomBtn.textContent = enlarged ? "⤡" : "⤢";
   if (enlarged) showBubble(); // 放大时把气泡亮出来
   // 窗口切换后：清掉记忆的固定尺寸，让气泡按新窗口自动缩放显示（超限由 clamp 收拢）
