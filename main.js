@@ -3417,7 +3417,9 @@ ipcMain.on("pet:tts-playback", (_e, msg) => logTts("render", String(msg || "")))
 ipcMain.on("pet:set-clickable", (_e, clickable) => {
   // 透明区域点击穿透：只有鼠标在 桌宠/气泡/输入栏 上时才接收鼠标事件，其余穿透给下层应用
   if (win && !win.isDestroyed()) win.setIgnoreMouseEvents(!clickable, { forward: true });
+  if (clickable !== _lastClickable) { _lastClickable = !!clickable; logTts("ui", "clickable=" + !!clickable + "（鼠标命中角色区变化）"); }
 });
+let _lastClickable = null;
 ipcMain.on("pet:set-size", (_e, w, h) => {
   if (!win || win.isDestroyed()) return;
   const ws = Math.max(120, Math.min(1200, Math.round(w || 170)));

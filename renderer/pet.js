@@ -179,6 +179,13 @@ function applyTheme(theme) { // 主题：auto=19 点-6 点深色
   document.body.classList.toggle("theme-dark", dark);
 }
 
+window.addEventListener("error", (e) => { // 渲染层全局错误上报（诊断基建）
+  try { window.petAPI.playback("[jserr] " + ((e && e.message) || "?") + " @ " + String(e && e.filename || "").split("/").pop() + ":" + (e && e.lineno || "?")); } catch { /* 忽略 */ }
+});
+window.addEventListener("unhandledrejection", (e) => {
+  try { window.petAPI.playback("[jsrej] " + ((e && e.reason && (e.reason.message || e.reason)) || "?")); } catch { /* 忽略 */ }
+});
+
 function bindCtxLost(canvas, tag) { // 低配核显 WebGL 上下文丢失 → 上报 + 自愈重载
   if (!canvas) return;
   canvas.addEventListener("webglcontextlost", (e) => {
@@ -740,7 +747,15 @@ function applyWalkState(s) {
 function playSpineInteract() {
   if (!spineObj || renderMode !== "spine" || busy) return;
   const inter = ["Interact", "interact"].find((n) => spineHas(n));
-  if (!inter) return;
+  if (!inter) {
+    // 模型没有 Interact 动作：退而求其次播一个站立/放松类动作，保证点击必有反馈
+    const alt = ["idle", "Idle", "relax", "stand"].find((n) => spineHas(n));
+    const fallback = alt || spinePhaseAnim();
+    if (fallback && spineObj.state.getCurrent(0)?.animation?.name !== fallback) {
+      setSpineAnim(fallback, true, "poke-fallback");
+    }
+    return;
+  }
   const next = spinePhaseAnim();
   if (!next) return;
   spineObj.state.clearTrack(0);
@@ -1987,6 +2002,7 @@ function dragVelocity(state) {
   return { vx: (last.x - first.x) / dt, vy: (last.y - first.y) / dt };
 }
 function onDragStart(e) {
+  try { window.petAPI.playback("[ui] dragStart btn=" + e.button + " target=" + (e.target.id || e.target.tagName)); } catch { /* 忽略 */ }
   wake();
   if (e.button !== 0) return;
   clearTimeout(pokeResumeTimer);
@@ -2011,6 +2027,7 @@ window.addEventListener("mousemove", (e) => {
   const dy = e.screenY - dragState.sy;
   if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
     dragState.moved = true;
+    try { window.petAPI.playback("[ui] 判定为拖动 dx=" + Math.round(dx) + " dy=" + Math.round(dy)); } catch { /* 忽略 */ }
     petEl.classList.add("dragging");
     window.petAPI.moveWindow(dx, dy);
     dragState.sx = e.screenX;
@@ -2029,15 +2046,20 @@ function showPatFeedback() {
     if (bubbleText.textContent === "❤") hideBubble(); // 主进程台词已覆盖则不动
   }, 2000);
 }
+document.addEventListener("mousedown", (e) => { // 诊断：确认鼠标事件到达渲染层
+  try { window.petAPI.playback("[ui] mousedown target=" + (e.target.id || e.target.className || e.target.tagName)); } catch { /* 忽略 */ }
+}, true);
 window.addEventListener("mouseup", () => {
   if (!dragState) return;
   const state = dragState;
   const wasDrag = state.moved;
+  try { window.petAPI.playback("[ui] mouseup wasDrag=" + wasDrag + " samples=" + state.samples.length); } catch { /* 忽略 */ }
   dragState = null;
   petEl.classList.remove("dragging");
   const velocity = wasDrag ? dragVelocity(state) : null;
   const speed = velocity ? Math.round(Math.hypot(velocity.vx, velocity.vy)) : 0;
   if (!wasDrag) {
+    try { window.petAPI.playback("[ui] click 未拖动 count=" + ((patSeq && patSeq.count) || 0)); } catch { /* 忽略 */ }
     const now = Date.now();
     if (!patSeq || now - patSeq.at > 2000) patSeq = { at: now, count: 0, barOpenedByFirst: false };
     patSeq.count += 1;
