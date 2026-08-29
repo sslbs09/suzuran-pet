@@ -396,7 +396,7 @@
         <div id="rig-skins-list" class="rig-skin-hint">加载中…</div>
       </div>
       <div class="col" data-rm="live2d">
-        <span>🎭 Live2D 模型：</span>
+        <span>🎭 Live2D 模型（点选即生效，无需保存）：</span>
         <div id="live2d-skins-list" class="rig-skin-hint">加载中…</div>
       </div>
       <div class="col" data-rm="live2d">
@@ -516,3 +516,9 @@
 <script src="settings.js"></script>
 </body>
 </html>
+
+<button id="btn-save-sticky" type="button" title="保存当前通用设置（渲染模式/行走/大小等）">💾 保存</button>
+<style>
+  #btn-save-sticky { position: fixed; right: 22px; bottom: 22px; z-index: 999; padding: 10px 22px; border: none; border-radius: 24px; background: linear-gradient(135deg, #2f8f87, #23736d); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: 0 6px 18px rgba(30, 77, 77, .35); }
+  #btn-save-sticky:hover { filter: brightness(1.12); transform: translateY(-1px); }
+</style>

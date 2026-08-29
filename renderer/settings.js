@@ -231,6 +231,13 @@ async function toast(msg) {
   $("walking-opt").checked = !!S.walking;
   applyRenderModeUI($("render-mode").value);
   $("render-mode").addEventListener("change", () => applyRenderModeUI($("render-mode").value));
+  // 渲染模式即时保存（v2.5.1）：选中即生效，不用滚到页底找保存
+  $("render-mode").addEventListener("change", async () => {
+    const v = $("render-mode").value;
+    const r = await window.petAPI.saveSettings({ renderMode: v }).catch(() => null);
+    const hint = $("rm-hint");
+    if (hint && r && r.ok !== false) hint.textContent = "已切换并保存 ✓";
+  });
   // 主题颜色（v2.5.1）：切换即时保存并全窗生效（auto=19 点-6 点深色）
   const themeSel = $("theme-select");
   if (themeSel) {
@@ -505,6 +512,8 @@ $("btn-import-font").addEventListener("click", async () => {
 });
 
 /* ---------- 其他 ---------- */
+// 悬浮保存按钮（v2.5.1）：任意位置改完通用设置，随手可存（复用通用保存逻辑）
+$("btn-save-sticky").addEventListener("click", () => $("btn-save-other").click());
 $("btn-save-other").addEventListener("click", async () => {
   const scale = parseFloat($("pet-scale").value) || 1;
   const r = await window.petAPI.saveSettings({
