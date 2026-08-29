@@ -749,13 +749,13 @@ function pokeFeedback() { // 点击反馈（v2.5.1）：缩放脉冲 + 原声切
   const now = Date.now();
   if (now - pokeFeedbackAt < 600) return; // 连点限流
   pokeFeedbackAt = now;
-  // 缩放脉冲：放大 6% 后弹回（保留朝向符号）
+  // 跳一下：模型上跳 16px 再落回（250ms，视觉明显的点击反馈）
   try {
     if (spineObj) {
-      const s = spineObj.scale, sx = Math.abs(s.x), sy = Math.abs(s.y);
-      const sign = s.x < 0 ? -1 : 1;
-      s.set(sx * 1.06 * sign, sy * 1.06);
-      setTimeout(() => { try { s.set(sx * sign, sy); } catch { /* 忽略 */ } }, 150);
+      const baseY = spineObj.y;
+      spineObj.y = baseY - 16;
+      setTimeout(() => { try { spineObj.y = baseY - 6; } catch { /* 忽略 */ } }, 120);
+      setTimeout(() => { try { spineObj.y = baseY; } catch { /* 忽略 */ } }, 250);
     }
   } catch { /* 忽略 */ }
   // 原声切片（随包苏苏洛游戏语音）：语音开着才出声，随机一条
@@ -763,6 +763,7 @@ function pokeFeedback() { // 点击反馈（v2.5.1）：缩放脉冲 + 原声切
 }
 
 function playSpineInteract() {
+  try { window.petAPI.playback("[ui] interact入口 spineObj=" + !!spineObj + " mode=" + renderMode + " busy=" + busy); } catch { /* 忽略 */ }
   if (!spineObj || renderMode !== "spine" || busy) return;
   const inter = ["Interact", "interact"].find((n) => spineHas(n));
   if (!inter) {
