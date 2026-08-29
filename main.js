@@ -521,7 +521,17 @@ async function diagClick() { // 点击穿透诊断：在渲染层实时抓取交
         petRect: el ? JSON.stringify(el.getBoundingClientRect()) : "无",
         canvasRect: canvas ? JSON.stringify(canvas.getBoundingClientRect()) : "无",
         canvasZ: canvas ? getComputedStyle(canvas).zIndex + "/" + getComputedStyle(canvas).pointerEvents : "无",
-        inputHidden: bar ? bar.classList.contains("hidden") : "?"
+        inputHidden: bar ? bar.classList.contains("hidden") : "?",
+        pet中心命中的顶层元素: (() => {
+          const el2 = document.getElementById("pet");
+          if (!el2) return "无pet";
+          const r = el2.getBoundingClientRect();
+          const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          if (!hit) return "null（命中空）";
+          const cs = getComputedStyle(hit);
+          return hit.tagName + "#" + (hit.id || "") + "." + String(hit.className || "").slice(0, 40) + " z=" + cs.zIndex + " pe=" + cs.pointerEvents;
+        })(),
+        全部顶层元素: Array.from(document.body.children).map((c) => c.tagName + (c.id ? "#" + c.id : "") + (c.className && typeof c.className === "string" ? "." + c.className.split(" ")[0] : "")).join(" | ")
       });
     })()`, true);
     logTts("ui", "诊断: " + s);

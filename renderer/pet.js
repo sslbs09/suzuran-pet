@@ -2127,8 +2127,15 @@ setInterval(() => {
    只有鼠标在 桌宠/气泡/输入栏 上时才放行鼠标事件，其余穿透给下层应用；
    拖拽中强制放行（否则 mouseup 被穿透吞掉会导致拖拽卡死） */
 function isPetUI(el, e) {
-  const base = !!el && (el.closest("#pet") || el.closest("#bubble") || el.closest("#input-bar") || el.closest("#rig-canvas") || el.closest("#live2d-canvas") || el.closest("#info-panel"));
+  const base = !!el && (el.closest("#pet") || el.closest(".pet-root") || el.closest("#bubble") || el.closest("#input-bar") || el.closest("#rig-canvas") || el.closest("#live2d-canvas") || el.closest("#info-panel"));
   if (base) return true;
+  // 诊断：命中了元素但 closest 全空 → DOM 结构异常（元素被移出容器）
+  if (el && e) {
+    const cp = el.closest("#pet"), cr = el.closest(".pet-root");
+    if (!cp && !cr) {
+      try { window.petAPI.playback("[ui] closest断点 target=" + (el.id || el.tagName) + " pet祖先=无 pet-root祖先=" + (!!cr)); } catch { /* 忽略 */ }
+    }
+  }
   // 行走容差圈（v2.5.1）：小人在走动，精确命中太难——鼠标在小人附近 130px 内即可点击/拖拽
   if (e && petEl && renderMode === "spine" && !busy) {
     try {
