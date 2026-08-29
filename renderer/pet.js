@@ -1522,6 +1522,25 @@ window.petAPI.onModeChanged((m) => {
 
 window.petAPI.onToggleInput(() => toggleInputBar());
 
+/* Agent 任务状态（zcode 模式，借鉴 dsh-dafeiyu 反幻觉原则）：只显示真实任务文本+计时，不编造阶段百分比 */
+let agentStatusTimer = null;
+if (window.petAPI.onAgentStatus) {
+  window.petAPI.onAgentStatus((s) => {
+    if (agentStatusTimer) { clearInterval(agentStatusTimer); agentStatusTimer = null; }
+    if (s && s.state === "working") {
+      const t0 = s.since || Date.now();
+      const brief = String(s.text || "任务").slice(0, 20);
+      bubbleText.textContent = "🔧 正在执行：" + brief + "…（0 秒）";
+      showBubble();
+      agentStatusTimer = setInterval(() => {
+        const sec = Math.round((Date.now() - t0) / 1000);
+        bubbleText.textContent = "🔧 正在执行：" + brief + "…（已 " + sec + " 秒）";
+      }, 1000);
+    }
+    // done：只停表，随后的 pet:done / pet:error 会正常覆盖气泡内容
+  });
+}
+
 window.petAPI.onToast((msg) => toast(msg));
 if (window.petAPI.onNameChanged) {
   window.petAPI.onNameChanged((name) => applyPetName(name));
@@ -2065,6 +2084,22 @@ function showPatFeedback() {
     if (bubbleText.textContent === "❤") hideBubble(); // 主进程台词已覆盖则不动
   }, 2000);
 }
+/* 被抛出去：约落地时刻给"晕乎/抗议"短反馈（借鉴 dsh-dafeiyu 拖拽反馈） */
+let dizzyTimer = null;
+function scheduleDizzyFeedback() {
+  if (dizzyTimer) clearTimeout(dizzyTimer);
+  dizzyTimer = setTimeout(() => {
+    dizzyTimer = null;
+    if (dragState) return; // 正在拖拽不打断
+    petEl.classList.add("pet-dizzy");
+    setTimeout(() => petEl.classList.remove("pet-dizzy"), 600);
+    if (bubbleEl) {
+      bubbleText.textContent = "😵💫";
+      showBubble();
+      setTimeout(() => { if (bubbleText.textContent === "😵💫") hideBubble(); }, 2000);
+    }
+  }, 600);
+}
 document.addEventListener("mousedown", (e) => { // 诊断：确认鼠标事件到达渲染层
   try { window.petAPI.playback("[ui] mousedown target=" + (e.target.id || e.target.className || e.target.tagName)); } catch { /* 忽略 */ }
 }, true);
@@ -2104,6 +2139,7 @@ window.addEventListener("mouseup", () => {
   } else {
     if (velocity && speed > THROW_MIN_SPEED) {
       window.petAPI.throwPet(velocity.vx, velocity.vy);
+      scheduleDizzyFeedback(); // 被抛出去：落地时晕乎/抗议
     } else {
       window.petAPI.walkingPause(false);
     }

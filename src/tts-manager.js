@@ -117,7 +117,7 @@ async function ttsCloneImplInner(text, opts, jobId) {
       } catch { /* 转储失败不影响主流程 */ }
     };
     const cfg = config.getConfig();
-    const clean = String(text || "").slice(0, 200);
+    const clean = String(text || "").slice(0, 400); // 长回复句尾称呼不再被切（与 ja-translate 截断一致）
     // 游戏习惯称呼：中文朗读用“刀客塔”；日语翻译仍用原文“博士”（让翻译器输出ドクター）
     const cleanZh = clean.replace(/博士/g, "刀客塔");
     const q = cfg.ttsGenie || {};

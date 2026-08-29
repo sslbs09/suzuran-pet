@@ -253,6 +253,14 @@ function createWindow() {
   // 初始即开启点击穿透（透明区域不挡下层应用），由渲染层按需放行
   win.setIgnoreMouseEvents(true, { forward: true });
   startOutOfScreenGuard(); // 出屏哨兵：任何路径导致窗口严重滑出屏幕时 2s 内钳回（防角色在屏幕边缘“闪现”/消失）
+  // 置顶层级周期重断言（借鉴 dsh-dafeiyu）：全屏游戏/其他置顶窗口抢占后自动恢复置顶；桌面层级/托盘隐藏不干预
+  setInterval(() => {
+    try {
+      if (!win || win.isDestroyed() || !win.isVisible()) return;
+      if ((config.getConfig().layer || "top") !== "top") return;
+      win.setAlwaysOnTop(true);
+    } catch { /* 忽略 */ }
+  }, 5000);
 
   // 启动时把窗口钳回屏幕工作区内（布局变宽后旧位置可能越界）
   clampPetToWorkArea("启动");
@@ -1465,12 +1473,18 @@ async function handleAskInner(sender, { id, text }) {
   try {
     let full = "";
     if (mode === "zcode") {
-      full = await zcodeClient.runZcodeTask({
-        prompt: taskText,
-        persona: personaCache,
-        signal: abort.signal,
-        onChunk: (d) => { if (isCurrent()) sender.send("pet:chunk", { id, mode, text: d }); }
-      });
+      // Agent 任务状态（借鉴 dsh-dafeiyu 反幻觉原则）：只报真实信息（任务文本+计时），不编造阶段百分比
+      sendToRenderer("pet:agent-status", { state: "working", text: String(taskText || "").slice(0, 40), since: Date.now() });
+      try {
+        full = await zcodeClient.runZcodeTask({
+          prompt: taskText,
+          persona: personaCache,
+          signal: abort.signal,
+          onChunk: (d) => { if (isCurrent()) sender.send("pet:chunk", { id, mode, text: d }); }
+        });
+      } finally {
+        sendToRenderer("pet:agent-status", { state: "done" });
+      }
     } else {
       const persona = buildChatPersona();
       const r = await chatClient.chat({
