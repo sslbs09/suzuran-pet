@@ -140,6 +140,7 @@ async function initLive2d(preferId) {
   }
   const pick = (preferId && skins.find((s) => s.id === preferId)) || skins.find((s) => s.id.startsWith("builtin/")) || skins[0];
   try {
+    window.petAPI.walkingEngineStop && window.petAPI.walkingEngineStop(); // Live2D 不行走，停引擎（照 rig 一致性）
     bindCtxLost(canvas, "live2d");
     await window.Live2DRuntime.init(canvas, pick.url);
     applyLive2dScale(live2dScaleFactor);
@@ -1516,6 +1517,12 @@ if (window.petAPI.onEdgeLeft) {
 }
 if (window.petAPI.onRenderModeChanged) {
   window.petAPI.onRenderModeChanged(async (m) => {
+    if (enlarged) { // 切模式还原放大状态：zoom 暂停标志不跨模式残留
+      enlarged = false;
+      document.body.classList.remove("enlarged");
+      zoomBtn.textContent = "⤢";
+      window.petAPI.walkingPause && window.petAPI.walkingPause(false, "zoom");
+    }
     if (m === "rig") { // 切到 2.5D：需要皮肤（无则回 gif）
       const ok = await initRig(rigSkinId || (await window.petAPI.getState()).rigSkinId);
       if (!ok) { renderMode = "gif"; spriteEl.style.display = ""; }

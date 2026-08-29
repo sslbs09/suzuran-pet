@@ -1598,6 +1598,10 @@ ipcMain.handle("pet:save-settings", (_e, patch) => {
     if ((after.pet && after.pet.name) !== (before.pet && before.pet.name)) refreshPetName();
     if (after.renderMode !== before.renderMode) {
       sendToRenderer("pet:render-mode-changed", after.renderMode);
+      // 模式切换是显式操作：旧模式的瞬态暂停（拖拽/对话/放大）不带入新模式，
+      // 否则切回 Spine 后行走引擎恢复但 paused 冻结，表现为"不能移动，过一会才好"
+      walk.dragPaused = false; walk.chatPaused = false; walk.zoomPaused = false;
+      walk.paused = false; walk.pausedAt = 0;
       syncWalkingEngine(); // 切回 GIF 时自动停走；切回 Spine 且开关开着则恢复
       // v2.5.13 模式切换后把窗口底边对齐任务栏上沿：三种模式窗口高度不同（rig 300×138 等），
       // 不做对齐会出现切模式后角色悬空/陷地的跳变
