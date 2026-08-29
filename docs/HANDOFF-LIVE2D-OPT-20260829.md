@@ -142,6 +142,16 @@ rig 物理摆动暂缓。理由：rig 的基础显示问题（耳朵不显示/�
 - **#7 文档**：CHANGELOG v2.5.0 段 + README 2.5 亮点（前轮）；开箱必读加"再多玩两天之后"节（Live2D/主题/Swipes/记忆）；新增新手教程《08-主题与Live2D》
 - **#8 单测**：RP 渲染提取为 `renderer/rp-render.js`（浏览器/node 双用，条件导出），新增 tests/rp-render.test.js（13/13）；render-mode.test 断言更新为四态；全量单测回归 ✅（此前 render-mode 1 项失败即四态断言未更新，已修）
 
+## 模式切换"不能移动"修复（08-29 深夜，✅）
+
+用户报告：Live2D 切回 Spine 小人后不能移动，过一会自己好了。
+根因：行走有三个暂停源（dragPaused/chatPaused/zoomPaused），**切渲染模式时这些标志被带入新模式**——比如 Live2D 下放大过聊天框（zoomPaused，60s 自愈都不解除），切回 Spine 后行走引擎恢复但 walk.paused 冻结 → 站着不动；直到放大还原/某个操作解除。
+修复：
+- `main.js` renderMode 变化块：清 dragPaused/chatPaused/zoomPaused/paused/pausedAt（模式切换是显式操作，旧模式瞬态暂停不带入）
+- `pet.js` onRenderModeChanged 开头：enlarged 状态还原（class/按钮/zoom 暂停解除）
+- `initLive2d` 加 walkingEngineStop（照 rig 一致性）
+验证：等用户切换 spine↔live2d 实测。
+
 ## 验收与 push（用户醒来后）
 
 1. 用户验收各功能（拖拽/皮肤切换/情绪反应等）
