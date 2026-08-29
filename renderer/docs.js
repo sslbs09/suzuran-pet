@@ -148,7 +148,7 @@ async function openDoc(doc, btn) {
   }
   if (r.html) {
     const iframe = $("docs-iframe");
-    iframe.src = r.url;
+    iframe.srcdoc = r.srcdoc || "";
     iframe.hidden = false;
     document.title = "苏苏洛 · " + doc.name;
     return;

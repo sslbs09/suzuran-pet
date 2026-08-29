@@ -141,6 +141,7 @@ async function initLive2d(preferId) {
   const pick = (preferId && skins.find((s) => s.id === preferId)) || skins.find((s) => s.id.startsWith("builtin/")) || skins[0];
   try {
     window.petAPI.walkingEngineStop && window.petAPI.walkingEngineStop(); // Live2D 不行走，停引擎（照 rig 一致性）
+    window.petAPI.setSize(300, 460); // live2d 专属窗口：模型贴底 + 输入栏完整显示（280px）
     bindCtxLost(canvas, "live2d");
     await window.Live2DRuntime.init(canvas, pick.url);
     applyLive2dScale(live2dScaleFactor);
@@ -162,6 +163,7 @@ function destroyLive2d() {
   if (!live2dActive) return;
   live2dActive = false;
   document.body.classList.remove("live2d-mode");
+  window.petAPI.setSize(winSize.width || 260, winSize.height || 200); // 恢复窗口
   try { window.Live2DRuntime.destroy(); } catch { /* 忽略 */ }
   const canvas = document.getElementById("live2d-canvas");
   if (canvas) canvas.classList.add("hidden");

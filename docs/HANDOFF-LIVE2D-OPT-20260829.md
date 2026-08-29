@@ -152,6 +152,12 @@ rig 物理摆动暂缓。理由：rig 的基础显示问题（耳朵不显示/�
 - `initLive2d` 加 walkingEngineStop（照 rig 一致性）
 验证：等用户切换 spine↔live2d 实测。
 
+## 第三轮反馈修复（08-29 深夜，✅ 三件）
+
+1. **✅ Live2D 输入框太长不完整**：live2d 模式没设专属窗口（沿用 260px 窗口，280px 输入栏溢出）。修复：initLive2d 设 300×460 专属窗口，destroy 恢复记忆尺寸（照 rig 模式）。
+2. **✅ 语音指南打不开（pathToFileURL 修复无效）**：改用 **srcdoc** 方案——docs:read 读 html 内容返回，iframe.srcdoc 直接注入，彻底绕开 file:// 中文路径/asar 的兼容坑。验证过三份 html（使用说明/API 指南/语音指南）均无本地资源引用（srcdoc 安全）；总览.html 仅外链 <a> 不受影响。
+3. **✅ 待机台词扩充**：PROACTIVE_BY_PERIOD 每时段 3-5 条 → 10-12 条（早 11/午 10/下午 12/晚 12/夜 11），超长闲置 5→8。台词按苏苏洛人设写（医疗干员/药茶梗/兽耳尾巴动作描写/{{user}} 宏混用/偶尔傲娇），`src/lines.js`。
+
 ## 验收与 push（用户醒来后）
 
 1. 用户验收各功能（拖拽/皮肤切换/情绪反应等）

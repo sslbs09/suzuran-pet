@@ -509,7 +509,7 @@ ipcMain.handle("docs:read", (_e, key) => {
   try {
     const it = docsManifest().find((d) => d.key === key);
     if (!it) return { ok: false, error: "文档不存在" };
-    if (it.html) return { ok: true, html: true, url: require("url").pathToFileURL(it.file).href }; // 中文路径必须编码，否则 iframe 打不开
+    if (it.html) return { ok: true, html: true, srcdoc: fs.readFileSync(it.file, "utf8") }; // srcdoc 直接注入内容，绕开 file:// 中文路径的各类兼容坑
     return { ok: true, html: false, text: fs.readFileSync(it.file, "utf8") };
   } catch (e) { return { ok: false, error: e && e.message }; }
 });
