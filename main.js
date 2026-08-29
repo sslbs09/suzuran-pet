@@ -1629,6 +1629,10 @@ ipcMain.handle("pet:save-settings", (_e, patch) => {
     refreshTrayMenu();
     const after = config.getConfig();
     if ((after.pet && after.pet.name) !== (before.pet && before.pet.name)) refreshPetName();
+    if ((after.tts?.enabled ?? false) !== (before.tts?.enabled ?? false)) {
+      // 设置页改的语音总开关要即时同步渲染层（否则渲染层以为语音还开着，点击/回复仍出声）——v2.5.1
+      sendToRenderer("pet:tts-changed", !!after.tts.enabled);
+    }
     if (after.renderMode !== before.renderMode) {
       sendToRenderer("pet:render-mode-changed", after.renderMode);
       // 模式切换是显式操作：旧模式的瞬态暂停（拖拽/对话/放大）不带入新模式，
