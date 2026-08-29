@@ -26,10 +26,22 @@ const PATHS = {
   marker: path.join(USER_DIR, ".storage-migration-v1.json")
 };
 
+function copyDirRecursive(src, dst) { // asar 兼容递归复制：fs.cpSync 对 asar 源静默失败（§14 追加 112），手写用被补丁覆盖的 API
+  fs.mkdirSync(dst, { recursive: true });
+  for (const item of fs.readdirSync(src)) {
+    const s = path.join(src, item), d = path.join(dst, item);
+    if (fs.statSync(s).isDirectory()) copyDirRecursive(s, d);
+    else fs.copyFileSync(s, d);
+  }
+}
 function copyIfMissing(from, to, migrated) {
   if (!fs.existsSync(from) || fs.existsSync(to)) return;
   fs.mkdirSync(path.dirname(to), { recursive: true });
-  fs.cpSync(from, to, { recursive: true, force: false, dereference: false });
+  try {
+    copyDirRecursive(from, to);
+  } catch (e) {
+    if (fs.existsSync(from) && !fs.existsSync(to)) throw e; // 真失败才上抛
+  }
   migrated.push(path.relative(APP_DIR, from));
 }
 
