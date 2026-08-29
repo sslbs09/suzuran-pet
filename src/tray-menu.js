@@ -14,7 +14,7 @@ function buildTrayItems(deps) {
     sendToRenderer, setPetLayer, openPsdWindow, rigSkinList, setRigSkin,
     setDimMode, sitOnTaskbar, setScale, clampScale, setWalkSpeed, setCatToy,
     setFileGuard,
-    openDocs, openSchedule, openSettings, openMoodManager, openVoiceStudio, openTtsGuide, openQuickstart, openHelp, openAddChar,
+    diagClick, openDocs, openSchedule, openSettings, openMoodManager, openVoiceStudio, openTtsGuide, openQuickstart, openHelp, openAddChar,
     reloadPersona, openConfigPath, openPersonaPath, quitApp
   } = deps;
 
@@ -149,6 +149,7 @@ function buildTrayItems(deps) {
       { label: "⚡ 飞快", type: "radio", checked: cfg.walkSpeedMul >= 2.2, click: () => setWalkSpeed(2.5) }
     ]} ] : []),
     { type: "separator" },
+    { label: "🔍 点击诊断", click: () => diagClick() },
     { label: "📖 文档中心", click: () => openDocs() },
     { label: "📅 日程安排", click: () => openSchedule() },
     { label: i18n.t(lang, "tray.settings"), click: () => openSettings() },

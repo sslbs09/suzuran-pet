@@ -326,7 +326,8 @@ function refreshTrayMenu() {
     setDimMode, sitOnTaskbar, setScale, clampScale, setWalkSpeed, setCatToy,
     setFileGuard,
     openSchedule, openSettings, openMoodManager, openVoiceStudio, openTtsGuide, openQuickstart, openHelp, openAddChar,
-    openDocs,
+    openDocs, diagClick,
+    
     reloadPersona: () => { personaCache = config.getPersonaText(); sendToRenderer("pet:toast", i18n.t(lang, "tray.personaReloaded")); },
     openConfigPath: () => shell.openPath(config.CONFIG_PATH),
     openPersonaPath: () => shell.openPath(config.PERSONA_PATH),
@@ -503,6 +504,28 @@ function openDocs() {
   docsWin.loadFile(path.join(config.APP_DIR, "renderer", "docs.html"));
   attachCrashDiag(docsWin, "docs");
   docsWin.on("closed", () => { docsWin = null; });
+}
+async function diagClick() { // 点击穿透诊断：在渲染层实时抓取交互相关状态写日志
+  if (!win || win.isDestroyed()) return;
+  try {
+    const s = await win.webContents.executeJavaScript(`(() => {
+      const el = document.getElementById("pet");
+      const canvas = document.getElementById("spine-canvas");
+      const bar = document.getElementById("input-bar");
+      return JSON.stringify({
+        renderMode: typeof renderMode !== "undefined" ? renderMode : "?",
+        spineObj: typeof spineObj !== "undefined" ? !!spineObj : "?",
+        busy: typeof busy !== "undefined" ? busy : "?",
+        enlarged: typeof enlarged !== "undefined" ? enlarged : "?",
+        dragState: typeof dragState !== "undefined" ? !!dragState : "?",
+        petRect: el ? JSON.stringify(el.getBoundingClientRect()) : "无",
+        canvasRect: canvas ? JSON.stringify(canvas.getBoundingClientRect()) : "无",
+        canvasZ: canvas ? getComputedStyle(canvas).zIndex + "/" + getComputedStyle(canvas).pointerEvents : "无",
+        inputHidden: bar ? bar.classList.contains("hidden") : "?"
+      });
+    })()`, true);
+    logTts("ui", "诊断: " + s);
+  } catch (e) { logTts("ui", "诊断失败: " + (e && e.message || e)); }
 }
 ipcMain.handle("docs:list", () => docsManifest().map(({ key, name, group, html }) => ({ key, name, group, html })));
 ipcMain.handle("docs:read", (_e, key) => {
