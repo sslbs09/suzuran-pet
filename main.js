@@ -1535,7 +1535,7 @@ ipcMain.handle("pet:get-state", () => {
     personaOpening: openingLine(personaCache),
     greetingOnStart: cfg.greetingOnStart !== false,
     forcedMode,
-    keyReady: !!cfg.chat.apiKey,
+    keyReady: !!cfg.chat.apiKey || chatClient.isLocalUrl(cfg.chat.baseUrl), // 本地部署端点免 Key（v2.5.1）
     keySource: cfg._keySource,
     zcodeCli: cfg.zcodeCli,
     zcodeEnabled: !!cfg.zcodeEnabled,
