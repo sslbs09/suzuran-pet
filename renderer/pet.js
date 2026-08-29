@@ -2138,10 +2138,19 @@ function isPetUI(el, e) {
   }
   return false;
 }
+let lastMouse = { x: -1, y: -1 };
+function refreshClickable(x, y) { // 穿透判定（mousemove 与定时兜底共用）
+  const el = document.elementFromPoint(x, y);
+  window.petAPI.setClickable(isPetUI(el, { clientX: x, clientY: y }) || (dragState && dragState.active));
+}
 document.addEventListener("mousemove", (e) => {
-  const el = document.elementFromPoint(e.clientX, e.clientY);
-  window.petAPI.setClickable(isPetUI(el, e) || (dragState && dragState.active));
+  lastMouse = { x: e.clientX, y: e.clientY };
+  refreshClickable(e.clientX, e.clientY);
 });
+setInterval(() => { // 兜底：小人走动会改变鼠标下方内容但不触发 mousemove（静止盲区），定时重判自愈
+  if (lastMouse.x < 0) return;
+  refreshClickable(lastMouse.x, lastMouse.y);
+}, 500);
 
 function applyPetName(name) {
   const value = String(name || "苏苏洛").trim() || "苏苏洛";
