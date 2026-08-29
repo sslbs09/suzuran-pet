@@ -744,11 +744,29 @@ function applyWalkState(s) {
 }
 
 /** 单击互动：播一次 Interact 后接回当前相位动画（还原游戏内点击基建干员的反应） */
+let pokeFeedbackAt = 0;
+function pokeFeedback() { // 点击反馈（v2.5.1）：缩放脉冲 + 原声切片——不依赖模型动作集，任何模型必有反馈
+  const now = Date.now();
+  if (now - pokeFeedbackAt < 600) return; // 连点限流
+  pokeFeedbackAt = now;
+  // 缩放脉冲：放大 6% 后弹回（保留朝向符号）
+  try {
+    if (spineObj) {
+      const s = spineObj.scale, sx = Math.abs(s.x), sy = Math.abs(s.y);
+      const sign = s.x < 0 ? -1 : 1;
+      s.set(sx * 1.06 * sign, sy * 1.06);
+      setTimeout(() => { try { s.set(sx * sign, sy); } catch { /* 忽略 */ } }, 150);
+    }
+  } catch { /* 忽略 */ }
+  // 原声切片（随包苏苏洛游戏语音）：语音开着才出声，随机一条
+  try { if (ttsConfig.enabled) playPresetVoice(); } catch { /* 忽略 */ }
+}
+
 function playSpineInteract() {
   if (!spineObj || renderMode !== "spine" || busy) return;
   const inter = ["Interact", "interact"].find((n) => spineHas(n));
   if (!inter) {
-    // 模型没有 Interact 动作：退而求其次播一个站立/放松类动作，保证点击必有反馈
+    // 模型没有 Interact 动作：播站立/放松类动作作辅助（主反馈是 pokeFeedback 的脉冲+原声）
     const alt = ["idle", "Idle", "relax", "stand"].find((n) => spineHas(n));
     const fallback = alt || spinePhaseAnim();
     if (fallback && spineObj.state.getCurrent(0)?.animation?.name !== fallback) {
