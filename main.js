@@ -3718,6 +3718,10 @@ if (!gotLock) {
     clearInterval(barrierTimer);
     barrierTimer = null;
     savePosSafe();
+    // 退出时停语音引擎（Genie/GSV 是 detached 独立进程，不清理会常驻后台占显存/内存，
+    // 且用户反馈"退出后后台卡着/文件被占用"）——v2.5.1
+    try { tts.shutdownGenieServer(); } catch { /* 忽略 */ }
+    try { tts.killGsvProcesses(config.getConfig().ttsGsv || {}); } catch { /* 忽略 */ }
   });
 }
 
