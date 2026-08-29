@@ -142,6 +142,7 @@ async function initLive2d(preferId) {
   try {
     bindCtxLost(canvas, "live2d");
     await window.Live2DRuntime.init(canvas, pick.url);
+    applyLive2dScale(live2dScaleFactor);
     live2dActive = true;
     document.body.classList.add("live2d-mode");
     spriteEl.style.display = "none";
@@ -166,7 +167,11 @@ function destroyLive2d() {
 }
 
 function applyTheme(theme) { // 主题：auto=19 点-6 点深色
-  const dark = theme === "dark" || (theme !== "light" && (new Date().getHours() >= 19 || new Date().getHours() < 6));
+  let dark;
+  if (theme === "dark") dark = true;
+  else if (theme === "light") dark = false;
+  else if (theme === "system") dark = !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  else dark = new Date().getHours() >= 19 || new Date().getHours() < 6; // auto：19 点-6 点
   document.body.classList.toggle("theme-dark", dark);
 }
 
@@ -177,6 +182,12 @@ function bindCtxLost(canvas, tag) { // 低配核显 WebGL 上下文丢失 → �
     window.petAPI.playback && window.petAPI.playback("[gpu] WebGL 上下文丢失: " + tag);
     window.petAPI.reloadRenderer && window.petAPI.reloadRenderer();
   });
+}
+
+let live2dScaleFactor = 1.0;
+function applyLive2dScale(v) {
+  live2dScaleFactor = Number(v) > 0 ? Number(v) : 1.0;
+  try { window.Live2DRuntime && window.Live2DRuntime.setScale(live2dScaleFactor); } catch { /* 忽略 */ }
 }
 
 function setLive2dMood(mood) {
@@ -1011,32 +1022,6 @@ function initTts() {
 }
 
 /** 朗读前清洗：去 emoji / 舞台动作括号 / 记号 */
-/* RP 富渲染（酒馆学习 v2.5.1）：*动作* 与（动作）渲染为斜体灰字 */
-function parseRpSegments(text) {
-  const src = String(text || "");
-  const segs = [];
-  const re = /\*([^*\n]{1,80})\*|（([^（)\n]{1,80})）/g;
-  let last = 0, m;
-  while ((m = re.exec(src))) {
-    if (m.index > last) segs.push({ text: src.slice(last, m.index), rp: false });
-    segs.push({ text: m[1] !== undefined ? "*" + m[1] + "*" : "（" + m[2] + "）", rp: true });
-    last = m.index + m[0].length;
-  }
-  if (last < src.length) segs.push({ text: src.slice(last), rp: false });
-  return segs;
-}
-function escHtml(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
-function renderRpSlice(full, n) { // 前 n 个字符的富渲染（打字机增量用）
-  let html = "", left = Math.max(0, n);
-  for (const s of parseRpSegments(full)) {
-    if (left <= 0) break;
-    const part = s.text.slice(0, left);
-    left -= s.text.length;
-    html += s.rp ? '<span class="rp-action">' + escHtml(part) + "</span>" : escHtml(part);
-  }
-  return html;
-}
-
 function stripForSpeech(text) {
   return String(text || "")
     .replace(/\*[^*\n]{1,80}\*/g, "")      // 去 *动作*（RP 富渲染斜体，不朗读）
@@ -2128,8 +2113,13 @@ function applyPetName(name) {
   updateTtsButton();
   initTts();
 
+  if (Number(state.live2dScale) > 0) applyLive2dScale(state.live2dScale);
+  if (window.petAPI.onLive2dScaleChanged) window.petAPI.onLive2dScaleChanged((v) => applyLive2dScale(v));
   applyTheme(state.theme);
   setInterval(() => applyTheme(state.theme), 60000); // auto 模式跨时段自动切换
+  if (window.matchMedia) {
+    try { window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => applyTheme(state.theme)); } catch { /* 旧内核 */ }
+  }
   if (window.petAPI.onThemeChanged) window.petAPI.onThemeChanged((th) => { state.theme = th; applyTheme(th); });
 
   // Spine 小人模式（支持桌面行走）；加载失败自动回退 GIF

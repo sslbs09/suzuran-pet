@@ -78,6 +78,8 @@ contextBridge.exposeInMainWorld("petAPI", {
   onThemeChanged: (cb) => ipcRenderer.on("pet:theme-changed", (_e, th) => cb(th)),
   live2dSelect: (id) => ipcRenderer.invoke("pet:live2d-select", id),
   onLive2dChanged: (cb) => ipcRenderer.on("pet:live2d-changed", (_e, id) => cb(id)),
+  setLive2dScale: (v) => ipcRenderer.send("pet:set-live2d-scale", v),
+  onLive2dScaleChanged: (cb) => ipcRenderer.on("pet:live2d-scale-changed", (_e, v) => cb(v)),
   psdOpen: () => ipcRenderer.invoke("pet:psd-open"), // PSD 角色工具窗口（v2.1）
   psdSave: (dataUrl, label) => ipcRenderer.invoke("pet:psd-save", dataUrl, label),
   // PSD 2.5D 角色皮肤（v2.2）

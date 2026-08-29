@@ -17,7 +17,7 @@ assertEq("renderModeOf 未配置(undefined) 回落 gif", RM.renderModeOf(undefin
 assertEq("renderModeOf 空串回落 gif", RM.renderModeOf(""), "gif");
 assertEq("renderModeOf 未知值回落 gif", RM.renderModeOf("psd"), "gif");
 assertEq("renderModeOf 大写不匹配回落 gif", RM.renderModeOf("SPINE"), "gif");
-assertEq("RENDER_MODES 三态", JSON.stringify(RM.RENDER_MODES), JSON.stringify(["gif", "spine", "rig"]));
+assertEq("RENDER_MODES 四态", JSON.stringify(RM.RENDER_MODES), JSON.stringify(["gif", "spine", "rig", "live2d"]));
 
 // 2) 切换贴地坐标
 const wa = { x: 0, y: 0, width: 1536, height: 800 };

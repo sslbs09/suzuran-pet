@@ -98,7 +98,11 @@ function mdToHtml(src) {
 const $ = (id) => document.getElementById(id);
 
 async function applyTheme(theme) {
-  const dark = theme === "dark" || (theme !== "light" && (new Date().getHours() >= 19 || new Date().getHours() < 6));
+  let dark;
+  if (theme === "dark") dark = true;
+  else if (theme === "light") dark = false;
+  else if (theme === "system") dark = !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  else dark = new Date().getHours() >= 19 || new Date().getHours() < 6; // auto：19 点-6 点
   document.body.classList.toggle("theme-dark", dark);
 }
 

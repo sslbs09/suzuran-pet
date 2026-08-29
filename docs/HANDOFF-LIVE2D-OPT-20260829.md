@@ -135,6 +135,13 @@ rig 物理摆动暂缓。理由：rig 的基础显示问题（耳朵不显示/�
  写成真实换行断正则——老坑，写含转义的 JS 用 chr(92) 构造或 Write 工具）
 - 实测：Agent /chat 回复带 RP 格式 ✓；**气泡 UI 的 ‹›/↻/斜体需用户操作验收**（Agent HTTP 路径不带 swipes 属预期）
 
+## 第 5/6/7/8 项补充记录（08-29 深夜第三轮后段，✅）
+
+- **#5 Live2D 大小滑条**：设置页 live2d 区块（照 rigScale 模式：`pet:set-live2d-scale` IPC 即时生效 + 广播热更新），`live2d-runtime.setScale(v)` 系数乘进贴底缩放；config.live2dScale（0.3-1.5）
+- **#6 主题"跟随系统"**：theme 加 "system" 档（Windows 深色模式联动，matchMedia + 主进程 nativeTheme），settings/pet/docs 三处 applyTheme 统一升级；pet 页监听系统深色变化
+- **#7 文档**：CHANGELOG v2.5.0 段 + README 2.5 亮点（前轮）；开箱必读加"再多玩两天之后"节（Live2D/主题/Swipes/记忆）；新增新手教程《08-主题与Live2D》
+- **#8 单测**：RP 渲染提取为 `renderer/rp-render.js`（浏览器/node 双用，条件导出），新增 tests/rp-render.test.js（13/13）；render-mode.test 断言更新为四态；全量单测回归 ✅（此前 render-mode 1 项失败即四态断言未更新，已修）
+
 ## 验收与 push（用户醒来后）
 
 1. 用户验收各功能（拖拽/皮肤切换/情绪反应等）

@@ -12,6 +12,7 @@
   let model = null;
   let active = false;
 
+  let scaleFactor = 1.0;
   function fit() {
     if (!app || !model) return;
     const winW = window.innerWidth || 300;
@@ -21,7 +22,7 @@
     const baseH = model.internalModel && model.internalModel.height ? model.internalModel.height : model.height;
     const baseW = model.internalModel && model.internalModel.width ? model.internalModel.width : model.width;
     if (!baseH || !baseW) return;
-    const k = (winH * 0.88) / baseH;
+    const k = ((winH * 0.88) / baseH) * scaleFactor;
     model.scale.set(k);
     model.x = Math.round((winW - baseW * k) / 2);
     model.y = Math.round(winH - baseH * k);
@@ -92,11 +93,14 @@
     } catch (e) { /* 忽略 */ }
   }
 
+  function setScale(v) { scaleFactor = Number(v) > 0 ? Number(v) : 1.0; fit(); }
+
   window.Live2DRuntime = {
     init,
     destroy,
     setMood,
     poke,
+    setScale,
     get active() { return active; },
     /** 供错误上报/诊断 */
     version: "v1.1"

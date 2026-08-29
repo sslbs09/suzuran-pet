@@ -36,6 +36,7 @@
         <span>🎨 主题颜色</span>
         <select id="theme-select">
           <option value="auto">自动（按时间：19 点-6 点深色）</option>
+          <option value="system">跟随系统（Windows 深色模式）</option>
           <option value="light">浅色</option>
           <option value="dark">深色</option>
         </select>
@@ -397,6 +398,10 @@
       <div class="col" data-rm="live2d">
         <span>🎭 Live2D 模型：</span>
         <div id="live2d-skins-list" class="rig-skin-hint">加载中…</div>
+      </div>
+      <div class="col" data-rm="live2d">
+        <span>🎭 Live2D 角色大小：<b id="live2d-scale-val">100%</b></span>
+        <input type="range" id="live2d-scale" min="0.3" max="1.5" step="0.05" value="1" style="width:100%" />
       </div>
       <div class="col rig-skin-hint" data-rm="rig" id="rig-hint" style="width:100%">在「🧩 PSD 角色工具」拖入 PSD → 「应用到桌宠」即导入；托盘「🎬 2.5D 皮肤」可切换</div>
     </div>

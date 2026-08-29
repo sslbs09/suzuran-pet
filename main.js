@@ -536,6 +536,11 @@ ipcMain.handle("pet:live2d-list", () => {
   return out;
 });
 let rendererReloadAt = 0;
+ipcMain.on("pet:set-live2d-scale", (_e, v) => { // Live2D 角色大小（实时生效）
+  const s = Math.max(0.3, Math.min(1.5, Number(v) || 1));
+  config.saveConfig({ live2dScale: s });
+  sendToRenderer("pet:live2d-scale-changed", s);
+});
 ipcMain.handle("pet:swipe-move", (_e, dir) => { // Swipes：版本切换（-1/+1），content 同步为选中版本供上下文使用
   const entry = history.updateLast("chat", "assistant", (r) => {
     const total = (r.swipes || [r.content]).length;
@@ -580,7 +585,7 @@ ipcMain.handle("pet:regenerate", async () => { // Swipes：重新生成最后一
   } catch (e) { logTts("chat", "regenerate 失败: " + (e && e.message || e)); sendToRenderer("pet:done", { mode: "chat", full: "", emotion: "" }); return null; }
 });
 ipcMain.handle("pet:set-theme", (_e, theme) => {
-  const v = ["auto", "light", "dark"].includes(theme) ? theme : "auto";
+  const v = ["auto", "light", "dark", "system"].includes(theme) ? theme : "auto";
   config.saveConfig({ theme: v });
   sendToRenderer("pet:theme-changed", v);
   return true;
@@ -1518,6 +1523,7 @@ ipcMain.handle("pet:get-state", () => {
     hasUserSprite: fs.existsSync(path.join(config.STORAGE.spritesUser, "sprite.png")),
     renderMode: renderModeMod.renderModeOf(cfg.renderMode),
     live2dSkinId: cfg.live2dSkinId || "",
+    live2dScale: Number(cfg.live2dScale) > 0 ? Number(cfg.live2dScale) : 1.0,
     theme: cfg.theme || "auto",
     rigSkinId: cfg.rigSkinId || "", // PSD 2.5D 皮肤
     rigScale: Number(cfg.rigScale) > 0 ? Number(cfg.rigScale) : 1.0,

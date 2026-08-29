@@ -176,6 +176,17 @@ async function toast(msg) {
       });
     } catch { const b = $("live2d-skins-list"); if (b) b.textContent = "加载失败"; }
   }
+  const ls = Number(S.live2dScale) > 0 ? Number(S.live2dScale) : 1;
+  const lsel = $("live2d-scale");
+  if (lsel) {
+    lsel.value = String(ls);
+    $("live2d-scale-val").textContent = Math.round(ls * 100) + "%";
+    lsel.addEventListener("input", () => {
+      const v = Number(lsel.value);
+      $("live2d-scale-val").textContent = Math.round(v * 100) + "%";
+      window.petAPI.setLive2dScale(v); // 实时生效
+    });
+  }
   loadLive2dSkins();
   if (window.petAPI.onLive2dChanged) window.petAPI.onLive2dChanged(() => loadLive2dSkins());
 
@@ -232,7 +243,11 @@ async function toast(msg) {
     if (window.petAPI.onThemeChanged) window.petAPI.onThemeChanged((th) => { applyThemeToPage(th); themeSel.value = th === "dark" || th === "light" ? th : "auto"; });
   }
   function applyThemeToPage(theme) {
-    const dark = theme === "dark" || (theme !== "light" && (new Date().getHours() >= 19 || new Date().getHours() < 6));
+    let dark;
+    if (theme === "dark") dark = true;
+    else if (theme === "light") dark = false;
+    else if (theme === "system") dark = !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    else dark = new Date().getHours() >= 19 || new Date().getHours() < 6; // auto：19 点-6 点
     document.body.classList.toggle("theme-dark", dark);
   }
 
