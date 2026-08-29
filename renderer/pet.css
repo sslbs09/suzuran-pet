@@ -20,7 +20,7 @@ html, body {
 .bubble {
   position: absolute;
   right: 128px;  /* 紧贴桌宠左侧（桌宠宽120 + 6px 间隙） */
-  bottom: 26px;  /* 与桌宠底部对齐 */
+  bottom: 34px;  /* 抬到输入栏（底部约 4~34px）上方，底边不再被输入栏遮挡（原 26px 与输入栏重叠 8px） */
   min-width: 60px;
   min-height: 24px;
   max-width: calc(100% - 136px); /* 不盖住桌宠 */
@@ -34,7 +34,7 @@ html, body {
   box-shadow: 0 2px 8px rgba(90, 140, 180, 0.22);
   z-index: 5;
   word-break: break-word;
-  max-height: calc(100% - 30px);
+  max-height: calc(100% - 46px); /* bottom 34px + 12px 顶部余量，小窗口（200px 高）里也不顶出窗口顶 */
   overflow: auto; /* 可滚动 + 右下角拖拽调大小 */
   resize: both;
 }
@@ -146,7 +146,7 @@ body.enlarged .bubble {
   padding: 8px 14px 14px;
 }
 body.enlarged .bubble.task { font-size: var(--chat-fz, 11px); }
-body.enlarged .input-bar { width: 320px; } /* 放大时输入栏随窗口变宽 */
+body.enlarged .input-bar { left: 50%; transform: translateX(-50%); width: 320px; } /* 放大时输入栏随窗口变宽 → 居中放置，避免 320px 宽按右缘定位在 480px 窗口里向右溢出被裁剪 */
 body.enlarged #input { font-size: calc(var(--chat-fz, 11px) + 1px); }
 
 /* 思考点点 */

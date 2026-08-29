@@ -154,6 +154,9 @@ async function toast(msg) {
   $("proactive-chat").addEventListener("change", () => window.petAPI.setProactiveChat($("proactive-chat").checked));
   $("personify").checked = S.personify !== false;
   $("personify").addEventListener("change", () => window.petAPI.setPersonify($("personify").checked));
+  // 角色扮演模式（RP，单独开关默认开）：关=助手模式优先服从指令
+  $("rp-mode").checked = S.rpMode !== false;
+  $("rp-mode").addEventListener("change", () => window.petAPI.setRpMode($("rp-mode").checked));
   // Live2D 模型列表（v2.5.1）：点选即切换（主进程保存并广播重载）
   async function loadLive2dSkins() {
     try {
@@ -545,7 +548,8 @@ $("btn-save-other").addEventListener("click", async () => {
     catToy: $("cat-toy").checked, // 逗猫棒（需显式许可）
     fileGuard: $("file-guard").checked, // 蜜标监控
     proactiveChat: $("proactive-chat").checked, // 主动搭话（v2.3 单独开关）
-    personify: $("personify").checked // 人格化（v2.3 单独开关）
+    personify: $("personify").checked, // 人格化（v2.3 单独开关）
+    rpMode: $("rp-mode").checked // 角色扮演模式（关=助手模式优先服从指令）
   });
   // 渲染模式联动：选「2.5D」需有皮肤；选 gif/spine 则关闭 2.5D
   const rm = $("render-mode").value;

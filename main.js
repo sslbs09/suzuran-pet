@@ -1294,7 +1294,7 @@ function buildChatPersona() {
   const mem = memory.getText();
   if (mem) parts.push(mem);
   // 2026-08-27 修复：return 原本在今日心情/情绪衔接之前（不可达代码），情绪衔接从未生效
-  parts.push(bond.getText()); // v2.5.13 羁绊：相处越久越亲密
+  if (cfg.rpMode !== false) parts.push(bond.getText()); // v2.5.13 羁绊：相处越久越亲密（仅 RP 模式注入，助手模式不加亲密滤镜）
   parts.push("她今天的心情基调：" + todayMood());
   if (lastReplyEmotion && lastReplyEmotion !== "idle") {
     parts.push("（上一条回复的情绪是「" + lastReplyEmotion + "」，请自然地延续这种氛围，不要生硬转折）");
@@ -1960,6 +1960,10 @@ ipcMain.on("pet:set-proactive-chat", (_e, on) => {
 });
 ipcMain.on("pet:set-personify", (_e, on) => {
   config.saveConfig({ personify: !!on });
+});
+ipcMain.on("pet:set-rp-mode", (_e, on) => {
+  config.saveConfig({ rpMode: !!on });
+  logTts("settings", "角色扮演模式(RP): " + (on ? "开" : "关（助手模式）"));
 });
 // 蜜标监控（honeytoken）：检测其他程序访问桌宠敏感配置区域（默认关；进程名需管理员 ETW，普通权限仅能检测"被访问"）
 function setFileGuard(on) {

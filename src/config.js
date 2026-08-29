@@ -90,6 +90,7 @@ const DEFAULTS = {
   fileGuard: false,                          // 蜜标监控（默认关）：检测其他程序访问桌宠敏感配置区域
   proactiveChat: true,                       // 主动搭话（默认开，设置页单独开关）：闲置后主动开口
   personify: true,                           // 人格化（默认开，设置页单独开关）：被抛掷/睡醒/坐窗等事件时小声嘀咕
+  rpMode: true,                              // 角色扮演模式（默认开=现有 RP 深度；关=助手模式：优先服从指令、回复直接简洁）
   walking: false,                           // 桌面行走开关（仅 spine 模式生效；GIF 模式下强制无效）
   walkTiming: { sitMaxSec: 30, walkMaxSec: 20 }, // 行走节奏：单次坐下/散步的最长秒数（保底随机），设置页可调
   appearance: { fontFamily: "", fontSize: 0, bubbleWidth: 0, customFonts: [] }, // 聊天外观：字体（""=默认雅黑/"custom:文件名"）、字号px(0=默认11)、气泡宽度px(0=自适应)、已导入本地字体
@@ -293,6 +294,7 @@ function buildSettingsView() {
     catToy: !!cfg.catToy, // 逗猫棒（需显式许可默认关）
     proactiveChat: cfg.proactiveChat !== false, // 主动搭话（设置页单独开关）
     personify: cfg.personify !== false, // 人格化（设置页单独开关）
+    rpMode: cfg.rpMode !== false, // 角色扮演模式（设置页单独开关）：关=助手模式优先服从指令
     walking: !!cfg.walking,
     persona: getPersonaText(),
     hasPersonaDefault: fs.existsSync(PERSONA_DEFAULT_PATH),

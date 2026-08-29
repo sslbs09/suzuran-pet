@@ -3,21 +3,22 @@ const config = require("./config");
 const { logTts } = require("./logger");
 
 // 翻译缓存（简单 LRU）：相同文本不重复调 API——减少上游限流(429)压力，也加快重复句响应。
-// 统一 90s TTL：成功译文 90s 内复用；失败（含空串）90s 后失效重试，避免限流恢复后一直卡中文。
+// TTL 按结果分档：成功译文 10min 复用（cost-cut）；失败（含空串）只缓存 90s，避免限流/超时恢复后同一句一直卡中文。
 const CACHE_MAX = 200;
-const CACHE_TTL = 600000; // cost-cut reuse 10min
+const CACHE_TTL = 600000; // 成功译文复用窗口 10min
+const FAIL_TTL = 90000;   // 失败缓存窗口 90s：API 恢复后自动重试翻译，不再 10 分钟内固定走中文
 const cache = new Map();
 function cacheGet(text) {
   const hit = cache.get(text);
   if (hit) {
-    if (Date.now() - hit.t > CACHE_TTL) { cache.delete(text); return undefined; }
+    if (Date.now() - hit.t > (hit.fail ? FAIL_TTL : CACHE_TTL)) { cache.delete(text); return undefined; }
     cache.delete(text); cache.set(text, hit); return hit.ja; // 命中后移到队尾（LRU）
   }
   return undefined;
 }
 function cacheSet(text, ja) {
   if (cache.has(text)) cache.delete(text);
-  cache.set(text, { ja, t: Date.now() });
+  cache.set(text, { ja, t: Date.now(), fail: !ja });
   if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
 }
 
