@@ -2126,12 +2126,21 @@ setInterval(() => {
 /* ---------- 点击穿透：透明区域不挡下层应用 ----------
    只有鼠标在 桌宠/气泡/输入栏 上时才放行鼠标事件，其余穿透给下层应用；
    拖拽中强制放行（否则 mouseup 被穿透吞掉会导致拖拽卡死） */
-function isPetUI(el) {
-  return !!el && (el.closest("#pet") || el.closest("#bubble") || el.closest("#input-bar") || el.closest("#rig-canvas") || el.closest("#live2d-canvas") || el.closest("#info-panel"));
+function isPetUI(el, e) {
+  const base = !!el && (el.closest("#pet") || el.closest("#bubble") || el.closest("#input-bar") || el.closest("#rig-canvas") || el.closest("#live2d-canvas") || el.closest("#info-panel"));
+  if (base) return true;
+  // 行走容差圈（v2.5.1）：小人在走动，精确命中太难——鼠标在小人附近 130px 内即可点击/拖拽
+  if (e && petEl && renderMode === "spine" && !busy) {
+    try {
+      const r = petEl.getBoundingClientRect();
+      if (Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2)) < 130) return true;
+    } catch { /* 忽略 */ }
+  }
+  return false;
 }
 document.addEventListener("mousemove", (e) => {
   const el = document.elementFromPoint(e.clientX, e.clientY);
-  window.petAPI.setClickable(isPetUI(el) || (dragState && dragState.active));
+  window.petAPI.setClickable(isPetUI(el, e) || (dragState && dragState.active));
 });
 
 function applyPetName(name) {
