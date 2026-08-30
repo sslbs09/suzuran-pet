@@ -153,6 +153,8 @@ contextBridge.exposeInMainWorld("petAPI", {
   // 设置窗口
   getSettings: () => ipcRenderer.invoke("pet:get-settings"),
   generateAgentToken: () => ipcRenderer.invoke("pet:generate-agent-token"),
+  addAgentClient: (name) => ipcRenderer.invoke("pet:add-agent-client", name), // 接入管理：新增授权接入方
+  removeAgentClient: (name) => ipcRenderer.invoke("pet:remove-agent-client", name), // 接入管理：断开接入方
   saveSettings: (patch) => ipcRenderer.invoke("pet:save-settings", patch),
   savePersona: (text) => ipcRenderer.invoke("pet:save-persona", text),
   resetPersona: () => ipcRenderer.invoke("pet:reset-persona"),

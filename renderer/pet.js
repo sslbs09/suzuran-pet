@@ -2084,10 +2084,10 @@ function showPatFeedback() {
     if (bubbleText.textContent === "❤") hideBubble(); // 主进程台词已覆盖则不动
   }, 2000);
 }
-/* 被抛出去：约落地时刻给"晕乎/抗议"短反馈（借鉴 dsh-dafeiyu 拖拽反馈；30% 概率，避免每次抛出都晕眩） */
+/* 被抛出去：约落地时刻给"晕乎/抗议"短反馈（借鉴 dsh-dafeiyu 拖拽反馈；5% 概率，避免频繁晕眩） */
 let dizzyTimer = null;
 function scheduleDizzyFeedback() {
-  if (Math.random() > 0.3) return;
+  if (Math.random() > 0.05) return;
   if (dizzyTimer) clearTimeout(dizzyTimer);
   dizzyTimer = setTimeout(() => {
     dizzyTimer = null;

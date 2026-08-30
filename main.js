@@ -84,6 +84,7 @@ let termsWin = null; // 使用条款确认窗口
 let scheduleWin = null; // 日程管理窗口
 let psdWin = null;      // PSD 角色工具窗口（v2.1）
 let agentApiAbort = null; // Agent 接口当前请求的中止控制器
+let agentTaskStatus = { state: "idle", text: "", since: 0 }; // 反幻觉任务状态：仅真实信息（zcode 任务），供气泡展示与 /status 接口
 let agentAskQueue = createAskQueue(3);   // /chat 串行化并发锁（v2.6：防双发双倍 API 费 + 历史乱序；队列满 429 兜底）
 let activeReq = null; // { id, sender, abort }
 const askBuffer = createDebounceBuffer(); // 消息生成防抖（v2.6）：生成/合成中来的消息只留最新一条，回合结束补发
@@ -1027,19 +1028,41 @@ function startAgentApi() {
     };
     try {
       const url = new URL(req.url || "/", "http://127.0.0.1");
-      if (url.search || !["/health", "/chat", "/stop"].includes(url.pathname)) { send(404, { ok: false, error: "not found" }); return; }
-      const allowed = url.pathname === "/health" ? "GET" : "POST";
+      if (url.search || !["/health", "/chat", "/stop", "/status"].includes(url.pathname)) { send(404, { ok: false, error: "not found" }); return; }
+      const allowed = (url.pathname === "/health" || url.pathname === "/status") ? "GET" : "POST";
       if (req.method !== allowed) { send(405, { ok: false, error: "method not allowed" }, { Allow: allowed }); return; }
       const cfg = config.getConfig();
       const apiCfg = cfg.agentApi || {};
-      const token = String(apiCfg.bearerToken || "");
-      if (token) {
-        const auth = String(req.headers.authorization || "");
-        const match = auth.match(/^Bearer ([^\s]+)$/i);
-        if (!match || !safeTokenEqual(match[1], token)) { send(401, { ok: false, error: "unauthorized" }, { "WWW-Authenticate": "Bearer" }); return; }
+      // 鉴权：主 Token（bearerToken）或任一已授权接入的 client token 均可；命中 client 则更新接入名单活跃时间
+      const authHdr = String(req.headers.authorization || "");
+      const am = authHdr.match(/^Bearer ([^\s]+)$/i);
+      const provided = am ? am[1] : "";
+      const master = String(apiCfg.bearerToken || "");
+      const clients = Array.isArray(apiCfg.clients) ? apiCfg.clients : [];
+      const clientHit = provided ? clients.find((c) => c && c.token && safeTokenEqual(provided, c.token)) : null;
+      const needsAuth = !!master || clients.length > 0;
+      const authOk = provided && (safeTokenEqual(provided, master) || !!clientHit);
+      if (needsAuth && !authOk) { send(401, { ok: false, error: "unauthorized" }, { "WWW-Authenticate": "Bearer" }); return; }
+      if (clientHit) { // 接入名单：记录该 agent 最近活跃（在线状态展示）
+        clientHit.lastSeen = Date.now();
+        config.saveConfig({ agentApi: { ...apiCfg, clients } });
       }
       if (url.pathname === "/health") {
-        send(200, { ok: true, name: (cfg.pet || {}).name || "苏苏洛", invokeWord: apiCfg.invokeWord || "", authRequired: !!token }); // v2.6 收敛：不暴露 agreed
+        send(200, { ok: true, name: (cfg.pet || {}).name || "苏苏洛", invokeWord: apiCfg.invokeWord || "", authRequired: needsAuth }); // v2.6 收敛：不暴露 agreed
+        return;
+      }
+      if (url.pathname === "/status") {
+        // 反幻觉任务状态：仅真实信息（zcode 任务文本+计时），供其他 agent 轮询接入
+        const st = agentTaskStatus;
+        send(200, {
+          ok: true,
+          enabled: apiCfg.statusEnabled !== false,
+          state: apiCfg.statusEnabled === false ? "disabled" : st.state,
+          text: st.text,
+          since: st.since,
+          elapsedMs: st.since ? Date.now() - st.since : 0,
+          petName: (cfg.pet || {}).name || "苏苏洛"
+        });
         return;
       }
       if (url.pathname === "/stop") {
@@ -1473,8 +1496,13 @@ async function handleAskInner(sender, { id, text }) {
   try {
     let full = "";
     if (mode === "zcode") {
-      // Agent 任务状态（借鉴 dsh-dafeiyu 反幻觉原则）：只报真实信息（任务文本+计时），不编造阶段百分比
-      sendToRenderer("pet:agent-status", { state: "working", text: String(taskText || "").slice(0, 40), since: Date.now() });
+      // Agent 任务状态（借鉴 dsh-dafeiyu 反幻觉原则）：只报真实信息（任务文本+计时），不编造阶段百分比；
+      // 受设置页「任务状态展示」开关控制（agentApi.statusEnabled）
+      const stOn = (config.getConfig().agentApi || {}).statusEnabled !== false;
+      if (stOn) {
+        agentTaskStatus = { state: "working", text: String(taskText || "").slice(0, 40), since: Date.now() };
+        sendToRenderer("pet:agent-status", { state: "working", text: agentTaskStatus.text, since: agentTaskStatus.since });
+      }
       try {
         full = await zcodeClient.runZcodeTask({
           prompt: taskText,
@@ -1483,7 +1511,10 @@ async function handleAskInner(sender, { id, text }) {
           onChunk: (d) => { if (isCurrent()) sender.send("pet:chunk", { id, mode, text: d }); }
         });
       } finally {
-        sendToRenderer("pet:agent-status", { state: "done" });
+        if (stOn) {
+          agentTaskStatus = { state: "idle", text: "", since: 0 };
+          sendToRenderer("pet:agent-status", { state: "done" });
+        }
       }
     } else {
       const persona = buildChatPersona();
@@ -1603,6 +1634,29 @@ function refreshPetName() {
 
 /* ---------- 设置窗口 IPC ---------- */
 ipcMain.handle("pet:generate-agent-token", () => crypto.randomBytes(32).toString("base64url"));
+// 接入管理：新增一个已授权 agent（生成独立 token，仅本机 127.0.0.1 接口使用）
+ipcMain.handle("pet:add-agent-client", (_e, name) => {
+  try {
+    const n = String(name || "").trim().slice(0, 30);
+    if (!n) return { ok: false, message: "名称不能为空" };
+    const cfg = config.getConfig();
+    const clients = Array.isArray(cfg.agentApi.clients) ? cfg.agentApi.clients.slice() : [];
+    if (clients.some((c) => c.name === n)) return { ok: false, message: "该名称已存在，请换一个" };
+    const token = crypto.randomBytes(24).toString("base64url");
+    clients.push({ name: n, token, grantedAt: Date.now(), lastSeen: 0 });
+    config.saveConfig({ agentApi: { ...(cfg.agentApi || {}), clients } });
+    return { ok: true, name: n, token };
+  } catch (e) { return { ok: false, message: String(e && e.message || e) }; }
+});
+// 接入管理：断开某个 agent（移除其 token，立即失效）
+ipcMain.handle("pet:remove-agent-client", (_e, name) => {
+  try {
+    const cfg = config.getConfig();
+    const clients = (Array.isArray(cfg.agentApi.clients) ? cfg.agentApi.clients : []).filter((c) => c.name !== String(name || ""));
+    config.saveConfig({ agentApi: { ...(cfg.agentApi || {}), clients } });
+    return { ok: true };
+  } catch (e) { return { ok: false, message: String(e && e.message || e) }; }
+});
 ipcMain.handle("pet:get-settings", () => {
   const view = config.buildSettingsView();
   try { view.autoLaunch = app.getLoginItemSettings().openAtLogin; } catch { view.autoLaunch = false; }

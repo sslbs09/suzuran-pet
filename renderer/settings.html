@@ -378,6 +378,20 @@
     </div>
     <p class="hint">安全提示：端口、开关、Token 与请求体上限在保存后需要重启桌宠生效。启用 Token 后，本机脚本须在每个请求中发送 <code>Authorization: Bearer &lt;Token&gt;</code>。</p>
     <div class="row">
+      <div class="col switch-row">
+        <span>🔧 任务状态展示（反幻觉）：zcode 任务进行时气泡显示真实进度（任务文本 + 计时，不编造百分比），并向已授权接入方开放 <code>GET /status</code> 查询。</span>
+        <label class="switch"><input type="checkbox" id="agent-status-enabled" /><span class="slider"></span></label>
+      </div>
+    </div>
+    <div class="col">
+      <span>🤝 接入管理（已授权可调用本接口的接入方；「断开」后其 token 立即失效）</span>
+      <div id="agent-clients" style="max-height:220px;overflow:auto;border:1px solid var(--ui-line);border-radius:6px;padding:6px 10px;background:var(--ui-surface);"></div>
+      <div style="display:flex;gap:6px;margin-top:8px;">
+        <input id="agent-client-name" type="text" placeholder="接入方名称，如：我的脚本 / ZCode" style="flex:1;padding:5px 8px;border:1px solid var(--ui-line);border-radius:6px;background:var(--ui-surface);color:inherit;" />
+        <button id="btn-agent-client-add" type="button">➕ 新增接入</button>
+      </div>
+    </div>
+    <div class="row">
       <label class="col"><input id="feat-clipboard" type="checkbox" /><span data-i18n="set.featClipboard">📋 剪贴板感知（读取复制内容并反应）</span></label>
       <label class="col"><input id="feat-sysmon" type="checkbox" /><span data-i18n="set.featSysmon">📊 系统监控播报（CPU/内存异常时提醒）</span></label>
       <label class="col"><input id="file-guard" type="checkbox" /><span>🛡️ 蜜标监控：检测其他程序访问我的敏感配置区域（配置/密钥/历史文件），发现即提醒（普通权限下无法显示具体进程名）</span></label>

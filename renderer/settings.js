@@ -111,6 +111,8 @@ async function toast(msg) {
     at && at.unreadable ? "已保存的 Token 不可读取；输入新值可替换" :
     at && at.saved ? "Token 已安全保存；输入新值可替换" : "未启用认证";
   $("agent-max-body").value = Math.round((Number(aa.maxBodyBytes) || 65536) / 1024);
+  $("agent-status-enabled").checked = aa.statusEnabled !== false;
+  renderAgentClients(aa.clients || []);
 
   // 功能开关
   const f = S.features || {};
@@ -538,7 +540,8 @@ $("btn-save-other").addEventListener("click", async () => {
       port: parseInt($("agent-port").value, 10) || 8765,
       invokeWord: $("agent-word").value.trim(),
       bearerToken: $("agent-token").value.trim(),
-      maxBodyBytes: Math.max(1024, Math.min(1024 * 1024, (parseInt($("agent-max-body").value, 10) || 64) * 1024))
+      maxBodyBytes: Math.max(1024, Math.min(1024 * 1024, (parseInt($("agent-max-body").value, 10) || 64) * 1024)),
+      statusEnabled: $("agent-status-enabled").checked
     },
     renderMode: $("render-mode").value,
     walking: $("walking-opt").checked,
@@ -584,6 +587,68 @@ $("btn-agent-token").addEventListener("click", async () => {
   $("agent-token").value = token || "";
   try { await navigator.clipboard.writeText(token); setResult($("other-result"), "已生成并复制 Token；保存并重启后生效", true); }
   catch { setResult($("other-result"), "已生成 Token；保存并重启后生效", true); }
+});
+
+/* ---------- Agent 接入管理（接入名单：显示授权了谁、在线状态、可主动断开） ---------- */
+const AGENT_CLIENT_LABEL = (c) => {
+  const now = Date.now();
+  const online = c.lastSeen && now - c.lastSeen < 5 * 60 * 1000;
+  const granted = c.grantedAt ? new Date(c.grantedAt).toLocaleDateString() : "—";
+  const seen = c.lastSeen ? new Date(c.lastSeen).toLocaleString() : "从未接入";
+  return { online, granted, seen };
+};
+function renderAgentClients(clients) {
+  const box = document.getElementById("agent-clients");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!clients || !clients.length) {
+    const empty = document.createElement("div");
+    empty.style.cssText = "color:var(--ui-muted);font-size:12px;padding:6px 2px;";
+    empty.textContent = "暂无已授权接入方——点下方「新增接入」给其他 agent 生成独立 Token";
+    box.appendChild(empty);
+    return;
+  }
+  clients.forEach((c) => {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px;border-bottom:1px dashed var(--ui-line);";
+    const info = document.createElement("span");
+    info.style.cssText = "flex:1;min-width:0;";
+    const { online, granted, seen } = AGENT_CLIENT_LABEL(c);
+    info.textContent = (online ? "🟢 " : "⚪ ") + c.name + "　授权于 " + granted + "　最近 " + seen;
+    info.title = "Token 只在本机使用";
+    const tok = document.createElement("button");
+    tok.textContent = "👁";
+    tok.title = "查看 Token";
+    tok.style.cssText = "border:none;background:transparent;cursor:pointer;color:#7d939a;font-size:13px;padding:0 4px;";
+    tok.addEventListener("click", () => {
+      window.alert(c.name + " 的接入 Token（仅本机 127.0.0.1 使用）：\n\n" + c.token + "\n\n请复制给该接入方。");
+    });
+    const del = document.createElement("button");
+    del.textContent = "断开";
+    del.title = "移除该接入方，其 token 立即失效";
+    del.style.cssText = "border:1px solid var(--ui-line-strong);background:transparent;cursor:pointer;color:var(--ui-danger);font-size:12px;padding:2px 8px;border-radius:6px;";
+    del.addEventListener("click", async () => {
+      if (!confirm("断开接入方「" + c.name + "」？其 token 将立即失效。")) return;
+      await window.petAPI.removeAgentClient(c.name);
+      const aa = (await window.petAPI.getSettings()).agentApi || {};
+      renderAgentClients(aa.clients || []);
+    });
+    row.appendChild(info);
+    row.appendChild(tok);
+    row.appendChild(del);
+    box.appendChild(row);
+  });
+}
+$("btn-agent-client-add").addEventListener("click", async () => {
+  const input = document.getElementById("agent-client-name");
+  const name = (input && input.value.trim()) || "";
+  if (!name) { window.alert("请先填写接入方名称"); return; }
+  const r = await window.petAPI.addAgentClient(name);
+  if (!r || !r.ok) { window.alert((r && r.message) || "新增失败"); return; }
+  if (input) input.value = "";
+  window.alert("已授权接入方「" + r.name + "」。\n\nToken：" + r.token + "\n\n请复制给该接入方（仅本机 127.0.0.1 接口使用）。");
+  const aa = (await window.petAPI.getSettings()).agentApi || {};
+  renderAgentClients(aa.clients || []);
 });
 
 $("btn-open-terms").addEventListener("click", () => window.petAPI.openTerms());

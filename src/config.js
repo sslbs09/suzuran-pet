@@ -52,8 +52,10 @@ const DEFAULTS = {
     enabled: false,
     port: 8765,
     invokeWord: "",                         // 自定义调用词：非空时 /chat 要求消息以该词开头
-    bearerToken: "",                        // 空=兼容旧脚本不认证；设置后所有路由都需 Bearer token
-    maxBodyBytes: 65536
+    bearerToken: "",                        // 主 Token：空=兼容旧脚本不认证（仍校验 clients）；设置后所有路由都需 Bearer token
+    maxBodyBytes: 65536,
+    statusEnabled: true,                    // 任务状态展示（反幻觉）+ 向已授权 Agent 开放 GET /status
+    clients: []                             // 已授权接入的 agent：{name, token, grantedAt, lastSeen}
   },
   zcodeCli: "",                             // 空 → 自动探测（分享版默认关闭）
   workspace: DEFAULT_WORKSPACE,
@@ -280,7 +282,7 @@ function buildSettingsView() {
     zcodeCli: cfg.zcodeCli,
     agreed: !!cfg.agreed,
     scale: cfg.window.scale || 1.0,
-    agentApi: { ...cfg.agentApi, bearerToken: undefined },
+    agentApi: { ...cfg.agentApi, bearerToken: undefined }, // clients 含本机接入 token（仅本地 127.0.0.1 接口使用）
     secretStatus: secrets.status(),
     security: cfg.security || { externalCredNoticeSeen: false },
     hotkey: cfg.hotkey,
