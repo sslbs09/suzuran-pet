@@ -91,8 +91,6 @@ contextBridge.exposeInMainWorld("petAPI", {
   setRigScale: (v) => ipcRenderer.send("pet:set-rig-scale", v),
   onRigScaleChanged: (cb) => ipcRenderer.on("pet:rig-scale-changed", (_e, v) => cb(v)),
   onRigSkinChanged: (cb) => ipcRenderer.on("pet:rig-skin-changed", (_e, id) => cb(id)),
-  setRigScale: (v) => ipcRenderer.send("pet:set-rig-scale", v),
-  onRigScaleChanged: (cb) => ipcRenderer.on("pet:rig-scale-changed", (_e, v) => cb(v)),
   setRigMouseFollow: (v) => ipcRenderer.send("pet:set-rig-mouse-follow", v),
   setWalkGlobal: (v) => ipcRenderer.send("pet:set-walk-global", v), // 桌面全域行走（实验）
   setSoftRender: (v) => ipcRenderer.send("pet:set-soft-render", v), // 软件渲染（重启生效）

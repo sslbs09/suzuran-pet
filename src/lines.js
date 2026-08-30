@@ -208,7 +208,6 @@ module.exports = {
   PROACTIVE_BY_PERIOD,
   LONG_IDLE_LINES,
   pickTpl, STAGE_LINES, EARLY_MORNING_LINES, pick,
-  pick,
   periodOf,
   throttled,
 };

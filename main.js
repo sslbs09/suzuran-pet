@@ -982,14 +982,14 @@ function setDimMode(v) { // 半透明模式：角色变淡不挡视线（借鉴 
 }
 ipcMain.handle("pet:get-seat-sink", () => {
   const t = seatSinkTier();
-  return { tier: t, value: getSeatSink(), default: SEAT_SINK_DEFAULTS[t] };
+  return { tier: t, value: getSeatSink(), default: walkGeo.SEAT_SINK_DEFAULTS[t] };
 });
 ipcMain.handle("pet:set-seat-sink", (_e, v) => {
   const n = Math.max(0, Math.min(80, Math.round(Number(v) || 0)));
   const t = seatSinkTier();
   config.saveConfig({ walkSeatSink: { ...config.getConfig().walkSeatSink, [t]: n } });
   applySeatPosition();
-  return { tier: t, value: getSeatSink(), default: SEAT_SINK_DEFAULTS[t] };
+  return { tier: t, value: getSeatSink(), default: walkGeo.SEAT_SINK_DEFAULTS[t] };
 });
 
 /* ---------- 本地 Agent 调用接口（仅 127.0.0.1；可选 Bearer token） ---------- */
@@ -1467,7 +1467,7 @@ async function handleAskInner(sender, { id, text }) {
   if (activeReq) {
     // v2.6 消息生成防抖：上一句还在生成/合成时再来消息，不再直接报错——
     // 只缓冲最新一条（连续快速发送只留最后一条），当前回合结束后自动补发（src/message-buffer）
-    askBuffer.push({ sender, payload });
+    askBuffer.push({ sender, payload: { id, text } });
     if (pendingAskTimer) clearTimeout(pendingAskTimer);
     pendingAskTimer = setTimeout(() => {
       pendingAskTimer = null;
