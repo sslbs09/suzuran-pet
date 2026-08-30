@@ -1341,10 +1341,13 @@ function buildChatPersona() {
   return base + "\n\n" + parts.join("\n");
 }
 
-/** 此刻状态注（v2.3）：每轮聊天注入时段+位置，让回复的情绪与桌宠当下处境一致 */
+/** 此刻状态注（v2.3）：每轮聊天注入时段+位置，让回复的情绪与桌宠当下处境一致
+ *  v2.5.16：注入具体时:分——此前只给时段（"下午"），模型被问"现在几点"只能编造 */
 function petStateNote() {
-  const h = new Date().getHours();
+  const now = new Date();
+  const h = now.getHours();
   const period = h < 5 ? "深夜" : h < 8 ? "清晨" : h < 11 ? "上午" : h < 14 ? "中午" : h < 18 ? "下午" : h < 23 ? "晚上" : "深夜";
+  const hm = `${String(h).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
   let loc = "静静待在你身边";
   if (walk.active) {
     if (walk.perched) loc = "坐在窗口顶上";
@@ -1352,7 +1355,7 @@ function petStateNote() {
     else if (!walk.resting) loc = "在桌面上散步";
     else if (walk.seated) loc = "坐在任务栏上";
   }
-  return `${period}，${loc}`;
+  return `${period}（${hm}），${loc}`;
 }
 /** 人格化事件台词（v2.3，设置页 personify 单独开关） ---------- */
 const personifyCooldowns = {}; // event → 上次发言时间
