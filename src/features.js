@@ -345,16 +345,19 @@ let clipboardTimer = null;
 function startClipboardWatch(sendFn, intervalMs = 3000) {
   stopClipboardWatch();
   clipboardTimer = setInterval(() => {
-    const text = clipboard.readText().trim();
+    let text;
+    try {
+      text = clipboard.readText().trim();
+    } catch { return; } // 剪贴板被占用/锁定：跳过本轮，不中断监视
     if (!text || text === lastClipboard || text.length < 10) return;
     lastClipboard = text;
 
-    // 判断内容类型
-    if (/^https?:\/\//.test(text)) {
-      // URL
+    // 判断内容类型：URL（含无协议头）→ 长数字（整段数字）→ 长文本
+    if (/^(https?:\/\/)?([\w-]+\.)+[a-z]{2,}(\/\S*)?$/i.test(text)) {
+      // URL（http/https 或裸域名）
       sendFn(`📋 检测到链接：${text.slice(0, 60)}${text.length > 60 ? "…" : ""}`);
-    } else if (/\d{10,}/.test(text)) {
-      // 可能是电话/订单号
+    } else if (/^\d{10,}$/.test(text)) {
+      // 整段是长数字（电话/订单号），而非长文本中夹带数字
       sendFn(`📋 检测到长数字，需要我帮忙记一下吗？`);
     } else if (text.length > 100) {
       // 长文本
