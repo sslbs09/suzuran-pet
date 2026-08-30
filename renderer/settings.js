@@ -738,8 +738,18 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
   const btnClear = document.getElementById("mem-clear");
   if (!statsEl || !listEl || !btnClear) return;
   const refresh = async () => {
+    const failText = "记忆读取失败，点击此处重试";
+    const showFail = () => {
+      statsEl.textContent = failText;
+      statsEl.style.cursor = "pointer";
+      statsEl.onclick = () => { statsEl.style.cursor = ""; statsEl.onclick = null; refresh(); };
+    };
     try {
-      const r = await window.petAPI.getMemory();
+      // 超时兜底：getMemory 偶发挂起时不再永远停在「加载中…」（6s 未返回即视为异常）
+      const r = await Promise.race([
+        window.petAPI.getMemory(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("读取超时")), 6000))
+      ]);
       if (!r || !Array.isArray(r.facts) || !r.facts.length) {
         statsEl.textContent = "暂无已记住的信息——聊天中提到的称谓/喜好/生日/健康/安排会自动记住（本地加密）";
         listEl.innerHTML = "";
@@ -778,7 +788,7 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
         row.appendChild(del);
         listEl.appendChild(row);
       });
-    } catch { statsEl.textContent = "记忆读取失败"; }
+    } catch { showFail(); }
   };
   btnClear.addEventListener("click", async () => {
     if (!confirm("确定清空全部记忆吗？她会忘记所有记得的事。")) return;

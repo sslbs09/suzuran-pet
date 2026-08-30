@@ -1952,6 +1952,7 @@ function proactiveMin() { return (config.getConfig().features && config.getConfi
 ipcMain.handle("pet:get-memory", () => {
   try {
     const facts = memory.getFactsList();
+    logTts("memory", "get-memory 被调用 facts=" + facts.length); // 诊断：设置页记忆区加载
     return { facts, summary: memory.getSummary(), bond: { level: bond.getLevel(), days: bond.getDays() } };
   } catch (e) { logTts("memory", "getMemory 异常: " + (e && e.stack || e)); return { facts: [], summary: "", bond: null }; }
 });
