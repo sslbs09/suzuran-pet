@@ -15,9 +15,12 @@
     max-width: 800px;
     margin: 0 auto;
   }
-  h1 { font-size: 22px; color: #7aa9c9; margin-bottom: 4px; }
+  h1 { font-size: clamp(20px, 3vw, 26px); color: #7aa9c9; margin-bottom: 4px; }
   .sub { color: #9ab3c6; font-size: 13px; margin-bottom: 18px; }
-  h2 { font-size: 17px; color: #5f8db0; margin: 24px 0 8px; padding-left: 10px; border-left: 4px solid #8ec7e8; }
+  h2 { font-size: clamp(15px, 2.2vw, 18px); color: #5f8db0; margin: 24px 0 8px; padding-left: 10px; border-left: 4px solid #8ec7e8; }
+  /* 可访问性：焦点可见环 + 减少动效（aesthetic-web） */
+  a:focus-visible, button:focus-visible, [tabindex]:focus-visible { outline: 2px solid #8ec7e8; outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
   .card { background: #fff; border: 1px solid #e3eef6; border-radius: 12px; padding: 14px 20px; margin-bottom: 12px; }
   ol, ul { padding-left: 22px; }
   li { margin-bottom: 4px; }

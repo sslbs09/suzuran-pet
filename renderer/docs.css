@@ -15,9 +15,12 @@ body {
   font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
   background: var(--bg);
   color: var(--text);
-  font-size: 15px;
+  font-size: clamp(14px, 1.2vw, 16px);
   line-height: 1.75;
 }
+/* 可访问性：焦点可见环 + 减少动效（aesthetic-web） */
+a:focus-visible, button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 #docs-app { display: flex; height: 100vh; }
 
 /* 侧边栏 */
