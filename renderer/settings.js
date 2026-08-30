@@ -768,12 +768,39 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
         edit.textContent = "✎";
         edit.title = "编辑这条";
         edit.style.cssText = "border:none;background:transparent;cursor:pointer;color:#2980b9;font-size:14px;padding:0 4px;";
-        edit.addEventListener("click", async () => {
-          const nt = prompt("编辑这条记忆：", f.text);
-          if (nt === null) return;
-          const r = await window.petAPI.updateMemoryFact(f.id, nt);
-          if (!r || !r.ok) { window.alert((r && r.message) || "编辑失败"); return; }
-          refresh();
+        // Electron 不支持 window.prompt()（直接返回 null），编辑改用行内输入框
+        edit.addEventListener("click", () => {
+          const input = document.createElement("input");
+          input.type = "text";
+          input.value = f.text;
+          input.style.cssText = "flex:1;min-width:0;padding:3px 6px;border:1px solid var(--ui-line);border-radius:4px;background:var(--ui-surface);color:inherit;font-size:13px;";
+          const save = document.createElement("button");
+          save.textContent = "✓";
+          save.title = "保存";
+          save.style.cssText = "border:none;background:transparent;cursor:pointer;color:#27ae60;font-size:14px;padding:0 4px;";
+          const cancel = document.createElement("button");
+          cancel.textContent = "✕";
+          cancel.title = "取消";
+          cancel.style.cssText = "border:none;background:transparent;cursor:pointer;color:#7f8c8d;font-size:14px;padding:0 4px;";
+          row.replaceChildren(input, save, cancel);
+          input.focus();
+          input.select();
+          const commit = async (doSave) => {
+            if (doSave) {
+              const nt = input.value.trim();
+              if (nt && nt !== f.text) {
+                const r = await window.petAPI.updateMemoryFact(f.id, nt);
+                if (!r || !r.ok) { window.alert((r && r.message) || "编辑失败"); return; }
+              }
+            }
+            refresh();
+          };
+          save.addEventListener("click", () => commit(true));
+          cancel.addEventListener("click", () => commit(false));
+          input.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") commit(true);
+            if (e.key === "Escape") commit(false);
+          });
         });
         const del = document.createElement("button");
         del.textContent = "✕";
