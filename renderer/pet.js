@@ -1295,9 +1295,9 @@ async function speak(text, emotion) {
     }
   }
   if (mySession !== speakSession) return; // 等待/失败期间来了新消息：不回退（不然旧句会用兜底音补读）
-  // 引擎全不可用 → 播放苏苏洛原声预设切片（游戏语音，替代难听的系统合成音）
-  window.petAPI.playback("语音引擎不可用 → 播放原声预设");
-  playPresetVoice();
+  // 引擎全不可用：静音——不播放无关的随机原声预设冒充聊天内容（曾导致"不念聊天框、随机日文台词"的误读）；
+  // 回复文本已在气泡里，静音能明确暴露"语音没工作"，方便查日志定位引擎问题
+  window.petAPI.playback("语音引擎不可用 → 静音（回复已显示在气泡，查 logs/tts.log 的 [genie]/[gsv] 定位）");
   } finally {
     if (mySession === speakSession) speakActive = false; // 只由最新会话收口流式接收窗口
   }
