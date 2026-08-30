@@ -101,7 +101,7 @@
     }
   ],
   "agentApi": {
-    "enabled": true,
+    "enabled": false,
     "port": 8765,
     "invokeWord": ""
   },

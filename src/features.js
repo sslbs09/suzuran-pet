@@ -309,6 +309,32 @@ function systemStatsToSpeech(stats) {
   return null;
 }
 
+let sysMonitorTimer = null;
+let lastSysStatsAt = 0;
+const SYS_STATS_MIN_GAP = 30 * 1000; // 两次播报至少间隔 30s（避免 CPU 持续高占用时连续唠叨）
+
+/** 系统监控播报（v2.5.15 补：此前 main.js 调用但本函数缺失 → 勾选后下次启动抛 TypeError 中断初始化）
+ *  定时轮询 CPU/内存，经 systemStatsToSpeech 转台词，仅在有值得说的情况时 sendFn。
+ *  签名对齐 main.js 调用：startSystemMonitor(getStatsFn, sendFn, intervalSec) */
+function startSystemMonitor(getStatsFn, sendFn, intervalSec = 15) {
+  stopSystemMonitor();
+  const statsFn = (typeof getStatsFn === "function") ? getStatsFn : () => getSystemStats();
+  sysMonitorTimer = setInterval(async () => {
+    let stats;
+    try { stats = await statsFn(); } catch { return; }
+    const msg = systemStatsToSpeech(stats);
+    if (!msg) return;
+    const now = Date.now();
+    if (now - lastSysStatsAt < SYS_STATS_MIN_GAP) return;
+    lastSysStatsAt = now;
+    try { sendFn(msg); } catch { /* 渲染层不可用时忽略 */ }
+  }, Math.max(5, Number(intervalSec) || 15) * 1000);
+}
+
+function stopSystemMonitor() {
+  if (sysMonitorTimer) { clearInterval(sysMonitorTimer); sysMonitorTimer = null; }
+}
+
 /* ============================================================
  * 6. 剪贴板感知
  * ============================================================ */
@@ -448,6 +474,8 @@ module.exports = {
   // 系统监控
   getSystemStats,
   systemStatsToSpeech,
+  startSystemMonitor,
+  stopSystemMonitor,
 
   // 剪贴板
   startClipboardWatch,
