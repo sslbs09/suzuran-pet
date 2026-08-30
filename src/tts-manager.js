@@ -133,8 +133,11 @@ async function ttsCloneImplInner(text, opts, jobId) {
     if (q.speakJa) {
       const ja = await translateToJa(clean);
       if (ja) { jaText = ja; ttsText = ja; logTts("ja", "翻译: " + clean + " → " + ja); }
-      else logTts("ja", "翻译失败，退回中文合成");
+      else {
+        logTts("ja", "翻译失败，静音（日语模式不退回中文引擎）");
         if (jaFallbackCb) { const _cb = jaFallbackCb; jaFallbackCb = null; try { _cb(); } catch { /* 通知失败不影响合成 */ } }
+        return ""; // v2.5.17：日语模式任何失败一律静音，不消耗中文/云引擎（省内存）
+      }
     }
     if (jaText) {
       // 日语模式：优先本地 GPT-SoVITS 日语合成（苏苏洛音色）。
@@ -170,15 +173,15 @@ async function ttsCloneImplInner(text, opts, jobId) {
             }
           }
           recordGsvResult(false);
-          logTts("route", "gsv-ja 无可用句 → 回退中文链路");
+          logTts("route", "gsv-ja 无可用句 → 静音（日语模式不退回中文）");
         } else {
           recordGsvResult(false);
-          logTts("route", "gsv-ja 服务不可用 → 回退中文链路");
+          logTts("route", "gsv-ja 服务不可用 → 静音（日语模式不退回中文）");
         }
       } else if (g.enabled) {
-        logTts("route", "gsv-ja 冷却中 → 回退中文链路");
+        logTts("route", "gsv-ja 冷却中 → 静音（日语模式不退回中文）");
       }
-      ttsText = cleanZh;
+      return ""; // v2.5.17：日语模式合成失败一律静音，不消耗 Genie/cosy/edge（省内存 + 失败不折腾）
     }
     if (q.enabled) {
       const up = await ensureGenieServer(q);

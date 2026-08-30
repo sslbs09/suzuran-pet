@@ -387,12 +387,16 @@ function setTts(enabled) {
   config.saveConfig({ tts: { enabled: !!enabled } });
   refreshTrayMenu();
   sendToRenderer("pet:tts-changed", !!enabled);
+  const q = config.getConfig().ttsGenie || {};
   if (enabled) {
-    // 语音开 → 确保本地 Genie TTS 服务器可用（后台拉起）
-    const q = config.getConfig().ttsGenie || {};
-    if (q.enabled) {
+    // 语音开 → 按模式确保对应本地引擎可用（后台拉起）
+    // v2.5.17：日语模式只留 GSV（合成时按需 ensureGsvServer），不拉起 Genie 中文引擎；中文模式才拉起 Genie
+    if (q.enabled && !q.speakJa) {
       tts.resetGenieServer(); // 重置 Genie 状态标志（tts-manager 内部管理），下次 ensureGenieServer 重新探活/拉起
       tts.ensureGenieServer(q).then((ok) => logTts("genie", "语音开启 → 服务器: " + (ok ? "已就绪" : "不可用")));
+    } else if (q.speakJa) {
+      tts.shutdownGenieServer(); // 日语模式：清掉可能残留的 Genie，释放内存
+      logTts("genie", "语音开启（日语模式）→ 不拉起 Genie，GSV 按需启动");
     }
   } else {
     // 语音关 → 停掉本地 TTS 服务器，释放显存
@@ -410,11 +414,16 @@ function setRate(rate) {
 ipcMain.handle("pet:set-rate", (_e, rate) => { setRate(rate); return true; });
 ipcMain.handle("pet:set-speak-ja", (_e, v) => { setSpeakJa(!!v); return true; });
 
-/** 日语语音模式：说话前把中文翻译成日语（文字/聊天保持中文）；保存并通知渲染层 */
+/** 日语语音模式：说话前把中文翻译成日语（文字/聊天保持中文）；保存并通知渲染层
+ *  v2.5.17：开启日语 → 立即停掉 Genie 中文引擎（省内存）；关闭日语 → 语音按需再拉起 */
 function setSpeakJa(v) {
   config.saveConfig({ ttsGenie: { speakJa: !!v } });
   refreshTrayMenu();
   sendToRenderer("pet:speak-ja-changed", !!v);
+  if (v) {
+    tts.shutdownGenieServer();
+    logTts("genie", "日语模式开启 → 停止 Genie 中文引擎");
+  }
   logTts("ja", "日语语音模式: " + (!!v ? "开" : "关"));
 }
 
@@ -3792,10 +3801,14 @@ if (!gotLock) {
     runDllGuard(); // §14 追加 98：DLL 侧载自检（exe 目录 dll 基线对比，可疑即告警）
 
     // 预热本地 Genie TTS 服务器（后台加载模型，不阻塞开窗；声音关闭时不拉起）
+    // v2.5.17：日语模式（speakJa）只留 GSV 日语引擎，不预热/不拉起 Genie 中文引擎（省 4.7G 内存）
     const _q = config.getConfig().ttsGenie || {};
     const _ttsOn = !!(config.getConfig().tts || {}).enabled;
-    if (_q.enabled && _ttsOn) {
+    if (_q.enabled && _ttsOn && !_q.speakJa) {
       tts.ensureGenieServer(_q).then((ok) => logTts("genie", "启动预热: " + (ok ? "已就绪" : "不可用")));
+    } else if (_ttsOn && _q.speakJa) {
+      logTts("genie", "日语模式：跳过 Genie 中文引擎预热（只留 GSV）");
+      tts.shutdownGenieServer(); // 保险：若残留 Genie 进程（如音色克隆窗口拉起的），立即释放
     } else {
       logTts("genie", "声音关闭，跳过服务器预热");
     }
