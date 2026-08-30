@@ -146,6 +146,7 @@ const DEFAULTS = {
   security: { externalCredNoticeSeen: false }, // 曾隐式读取外部凭据的非阻塞提示：用户点“知道了”后不再显示
   features: { // 功能开关（每个敏感权限单独授权，默认关闭）
     clipboardWatch: false,    // 剪贴板感知：读取系统剪贴板内容并反应
+    workspaceWatch: { enabled: false, dirs: [], cooldownMin: 5 }, // 感知工作区活动：只读监听文件变化，她会在你改代码时小声嘀咕（dirs 空 = 默认监听 ZCode workspace）
     systemMonitor: false,     // 系统监控播报：CPU/内存异常时角色语音提醒
     screenAwareness: false,   // 屏幕感知：定期截屏分析（需配置视觉模型）
     desktopIcons: false,      // 桌面图标感知：只读图标位置坐标（仅本机、不上传），让她走到图标上站/坐（需桌面层级模式）
@@ -296,6 +297,7 @@ function buildSettingsView() {
     catToy: !!cfg.catToy, // 逗猫棒（需显式许可默认关）
     proactiveChat: cfg.proactiveChat !== false, // 主动搭话（设置页单独开关）
     personify: cfg.personify !== false, // 人格化（设置页单独开关）
+    features: cfg.features || {}, // 功能开关快照（剪贴板/系统监控/工作区感知等）
     rpMode: cfg.rpMode !== false, // 角色扮演模式（设置页单独开关）：关=助手模式优先服从指令
     walking: !!cfg.walking,
     persona: getPersonaText(),

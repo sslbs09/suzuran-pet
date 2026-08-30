@@ -1373,6 +1373,64 @@ function maybeWorkflowComment() {
   sendProactive(lines.pickTpl(lines.WORKFLOW_LINES, chatVars()), "idle");
 }
 
+/* ---------- 感知工作区活动（v2.5.3）：她会在你改代码时小声嘀咕 ----------
+ * 只读轮询监听（不写文件、不上传）：每 5s 扫描配置目录的 mtime 签名，
+ * 有变化且冷却已过 → 从 WORKFLOW_LINES 嘀咕一句。排除 node_modules/.git 等大目录。 */
+let wsWatchTimer = null;
+let wsWatchSig = null;
+let wsWatchThrottle = null;
+const WS_WATCH_EXCLUDE = new Set(["node_modules", ".git", "release", "dist", "engines", "voice", "_backups", ".mimosa", "outputs", "logs"]);
+function wsWatchDirs() {
+  const cfg = config.getConfig();
+  const w = (cfg.features && cfg.features.workspaceWatch) || {};
+  const dirs = (Array.isArray(w.dirs) && w.dirs.length) ? w.dirs : [cfg.workspace || ""];
+  return dirs.filter((d) => d && fs.existsSync(d));
+}
+function wsScanSignature() {
+  let count = 0, sum = 0, max = 0;
+  const walk = (dir) => {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name.startsWith(".") || WS_WATCH_EXCLUDE.has(e.name)) continue;
+      const p = path.join(dir, e.name);
+      try {
+        if (e.isDirectory()) walk(p);
+        else if (e.isFile()) {
+          const st = fs.statSync(p);
+          count++; sum += st.mtimeMs; if (st.mtimeMs > max) max = st.mtimeMs;
+        }
+      } catch { /* 瞬时文件/权限忽略 */ }
+    }
+  };
+  for (const d of wsWatchDirs()) walk(d);
+  return count + "|" + sum + "|" + max;
+}
+function startWorkspaceWatch(cfg0) {
+  stopWorkspaceWatch();
+  const w = (cfg0 && cfg0.features && cfg0.features.workspaceWatch) || {};
+  const cooldownMs = Math.max(60, Number(w.cooldownMin) || 5) * 60 * 1000;
+  wsWatchThrottle = lines.throttled(cooldownMs);
+  wsWatchSig = wsScanSignature();
+  wsWatchTimer = setInterval(() => {
+    try {
+      const sig = wsScanSignature();
+      if (sig !== wsWatchSig) {
+        wsWatchSig = sig;
+        if (wsWatchThrottle()) {
+          const line = lines.pickTpl(lines.WORKFLOW_LINES, chatVars());
+          sendProactive(line, "idle");
+          logTts("watch", "工作区活动 → " + line);
+        }
+      }
+    } catch { /* 忽略 */ }
+  }, 5000);
+  logTts("watch", "感知工作区活动已启动: " + wsWatchDirs().join(" | "));
+}
+function stopWorkspaceWatch() {
+  if (wsWatchTimer) { clearInterval(wsWatchTimer); wsWatchTimer = null; }
+}
+
 /* ---------- 对话核心 ---------- */
 /** 对话期间暂停散步（busy 时渲染层不切 Move 动画，若窗口仍移动会出现“坐着滑行”）：
  *  进入对话暂停、结束（done/error/中止/快捷回复）统一在 finally 恢复。 */
@@ -2041,6 +2099,12 @@ ipcMain.on("pet:set-proactive-chat", (_e, on) => {
 });
 ipcMain.on("pet:set-personify", (_e, on) => {
   config.saveConfig({ personify: !!on });
+});
+ipcMain.on("pet:set-workspace-watch", (_e, on, dirs) => {
+  const cur = (config.getConfig().features || {});
+  const w = cur.workspaceWatch || {};
+  config.saveConfig({ features: { ...cur, workspaceWatch: { enabled: !!on, dirs: Array.isArray(dirs) ? dirs : (w.dirs || []), cooldownMin: w.cooldownMin || 5 } } });
+  if (on) startWorkspaceWatch(config.getConfig()); else stopWorkspaceWatch();
 });
 ipcMain.on("pet:set-rp-mode", (_e, on) => {
   config.saveConfig({ rpMode: !!on });
@@ -3751,6 +3815,11 @@ if (!gotLock) {
     features.startProactive((msg) => {
       sendProactive(msg, "idle"); // 隐藏到托盘时静默待命，不主动搭话
     }, _proactiveMin);
+
+    // 感知工作区活动（v2.5.3，默认关）：她会在你改代码时小声嘀咕（只读监听）
+    if (_cfg.features && _cfg.features.workspaceWatch && _cfg.features.workspaceWatch.enabled) {
+      startWorkspaceWatch(_cfg);
+    }
 
     // 剪贴板感知（默认关，用户在设置里勾选后启用）
     if (_cfg.features && _cfg.features.clipboardWatch) {

@@ -121,6 +121,9 @@ async function toast(msg) {
   $("feat-memory").checked = f.longTermMemory !== false;
   $("feat-emotional").checked = f.emotionalVoice !== false;
   $("feat-desktop-icons").checked = !!f.desktopIcons;
+  const _ww = f.workspaceWatch || {};
+  $("ws-watch").checked = !!_ww.enabled;
+  $("ws-watch-dirs").value = Array.isArray(_ww.dirs) ? _ww.dirs.join("; ") : "";
   $("auto-launch").checked = !!S.autoLaunch;
   // 2.5D 角色开关（v2.2）
   $("rig-switch").checked = !!S.rigSkinId;
@@ -159,6 +162,10 @@ async function toast(msg) {
   // 角色扮演模式（RP，单独开关默认开）：关=助手模式优先服从指令
   $("rp-mode").checked = S.rpMode !== false;
   $("rp-mode").addEventListener("change", () => window.petAPI.setRpMode($("rp-mode").checked));
+  // 感知工作区活动（默认关）：开关/目录即时生效（主进程保存并启停监听）
+  const parseWatchDirs = () => String($("ws-watch-dirs").value || "").split(/[;,，]/).map((s) => s.trim()).filter(Boolean);
+  $("ws-watch").addEventListener("change", () => window.petAPI.setWorkspaceWatch($("ws-watch").checked, parseWatchDirs()));
+  $("ws-watch-dirs").addEventListener("change", () => window.petAPI.setWorkspaceWatch($("ws-watch").checked, parseWatchDirs()));
   // Live2D 模型列表（v2.5.1）：点选即切换（主进程保存并广播重载）
   async function loadLive2dSkins() {
     try {

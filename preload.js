@@ -114,6 +114,7 @@ contextBridge.exposeInMainWorld("petAPI", {
   pat: () => ipcRenderer.send("pet:pat"),
   setProactiveChat: (on) => ipcRenderer.send("pet:set-proactive-chat", on),
   setPersonify: (on) => ipcRenderer.send("pet:set-personify", on),
+  setWorkspaceWatch: (on, dirs) => ipcRenderer.send("pet:set-workspace-watch", on, dirs), // 感知工作区活动
   setRpMode: (on) => ipcRenderer.send("pet:set-rp-mode", on),
   onAgentStatus: (cb) => ipcRenderer.on("pet:agent-status", (_e, s) => cb(s)), // Agent 任务状态（zcode 模式）
   onMouseTrackGlobalChanged: (cb) => ipcRenderer.on("pet:mouse-track-global-changed", (_e, v) => cb(v)),

@@ -394,6 +394,11 @@
     <div class="row">
       <label class="col"><input id="feat-clipboard" type="checkbox" /><span data-i18n="set.featClipboard">📋 剪贴板感知（读取复制内容并反应）</span></label>
       <label class="col"><input id="feat-sysmon" type="checkbox" /><span data-i18n="set.featSysmon">📊 系统监控播报（CPU/内存异常时提醒）</span></label>
+      <label class="col" style="min-width:260px;"><input id="ws-watch" type="checkbox" /><span>🧐 感知工作区活动：她会在你改代码时小声嘀咕（只读监听文件变化，不上传）</span></label>
+      <label class="col grow">
+        <span style="font-size:11px;">监听目录（分号/逗号分隔；留空 = 默认 ZCode 工作区）</span>
+        <input id="ws-watch-dirs" type="text" placeholder="E:\SuzuranPetGit; C:\Users\你\.zcode\workspace\default" style="font-size:12px;" />
+      </label>
       <label class="col"><input id="file-guard" type="checkbox" /><span>🛡️ 蜜标监控：检测其他程序访问我的敏感配置区域（配置/密钥/历史文件），发现即提醒（普通权限下无法显示具体进程名）</span></label>
     </div>
     <div class="row">
