@@ -51,14 +51,20 @@ function resetGenieServer() {
 function shutdownGenieServer() {
   genieServerChecked = false;
   genieServerUp = false;
-  try {
-    // 注意：服务器跑在 pythonw.exe（无控制台），必须匹配 python% 而非 python.exe
-    const ps = spawn("powershell", ["-NoProfile", "-Command",
-      "Get-CimInstance Win32_Process -Filter \"Name like 'python%'\" | Where-Object { $_.CommandLine -like '*genie_tts_server*' } | ForEach-Object { & taskkill /PID $_.ProcessId /T /F 2>&1 | Out-Null }"],
-      { windowsHide: true });
-    ps.on("error", () => {});
-    logTts("genie", "语音关闭 → 停止本地服务器");
-  } catch { /* 忽略 */ }
+  // 返回 Promise：等待 taskkill 完成（供退出前阻塞清理；其他调用方 fire-and-forget 也兼容）
+  return new Promise((resolve) => {
+    try {
+      // 注意：服务器跑在 pythonw.exe（无控制台），必须匹配 python% 而非 python.exe
+      const ps = spawn("powershell", ["-NoProfile", "-Command",
+        "Get-CimInstance Win32_Process -Filter \"Name like 'python%'\" | Where-Object { $_.CommandLine -like '*genie_tts_server*' } | ForEach-Object { & taskkill /PID $_.ProcessId /T /F 2>&1 | Out-Null }"],
+        { windowsHide: true });
+      ps.on("error", () => resolve());
+      ps.on("exit", () => resolve());
+      ps.on("close", () => resolve());
+      setTimeout(resolve, 8000); // 兜底：最多等 8s，避免退出卡住
+      logTts("genie", "语音关闭 → 停止本地服务器");
+    } catch { resolve(); }
+  });
 }
 
 function gsvAvailableNow() {

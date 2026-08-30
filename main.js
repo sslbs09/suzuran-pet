@@ -3878,17 +3878,26 @@ if (!gotLock) {
     e.preventDefault?.();
   });
 
-  app.on("before-quit", () => {
-    quitting = true;
-    schedules.stop();
-    clearInterval(barrierTimer);
-    barrierTimer = null;
-    savePosSafe();
-    // 退出时停语音引擎（Genie/GSV 是 detached 独立进程，不清理会常驻后台占显存/内存，
-    // 且用户反馈"退出后后台卡着/文件被占用"）——v2.5.1
-    try { tts.shutdownGenieServer(); } catch { /* 忽略 */ }
-    try { tts.killGsvProcesses(config.getConfig().ttsGsv || {}); } catch { /* 忽略 */ }
-  });
+let engineCleanupDone = false;
+app.on("before-quit", (e) => {
+  if (engineCleanupDone) return; // 第二次触发（清理完成后 app.quit()）直接退出
+  e.preventDefault();
+  quitting = true;
+  schedules.stop();
+  clearInterval(barrierTimer);
+  barrierTimer = null;
+  savePosSafe();
+  // 退出时阻塞清理语音引擎（Genie/GSV 是 detached 独立进程）：等待 taskkill 完成 + 按端口兜底，
+  // 确保"退出 = 彻底退出"——否则残留 python 进程占端口/显存，重启后连到旧引擎（换引擎文件不生效的根因）
+  (async () => {
+    try { await tts.shutdownGenieServer(); } catch { /* 忽略 */ }
+    try { await tts.killGsvProcesses(config.getConfig().ttsGsv || {}); } catch { /* 忽略 */ }
+    try { await tts.killPortListener(9881); } catch { /* 忽略 */ } // 兜底：按端口清残留
+    try { await tts.killPortListener(9880); } catch { /* 忽略 */ }
+    engineCleanupDone = true;
+    app.quit();
+  })();
+});
 }
 
 const _startupCfg = config.getConfig();
