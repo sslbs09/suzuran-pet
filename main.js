@@ -1952,9 +1952,17 @@ function proactiveMin() { return (config.getConfig().features && config.getConfi
 ipcMain.handle("pet:get-memory", () => {
   try {
     const facts = memory.getFactsList();
-    logTts("memory", "get-memory 被调用 facts=" + facts.length); // 诊断：设置页记忆区加载
     return { facts, summary: memory.getSummary(), bond: { level: bond.getLevel(), days: bond.getDays() } };
   } catch (e) { logTts("memory", "getMemory 异常: " + (e && e.stack || e)); return { facts: [], summary: "", bond: null }; }
+});
+// 手动添加记忆（设置页记忆管理）：type 用时间戳唯一化，避免同 type 互相覆盖
+ipcMain.handle("pet:add-memory-fact", (_e, text) => {
+  try {
+    const t = String(text || "").trim();
+    if (!t) return { ok: false, message: "内容为空" };
+    memory.addFacts([{ type: "manual-" + Date.now().toString(36), text: t.slice(0, 120) }]);
+    return { ok: true };
+  } catch (e) { return { ok: false, message: String(e && e.message || e) }; }
 });
 ipcMain.handle("pet:delete-memory-fact", (_e, id) => {
   try { memory.deleteFact(String(id || "")); return true; } catch { return false; }

@@ -795,6 +795,20 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
     await window.petAPI.clearMemory();
     refresh();
   });
+  // 手动添加记忆（v2.5.3）：不用等聊天自动提取，直接输入一条
+  const addInput = document.getElementById("mem-add-input");
+  const addBtn = document.getElementById("mem-add-btn");
+  if (addInput && addBtn) {
+    const doAdd = async () => {
+      const v = addInput.value.trim();
+      if (!v) return;
+      const r = await window.petAPI.addMemoryFact(v);
+      if (r && r.ok) { addInput.value = ""; refresh(); }
+      else window.alert((r && r.message) || "添加失败");
+    };
+    addBtn.addEventListener("click", doAdd);
+    addInput.addEventListener("keydown", (e) => { if (e.key === "Enter") doAdd(); });
+  }
   refresh();
 })();
 

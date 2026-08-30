@@ -106,6 +106,7 @@ contextBridge.exposeInMainWorld("petAPI", {
   importSpine: () => ipcRenderer.invoke("pet:import-spine"),
   // v2.5.2 记忆管理
   getMemory: () => ipcRenderer.invoke("pet:get-memory"),
+  addMemoryFact: (text) => ipcRenderer.invoke("pet:add-memory-fact", text), // 手动添加记忆（设置页）
   deleteMemoryFact: (id) => ipcRenderer.invoke("pet:delete-memory-fact", id),
   updateMemoryFact: (id, text) => ipcRenderer.invoke("pet:update-memory-fact", id, text), // 编辑单条记忆（§14 追加 103）
   clearMemory: () => ipcRenderer.invoke("pet:clear-memory"),

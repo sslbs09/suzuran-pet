@@ -98,6 +98,10 @@
         <p class="hint" id="mem-stats" style="margin:6px 0 4px;">加载中…</p>
         <div id="mem-list" style="max-height:180px;overflow:auto;border:1px solid var(--ui-line);border-radius:6px;padding:6px 10px;background:var(--ui-surface);"></div>
         <button id="mem-clear" type="button" style="margin-top:8px;">🗑️ 清空全部记忆</button>
+        <div style="display:flex;gap:6px;margin-top:8px;">
+          <input id="mem-add-input" type="text" placeholder="手动添加一条记忆，如：我喜欢喝咖啡（最多 120 字）" style="flex:1;padding:5px 8px;border:1px solid var(--ui-line);border-radius:6px;background:var(--ui-surface);color:inherit;" />
+          <button id="mem-add-btn" type="button">➕ 添加</button>
+        </div>
       </div>
     </div>
   </section>
@@ -516,13 +520,14 @@
   </section>
   </div>
 
-<script src="i18n.js"></script>
-<script src="settings.js"></script>
-</body>
-</html>
-
+<!-- 悬浮保存按钮（v2.5.1）：必须放在 <script> 之前且在 </body> 内——曾误放 </html> 之后，settings.js 执行时该元素还未解析，getElementById 返回 null 导致脚本中止（记忆管理等后续功能全部失效） -->
 <button id="btn-save-sticky" type="button" title="保存当前通用设置（渲染模式/行走/大小等）">💾 保存</button>
 <style>
   #btn-save-sticky { position: fixed; right: 22px; bottom: 22px; z-index: 999; padding: 10px 22px; border: none; border-radius: 24px; background: linear-gradient(135deg, #2f8f87, #23736d); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: 0 6px 18px rgba(30, 77, 77, .35); }
   #btn-save-sticky:hover { filter: brightness(1.12); transform: translateY(-1px); }
 </style>
+
+<script src="i18n.js"></script>
+<script src="settings.js"></script>
+</body>
+</html>
