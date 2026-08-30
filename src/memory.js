@@ -19,6 +19,13 @@ const MAX_FACTS_INJECT = 12; // 注入条数
 const MAX_SUMMARY_LEN = 300; // 摘要长度封顶
 const MAX_TEXT_LEN = 120;    // 单条事实文本封顶
 
+/* 记忆锚点分类（借鉴 RhodesLink）：把事实归入结构化锚点，注入时分组带标签，模型更易正确使用 */
+const ANCHOR_LABEL = { PLAN: "计划", PREFERENCE: "偏好", TABOO: "禁忌", EVENT: "重要日子", EMOTION: "情绪状态", RELATION: "关系身份" };
+function anchorOf(type) {
+  const map = { name: "RELATION", birthday: "EVENT", pref: "PREFERENCE", health: "EMOTION", event: "PLAN", avoid: "TABOO", pet: "PREFERENCE", job: "RELATION" };
+  return map[type] || "PREFERENCE";
+}
+
 let cache = null;
 let enc = null;      // { encrypt(str)->str, decrypt(str)->str }，由 main.js 注入 safeStorage/DPAPI
 let tamperFlag = false; // 上次加载是否发现损坏/被篡改（解密失败或格式异常）
@@ -132,13 +139,13 @@ function addFacts(newFacts) {
     const sameType = mem.facts.findIndex((x) => x.type === f.type);
     if (sameType >= 0) {
       if (mem.facts[sameType].text !== text) {
-        mem.facts[sameType] = { id: mem.facts[sameType].id || newFactId(), type: f.type, text, ts: Date.now() };
+        mem.facts[sameType] = { id: mem.facts[sameType].id || newFactId(), type: f.type, text, ts: Date.now(), anchor: f.anchor || anchorOf(f.type) };
         changed = true;
       }
       continue;
     }
     if (mem.facts.some((x) => similar(x.text, text))) continue;
-    mem.facts.push({ id: newFactId(), type: f.type, text, ts: Date.now() });
+    mem.facts.push({ id: newFactId(), type: f.type, text, ts: Date.now(), anchor: f.anchor || anchorOf(f.type) });
     changed = true;
   }
   if (mem.facts.length > MAX_FACTS) mem.facts = mem.facts.slice(-MAX_FACTS);
@@ -175,9 +182,9 @@ function clear() {
   save();
 }
 
-/** 设置页列表：{id,type,text}[] */
+/** 设置页列表：{id,type,text,anchor}[] */
 function getFactsList() {
-  return load().facts.map((f) => ({ id: f.id || "", type: f.type || "", text: f.text }));
+  return load().facts.map((f) => ({ id: f.id || "", type: f.type || "", text: f.text, anchor: (f.anchor || anchorOf(f.type || "")) }));
 }
 
 function getSummary() {
@@ -201,14 +208,24 @@ function hasHealthFact() {
 function getText() {
   const mem = load();
   const lines = [];
+  // 锚点分组（借鉴 RhodesLink）：按【计划/偏好/禁忌/重要日子/情绪状态/关系身份】归类注入，模型更易正确使用
+  const byAnchor = new Map();
   for (const f of mem.facts.slice(-MAX_FACTS_INJECT)) {
-    const old = f.ts && Date.now() - f.ts > 90 * 86400000;
-    lines.push((old ? "（以前提过）" : "") + "- " + f.text);
+    const a = f.anchor || anchorOf(f.type || "");
+    if (!byAnchor.has(a)) byAnchor.set(a, []);
+    byAnchor.get(a).push(f);
+  }
+  for (const [a, fs] of byAnchor) {
+    lines.push("【" + (ANCHOR_LABEL[a] || a) + "】");
+    for (const f of fs) {
+      const old = f.ts && Date.now() - f.ts > 90 * 86400000;
+      lines.push((old ? "（以前提过）" : "") + "- " + f.text);
+    }
   }
   const sum = mem.summary.trim();
   if (sum) lines.push("（最近印象：" + sum.slice(0, MAX_SUMMARY_LEN) + "）");
   return lines.length ? "【苏苏洛记得的事】\n" + lines.join("\n") : "";
 }
 
-module.exports = { load, save, init, wasTampered, extractFacts, addFacts, deleteFact, updateFact, clear, getFactsList, getSummary, updateSummary, getText, hasHealthFact,
+module.exports = { load, save, init, wasTampered, extractFacts, addFacts, deleteFact, updateFact, clear, getFactsList, getSummary, updateSummary, getText, hasHealthFact, anchorOf, ANCHOR_LABEL,
   lastLoadError: () => lastLoadError, lastHadData: () => lastHadData };

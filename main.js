@@ -1955,12 +1955,16 @@ ipcMain.handle("pet:get-memory", () => {
     return { facts, summary: memory.getSummary(), bond: { level: bond.getLevel(), days: bond.getDays() } };
   } catch (e) { logTts("memory", "getMemory 异常: " + (e && e.stack || e)); return { facts: [], summary: "", bond: null }; }
 });
-// 手动添加记忆（设置页记忆管理）：type 用时间戳唯一化，避免同 type 互相覆盖
+// 手动添加记忆（设置页记忆管理）：type 用时间戳唯一化避免互相覆盖；先经规则分类器识别类型/锚点/规范化文本
 ipcMain.handle("pet:add-memory-fact", (_e, text) => {
   try {
     const t = String(text || "").trim();
     if (!t) return { ok: false, message: "内容为空" };
-    memory.addFacts([{ type: "manual-" + Date.now().toString(36), text: t.slice(0, 120) }]);
+    const detected = memory.extractFacts(t);
+    const fact = detected.length
+      ? { type: "manual-" + Date.now().toString(36), text: detected[0].text, anchor: memory.anchorOf(detected[0].type) }
+      : { type: "manual-" + Date.now().toString(36), text: t.slice(0, 120) };
+    memory.addFacts([fact]);
     return { ok: true };
   } catch (e) { return { ok: false, message: String(e && e.message || e) }; }
 });

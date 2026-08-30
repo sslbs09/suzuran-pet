@@ -40,7 +40,7 @@ const BOOKS = [
 ];
 
 /**
- * 按文本激活世界书条目。
+ * 按文本激活世界书条目（按命中关键词数降序，更相关优先；最多激活 max 条）。
  * @param {string} text 用户消息
  * @param {Array} books 可注入条目列表（默认内置）
  * @param {number} max 最多激活条数
@@ -52,10 +52,10 @@ function activeWorldInfos(text, books = BOOKS, max = 2) {
   const hit = [];
   for (const b of books) {
     if (!b || !Array.isArray(b.keywords) || !b.content) continue;
-    if (b.keywords.some((k) => k && t.includes(k))) hit.push(b.content);
-    if (hit.length >= max) break;
+    const n = b.keywords.filter((k) => k && t.includes(k)).length;
+    if (n > 0) hit.push({ content: b.content, n });
   }
-  return hit;
+  return hit.sort((a, b) => b.n - a.n).slice(0, max).map((h) => h.content);
 }
 
 module.exports = { BOOKS, activeWorldInfos };

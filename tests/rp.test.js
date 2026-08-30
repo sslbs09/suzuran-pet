@@ -47,6 +47,16 @@ ok("extractFacts 宠物", f.some((x) => x.type === "pet" && x.text.includes("猫
 f = memory.extractFacts("我是软件工程师");
 ok("extractFacts 职业", f.some((x) => x.type === "job" && x.text.includes("工程师")));
 ok("extractFacts 结尾词不误收（不吃了）", memory.extractFacts("我不吃了").every((x) => x.type !== "avoid"));
+/* ---- 记忆锚点分类（借鉴 RhodesLink）：type → 锚点映射 + 注入分组带标签 ---- */
+ok("锚点 avoid→TABOO", memory.anchorOf("avoid") === "TABOO");
+ok("锚点 pref→PREFERENCE", memory.anchorOf("pref") === "PREFERENCE");
+ok("锚点 event→PLAN", memory.anchorOf("event") === "PLAN");
+ok("锚点未知类型回退 PREFERENCE", memory.anchorOf("manual-x") === "PREFERENCE");
+memory.addFacts([{ type: "avoid", text: "博士不吃香菜" }, { type: "pref", text: "博士喜欢喝咖啡" }]);
+const gt = memory.getText();
+ok("getText 锚点分组【禁忌】", gt.includes("【禁忌】") && gt.includes("不吃香菜"));
+ok("getText 锚点分组【偏好】", gt.includes("【偏好】") && gt.includes("咖啡"));
+ok("getFactsList 带 anchor", memory.getFactsList().every((x) => typeof x.anchor === "string" && x.anchor.length > 0));
 // 过期标注：写入一条 100 天前的事实 → getText 含"（以前提过）"
 const MEM = path.join(require("../src/config").STORAGE.userDir, "memory.json");
 fs.writeFileSync(MEM, JSON.stringify({ facts: [{ id: "old1", type: "health", text: "博士最近感冒", ts: Date.now() - 100 * 86400000 }], summary: "" }), "utf8");
