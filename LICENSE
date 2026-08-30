@@ -1,26 +1,32 @@
-开源但禁止商用许可（Non-Commercial Open Source License）
+MIT License
 
-版权所有（Copyright）(c) 2026 NEATB <1598184627@qq.com>
+Copyright (c) 2026 NEATB <1598184627@qq.com>
 
-特此免费授予获得本软件及相关文档文件（以下简称"软件"）副本的任何人
-以使用、复制、修改、合并、出版、分发、再许可及/或销售软件副本的权利，
-但须遵守以下限制条件：
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-1. 【禁止商用】本软件仅允许用于个人学习、研究、非商业目的。
-   禁止将本软件或其修改版本用于任何商业用途，包括但不限于：
-   - 直接或间接销售、出租、租赁本软件；
-   - 将本软件作为商业产品、服务或解决方案的一部分对外提供；
-   - 在经营性、盈利性环境中部署本软件；
-   - 使用本软件进行任何以营利为目的的活动。
-   商业使用须另行获得版权所有者的书面许可。
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-2. 【保留声明】上述版权声明和本许可声明必须包含在软件的所有副本或
-   实质性部分中。
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
-3. 【按原样提供】本软件按"原样"提供，不附带任何明示或暗示的担保，
-   包括但不限于适销性、特定用途适用性和非侵权的保证。在任何情况下，
-   作者或版权持有人均不对因使用本软件而产生的任何索赔、损害或其他
-   责任负责，无论是在合同、侵权或其他方面。
+---
 
-4. 【第三方组件】本软件依赖的第三方开源组件（如 Electron、
-   GPT-SoVITS、Genie、electron-packager、omggif 等）遵循其各自的开源许可。
+关于本许可的说明（非许可正文）：
+
+本软件采用 MIT 许可发布——一种无使用领域限制的宽松许可：
+允许个人与商业使用、修改、分发与再许可，不构成对任何使用领域的歧视。
+
+特别说明（第三方组件与素材）：
+- 本软件依赖的第三方开源组件（如 Electron、GPT-SoVITS、Genie、electron-packager、omggif 等）遵循其各自的开源许可，第三方许可条款优先于本许可。
+- 本软件内置的角色形象、表情等素材版权归其原作者所有，素材的使用范围以原作者的授权为准（MIT 许可覆盖的是本软件的代码部分）。

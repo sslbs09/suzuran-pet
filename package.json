@@ -15,7 +15,7 @@
     "test:secrets": "node scripts/test-config-secrets.js",
     "gen:icon": "node scripts/gen-icon-ico.js"
   },
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "MIT",
   "devDependencies": {
     "electron": "^43.3.0",
     "electron-packager": "^17.1.2",
