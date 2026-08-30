@@ -39,10 +39,16 @@ const PERSONIFY_LINES = {
     "（揉眼睛）{{user}}早安～我梦到你了",
   ],
   // 入睡
-  sleep: [
+  // 入睡台词按时段分档（白天=午休口吻，晚上=晚安）——桌宠白天也会随机睡午觉，不该说"晚安"
+  sleepDay: [
+    "（打了个哈欠）有点困了……博士，我眯一会儿",
+    "（揉眼睛）午休时间到啦，我睡一小会儿～",
     "好困……博士，我先睡一会儿哦",
+  ],
+  sleepNight: [
     "（打了个哈欠）今天也辛苦了……晚安",
     "（哈欠）晚安啦{{user}}，我先睡会儿…",
+    "夜深了……我守着博士，先眯一下下",
   ],
   // 坐上窗口/高处
   perch: [
@@ -158,6 +164,13 @@ function pickTpl(arr, vars = {}) {
           .replace(/\{\{\s*user\s*\}\}/g, vars.user || "主人");
 }
 
+/** 入睡台词按本机时段选择：22:00~次日5:00 说"晚安"，其余时段说"午休/眯一会儿" */
+function pickSleepLine(vars = {}) {
+  const h = new Date().getHours();
+  const pool = (h >= 22 || h < 5) ? PERSONIFY_LINES.sleepNight : PERSONIFY_LINES.sleepDay;
+  return pickTpl(pool, vars);
+}
+
 /** 关系阶段专属台词（bond 阶段：fd=熟悉 / xl=信赖 / sy=誓约） */
 const STAGE_LINES = {
   fd: [
@@ -207,7 +220,7 @@ module.exports = {
   WORKFLOW_LINES,
   PROACTIVE_BY_PERIOD,
   LONG_IDLE_LINES,
-  pickTpl, STAGE_LINES, EARLY_MORNING_LINES, pick,
+  pickTpl, pickSleepLine, STAGE_LINES, EARLY_MORNING_LINES, pick,
   periodOf,
   throttled,
 };

@@ -1367,7 +1367,9 @@ function maybePersonify(event, { chance = 0.3, cooldownMs = 60000 } = {}) {
   const pool = lines.PERSONIFY_LINES[event];
   if (!pool || !pool.length) return;
   personifyCooldowns[event] = Date.now();
-  sendProactive(lines.pickTpl(pool, chatVars()), "happy");
+  // 入睡台词按时段（白天=午休口吻，晚上=晚安），见 lines.pickSleepLine
+  const line = event === "sleep" ? lines.pickSleepLine(chatVars()) : lines.pickTpl(pool, chatVars());
+  sendProactive(line, "happy");
 }
 /** 观察 AI 工作流（v2.3）：Agent 接口被外部 AI/脚本调用时，偶尔小声嘀咕 */
 const workflowCalls = [];
