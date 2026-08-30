@@ -357,6 +357,10 @@ async function ensureGenieServer(q) {
     return await genieEnsurePromise;
   } finally {
     genieEnsurePromise = null;
+    if (!genieServerUp) {
+      // 启动失败自愈：60s 后清缓存允许重新拉起（避免一次失败导致整会话没声音、一直系统音兜底）
+      setTimeout(() => { if (!genieServerUp) resetGenieServer(); }, 60000);
+    }
   }
 }
 

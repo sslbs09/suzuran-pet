@@ -1163,14 +1163,22 @@ ipcMain.handle("pet:voice-status", async () => {
   const g = cfg.ttsGenie || {};
   if (!g.python || !g.serverScript) return { deployed: false };
   const base = String(g.server || "http://127.0.0.1:9881").replace(/\/+$/, "");
-  try {
-    const r = await fetch(base + "/status", { signal: AbortSignal.timeout(3000) });
-    if (!r.ok) return { deployed: true, ready: false, fail: "服务器 HTTP " + r.status };
-    const j = await r.json();
-    return { deployed: true, ready: !!j.ready, character: j.character || "", fail: j.fail || "" };
-  } catch (e) {
-    return { deployed: true, ready: false, fail: "服务器未响应（未启动？）" };
-  }
+  const ping = async (timeoutMs) => {
+    try {
+      const r = await fetch(base + "/status", { signal: AbortSignal.timeout(timeoutMs) });
+      if (!r.ok) return { deployed: true, ready: false, fail: "服务器 HTTP " + r.status };
+      const j = await r.json();
+      return { deployed: true, ready: !!j.ready, character: j.character || "", fail: j.fail || "" };
+    } catch { return null; }
+  };
+  const quick = await ping(3000);
+  if (quick) return quick; // 服务器在（就绪或模型加载中）→ 原样报告，不动它
+  // 服务器未响应 → 清缓存强制重新拉起（音色克隆窗口打开时自动启动；模型加载约 1~2 分钟）
+  try { tts.resetGenieServer(); } catch { /* 忽略 */ }
+  try { tts.ensureGenieServer(g).catch(() => {}); } catch { /* 忽略 */ }
+  const after = await ping(8000);
+  if (after) return after;
+  return { deployed: true, ready: false, fail: "服务器未响应，已尝试拉起（模型加载约 1~2 分钟，稍后重试；持续失败请查看 engines/genie/server.log）" };
 });
 
 ipcMain.handle("pet:apply-voice", async (_e, { audioPath, text }) => {
