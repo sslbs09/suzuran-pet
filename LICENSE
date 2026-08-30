@@ -1,32 +1,79 @@
-MIT License
+Business Source License 1.1
 
-Copyright (c) 2026 NEATB <1598184627@qq.com>
+License text copyright (c) 2017 MariaDB Corporation Ab, All Rights Reserved.
+"Business Source License" is a trademark of MariaDB Corporation Ab.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+-----------------------------------------------------------------------------
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Parameters
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+Licensor:             NEATB <1598184627@qq.com>
+Licensed Work:        苏苏洛桌宠 SuzuranPet 2.5.0
+Additional Use Grant: 允许个人学习、研究及非商业使用（允许复制、修改、
+                      非商业分发；禁止任何形式的商业用途，包括但不限于
+                      销售、出租、作为商业产品或服务的一部分对外提供、
+                      在经营性环境中部署）
+Change Date:          The date four years after the first publicly available
+                      distribution of this version of the Licensed Work,
+                      or 2030-08-30, whichever comes first.
+Change License:       MIT License
 
----
+For information about alternative licensing arrangements for the Software,
+please visit https://github.com/sslbs09/suzuran-pet or contact
+1598184627@qq.com.
 
-关于本许可的说明（非许可正文）：
+-----------------------------------------------------------------------------
 
-本软件采用 MIT 许可发布——一种无使用领域限制的宽松许可：
-允许个人与商业使用、修改、分发与再许可，不构成对任何使用领域的歧视。
+Terms
+
+The Licensor hereby grants you the right to copy, modify, create derivative
+works, redistribute, and make non-production use of the Licensed Work. The
+Licensor may make an Additional Use Grant, above, permitting limited
+production use.
+
+Effective on the Change Date, or the fourth anniversary of the first
+publicly available distribution of a given version of the Licensed Work
+whichever comes first, the Licensor hereby grants you rights under the
+terms of the Change License, and the rights granted in the paragraph above
+terminate.
+
+If your use of the Licensed Work does not comply with the requirements
+currently in effect as described in this License, you must purchase a
+commercial license from the Licensor, its affiliated entities, or
+authorized resellers, or you must refrain from using the Licensed Work.
+
+All copies of the original and modified Licensed Work, and derivative
+works of the Licensed Work, are subject to this License. This License will
+apply each time an individual, legal entity, or organization makes use of
+the Licensed Work for any use whatsoever.
+
+All notices, attribution, and trademarks of the Licensed Work must be
+retained.
+
+The Licensor is not liable for any damages or claims arising from the use
+of the Licensed Work, including but not limited to direct, indirect,
+incidental, and consequential damages.
+
+The Licensed Work is provided "AS IS" basis, WITHOUT WARRANTY OF ANY KIND,
+either express or implied, including, but not limited to, warranties of
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, and NON-INFRINGEMENT.
+
+-----------------------------------------------------------------------------
+
+关于本许可的中文说明（非许可正文，仅便于理解；以英文正文为准）：
+
+- 本软件采用 **BUSL-1.1（Business Source License）** 发布，属于"源代码可得"
+  （Source-Available）许可，而非传统意义的"开源许可"。
+- 您可以查看、复制、修改本软件源码，并用于个人学习、研究等非商业用途；
+  **禁止将本软件或其修改版本用于商业用途**（销售、出租、作为商业产品或
+  服务的一部分对外提供、在经营性环境中部署等）。
+- 自首次公开发布之日起满 4 年（或 2030-08-30，以先到者为准），本软件
+  自动转为 **MIT 许可**，届时允许包括商业在内的一切使用。
+- 商业使用需要另行联系版权所有者（1598184627@qq.com）获得商业许可。
 
 特别说明（第三方组件与素材）：
-- 本软件依赖的第三方开源组件（如 Electron、GPT-SoVITS、Genie、electron-packager、omggif 等）遵循其各自的开源许可，第三方许可条款优先于本许可。
-- 本软件内置的角色形象、表情等素材版权归其原作者所有，素材的使用范围以原作者的授权为准（MIT 许可覆盖的是本软件的代码部分）。
+- 本软件依赖的第三方开源组件（如 Electron、GPT-SoVITS、Genie、
+  electron-packager、omggif 等）遵循其各自的开源许可，第三方许可条款
+  优先于本许可。
+- 本软件内置的角色形象、表情等素材版权归其原作者所有，素材的使用范围
+  以原作者的授权为准（本许可覆盖的是本软件的代码部分）。
