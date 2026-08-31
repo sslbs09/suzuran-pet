@@ -52,5 +52,5 @@ body:
     id: logs
     attributes:
       label: 日志（可选）
-      description: 出问题时的日志：`%APPDATA%\苏苏洛桌宠 2.5 正式版\logs\tts.log` 或 `E:\SuzuranPetData-Roaming-2.5\logs\tts.log` 最后 30 行
+      description: 出问题时的日志：`%APPDATA%\苏苏洛桌宠 2.5 正式版\logs\tts.log` 最后 30 行
       render: text

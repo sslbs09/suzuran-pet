@@ -13,7 +13,7 @@
 ![平台](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows-blue)
 ![许可](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF-BUSL--1.1%20%E7%A6%81%E6%AD%A2%E5%95%86%E7%94%A8-lightgrey)
 
-[**⬇ 下载**](#-下载) ｜ [快速开始](#-四步开始) ｜ [English](README_EN.md)
+[**⬇ 下载**](#-下载) ｜ [快速开始](#-四步开始) ｜ [🌐 官网](https://sslbs09.github.io/suzuran-pet/) ｜ [English](README_EN.md)
 
 </div>
 
@@ -23,13 +23,14 @@
 
 | 版本 | 大小 | 语音 | 获取 |
 | --- | --- | --- | --- |
-| **轻量版** | 约 248 MB | ❌ 不含引擎，可自行部署 | [GitHub Releases](https://github.com/sslbs09/suzuran-pet/releases/latest) |
-| **完整版** | 约 15 GB | ✅ 含中文 + 日语引擎，开箱即说 | 见 [Releases 页](https://github.com/sslbs09/suzuran-pet/releases) 公告（网盘分发） |
-| **皮肤包** | — | 38 款皮肤补装 | 见 [Releases 页](https://github.com/sslbs09/suzuran-pet/releases) 公告 |
+| **轻量版** | 约 220 MB | ❌ 不含引擎，可自行部署 | [GitHub Releases](https://github.com/sslbs09/suzuran-pet/releases/latest) |
+| **完整版** | 约 16 GB | ✅ 含中文 + 日语引擎，开箱即说 | 联系 **1598184627@qq.com** |
+| **皮肤包** | 约 96 MB | 38 款皮肤补装 | [Releases 皮肤包资产](https://github.com/sslbs09/suzuran-pet/releases/download/v2.5.18/SuzuranPet-2.5.0-SkinPack.zip) |
 
 > ⚠️ GitHub 单文件上限 2 GB，这里只能放**轻量版**。
-> 想要「解压就能听见她说话」，请在 Releases 页公告处获取**完整版**。
+> 想要「解压就能听见她说话」，请联系邮箱获取**完整版**。
 > 两种版本聊天功能完全一样，差别只在语音引擎。
+> 皮肤包解压到 `resources/app/renderer/sprites/` 即可补装 38 款皮肤。
 
 ## ✨ 她能做什么
 
@@ -160,6 +161,14 @@
 - **首次运行被 SmartScreen 拦截**是未购买商业代码签名证书的正常现象，点「仍要运行」即可。
 - **语音默认状态**：完整版出厂即开（引擎随包）；轻量版默认关闭，部署引擎后可开。
 - 隐私政策见 [`PRIVACY.md`](PRIVACY.md)，使用条款见 [`TERMS.md`](TERMS.md)，许可证见 [`LICENSE`](LICENSE)（BUSL-1.1：源代码可得、禁止商用）。
+
+## 📚 文档
+
+- 🌐 **官网**：[sslbs09.github.io/suzuran-pet](https://sslbs09.github.io/suzuran-pet/)（开箱必读 / 使用说明 / API 接入 / 语音部署）
+- 🐣 **新手教程**：[`新手教程/快速开始.md`](新手教程/快速开始.md)（Key 去哪领、怎么填、常见故障）｜完整 8 篇在应用内文档中心或官网
+- 🔌 **API 接入指南**：[`API接入指南.html`](API接入指南.html)
+- 🎙 **语音部署与训练**：[`语音部署与训练指南/`](语音部署与训练指南/)
+- 📦 **项目结构**：[`PROJECT-STRUCTURE.md`](PROJECT-STRUCTURE.md) ｜ **安全策略**：[`SECURITY.md`](SECURITY.md) ｜ **免责声明**：[`DISCLAIMER.md`](DISCLAIMER.md)
 
 ## 📜 更新日志
 
