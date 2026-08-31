@@ -16,10 +16,6 @@ Additional Use Grant: Personal, academic, and non-commercial use only —
                       a commercial product or service, deployment in a
                       profit-making environment) is prohibited without a
                       separate commercial license from the Licensor.
-                      中文：允许个人学习、研究及非商业使用（允许复制、修改、
-                      非商业分发；禁止任何形式的商业用途，包括但不限于
-                      销售、出租、作为商业产品或服务的一部分对外提供、
-                      在经营性环境中部署）；商业使用须另行获得书面许可。
 Change Date:          The date four years after the first publicly available
                       distribution of this version of the Licensed Work,
                       or 2030-08-30, whichever comes first.
@@ -64,6 +60,33 @@ incidental, and consequential damages.
 The Licensed Work is provided "AS IS" basis, WITHOUT WARRANTY OF ANY KIND,
 either express or implied, including, but not limited to, warranties of
 MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, and NON-INFRINGEMENT.
+
+The text of this license, the Business Source License 1.1, is made available
+for use and modification by third parties subject to the following
+conditions (the "Covenants of Licensor"):
+
+1. The Licensor covenants that, to the extent the Licensed Work is made
+   available to third parties under the terms of this License, the Licensor
+   will include in the Licensed Work a notice that the Licensed Work is
+   made available under the terms of the Business Source License 1.1.
+
+2. The Licensor covenants that, to the extent the Licensed Work is made
+   available to third parties under the terms of this License, the Licensor
+   will specify the Change License and the Change Date in the Licensed Work.
+
+3. The Licensor covenants that, to the extent the Licensed Work is made
+   available to third parties under the terms of this License, the Licensor
+   will specify an Additional Use Grant in the Licensed Work, or will state
+   that no Additional Use Grant applies.
+
+The Licensor further covenants that the Change License specified in the
+Licensed Work is a license that is compatible with the GNU Affero General
+Public License version 3 or the GNU General Public License version 3, or a
+later version of either license, or is a license that permits relicensing
+of the Licensed Work under the GNU Affero General Public License version 3
+or the GNU General Public License version 3, or a later version of either
+license, for the purpose of providing the source code of the Licensed Work
+to the public.
 
 -----------------------------------------------------------------------------
 

@@ -47,37 +47,41 @@ jobs:
           Compress-Archive -Path $folder.FullName -DestinationPath $zip -Force
           Write-Host "已生成: $zip"
 
+      - name: 生成 Release 正文（从 CHANGELOG 抽取本版本段落）
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}"            # 如 v2.5.18
+          $notes = Get-Content CHANGELOG.md -Raw
+          # 抽取当前版本段落：从 "## $ver" 到下一个 "## v" 之前
+          $match = [regex]::Match($notes, "(?s)## $ver.*?(?=\n## v|\z)")
+          if (-not $match.Success) { Write-Error "CHANGELOG.md 中未找到 $ver 段落"; exit 1 }
+          $chunk = $match.Value.Trim()
+          $header = @"
+# 苏苏洛桌宠 $ver 正式版
+
+🩺 罗德岛医疗干员苏苏洛，从终端走出来，在桌面上陪你工作。
+
+## 📥 下载说明
+- 本资产为**轻量版**（不含语音引擎，约 220 MB）：下载后到「语音设置」按《语音部署与训练指南》部署引擎即可获得完整语音
+- **皮肤包**：见下方资产 `SuzuranPet-$ver-SkinPack.zip`（若有），解压到 `resources/app/renderer/sprites/` 即可
+- **完整版**（含全部语音引擎约 16 GB，解压即说话）：请联系 **1598184627@qq.com** 获取
+- 替换升级：直接覆盖 `resources/app.asar` 并重启即可保留原配置
+
+## 🐛 更新日志（本版）
+
+$chunk
+
+## ⚖️ 许可
+**BUSL-1.1（源代码可得）**：允许个人学习、研究、非商业使用；禁止商用；自首次发布满 4 年后自动转为 MIT。使用前请阅读并同意 TERMS.md。
+"@
+          $header | Set-Content -Path RELEASE_NOTES.md -Encoding UTF8
+          Write-Host "RELEASE_NOTES.md 已生成（含 CHANGELOG $ver 段落）"
+
       - name: 上传到 GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
           name: "苏苏洛桌宠 ${{ github.ref_name }} 正式版"
-          body: |
-            # 苏苏洛桌宠 ${{ github.ref_name }} 正式版
-
-            🩺 罗德岛医疗干员苏苏洛，从终端走出来，在桌面上陪你工作。
-
-            ## ✨ 核心亮点
-            - **桌面行走**：在任务栏/窗口边缘散步、坐下、跳跃；拖拽抛掷有物理反馈
-            - **克隆音色语音**：中文（GenieTTS）与日语（GPT-SoVITS v2Pro）本地推理，苏苏洛训练成品随包（完整版解压即说话）
-            - **日语语音模式**：说话先翻译成日语（界面文字保持中文），失败自动重试，不打扰
-            - **长期记忆 + 羁绊系统**：记得你说过的事，相处越久越亲密
-            - **四套渲染**：Spine 2D / 2.5D 摆件 / Live2D / 经典 GIF
-            - **本地 Agent 接口**：其他 AI/脚本可通过 127.0.0.1 调用她（可关闭、可鉴权）
-            - **界面三语**：中文 / English / 日本語 一键切换
-
-            ## 📥 下载说明
-            - 本资产为**轻量版**（不含语音引擎，~248 MB）：下载后到「语音设置」按《语音部署与训练指南》部署引擎即可获得完整语音
-            - **完整版**（含引擎约 16 GB）与**皮肤包**由发布者在 Release 公告/网盘提供
-            - 替换升级：直接覆盖 `resources/app.asar` 并重启即可保留原配置
-
-            ## 🐛 本版修复（节选）
-            - 首启「同意后退出」：点同意不再被误判为拒绝而退出应用
-            - 重复台词翻译失败不再固定走系统音：失败进池 10s 冷却后自动重新翻译
-            - 全新安装 config.json 不再被建成空目录（持久化失效 P0）
-            - 托盘菜单分组重构；日语模式关闭中文引擎（省 ~4.7G 内存）
-
-            ## ⚖️ 许可
-            **BUSL-1.1（源代码可得）**：允许个人学习、研究、非商业使用；禁止商用；自首次发布满 4 年后自动转为 MIT。使用前请阅读并同意 TERMS.md。
+          body_path: RELEASE_NOTES.md
           files: "SuzuranPet-${{ github.ref_name }}-win32-x64.zip"
           generate_release_notes: false
           fail_on_unmatched_files: true
