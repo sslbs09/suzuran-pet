@@ -13,8 +13,9 @@ const path = require("path");
 const config = require("./config");
 
 const MAX_OUTPUT = 64 * 1024;
-const CLI_CONFIG_PATH = path.join(process.env.USERPROFILE || "C:\\Users\\xsbil", ".zcode", "cli", "config.json");
-const V2_CONFIG_PATH = path.join(process.env.USERPROFILE || "C:\\Users\\xsbil", ".zcode", "v2", "config.json");
+const os = require("os");
+const CLI_CONFIG_PATH = path.join(os.homedir(), ".zcode", "cli", "config.json");
+const V2_CONFIG_PATH = path.join(os.homedir(), ".zcode", "v2", "config.json");
 
 /** 从 ZCode v2 配置提取 deepseek provider 定义（不含 key）与 key */
 function readDeepseekFromV2() {

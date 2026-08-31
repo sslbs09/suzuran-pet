@@ -17,8 +17,9 @@ const STORAGE = storage.initializeStorage();
 const CONFIG_PATH = STORAGE.config;
 const PERSONA_PATH = STORAGE.persona;
 const PERSONA_DEFAULT_PATH = STORAGE.personaDefault;
-const ZCODE_V2_CONFIG = path.join(process.env.USERPROFILE || "C:\\Users\\xsbil", ".zcode", "v2", "config.json");
-const DEFAULT_WORKSPACE = path.join(process.env.USERPROFILE || "C:\\Users\\xsbil", ".zcode", "workspace", "default");
+const os = require("os");
+const ZCODE_V2_CONFIG = path.join(os.homedir(), ".zcode", "v2", "config.json");
+const DEFAULT_WORKSPACE = path.join(os.homedir(), ".zcode", "workspace", "default");
 
 const DEFAULT_MOODS = [
   { name: "idle1", label: "待机1", emotion: false },
@@ -214,7 +215,7 @@ function detectApiKeyFromZcode() {
 /** 从 vision 技能 .env 读取 DashScope（百炼）API Key */
 function detectDashScopeKey() {
   try {
-    const p = path.join(process.env.USERPROFILE || "C:\\Users\\xsbil", ".zcode", "skills", "vision", ".env");
+    const p = path.join(os.homedir(), ".zcode", "skills", "vision", ".env");
     if (!fs.existsSync(p)) return "";
     for (const line of fs.readFileSync(p, "utf8").split(/\r?\n/)) {
       const m = line.match(/^\s*DASHSCOPE_API_KEY\s*=\s*(.+?)\s*$/);

@@ -108,6 +108,7 @@ let termsWin = null; // 使用条款确认窗口
 let scheduleWin = null; // 日程管理窗口
 let psdWin = null;      // PSD 角色工具窗口（v2.1）
 let agentApiAbort = null; // Agent 接口当前请求的中止控制器
+let agentLastSeenFlushAt = 0; // Agent lastSeen 落盘节流（P2-3：60s 内最多写一次 config.json）
 let agentTaskStatus = { state: "idle", text: "", since: 0 }; // 反幻觉任务状态：仅真实信息（zcode 任务），供气泡展示与 /status 接口
 let agentAskQueue = createAskQueue(3);   // /chat 串行化并发锁（v2.6：防双发双倍 API 费 + 历史乱序；队列满 429 兜底）
 let activeReq = null; // { id, sender, abort }
@@ -1077,6 +1078,8 @@ async function readAgentJson(req, maxBytes) {
 function startAgentApi() {
   const a = config.getConfig().agentApi || {};
   if (!a.enabled) return;
+  // v2.5.22 优化（P2-3）：Agent lastSeen 落盘节流状态（60s 内最多写一次 config）
+  agentLastSeenFlushAt = 0;
   // v2.5.22 安全加固（P1-4）：master token 与 clients 都为空时自动生成随机 token——
   // 杜绝"本机任何进程可无认证调用 /chat 消耗 LLM 额度"的零认证缺口。
   // token 走 secrets（DPAPI 加密），config.json 只存指纹不落明文。
@@ -1118,7 +1121,12 @@ function startAgentApi() {
       if (needsAuth && !authOk) { send(401, { ok: false, error: "unauthorized" }, { "WWW-Authenticate": "Bearer" }); return; }
       if (clientHit) { // 接入名单：记录该 agent 最近活跃（在线状态展示）
         clientHit.lastSeen = Date.now();
-        config.saveConfig({ agentApi: { ...apiCfg, clients } });
+        // v2.5.22 优化（P2-3）：lastSeen 高频更新只改内存，60s 节流落盘——避免每次请求全量重写 config.json（磨损 SSD）
+        const _now = Date.now();
+        if (!agentLastSeenFlushAt || _now - agentLastSeenFlushAt >= 60000) {
+          agentLastSeenFlushAt = _now;
+          config.saveConfig({ agentApi: { ...apiCfg, clients } });
+        }
       }
       if (url.pathname === "/health") {
         send(200, { ok: true, name: (cfg.pet || {}).name || "苏苏洛", invokeWord: apiCfg.invokeWord || "", authRequired: needsAuth }); // v2.6 收敛：不暴露 agreed
@@ -1460,11 +1468,15 @@ function maybeWorkflowComment() {
 }
 
 /* ---------- 感知工作区活动（v2.5.3）：她会在你改代码时小声嘀咕 ----------
- * 只读轮询监听（不写文件、不上传）：每 5s 扫描配置目录的 mtime 签名，
- * 有变化且冷却已过 → 从 WORKFLOW_LINES 嘀咕一句。排除 node_modules/.git 等大目录。 */
+ * 只读监听（不写文件、不上传）：v2.5.22 改为 fs.watch 事件驱动 + 防抖——
+ * 此前每 5s 全树同步遍历（readdirSync+statSync）大目录会周期性阻塞主进程；
+ * 现在文件变更事件触发，防抖窗口合并，冷却已过才嘀咕。排除 node_modules/.git 等大目录。 */
 let wsWatchTimer = null;
 let wsWatchSig = null;
 let wsWatchThrottle = null;
+let wsWatchers = []; // fs.FSWatcher[] 当前注册的 watcher（多个目录）
+let wsDebounceTimer = null;
+let wsPending = false;
 const WS_WATCH_EXCLUDE = new Set(["node_modules", ".git", "release", "dist", "engines", "voice", "_backups", ".mimosa", "outputs", "logs"]);
 function wsWatchDirs() {
   const cfg = config.getConfig();
@@ -1472,6 +1484,66 @@ function wsWatchDirs() {
   const dirs = (Array.isArray(w.dirs) && w.dirs.length) ? w.dirs : [cfg.workspace || ""];
   return dirs.filter((d) => d && fs.existsSync(d));
 }
+function wsWatchable(p) {
+  const parts = String(p || "").split(/[\\/]/);
+  return !parts.some((seg) => seg.startsWith(".") || WS_WATCH_EXCLUDE.has(seg));
+}
+function wsDebounceFire() {
+  wsPending = false;
+  if (wsWatchThrottle()) {
+    const line = lines.pickTpl(lines.WORKFLOW_LINES, chatVars());
+    sendProactive(line, "idle");
+    logTts("watch", "工作区活动 → " + line);
+  }
+}
+function startWorkspaceWatch(cfg0) {
+  stopWorkspaceWatch();
+  const w = (cfg0 && cfg0.features && cfg0.features.workspaceWatch) || {};
+  const cooldownMs = Math.max(60, Number(w.cooldownMin) || 5) * 60 * 1000;
+  wsWatchThrottle = lines.throttled(cooldownMs);
+  // fs.watch 递归监听（Windows 支持 recursive）：事件驱动，替代 5s 全树轮询
+  for (const d of wsWatchDirs()) {
+    try {
+      const watcher = fs.watch(d, { recursive: true }, (_ev, name) => {
+        try {
+          if (!wsWatchable(String(name || ""))) return;
+          if (wsPending) return; // 防抖窗口内合并
+          wsPending = true;
+          clearTimeout(wsDebounceTimer);
+          wsDebounceTimer = setTimeout(wsDebounceFire, 800);
+        } catch { /* 忽略 */ }
+      });
+      wsWatchers.push(watcher);
+    } catch { /* 单目录监听失败不影响其他 */ }
+  }
+  // 兜底：fs.watch 在某些网络盘/特殊目录不可靠，保留低频轮询（30s）作后备
+  wsWatchSig = null;
+  wsWatchTimer = setInterval(() => {
+    try {
+      if (wsWatchers.length === 0 && wsWatchDirs().length) {
+        // watcher 全部失败 → 回退轮询（原 5s 逻辑，但 30s 低频）
+        const sig = wsScanSignature();
+        if (sig !== wsWatchSig) {
+          wsWatchSig = sig;
+          if (wsWatchThrottle()) {
+            const line = lines.pickTpl(lines.WORKFLOW_LINES, chatVars());
+            sendProactive(line, "idle");
+            logTts("watch", "工作区活动 → " + line);
+          }
+        }
+      }
+    } catch { /* 忽略 */ }
+  }, 30000);
+  logTts("watch", "感知工作区活动已启动（fs.watch 事件驱动）: " + wsWatchDirs().join(" | "));
+}
+function stopWorkspaceWatch() {
+  if (wsWatchTimer) { clearInterval(wsWatchTimer); wsWatchTimer = null; }
+  if (wsDebounceTimer) { clearTimeout(wsDebounceTimer); wsDebounceTimer = null; }
+  wsPending = false;
+  for (const w of wsWatchers) { try { w.close(); } catch { /* 忽略 */ } }
+  wsWatchers = [];
+}
+/** 全树签名（保留给 fs.watch 不可用时的低频兜底轮询） */
 function wsScanSignature() {
   let count = 0, sum = 0, max = 0;
   const walk = (dir) => {
@@ -1491,30 +1563,6 @@ function wsScanSignature() {
   };
   for (const d of wsWatchDirs()) walk(d);
   return count + "|" + sum + "|" + max;
-}
-function startWorkspaceWatch(cfg0) {
-  stopWorkspaceWatch();
-  const w = (cfg0 && cfg0.features && cfg0.features.workspaceWatch) || {};
-  const cooldownMs = Math.max(60, Number(w.cooldownMin) || 5) * 60 * 1000;
-  wsWatchThrottle = lines.throttled(cooldownMs);
-  wsWatchSig = wsScanSignature();
-  wsWatchTimer = setInterval(() => {
-    try {
-      const sig = wsScanSignature();
-      if (sig !== wsWatchSig) {
-        wsWatchSig = sig;
-        if (wsWatchThrottle()) {
-          const line = lines.pickTpl(lines.WORKFLOW_LINES, chatVars());
-          sendProactive(line, "idle");
-          logTts("watch", "工作区活动 → " + line);
-        }
-      }
-    } catch { /* 忽略 */ }
-  }, 5000);
-  logTts("watch", "感知工作区活动已启动: " + wsWatchDirs().join(" | "));
-}
-function stopWorkspaceWatch() {
-  if (wsWatchTimer) { clearInterval(wsWatchTimer); wsWatchTimer = null; }
 }
 
 /* ---------- 对话核心 ---------- */
@@ -3511,13 +3559,15 @@ ipcMain.on("pet:set-sleeping", (_e, v) => {
   walk.sleeping = !!v;
   if (walk.sleeping) { cancelFlight(); cancelWalkJump(); }
   // v2.5.21c 修复：睡觉躺下变矮，窗口底边仍贴地 → 视觉上"陷入任务栏中间"。
-  // 入睡时把窗口底边抬到任务栏上沿（躺姿高度≈站立 60%，上抬窗口高度 40% 让脚落在任务栏上沿）；
-  // 醒来恢复站立贴地。
+  // 入睡时把窗口底边抬到任务栏上沿（躺姿高度≈站立 75%，上抬窗口高度 lift 让脚落在任务栏上沿）；
+  // 醒来恢复站立贴地。lift 默认 0.15，可在 config.json 的 walk.sleepLift 微调（0=不抬 0.3=抬 30%）。
   if (win && !win.isDestroyed() && config.getConfig().renderMode === "spine") {
     const b = win.getBounds();
     const wa = walkGeo.workAreaOf(screen, b);
     const standY = wa.y + wa.height + walk.groundGap - b.height; // 站立贴地（底边=任务栏上沿+gap）
-    const sleepY = standY - Math.round(b.height * 0.4);          // 躺下：窗口整体上抬 40% 高，脚落在任务栏上沿
+    const lift = Number((config.getConfig().walk || {}).sleepLift);
+    const liftRatio = Number.isFinite(lift) && lift >= 0 && lift <= 0.5 ? lift : 0.15;
+    const sleepY = standY - Math.round(b.height * liftRatio);
     const targetY = v ? sleepY : standY;
     if (Math.abs(b.y - targetY) > 1) win.setPosition(b.x, Math.round(targetY));
   }

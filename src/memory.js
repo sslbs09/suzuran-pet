@@ -83,7 +83,7 @@ function newFactId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
-/** 简单去重：新事实与已有事实文本重叠比例 */
+/** 简单去重：新事实与已有事实"短串是长串的连续子串且占比>60%"视为重复（v2.5.22 注释修正：子串匹配，非字符级重叠） */
 function similar(a, b) {
   if (!a || !b) return false;
   const s = a.length <= b.length ? a : b;

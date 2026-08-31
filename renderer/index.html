@@ -50,8 +50,8 @@
 <script src="rp-render.js"></script>
 <script src="pixi.min.js"></script>
 <script src="pixi-spine.js"></script>
-<script src="live2dcubismcore.min.js"></script>
-<script src="pixi-live2d.min.js"></script>
+<script src="live2dcubismcore.min.js" onerror="console.warn('[live2d] Core 缺失（克隆仓库未含 Live2D 专有文件），Live2D 模式降级不可用')"></script>
+<script src="pixi-live2d.min.js" onerror="console.warn('[live2d] pixi-live2d 加载失败，Live2D 模式降级不可用')"></script>
 <script src="live2d-runtime.js"></script>
 <script src="../node_modules/ag-psd/dist/bundle.js"></script>
 <script src="rig/rigger.js"></script>

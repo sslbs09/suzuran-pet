@@ -17,7 +17,12 @@ function mdToHtml(src) {
   const inline = (t) => t
     .replace(/`([^`]+)`/g, (m, c) => "<code>" + esc(c) + "</code>")
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, label, url) => {
+      // v2.5.22 安全（P2-5）：只允许 http/https/mailto 链接，javascript:/data: 等危险协议转纯文本
+      const u = String(url || "").trim();
+      if (/^(https?:\/\/|mailto:)/i.test(u)) return '<a href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">' + label + "</a>";
+      return label + "（" + esc(u) + "）"; // 危险协议不生成链接
+    })
     .replace(/\*([^*]+)\*/g, "<em>$1</em>");
 
   const closeList = () => {

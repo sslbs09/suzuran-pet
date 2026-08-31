@@ -940,10 +940,16 @@ function stopReveal() {
 function startReveal(full, offset) {
   stopReveal();
   typing = true;
+  // v2.5.22 优化（P2-4）：打字期间用 textContent 增量追加（O(n)），
+  // 不再每 14ms 全量 innerHTML 重建（长回复 O(n²) 重解析）。结束后一次性富渲染 RP 格式。
+  bubbleText.textContent = full.slice(0, offset);
   revealTimer = setInterval(() => {
     offset = Math.min(full.length, offset + 3);
-    bubbleText.innerHTML = renderRpSlice(full, offset);
-    if (offset >= full.length) stopReveal();
+    bubbleText.textContent = full.slice(0, offset); // 纯文本增量：无标签断裂风险
+    if (offset >= full.length) {
+      stopReveal();
+      bubbleText.innerHTML = renderRpSlice(full, full.length); // 完成后富渲染一次（*动作*/（动作）斜体）
+    }
   }, 14);
 }
 
