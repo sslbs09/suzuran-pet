@@ -2699,21 +2699,8 @@ function getSeatSink() { return walkGeo.seatSinkOf(clampScale((config.getConfig(
  * 角色渲染在窗口右侧条带内、左侧是气泡预留区：按 charInset 放宽左边界，让角色能贴到屏幕左缘；
  * 坐/走时长在设置页调上限（保底随机），每个相位调度时实时读配置，改了立即生效。 */
 function safeSetPosition(x, y, source = "position") {
-  if (!win || win.isDestroyed()) return false;
-  // 允许 x 为负（贴屏幕左缘），只拦截 NaN/越界
-  const px = Math.round(Number(x)) || 0, py = Math.round(Number(y)) || 0; // ||0 归一化 -0
-  if (!Number.isSafeInteger(px) || !Number.isSafeInteger(py) || Math.abs(px) > 1000000 || Math.abs(py) > 1000000) {
-    logTts("walk", source + " 坐标越界：x=" + px + " y=" + py);
-    return false;
-  }
-  try { win.setPosition(px, py); applyLayerThrottled(); return true; }
-  catch (e) {
-    if (Date.now() - (safeSetPosition._lastLog || 0) > 5000) { // 节流：防连续失败刷爆日志
-      safeSetPosition._lastLog = Date.now();
-      logTts("walk", source + " setPosition 失败：" + (e && e.message || e) + " px=" + px + " py=" + py + " raw=(" + x + "," + y + ")");
-    }
-    return false;
-  }
+  // v2.5.22d 合并（技术债 #5）：与 walkSetPosition 实现完全相同，收敛为别名
+  return walkSetPosition(x, y, source);
 }
 function clampWalkX(x, wa, width) { return walkGeo.clampWalkX(x, wa, width, walk.edgeLeft, walk.charInset); }
 function walkSpan() { return walkGeo.spanOf(() => screen.getAllDisplays(), config.getConfig().walkGlobal); }

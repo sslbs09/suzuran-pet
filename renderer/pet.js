@@ -2058,6 +2058,9 @@ function onDragStart(e) {
   wake();
   if (e.button !== 0) return;
   clearTimeout(pokeResumeTimer);
+  // v2.5.22d Q 弹按压（GIF 模式）：按下压缩，松手回弹（CSS 仅对 GIF 生效，其他模式无此动画）
+  petEl.classList.remove("pet-squash", "pet-squash-release");
+  petEl.classList.add("pet-squash");
   dragState = { sx: e.screenX, sy: e.screenY, moved: false, active: true, samples: [] };
   addDragSample(dragState, e);
   window.petAPI.walkingPause(true); // 拖拽中暂停桌面行走，松手恢复
@@ -2125,6 +2128,10 @@ window.addEventListener("mouseup", () => {
   try { window.petAPI.playback("[ui] mouseup wasDrag=" + wasDrag + " samples=" + state.samples.length); } catch { /* 忽略 */ }
   dragState = null;
   petEl.classList.remove("dragging");
+  // v2.5.22d Q 弹回弹（GIF 模式）：松手换 release 动画，播完清理
+  petEl.classList.remove("pet-squash");
+  petEl.classList.add("pet-squash-release");
+  setTimeout(() => petEl.classList.remove("pet-squash-release"), 400);
   const velocity = wasDrag ? dragVelocity(state) : null;
   const speed = velocity ? Math.round(Math.hypot(velocity.vx, velocity.vy)) : 0;
   if (!wasDrag) {

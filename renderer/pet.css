@@ -178,6 +178,24 @@ body.enlarged #input { font-size: calc(var(--chat-fz, 11px) + 1px); }
   80% { transform: rotate(6deg); }
   100% { transform: rotate(0deg); }
 }
+/* 按压 Q 弹（v2.5.22d，借鉴 dsh-whale）：GIF 模式按下时底部固定压缩，松手弹性回弹 */
+body:not(.spine-mode):not(.rig-mode):not(.live2d-mode) .pet.pet-squash {
+  transform-origin: 50% 100%; /* 底部中心固定：压缩时脚不离地 */
+  animation: pet-squash-press 0.15s ease-out forwards;
+}
+@keyframes pet-squash-press {
+  from { transform: scale(1, 1); }
+  to   { transform: scale(0.88, 0.85); }
+}
+body:not(.spine-mode):not(.rig-mode):not(.live2d-mode) .pet.pet-squash-release {
+  transform-origin: 50% 100%;
+  animation: pet-squash-release 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; /* 弹性回弹 */
+}
+@keyframes pet-squash-release {
+  0%   { transform: scale(0.88, 0.85); }
+  60%  { transform: scale(1.06, 1.04); }
+  100% { transform: scale(1, 1); }
+}
 /* PSD 2.5D 角色画布（v2.2）：独立大画布——rig 模式全窗口、角色贴底居中显示 */
 .rig-canvas {
   position: absolute;
