@@ -38,7 +38,7 @@ Chat · long-term memory · cloned real voice (CN/JP) · walks along your taskba
 | Build | Size | Voice | Where |
 | --- | --- | --- | --- |
 | **Lite** | ~220 MB | ❌ engines not included | [GitHub Releases](https://github.com/sslbs09/suzuran-pet/releases/latest) |
-| **Full** | ~16 GB | ✅ CN + JP engines, talks out of the box | Contact **1598184627@qq.com** |
+| **Full** | ~16 GB | ✅ CN + JP engines, talks out of the box | Contact <1598184627@qq.com> |
 | **Skin Pack** | ~96 MB | 38 skins | [Releases asset](https://github.com/sslbs09/suzuran-pet/releases/download/v2.5.18/SuzuranPet-2.5.0-SkinPack.zip) |
 
 > GitHub's 2 GB per-file limit means only the **Lite** build can live here. Both builds share identical chat features; only the voice engines differ. Extract the Skin Pack into `resources/app/renderer/sprites/` to add 38 skins.

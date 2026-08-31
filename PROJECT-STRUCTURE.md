@@ -6,7 +6,7 @@
 ## 1. 典型目录
 
 | 路径 | 说明 |
-|---|---|
+| --- | --- |
 | `main.js` / `preload.js` | 主进程与 preload 桥（IPC 安全暴露，含 `appVersion`） |
 | `src/` | 业务模块：config / chat-client / tts-manager / memory / bond / features（主动搭话·语音输入·日程）/ lines（台词库）/ ja-translate / schedules / tray-menu / router（zcode 任务）/ history / secrets / storage / file-guard / logger / utils / credential-import |
 | `renderer/` | 页面与运行库：index.html + pet.js（主窗口）、settings / moods / psd / voice / schedule / addchar / terms；`rig/`（2.5D 装配 rigger.js + genericparts.js）、`rig-runtime.js`、`sprites/`（表情 GIF：default 默认 / user 用户覆盖）、`spine/`（Spine 模型） |
@@ -51,12 +51,14 @@
 ## 5. 历史整理记录（2026-08-26 全局整理，存档）
 
 **审计结果（违规/安全）**
+
 - ✅ 安装目录两个 `config.json` 含**真实 API 密钥**（DeepSeek `sk-df3c…`/`sk-a4c…`、百炼 `sk-ws-H.…`）——已清空为 `""`（原件在 `_backups/2026-08-26-整理前/install-extra/`），**建议轮换这两组密钥**；若曾压缩/分享该文件夹视为已泄露。
 - ✅ git 历史与 dev 源码无真实密钥（仅测试假密钥 sk-test-*）。
 - ✅ 个人信息：仅法律文档中的联系人邮箱（`1598184627@qq.com`，作者自愿公开）+ pixi/npm 库作者邮箱（许可证头）。
 - ℹ️ 桌面 `人格配置.txt`、`好好好/`（照片）**不属于本项目**，未纳入。
 
 **去重结论**
+
 - `sprites/default/` 与 `sprites/user/` 内容相同属**设计内**（默认层 + 用户覆盖层，首次运行自动复制），不删。
 - persona.md 与 persona.default.md 相同属设计（模板 + 活副本）。
 - ℹ️ 已知瑕疵：`user/coquetry.gif`（撒娇）内容=开心 gif（哈希相同）——开心动画暂复用撒娇图，如需独立开心动画请再换素材。
