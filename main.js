@@ -3473,6 +3473,17 @@ ipcMain.on("pet:throw", (_e, vx, vy) => {
 ipcMain.on("pet:set-sleeping", (_e, v) => {
   walk.sleeping = !!v;
   if (walk.sleeping) { cancelFlight(); cancelWalkJump(); }
+  // v2.5.21c 修复：睡觉躺下变矮，窗口底边仍贴地 → 视觉上"陷入任务栏中间"。
+  // 入睡时把窗口底边抬到任务栏上沿（躺姿高度≈站立 60%，上抬窗口高度 40% 让脚落在任务栏上沿）；
+  // 醒来恢复站立贴地。
+  if (win && !win.isDestroyed() && config.getConfig().renderMode === "spine") {
+    const b = win.getBounds();
+    const wa = walkGeo.workAreaOf(screen, b);
+    const standY = wa.y + wa.height + walk.groundGap - b.height; // 站立贴地（底边=任务栏上沿+gap）
+    const sleepY = standY - Math.round(b.height * 0.4);          // 躺下：窗口整体上抬 40% 高，脚落在任务栏上沿
+    const targetY = v ? sleepY : standY;
+    if (Math.abs(b.y - targetY) > 1) win.setPosition(b.x, Math.round(targetY));
+  }
   // 人格化：入睡/睡醒时偶尔嘀咕
   if (v) maybePersonify("sleep", { chance: 0.25, cooldownMs: 180000 });
   else maybePersonify("wake", { chance: 0.35, cooldownMs: 60000 });
