@@ -3559,14 +3559,15 @@ ipcMain.on("pet:set-sleeping", (_e, v) => {
   walk.sleeping = !!v;
   if (walk.sleeping) { cancelFlight(); cancelWalkJump(); }
   // v2.5.21c 修复：睡觉躺下变矮，窗口底边仍贴地 → 视觉上"陷入任务栏中间"。
-  // 入睡时把窗口底边抬到任务栏上沿（躺姿高度≈站立 75%，上抬窗口高度 lift 让脚落在任务栏上沿）；
-  // 醒来恢复站立贴地。lift 默认 0.15，可在 config.json 的 walk.sleepLift 微调（0=不抬 0.3=抬 30%）。
+  // 入睡时把窗口底边微微上抬，让脚落在任务栏上沿；醒来恢复站立贴地。
+  // 校准（vision 实测）：上抬 15%→脚悬空 12-15px；上抬 7.5%（≈15px）恰好让脚贴任务栏上沿。
+  // 可在 config.json 的 walk.sleepLift 微调（0=不抬 0.3=抬 30%）。
   if (win && !win.isDestroyed() && config.getConfig().renderMode === "spine") {
     const b = win.getBounds();
     const wa = walkGeo.workAreaOf(screen, b);
     const standY = wa.y + wa.height + walk.groundGap - b.height; // 站立贴地（底边=任务栏上沿+gap）
     const lift = Number((config.getConfig().walk || {}).sleepLift);
-    const liftRatio = Number.isFinite(lift) && lift >= 0 && lift <= 0.5 ? lift : 0.15;
+    const liftRatio = Number.isFinite(lift) && lift >= 0 && lift <= 0.5 ? lift : 0.075;
     const sleepY = standY - Math.round(b.height * liftRatio);
     const targetY = v ? sleepY : standY;
     if (Math.abs(b.y - targetY) > 1) win.setPosition(b.x, Math.round(targetY));
