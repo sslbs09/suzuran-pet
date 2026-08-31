@@ -385,6 +385,13 @@ function fitSpinePose(generation = spineFitGeneration) {
       const b2 = spineObj.getBounds();
       if (spineXoff) spineObj.x += spineXoff * b2.width * flip;
       spineObj.y += H - (b2.y + b2.height);
+      // v2.5.22c 诊断（低频）：睡觉时确认贴底值——排查"睡眠悬浮/陷入"（isSleeping 时记录）
+      if (isSleeping && Date.now() - (window.__sleepFitLogAt || 0) > 2000) {
+        window.__sleepFitLogAt = Date.now();
+        try {
+          window.petAPI.playback && window.petAPI.playback(`[spine] sleep-fit bbox=${Math.round(b2.width)}x${Math.round(b2.height)} bottomY=${Math.round(b2.y + b2.height)} H=${Math.round(H)} y-offset=${Math.round(H - (b2.y + b2.height))}`);
+        } catch { /* 忽略 */ }
+      }
       const v2 = sample();
       if (v2) {
         const vy1 = v2.y1;
