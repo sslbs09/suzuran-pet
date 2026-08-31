@@ -37,6 +37,11 @@ async function toast(msg) {
 /* ---------- 初始化 ---------- */
 (async function init() {
   S = await window.petAPI.getSettings();
+  // 版本号：单一来源 package.json（app.getVersion），比硬编码文本更可信（P1-5）
+  const verEl = document.getElementById("version");
+  if (verEl && window.petAPI.appVersion) {
+    verEl.textContent = "苏苏洛桌宠 · v" + window.petAPI.appVersion;
+  }
   document.getElementById("key-source").textContent =
     L("set.keyStatus") + (S.keySource || L("set.unknown"));
 
