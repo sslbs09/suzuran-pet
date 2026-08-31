@@ -18,7 +18,6 @@ const CONFIG_PATH = STORAGE.config;
 const PERSONA_PATH = STORAGE.persona;
 const PERSONA_DEFAULT_PATH = STORAGE.personaDefault;
 const os = require("os");
-const ZCODE_V2_CONFIG = path.join(os.homedir(), ".zcode", "v2", "config.json");
 const DEFAULT_WORKSPACE = path.join(os.homedir(), ".zcode", "workspace", "default");
 
 const DEFAULT_MOODS = [
@@ -195,35 +194,7 @@ function detectZcodeCli() {
   return "";
 }
 
-/** 从 ZCode v2 配置中提取第一个带 API Key 的 provider（本机没有就返回空） */
-function detectApiKeyFromZcode() {
-  try {
-    const raw = JSON.parse(fs.readFileSync(ZCODE_V2_CONFIG, "utf8"));
-    const providers = raw.provider || {};
-    const entries = Object.entries(providers).filter(([, p]) => p);
-    const hasKey = (p) => !!((p.options && p.options.apiKey) || p.apiKey);
-    const getKey = (p) => (p.options && p.options.apiKey) || p.apiKey;
-    const pick = entries.find(([, p]) => /deepseek/i.test(String(p.name || "")) && hasKey(p)) ||
-                 entries.find(([, p]) => hasKey(p));
-    if (pick) {
-      return { apiKey: getKey(pick[1]), providerId: pick[1].id || pick[1].name || pick[0], baseURL: pick[1].options?.baseURL || pick[1].baseURL };
-    }
-  } catch { /* 无配置则返回空 */ }
-  return { apiKey: "", providerId: "", baseURL: "" };
-}
-
-/** 从 vision 技能 .env 读取 DashScope（百炼）API Key */
-function detectDashScopeKey() {
-  try {
-    const p = path.join(os.homedir(), ".zcode", "skills", "vision", ".env");
-    if (!fs.existsSync(p)) return "";
-    for (const line of fs.readFileSync(p, "utf8").split(/\r?\n/)) {
-      const m = line.match(/^\s*DASHSCOPE_API_KEY\s*=\s*(.+?)\s*$/);
-      if (m && m[1]) return m[1].trim().replace(/^["']|["']$/g, "");
-    }
-  } catch { /* 无配置则返回空 */ }
-  return "";
-}
+/** v2.5.22 清理：detectApiKeyFromZcode / detectDashScopeKey 已删除（无外部调用，且与 README"不读取其他密钥"承诺存在误解空间） */
 
 function getConfig(force = false) {
   if (cache && !force) return cache;
@@ -365,7 +336,7 @@ module.exports = {
   APP_DIR, STORAGE, CONFIG_PATH, PERSONA_PATH, PERSONA_DEFAULT_PATH,
   getConfig, saveConfig, getPersonaText, savePersonaText, resetPersona,
   initializeSecretStorage, secretStatus, replaceSecrets, buildSettingsView,
-  fillTokens, detectZcodeCli, detectApiKeyFromZcode
+  fillTokens, detectZcodeCli
 };
 
 // CLI 冒烟测试：node src/config.js --test

@@ -48,15 +48,17 @@
 </div>
 <script src="i18n.js"></script>
 <script src="rp-render.js"></script>
-<script src="pixi.min.js"></script>
-<script src="pixi-spine.js"></script>
-<script src="live2dcubismcore.min.js" onerror="console.warn('[live2d] Core 缺失（克隆仓库未含 Live2D 专有文件），Live2D 模式降级不可用')"></script>
-<script src="pixi-live2d.min.js" onerror="console.warn('[live2d] pixi-live2d 加载失败，Live2D 模式降级不可用')"></script>
-<script src="live2d-runtime.js"></script>
-<script src="../node_modules/ag-psd/dist/bundle.js"></script>
-<script src="rig/rigger.js"></script>
-<script src="rig/genericparts.js"></script>
-<script src="rig-runtime.js"></script>
+<!-- v2.5.22 优化（P2-1）：渲染库 defer 加载——GIF 模式启动不阻塞（pet.js 仅在 initSpine 时才用 PIXI），
+     1MB 库后台加载，切 Spine/Live2D 时已就绪；Live2D 专有文件缺失自动降级 -->
+<script defer src="pixi.min.js"></script>
+<script defer src="pixi-spine.js"></script>
+<script defer src="live2dcubismcore.min.js" onerror="console.warn('[live2d] Core 缺失（克隆仓库未含 Live2D 专有文件），Live2D 模式降级不可用')"></script>
+<script defer src="pixi-live2d.min.js" onerror="console.warn('[live2d] pixi-live2d 加载失败，Live2D 模式降级不可用')"></script>
+<script defer src="live2d-runtime.js"></script>
+<script defer src="../node_modules/ag-psd/dist/bundle.js"></script>
+<script defer src="rig/rigger.js"></script>
+<script defer src="rig/genericparts.js"></script>
+<script defer src="rig-runtime.js"></script>
 <script src="pet.js"></script>
 </body>
 </html>

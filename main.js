@@ -16,7 +16,9 @@ const http = require("http");
 const crypto = require("crypto");
 const path = require("path");
 const fs = require("fs");
-const XLSX = require("xlsx");
+// v2.5.22 供应链加固（P3）：xlsx 改用 vendor 本地副本（xlsx.js CommonJS，API 覆盖日程导入全部用法）——
+// 不再依赖 CDN tarball（无完整性校验风险），node_modules 减 7.8MB。
+const XLSX = require("./vendor/xlsx.js");
 
 // 产品名升级迁移（v2.5.18）：productName 从「苏苏洛桌宠 1.1 正式版」改为「苏苏洛桌宠 2.5 正式版」。
 // Electron 的 userData 路径由 productName 决定，不改名则老用户数据"凭空消失"。

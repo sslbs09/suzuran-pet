@@ -105,9 +105,10 @@ function search(query, k = 3) {
     .map((e) => ({ text: e.text, score: cosine(e.vec, q), ts: e.ts }))
     .sort((a, b) => b.score - a.score)
     .slice(0, Math.max(1, k));
-  // 低相似度（<0.06）视为无关，不回引。v1 哈希 embedding 对"换说法"泛化弱
-  // （实测：直接词重叠 0.30、换说法 0.06-0.13、无关 0.05），故门槛放宽、注入后由模型自判契合。
-  return scored.filter((s) => s.score >= 0.06);
+  // 低相似度（<0.10）视为无关，不回引。v1 哈希 embedding 对"换说法"泛化弱
+  // （实测：直接词重叠 0.30、换说法 0.06-0.13、无关 0.05）——v2.5.22 收紧 0.06→0.10：
+  // 原 0.06 与无关 0.05 几乎贴边，弱相关片段被塞进 prompt；0.10 保留真实换说法、滤掉无关。
+  return scored.filter((s) => s.score >= 0.10);
 }
 
 function getCount() { return load().entries.length; }

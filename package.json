@@ -30,7 +30,6 @@
     "omggif": "^1.0.10",
     "pixi-live2d-display-lipsyncpatch": "^0.5.0-ls-8",
     "pixi-spine": "^4.0.5",
-    "pixi.js": "^7.4.2",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+    "pixi.js": "^7.4.2"
   }
 }
