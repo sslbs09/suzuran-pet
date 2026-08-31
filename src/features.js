@@ -452,6 +452,76 @@ async function generateMemorySummary(chatClient, recentLines) {
 }
 
 /* ============================================================
+ * 8. 日语翻译预热（v2.5.20）：固定台词提前翻译进磁盘缓存
+ * 台词池里不含人称占位符（{{user}}/{{name}}）的句子是固定的，
+ * 提前翻译后即使翻译 API 挂了也能查缓存说出日语（"说不出来"根治）。
+ * 空闲批次执行（每次 3 句 + 间隔），不阻塞主流程；翻译成功自动落盘
+ * （复用 translate-cache），下次任何时刻直接命中。
+ * ============================================================ */
+let jaPrewarmTimer = null;
+let jaPrewarmIdx = 0;
+function jaPrewarmableLines() {
+  try {
+    const lines = require("./lines");
+    const pools = [
+      lines.PAT_LINES,
+      lines.PERSONIFY_LINES.thrown, lines.PERSONIFY_LINES.grabbed,
+      lines.PERSONIFY_LINES.wake, lines.PERSONIFY_LINES.sleepDay,
+      lines.PERSONIFY_LINES.sleepNight, lines.PERSONIFY_LINES.perch,
+      lines.WORKFLOW_LINES,
+      ...Object.values(lines.PROACTIVE_BY_PERIOD),
+      lines.LONG_IDLE_LINES,
+      ...Object.values(lines.STAGE_LINES),
+      lines.EARLY_MORNING_LINES,
+    ];
+    // 去重 + 只留不含人称占位符的固定句
+    const seen = new Set();
+    const out = [];
+    for (const pool of pools) {
+      for (const s of pool) {
+        if (s.includes("{{") || seen.has(s)) continue;
+        seen.add(s);
+        out.push(s);
+      }
+    }
+    return out;
+  } catch { return []; }
+}
+
+/** 启动日语翻译预热（仅在 speakJa 开启且有 key 时生效；幂等，可重复调用） */
+function startJaPrewarm() {
+  stopJaPrewarm();
+  const cfg = config.getConfig();
+  if (!(cfg.ttsGenie || {}).speakJa) return; // 非日语模式不预热
+  if (!(cfg.chat || {}).apiKey) return;      // 无 key 无法翻译
+  const list = jaPrewarmableLines();
+  if (!list.length) return;
+  jaPrewarmIdx = 0;
+  logJaPrewarm(`日语翻译预热启动（${list.length} 句固定台词，空闲批次翻译）`);
+  const BATCH = 3, GAP = 60000; // 每批 3 句，间隔 1 分钟（避免限流）
+  jaPrewarmTimer = setInterval(async () => {
+    if (jaPrewarmIdx >= list.length) { stopJaPrewarm(); return; }
+    const batch = list.slice(jaPrewarmIdx, jaPrewarmIdx + BATCH);
+    jaPrewarmIdx += BATCH;
+    try {
+      const { translateToJa } = require("./ja-translate");
+      for (const s of batch) {
+        const ja = await translateToJa(s);
+        if (ja) logJaPrewarm(`预热✓: ${s.slice(0, 18)} → ${ja.slice(0, 18)}`);
+      }
+    } catch { /* 单批失败下轮重试 */ }
+  }, GAP);
+}
+
+function stopJaPrewarm() {
+  if (jaPrewarmTimer) { clearInterval(jaPrewarmTimer); jaPrewarmTimer = null; }
+}
+
+function logJaPrewarm(msg) {
+  try { require("./logger").logTts("ja", msg); } catch { /* 日志失败忽略 */ }
+}
+
+/* ============================================================
  * 导出
  * ============================================================ */
 module.exports = {
@@ -494,4 +564,9 @@ module.exports = {
 
   // 记忆摘要
   generateMemorySummary,
+
+  // 日语翻译预热（v2.5.20）
+  startJaPrewarm,
+  stopJaPrewarm,
+  jaPrewarmableLines,
 };

@@ -3868,6 +3868,10 @@ if (!gotLock) {
       sendProactive(msg, "idle"); // 隐藏到托盘时静默待命，不主动搭话
     }, _proactiveMin);
 
+    // 日语翻译预热（v2.5.20）：speakJa 模式下空闲批量翻译固定台词进磁盘缓存，
+    // 翻译 API 挂了也能说出日语（"说不出来"根治）
+    features.startJaPrewarm();
+
     // 感知工作区活动（v2.5.3，默认关）：她会在你改代码时小声嘀咕（只读监听）
     if (_cfg.features && _cfg.features.workspaceWatch && _cfg.features.workspaceWatch.enabled) {
       startWorkspaceWatch(_cfg);

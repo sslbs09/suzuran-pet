@@ -44,16 +44,17 @@ function ensureTrDisk() {
 async function translateToJa(text) {
   const cfg = config.getConfig();
   const c = cfg.chat || {};
-  if (!c.apiKey || !c.baseUrl) return "";
-  const cached = cacheGet(String(text || ""));
-  if (cached !== undefined) return cached; // 命中缓存直接返回（成功译文=10min 复用；空串=失败冷却中，10s 后自动重试翻译）
-  // cost-cut: disk cache (cross-session) reuse
+  // 磁盘缓存优先（v2.5.20）：跨会话复用已翻译的固定台词——API 挂了/key 缺失也能说话。
+  // 必须在 apiKey 检查之前：否则 key 失效时连缓存都查不到（"说不出来"根因之一）。
   const tc = require("./translate-cache");
   {
     const d = ensureTrDisk();
-    const dja = tc.get(d.map, text);
+    const dja = tc.get(d.map, String(text || ""));
     if (dja !== undefined) return dja;
   }
+  if (!c.apiKey || !c.baseUrl) return "";
+  const cached = cacheGet(String(text || ""));
+  if (cached !== undefined) return cached; // 命中缓存直接返回（成功译文=10min 复用；空串=失败冷却中，10s 后自动重试翻译）
   const base = String(c.baseUrl || "").replace(/\/+$/, "");
   const userName = String((c.userName || "")).trim();
   const sys = "你是中日翻译器。把用户输入的中文翻译成自然流畅、口语化的日语。只输出译文本身，不要任何解释、引号或多余内容。" +
