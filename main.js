@@ -430,10 +430,12 @@ attachCrashDiag(quickstartWin, "quickstart");
     quickstartWin.on("closed", () => { quickstartWin = null; });
 }
 
-function setTts(enabled) {
-  config.saveConfig({ tts: { enabled: !!enabled } });
-  refreshTrayMenu();
-  sendToRenderer("pet:tts-changed", !!enabled);
+/**
+ * 语音总开关对应的本地引擎停启——setTts 与 save-settings 共用（v2.5.23 修复：
+ * 此前语音关只停 Genie 不停 GSV，且设置页保存关语音只广播 tts-changed 不停任何引擎，
+ * 导致日语模式关声音后 GSV 引擎残留占显存，"关声音释放显存"失效）。
+ */
+function applyTtsEngine(enabled) {
   const q = config.getConfig().ttsGenie || {};
   if (enabled) {
     // 语音开 → 按模式确保对应本地引擎可用（后台拉起）
@@ -446,9 +448,19 @@ function setTts(enabled) {
       logTts("genie", "语音开启（日语模式）→ 不拉起 Genie，GSV 按需启动");
     }
   } else {
-    // 语音关 → 停掉本地 TTS 服务器，释放显存
+    // 语音关 → 停掉本地 TTS 服务器，释放显存（Genie 中文引擎 + GSV 日语引擎都要停）
     tts.shutdownGenieServer();
+    tts.killGsvProcesses(config.getConfig().ttsGsv || {}).then((out) => {
+      if (out) logTts("gsv", "语音关闭 → 已停止 GSV 引擎（释放显存）PID: " + out.replace(/\s+/g, ","));
+    });
   }
+}
+
+function setTts(enabled) {
+  config.saveConfig({ tts: { enabled: !!enabled } });
+  refreshTrayMenu();
+  sendToRenderer("pet:tts-changed", !!enabled);
+  applyTtsEngine(!!enabled);
 }
 
 /** 调整语速（0.6~1.5，<1 更慢，>1 更快），保存到 tts.rate 并通知渲染层 */
@@ -1883,8 +1895,10 @@ ipcMain.handle("pet:save-settings", (_e, patch) => {
     const after = config.getConfig();
     if ((after.pet && after.pet.name) !== (before.pet && before.pet.name)) refreshPetName();
     if ((after.tts?.enabled ?? false) !== (before.tts?.enabled ?? false)) {
-      // 设置页改的语音总开关要即时同步渲染层（否则渲染层以为语音还开着，点击/回复仍出声）——v2.5.1
+      // 设置页改的语音总开关：同步渲染层（否则渲染层以为语音还开着，点击/回复仍出声）+ 停启本地引擎
+      // （v2.5.23 修复：此前只广播不停引擎，关语音后 Genie/GSV 残留占显存）
       sendToRenderer("pet:tts-changed", !!after.tts.enabled);
+      applyTtsEngine(!!after.tts.enabled);
     }
     if (after.renderMode !== before.renderMode) {
       sendToRenderer("pet:render-mode-changed", after.renderMode);
