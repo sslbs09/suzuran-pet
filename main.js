@@ -297,13 +297,14 @@ function createWindow() {
   // 置顶层级周期重断言（借鉴 dsh-dafeiyu）：全屏游戏/其他置顶窗口抢占后自动恢复置顶；桌面层级/托盘隐藏不干预
   // v2.5.21 修复：必须带 "screen-saver" level——无 level 的 setAlwaysOnTop(true) 用默认层级，
   // 会每 5s 把 applyLayer 设的最高层级降级，导致脚被任务栏盖住（"时前时后"根因之一）。
+  // v2.5.21b：间隔 5s→2s——被全屏游戏/置顶窗口抢占后的恢复窗口缩短，极小概率被挡进一步压低。
   setInterval(() => {
     try {
       if (!win || win.isDestroyed() || !win.isVisible()) return;
       if ((config.getConfig().layer || "top") !== "top") return;
       win.setAlwaysOnTop(true, "screen-saver");
     } catch { /* 忽略 */ }
-  }, 5000);
+  }, 2000);
 
   // 启动时把窗口钳回屏幕工作区内（布局变宽后旧位置可能越界）
   clampPetToWorkArea("启动");
