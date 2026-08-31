@@ -23,6 +23,7 @@ const PRESETS = {
 };
 
 let S = {}; // 当前配置快照
+let personaDirty = false; // 人设输入框是否有未保存改动（v2.5.18 未保存条用）
 
 function setResult(el, text, ok) {
   el.textContent = text || "";
@@ -287,6 +288,7 @@ function applyRenderModeUI(mode) {
       : mode === "live2d" ? "Live2D 模式：选择模型目录（把 .model3.json 所在文件夹放进 userData/assets/live2d/ 即可出现）。"
       : "GIF 模式：经典表情，无行走与模型选项。";
   }
+  syncNavVisibility(); // v2.5.18：分区被渲染模式隐藏时，左侧导航项同步隐藏
 }
 
 /* ---------- 预设 ---------- */
@@ -368,18 +370,24 @@ $("model-pick").addEventListener("change", () => {
   }
 });
 
-$("btn-save-api").addEventListener("click", async () => {
+$("btn-save-api").addEventListener("click", async () => { await doSaveApi(); });
+
+/* 提取为具名函数（v2.5.18）：顶部「保存全部」需要按顺序复用各分区保存逻辑 */
+async function doSaveApi() {
   const patch = readChat();
   const r = await window.petAPI.saveSettings(patch);
   if (r === true) { setResult($("test-result"), L("set.apiSaved"), true); }
   else { setResult($("test-result"), L("set.saveFailed") + (r && r.message || L("set.unknown")), false); }
-});
+}
 
 /* ---------- 人设 ---------- */
-$("btn-save-persona").addEventListener("click", async () => {
+$("btn-save-persona").addEventListener("click", async () => { await doSavePersona(); });
+
+async function doSavePersona() {
   const ok = await window.petAPI.savePersona($("persona").value);
+  personaDirty = false;
   setResult($("persona-result"), ok ? L("set.personaSaved") : L("set.personaSaveFail"), ok);
-});
+}
 
 $("btn-reset-persona").addEventListener("click", async () => {
   if (!confirm(L("set.confirmReset"))) return;
@@ -417,7 +425,9 @@ $("btn-restart-gsv").addEventListener("click", async () => {
   setResult(out, msgs[r && r.code] || L("set.gsvTimeout"), !!(r && r.ok));
 });
 
-$("btn-save-voice").addEventListener("click", async () => {
+$("btn-save-voice").addEventListener("click", async () => { await doSaveVoice(); });
+
+async function doSaveVoice() {
   const enabled = $("tts-enabled").value === "true";
   const plan = $("tts-plan").value;
   const patch = {
@@ -436,7 +446,7 @@ $("btn-save-voice").addEventListener("click", async () => {
   };
   const r = await window.petAPI.saveSettings(patch);
   setResult($("voice-result"), r === true ? L("set.voiceSaved") : L("set.voiceSaveFail"), r === true);
-});
+}
 
 $("btn-open-guide").addEventListener("click", () => window.petAPI.openTtsGuide());
 
@@ -524,9 +534,9 @@ $("btn-import-font").addEventListener("click", async () => {
 });
 
 /* ---------- 其他 ---------- */
-// 悬浮保存按钮（v2.5.1）：任意位置改完通用设置，随手可存（复用通用保存逻辑）
-$("btn-save-sticky").addEventListener("click", () => $("btn-save-other").click());
-$("btn-save-other").addEventListener("click", async () => {
+$("btn-save-other").addEventListener("click", async () => { await doSaveOther(); });
+
+async function doSaveOther() {
   const scale = parseFloat($("pet-scale").value) || 1;
   const r = await window.petAPI.saveSettings({
     uiLang: $("ui-lang").value,
@@ -587,11 +597,12 @@ $("btn-save-other").addEventListener("click", async () => {
     }
   }
   setResult($("other-result"), r === true ? L("set.saved") : L("set.saveFailed"), r === true);
-});
+}
 
 $("btn-agent-token").addEventListener("click", async () => {
   const token = await window.petAPI.generateAgentToken();
   $("agent-token").value = token || "";
+  if (window.__setMarkDirty) window.__setMarkDirty(); // Token 需点「保存全部/系统与高级的保存」才落盘（程序赋值不触发 input 事件）
   try { await navigator.clipboard.writeText(token); setResult($("other-result"), "已生成并复制 Token；保存并重启后生效", true); }
   catch { setResult($("other-result"), "已生成 Token；保存并重启后生效", true); }
 });
@@ -972,4 +983,107 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
     const el = document.getElementById("tone-" + k);
     if (el) el.addEventListener("change", () => window.petAPI.setEmotionVoice(k, el.checked));
   }
+})();
+
+/* ---------- 左侧导航 / 搜索 / 未保存提示条（v2.5.18） ---------- */
+/* 背景：9 个分区 4~5 屏单列盲滚 + 右下角悬浮保存只保存"通用设置"（作用域陷阱）。
+   现在：左栏锚点 + scroll-spy 高亮 + 搜索过滤；任何需显式保存的改动触发顶部提示条，
+   「保存全部」按 API → 人设 → 语音 → 系统高级 顺序依次走各自既有的保存函数。 */
+
+function syncNavVisibility() {
+  document.querySelectorAll(".set-nav a").forEach((a) => {
+    const sec = document.querySelector(a.getAttribute("href"));
+    a.style.display = (!sec || sec.style.display === "none") ? "none" : "";
+  });
+}
+
+(function setupSettingsNav() {
+  const links = [...document.querySelectorAll(".set-nav a")];
+  if (!links.length) return;
+
+  // scroll-spy：滚动时高亮当前分区对应的导航项
+  if ("IntersectionObserver" in window) {
+    const byId = new Map(links.map((a) => [a.getAttribute("href").slice(1), a]));
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((en) => {
+        if (!en.isIntersecting) return;
+        links.forEach((l) => l.classList.remove("active"));
+        const a = byId.get(en.target.id);
+        if (a) a.classList.add("active");
+      });
+    }, { rootMargin: "-8% 0px -75% 0px", threshold: 0 });
+    links.forEach((a) => { const s = document.querySelector(a.getAttribute("href")); if (s) io.observe(s); });
+  }
+  if (links[0]) links[0].classList.add("active");
+
+  // 搜索过滤：按文本内容显示/隐藏分区（优先于渲染模式过滤；清空后恢复渲染模式过滤）
+  const searchInput = $("set-search");
+  if (searchInput) {
+    searchInput.addEventListener("input", () => {
+      const q = searchInput.value.trim().toLowerCase();
+      const sections = document.querySelectorAll(".set-main > section");
+      if (!q) {
+        applyRenderModeUI($("render-mode").value);
+      } else {
+        sections.forEach((s) => {
+          const hit = (s.textContent || "").toLowerCase().includes(q);
+          s.style.display = hit ? "" : "none";
+        });
+      }
+      syncNavVisibility();
+    });
+  }
+
+  // 未保存改动跟踪：只盯"需要显式保存"的控件；即时生效类（INSTANT_IDS）与情绪分档（tone-*）不触发
+  const INSTANT_IDS = new Set(["render-mode", "theme-select", "ui-lang", "rig-scale", "rig-mouse",
+    "rig-mouse-global", "cat-toy", "walk-global", "soft-render", "file-guard", "proactive-chat",
+    "personify", "rp-mode", "ws-watch", "ws-watch-dirs", "seat-sink", "sit-max", "walk-max",
+    "chat-font", "chat-font-size", "bubble-width", "live2d-scale", "mem-add-input",
+    "agent-client-name", "cred-source", "cred-slot"]);
+  let dirtyOn = false;
+  const bar = $("set-dirty");
+  function markDirty() { if (!dirtyOn && bar) { dirtyOn = true; bar.hidden = false; } }
+  function hideBarSoon() {
+    setTimeout(() => {
+      if (!dirtyOn && bar) {
+        bar.hidden = true;
+        const res = $("set-dirty-result");
+        if (res) setResult(res, "");
+      }
+    }, 2000);
+  }
+  const setMain = document.querySelector(".set-main");
+  if (setMain) {
+    const onEdit = (e) => {
+      const t = e.target;
+      if (!t || !t.id || INSTANT_IDS.has(t.id) || String(t.id).startsWith("tone-")) return;
+      if (t.id === "persona") personaDirty = true;
+      markDirty();
+    };
+    setMain.addEventListener("input", onEdit, true);
+    setMain.addEventListener("change", onEdit, true);
+  }
+
+  const btnAll = $("set-save-all");
+  if (btnAll) btnAll.addEventListener("click", async () => {
+    const res = $("set-dirty-result");
+    if (res) setResult(res, "");
+    try { await doSaveApi(); } catch { /* 失败提示见「聊天 API」分区 result */ }
+    if (personaDirty) { try { await doSavePersona(); } catch { /* 见「人设」分区 */ } }
+    try { await doSaveVoice(); } catch { /* 见「语音」分区 */ }
+    try { await doSaveOther(); } catch { /* 见「系统与高级」分区 */ }
+    const otherErr = $("other-result") && $("other-result").classList.contains("err");
+    if (otherErr) { if (res) setResult(res, L("set.dirtyPartial"), false); return; } // 保持提示条可见
+    dirtyOn = false;
+    if (res) setResult(res, L("set.allSaved"), true);
+    hideBarSoon();
+  });
+  const btnDiscard = $("set-discard");
+  if (btnDiscard) btnDiscard.addEventListener("click", () => {
+    if (!confirm("放弃所有未保存的改动？页面将重新加载，已填内容会恢复为上次保存的值。")) return;
+    location.reload();
+  });
+
+  // 供外部调用：生成 Agent Token 后 .value 是程序赋值不触发 input 事件，需手动标记
+  window.__setMarkDirty = markDirty;
 })();

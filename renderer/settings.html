@@ -20,7 +20,34 @@
     <button id="btn-dismiss-notice" type="button">知道了，不再提示</button>
   </div>
 
-  <section>
+  <div class="set-layout">
+  <!-- 左侧分类导航（v2.5.18）：9 个分区锚点 + 搜索 + scroll-spy，替代单列长滚动盲找 -->
+  <aside class="set-nav" id="set-nav" aria-label="设置分区导航">
+    <input id="set-search" type="search" data-i18n-placeholder="set.navSearchPlaceholder" placeholder="搜索设置项…" aria-label="搜索设置项" />
+    <nav>
+      <a href="#sec-render" data-i18n="set.nav.render">🖼 渲染模式</a>
+      <a href="#sec-experimental" data-i18n="set.nav.experimental">🧪 实验性功能</a>
+      <a href="#sec-personality" data-i18n="set.nav.personality">💬 主动与人格化</a>
+      <a href="#sec-memory" data-i18n="set.nav.memory">🧠 记忆管理</a>
+      <a href="#sec-api" data-i18n="set.nav.api">💬 聊天 API</a>
+      <a href="#sec-persona" data-i18n="set.nav.persona">🎭 人设</a>
+      <a href="#sec-voice" data-i18n="set.nav.voice">🗣 语音</a>
+      <a href="#sec-other" data-i18n="set.nav.other">⚙ 系统与高级</a>
+      <a href="#sec-security" data-i18n="set.nav.security">🔐 密钥与凭据</a>
+    </nav>
+  </aside>
+  <div class="set-main">
+  <!-- 未保存改动提示条（v2.5.18）：替代原右下角悬浮保存按钮——那个按钮只保存"通用设置"，
+       用户改完 API Key 点它会误以为全保存了（作用域陷阱）。现在：任何改动出现提示条，
+       「保存全部」按 API → 人设 → 语音 → 其他的顺序依次保存，作用域不再模糊 -->
+  <div id="set-dirty" class="set-dirty" hidden>
+    <span data-i18n="set.dirtyTip">⚠ 有未保存的改动</span>
+    <button class="primary" id="set-save-all" type="button" data-i18n="set.dirtySaveAll">保存全部</button>
+    <button id="set-discard" type="button" data-i18n="set.dirtyDiscard">放弃改动</button>
+    <span id="set-dirty-result" class="result"></span>
+  </div>
+
+  <section id="sec-render">
     <h2>🖼 渲染模式（先选择模式，对应选项才会出现）</h2>
     <div class="row">
       <label class="col">
@@ -48,7 +75,7 @@
     </div>
   </section>
 
-  <section data-rm="rig spine">
+  <section id="sec-experimental" data-rm="rig spine">
     <h2>🧪 实验性功能（需单独许可）</h2>
     <div class="row">
       <div class="col switch-row" data-rm="rig">
@@ -71,7 +98,7 @@
   </section>
 
   <!-- ============ 0.5 主动与人格化（v2.3，单独开关） ============ -->
-  <section data-rm="gif spine rig">
+  <section id="sec-personality" data-rm="gif spine rig">
     <h2>💬 主动与人格化（v2.3）</h2>
     <div class="row">
       <div class="col switch-row">
@@ -90,7 +117,7 @@
   </section>
 
   <!-- ============ 0.6 记忆管理（v2.5，加密存储） ============ -->
-  <section data-rm="gif spine rig">
+  <section id="sec-memory" data-rm="gif spine rig">
     <h2>🧠 记忆管理（v2.5）</h2>
     <div class="row">
       <div class="col">
@@ -107,8 +134,8 @@
   </section>
 
   <!-- ============ 1. 聊天 API ============ -->
-  <section>
-    <h2 data-i18n="set.api">① 聊天 API</h2>
+  <section id="sec-api">
+    <h2 data-i18n="set.api">聊天 API（最关键的一步）</h2>
     <div class="row">
       <label class="col">
         <span data-i18n="set.preset">服务商预设</span>
@@ -204,8 +231,8 @@
   </section>
 
   <!-- ============ 2. 人设 ============ -->
-  <section>
-    <h2 data-i18n="set.persona">② 人设（角色设定）</h2>
+  <section id="sec-persona">
+    <h2 data-i18n="set.persona">人设（角色设定）</h2>
     <p class="hint" data-i18n="set.personaHint">编辑下方内容即可自定义角色。占位符 <code>{{userName}}</code> 会自动替换成上面填的称呼，<code>{{petName}}</code> 替换成桌宠名字。保存后立即生效。</p>
     <textarea id="persona" rows="12" spellcheck="false" placeholder="# 人格设定…"></textarea>
     <div class="row actions">
@@ -216,8 +243,8 @@
   </section>
 
   <!-- ============ 3. 语音 ============ -->
-  <section>
-    <h2 data-i18n="set.voice">③ 语音（可选，默认关闭）</h2>
+  <section id="sec-voice">
+    <h2 data-i18n="set.voice">语音（想让它开口说话就看这里）</h2>
     <div class="row">
       <label class="col">
         <span data-i18n="set.ttsEnabled">语音总开关</span>
@@ -306,9 +333,9 @@
     </div>
   </section>
 
-  <!-- ============ 4. 其他 ============ -->
-  <section>
-    <h2 data-i18n="set.other">④ 其他</h2>
+  <!-- ============ 4. 系统与高级（原「④ 其他」，v2.5.18 改名明义） ============ -->
+  <section id="sec-other">
+    <h2 data-i18n="set.other">系统与高级（杂七杂八都在这）</h2>
     <div class="row">
       <label class="col">
         <span data-i18n="set.uiLang">界面语言（聊天内容始终为中文）</span>
@@ -492,11 +519,11 @@
       <span id="other-result" class="result"></span>
     </div>
     <p class="hint" data-i18n="set.taskHint">任务模式（/zcode 前缀操控电脑）默认关闭：想开启请打开 config.json，把 <code>zcodeEnabled</code> 改为 <code>true</code> 并配置 <code>zcodeCli</code> 路径（需自行安装 ZCode）。</p>
-    <p class="foot" id="version" data-i18n="set.version">苏苏洛桌宠 · 1.1 正式版</p>
+    <p class="foot" id="version" data-i18n="set.version">苏苏洛桌宠 · 2.5 正式版</p>
   </section>
   <!-- ============ 5. 密钥与凭据安全 ============ -->
-  <section>
-    <h2>⑤ 密钥与凭据安全</h2>
+  <section id="sec-security">
+    <h2>🔐 密钥与凭据安全</h2>
     <div class="row">
       <label class="col grow">
         <span>聊天 API Key 状态</span>
@@ -542,16 +569,11 @@
       <span id="import-result" class="result"></span>
     </div>
   </section>
+  </div><!-- /.set-main -->
+  </div><!-- /.set-layout -->
   </div>
 
-<!-- 悬浮保存按钮（v2.5.1）：必须放在 <script> 之前且在 </body> 内——曾误放 </html> 之后，settings.js 执行时该元素还未解析，getElementById 返回 null 导致脚本中止（记忆管理等后续功能全部失效） -->
-<button id="btn-save-sticky" type="button" title="保存当前通用设置（渲染模式/行走/大小等）">💾 保存</button>
-<style>
-  #btn-save-sticky { position: fixed; right: 22px; bottom: 22px; z-index: 999; padding: 10px 22px; border: none; border-radius: 24px; background: linear-gradient(135deg, #2f8f87, #23736d); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: 0 6px 18px rgba(30, 77, 77, .35); }
-  #btn-save-sticky:hover { filter: brightness(1.12); transform: translateY(-1px); }
-</style>
-
-<script src="i18n.js"></script>
-<script src="settings.js"></script>
+  <script src="i18n.js"></script>
+  <script src="settings.js"></script>
 </body>
 </html>
