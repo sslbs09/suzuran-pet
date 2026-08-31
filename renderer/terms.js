@@ -5,7 +5,10 @@
  */
 "use strict";
 
+let agreed = false; // 点过「同意」后关窗属于正常流程，不应触发拒绝退出
+
 document.getElementById("btn-agree").addEventListener("click", async () => {
+  agreed = true;
   await window.petAPI.agreeTerms();
   window.close();
 });
@@ -14,7 +17,7 @@ document.getElementById("btn-refuse").addEventListener("click", () => {
   window.petAPI.refuseTerms();
 });
 
-// 关窗 = 拒绝
+// 关窗 = 拒绝（已同意后的正常关窗除外）
 window.addEventListener("beforeunload", () => {
-  window.petAPI.refuseTerms();
+  if (!agreed) window.petAPI.refuseTerms();
 });

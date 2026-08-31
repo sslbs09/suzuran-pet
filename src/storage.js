@@ -38,15 +38,33 @@ function copyIfMissing(from, to, migrated) {
   if (!fs.existsSync(from) || fs.existsSync(to)) return;
   fs.mkdirSync(path.dirname(to), { recursive: true });
   try {
-    copyDirRecursive(from, to);
+    // 单文件必须走 copyFileSync：copyDirRecursive 会先把目标 mkdir 成目录，
+    // 导致 config.json / persona.md 等在全新安装时被创建为同名空目录（EISDIR，
+    // 全部持久化失效，defense.test.js 即因此挂）。asar 源上 statSync/
+    // copyFileSync 均可用（§112 补丁覆盖的 API）。
+    if (fs.statSync(from).isFile()) fs.copyFileSync(from, to);
+    else copyDirRecursive(from, to);
   } catch (e) {
     if (fs.existsSync(from) && !fs.existsSync(to)) throw e; // 真失败才上抛
   }
   migrated.push(path.relative(APP_DIR, from));
 }
 
+function healFileAsDir(target, source) {
+  // 自愈：某路径本应是文件却成了空目录（b40874e 回归遗留的受害用户），删除后从安装目录补回。
+  // 只对"空目录"生效，绝不碰有内容的路径。
+  try {
+    if (fs.existsSync(target) && fs.statSync(target).isDirectory() && fs.readdirSync(target).length === 0) {
+      fs.rmdirSync(target);
+      if (source) copyIfMissing(source, target, []);
+    }
+  } catch { /* 自愈失败不阻塞启动 */ }
+}
+
 function initializeStorage() {
   fs.mkdirSync(PATHS.userDir, { recursive: true });
+  healFileAsDir(PATHS.config, path.join(APP_DIR, "config.json"));
+  healFileAsDir(PATHS.persona, path.join(APP_DIR, "persona.md"));
   if (fs.existsSync(PATHS.marker)) return PATHS;
   const migrated = [], failed = [];
   const pairs = [

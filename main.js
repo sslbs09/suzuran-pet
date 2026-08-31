@@ -18,6 +18,30 @@ const path = require("path");
 const fs = require("fs");
 const XLSX = require("xlsx");
 
+// 产品名升级迁移（v2.5.18）：productName 从「苏苏洛桌宠 1.1 正式版」改为「苏苏洛桌宠 2.5 正式版」。
+// Electron 的 userData 路径由 productName 决定，不改名则老用户数据"凭空消失"。
+// 必须在 require("./src/config")（其内部 storage.js 在 require 时即读取 userData）之前执行：
+// 旧目录存在且新目录不存在 → 整目录改名（同盘 rename，原子）；改名失败或新目录已存在 →
+// 回退继续用旧目录（app.setPath），任何情况下都不让用户数据丢失。
+(function migrateUserDataDirOnRename() {
+  try {
+    const OLD_NAME = "苏苏洛桌宠 1.1 正式版";
+    const oldDir = path.join(app.getPath("appData"), OLD_NAME);
+    const newDir = app.getPath("userData");
+    if (oldDir.toLowerCase() === newDir.toLowerCase()) return;
+    if (!fs.existsSync(oldDir)) return; // 全新机器：无旧目录，走默认
+    // Electron 启动时会先自行创建空的新 userData 目录：仅当新目录为空时删掉再改名，
+    // 有内容则绝不碰（说明已迁移过或有真实数据）。
+    if (fs.existsSync(newDir) && fs.statSync(newDir).isDirectory() && fs.readdirSync(newDir).length === 0) {
+      try { fs.rmdirSync(newDir); } catch { /* 删不掉就落到下方回退 */ }
+    }
+    if (!fs.existsSync(newDir)) {
+      try { fs.renameSync(oldDir, newDir); return; } catch { /* 落到下方回退 */ }
+    }
+    app.setPath("userData", oldDir); // 新目录已有内容或改名失败：留在旧目录，不丢数据
+  } catch { /* 异常时保持 Electron 默认路径，启动不受阻 */ }
+})();
+
 const config = require("./src/config");
 const router = require("./src/router");
 const chatClient = require("./src/chat-client");
@@ -462,6 +486,8 @@ function openSettings() {
   settingsWin.setMenuBarVisibility(false);
   settingsWin.loadFile(path.join(config.APP_DIR, "renderer", "settings.html"));
 attachCrashDiag(settingsWin, "settings");
+    settingsWin.show();
+    settingsWin.focus();
     settingsWin.on("closed", () => { settingsWin = null; });
 }
 
