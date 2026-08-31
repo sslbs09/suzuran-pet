@@ -30,5 +30,9 @@ release/
 outputs/
 _backups/
 
+# 内部交接与过程文档（含绝对路径/安全测试执行细节，不入公开仓库；本地保留供交接）
+docs/internal/
+docs/assets/
+
 # Live2D Cubism Core（Live2D 专有许可：应用内捆绑合规，git 仓库不再分发）
 renderer/live2dcubismcore.min.js

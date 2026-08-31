@@ -1,5 +1,5 @@
 # Build & 自动发布 Release
-# 打正式版本 tag（如 v1.0.0）推送后：自动打包 Windows 免安装版并上传到 Releases
+# 打正式版本 tag（如 v2.5.18）推送后：自动打包 Windows 免安装版并上传到 Releases
 name: Build & Release
 
 on:
@@ -42,20 +42,43 @@ jobs:
         run: |
           $folder = Get-ChildItem dist | Select-Object -First 1
           if (-not $folder) { Write-Error "dist 目录为空"; exit 1 }
-          Compress-Archive -Path $folder.FullName -DestinationPath "SuzuranPet-1.1.0-win32-x64.zip" -Force
-          Write-Host "已生成: SuzuranPet-1.1.0-win32-x64.zip"
+          $ver = "${{ github.ref_name }}"
+          $zip = "SuzuranPet-$ver-win32-x64.zip"
+          Compress-Archive -Path $folder.FullName -DestinationPath $zip -Force
+          Write-Host "已生成: $zip"
 
       - name: 上传到 GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          name: "苏苏洛桌宠 1.1 正式版"
+          name: "苏苏洛桌宠 ${{ github.ref_name }} 正式版"
           body: |
-            # 苏苏洛桌宠 1.1 正式版
+            # 苏苏洛桌宠 ${{ github.ref_name }} 正式版
 
-            本版本为 1.1 发行版：接入本地 GPT-SoVITS v2ProPlus 微调音色（苏苏洛日语语音），新增「日语语音模式」（界面文字保持中文、说话先翻译成日语），界面语言支持中文 / English / 日本語 一键切换；沿用 1.0 的条款确认、隐私/安全文档、可调桌宠大小、本地 Agent 调用接口、自定义调用词、API 模型列表与 19 个可编辑情绪。
+            🩺 罗德岛医疗干员苏苏洛，从终端走出来，在桌面上陪你工作。
 
-            **开源但禁止商用**。使用前请阅读并同意 TERMS.md。日语语音模式需先按「语音部署与训练指南」部署本地 Genie（GPT-SoVITS）日语微调模型。
-          files: "SuzuranPet-1.1.0-win32-x64.zip"
+            ## ✨ 核心亮点
+            - **桌面行走**：在任务栏/窗口边缘散步、坐下、跳跃；拖拽抛掷有物理反馈
+            - **克隆音色语音**：中文（GenieTTS）与日语（GPT-SoVITS v2Pro）本地推理，苏苏洛训练成品随包（完整版解压即说话）
+            - **日语语音模式**：说话先翻译成日语（界面文字保持中文），失败自动重试，不打扰
+            - **长期记忆 + 羁绊系统**：记得你说过的事，相处越久越亲密
+            - **四套渲染**：Spine 2D / 2.5D 摆件 / Live2D / 经典 GIF
+            - **本地 Agent 接口**：其他 AI/脚本可通过 127.0.0.1 调用她（可关闭、可鉴权）
+            - **界面三语**：中文 / English / 日本語 一键切换
+
+            ## 📥 下载说明
+            - 本资产为**轻量版**（不含语音引擎，~248 MB）：下载后到「语音设置」按《语音部署与训练指南》部署引擎即可获得完整语音
+            - **完整版**（含引擎约 16 GB）与**皮肤包**由发布者在 Release 公告/网盘提供
+            - 替换升级：直接覆盖 `resources/app.asar` 并重启即可保留原配置
+
+            ## 🐛 本版修复（节选）
+            - 首启「同意后退出」：点同意不再被误判为拒绝而退出应用
+            - 重复台词翻译失败不再固定走系统音：失败进池 10s 冷却后自动重新翻译
+            - 全新安装 config.json 不再被建成空目录（持久化失效 P0）
+            - 托盘菜单分组重构；日语模式关闭中文引擎（省 ~4.7G 内存）
+
+            ## ⚖️ 许可
+            **BUSL-1.1（源代码可得）**：允许个人学习、研究、非商业使用；禁止商用；自首次发布满 4 年后自动转为 MIT。使用前请阅读并同意 TERMS.md。
+          files: "SuzuranPet-${{ github.ref_name }}-win32-x64.zip"
           generate_release_notes: false
           fail_on_unmatched_files: true
           draft: false

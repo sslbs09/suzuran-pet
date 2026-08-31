@@ -3,15 +3,20 @@ const config = require("./config");
 const { logTts } = require("./logger");
 
 // 翻译缓存（简单 LRU）：相同文本不重复调 API——减少上游限流(429)压力，也加快重复句响应。
-// TTL 按结果分档：成功译文 10min 复用（cost-cut）；失败（含空串）只缓存 90s，避免限流/超时恢复后同一句一直卡中文。
+// TTL 按结果分档：成功译文 10min 复用（cost-cut）；失败进「失败池」只做短暂冷却（FAIL_COOLDOWN），
+// 冷却结束后同一句再次触发会**重新请求翻译**——避免限流/超时恢复后重复台词一直走系统音。
 const CACHE_MAX = 200;
-const CACHE_TTL = 600000; // 成功译文复用窗口 10min
-const FAIL_TTL = 90000;   // 失败缓存窗口 90s：API 恢复后自动重试翻译，不再 10 分钟内固定走中文
+const CACHE_TTL = 600000;   // 成功译文复用窗口 10min
+const FAIL_COOLDOWN = 10000; // 失败冷却 10s：限流窗口内不反复撞 API；冷却后自动重试翻译
 const cache = new Map();
 function cacheGet(text) {
   const hit = cache.get(text);
   if (hit) {
-    if (Date.now() - hit.t > (hit.fail ? FAIL_TTL : CACHE_TTL)) { cache.delete(text); return undefined; }
+    if (!hit.fail && Date.now() - hit.t > CACHE_TTL) { cache.delete(text); return undefined; }
+    if (hit.fail) {
+      if (Date.now() - hit.t < FAIL_COOLDOWN) return ""; // 还在冷却：按失败处理（不撞 API）
+      cache.delete(text); return undefined; // 冷却结束：删除失败标记 → 调用方重新翻译
+    }
     cache.delete(text); cache.set(text, hit); return hit.ja; // 命中后移到队尾（LRU）
   }
   return undefined;
@@ -25,6 +30,7 @@ function cacheSet(text, ja) {
 /**
  * 中日翻译（日语语音模式）：把中文翻译成自然口语的日语；失败/空结果自动重试一次；
  * 全部失败返回空串（调用方回退中文合成）。
+ * 失败会进「失败池」做 10s 冷却，冷却后同句再次触发重新翻译——重复台词不固定走系统音。
  * 限流(429)按服务端 retryAfterSeconds 等待（上限 90s，覆盖常见 60s 限流窗口）。
  */
 let trDisk = null;
@@ -40,7 +46,7 @@ async function translateToJa(text) {
   const c = cfg.chat || {};
   if (!c.apiKey || !c.baseUrl) return "";
   const cached = cacheGet(String(text || ""));
-  if (cached !== undefined) return cached; // 命中缓存直接返回（含空串=上次失败，90s 后失效重试）
+  if (cached !== undefined) return cached; // 命中缓存直接返回（成功译文=10min 复用；空串=失败冷却中，10s 后自动重试翻译）
   // cost-cut: disk cache (cross-session) reuse
   const tc = require("./translate-cache");
   {
@@ -123,7 +129,7 @@ async function translateToJa(text) {
     }
     if (attempt < 2) await new Promise((r) => setTimeout(r, retryWaitMs));
   }
-  cacheSet(String(text || ""), ""); // 失败也缓存（90s TTL）：限流窗口内不反复撞，恢复后自动重试
+  cacheSet(String(text || ""), ""); // 失败入池（10s 冷却）：冷却期内不反复撞 API，冷却后同句自动重新翻译
   return "";
 }
 

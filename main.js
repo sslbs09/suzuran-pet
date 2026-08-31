@@ -474,9 +474,9 @@ ipcMain.handle("pet:set-ui-lang", (_e, lang) => {
 function openSettings() {
   if (settingsWin && !settingsWin.isDestroyed()) { settingsWin.focus(); return; }
   settingsWin = new BrowserWindow({
-    width: 720,
+    width: 900,
     height: 800,
-    minWidth: 560,
+    minWidth: 700,
     minHeight: 620,
     resizable: true,
     title: "苏苏洛 · 设置",
