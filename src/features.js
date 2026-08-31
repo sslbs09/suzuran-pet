@@ -498,7 +498,7 @@ function startJaPrewarm() {
   if (!list.length) return;
   jaPrewarmIdx = 0;
   logJaPrewarm(`日语翻译预热启动（${list.length} 句固定台词，空闲批次翻译）`);
-  const BATCH = 3, GAP = 60000; // 每批 3 句，间隔 1 分钟（避免限流）
+  const BATCH = 3, GAP = 15000; // 每批 3 句，间隔 15 秒（v2.5.20 调快：165 句约 15 分钟跑完；避免限流）
   jaPrewarmTimer = setInterval(async () => {
     if (jaPrewarmIdx >= list.length) { stopJaPrewarm(); return; }
     const batch = list.slice(jaPrewarmIdx, jaPrewarmIdx + BATCH);
