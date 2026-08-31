@@ -1,0 +1,56 @@
+name: 🐛 Bug 反馈
+description: 报告桌宠的异常行为或故障
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！请尽量提供以下信息，能让我更快定位问题。
+  - type: input
+    id: version
+    attributes:
+      label: 桌宠版本
+      description: 从设置页或「关于」里看，或告诉我你用的 Release 版本号
+      placeholder: 例如 v2.5.18
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 问题发生在哪个功能
+      options:
+        - 启动 / 首次引导
+        - 聊天 / 记忆
+        - 语音（中文 / 日语）
+        - 行走 / 拖拽
+        - 渲染模式（Spine / 2.5D / Live2D / GIF）
+        - 托盘菜单 / 设置页
+        - Agent 接口 / 接入
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: desc
+    attributes:
+      label: 问题描述
+      description: 发生了什么？期望是什么？
+      placeholder: 详细描述……
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开……
+        2. 点击……
+        3. 看到……
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志（可选）
+      description: 出问题时的日志：`%APPDATA%\苏苏洛桌宠 2.5 正式版\logs\tts.log` 或 `E:\SuzuranPetData-Roaming-2.5\logs\tts.log` 最后 30 行
+      render: text

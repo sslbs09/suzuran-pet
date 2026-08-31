@@ -1,0 +1,16 @@
+name: 📧 其他 / 联系
+description: 其他问题或想直接联系作者
+title: "[其他] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        也可以直接发邮件：**1598184627@qq.com**
+  - type: textarea
+    id: message
+    attributes:
+      label: 你想说什么
+      placeholder: 写在这里……
+    validations:
+      required: true

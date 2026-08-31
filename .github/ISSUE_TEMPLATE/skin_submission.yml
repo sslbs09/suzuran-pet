@@ -1,0 +1,47 @@
+name: 🎨 皮肤 / 素材投稿
+description: 分享你做的皮肤、表情或 Live2D/Spine 模型
+title: "[皮肤投稿] "
+labels: ["skin"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢投稿！请附上素材的预览图和使用说明。注意：投稿即代表你同意该素材可随桌宠免费分发（保留署名）。
+  - type: input
+    id: name
+    attributes:
+      label: 素材名称
+      placeholder: 例如「夏日苏苏洛」
+    validations:
+      required: true
+  - type: dropdown
+    id: type
+    attributes:
+      label: 素材类型
+      options:
+        - GIF 表情
+        - Spine 皮肤 / 模型
+        - Live2D 模型
+        - 2.5D 摆件
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: desc
+    attributes:
+      label: 素材说明
+      description: 包含哪些表情/动作？适用场景？
+    validations:
+      required: true
+  - type: textarea
+    id: usage
+    attributes:
+      label: 安装方法
+      description: 用户怎么安装这个素材？（放在哪个目录）
+    validations:
+      required: true
+  - type: input
+    id: contact
+    attributes:
+      label: 署名 / 联系方式
+      description: 你希望如何被署名？
