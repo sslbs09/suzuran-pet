@@ -2242,6 +2242,7 @@ function applyPetName(name) {
   if (Number(state.live2dScale) > 0) applyLive2dScale(state.live2dScale);
   if (window.petAPI.onLive2dScaleChanged) window.petAPI.onLive2dScaleChanged((v) => applyLive2dScale(v));
   applyTheme(state.theme);
+  resetSleepTimer(); // v2.5.21c 修复：睡眠计时提前到条款/key 检查之前——未同意/未配 key 时桌宠也会困（此前被 return 跳过，永远不睡）
   setInterval(() => applyTheme(state.theme), 60000); // auto 模式跨时段自动切换
   if (window.matchMedia) {
     try { window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => applyTheme(state.theme)); } catch { /* 旧内核 */ }
@@ -2275,7 +2276,6 @@ function applyPetName(name) {
   }
 
   setMood("idle");
-  resetSleepTimer();
 
   // 开场白（气泡 + 语音；可在设置里关闭「启动问候」；隐藏启动时静默待命不打扰）
   if (state.greetingOnStart !== false && state.personaOpening && !state.hiddenAtStart) {

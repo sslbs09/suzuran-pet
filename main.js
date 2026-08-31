@@ -7,9 +7,9 @@
 "use strict";
 
 const { app, protocol, safeStorage, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, screen, dialog, Notification } = require("electron");
-// 渲染进程偶发崩溃（reason=crashed，疑似 GPU/WebGL）→ 禁用硬件加速回退软件渲染（SwiftShader）。
-// 桌宠画布小，性能影响可接受；若确认崩溃消失则保留，否则可移除此行恢复硬件加速。
-app.disableHardwareAcceleration();
+// v2.5.22 修复（P0-2）：删除无条件 disableHardwareAcceleration——
+// 此前与下方按 softRender 配置的判断冲突，导致设置页「软件渲染」开关形同虚设。
+// 硬件加速默认开启（Spine/PIXI 性能更好）；若遇 GPU 崩溃，用户在设置开启 softRender 即回退 CPU 渲染。
 protocol.registerSchemesAsPrivileged([{ scheme: "pet-user", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 const { spawn, exec, execFile } = require("child_process");
 const http = require("http");
@@ -851,9 +851,16 @@ ipcMain.handle("pet:apply-gif", (_e, { name, filePath }) => {
   try {
     if (!name || !filePath) return { ok: false, message: "参数缺失" };
     if (!getMoodList().some((m) => m.name === name)) return { ok: false, message: "未知情绪: " + name };
-    if (!fs.existsSync(filePath)) return { ok: false, message: "文件不存在: " + filePath };
+    // v2.5.22 安全加固（P1-3）：只允许 .gif 扩展名 + realpath 拒绝符号链接/越权路径，
+    // 防止渲染层传任意路径复制进可读目录（任意文件读取链）。
+    const ext = String(filePath).toLowerCase();
+    if (!ext.endsWith(".gif")) return { ok: false, message: "仅支持 .gif 文件" };
+    let realSrc = "";
+    try { realSrc = fs.realpathSync(filePath); } catch { return { ok: false, message: "文件不存在: " + filePath }; }
+    if (!fs.existsSync(realSrc) || !fs.statSync(realSrc).isFile()) return { ok: false, message: "文件不存在: " + filePath };
+    if (!realSrc.toLowerCase().endsWith(".gif")) return { ok: false, message: "仅支持 .gif 文件" };
     fs.mkdirSync(SPRITE_USER_DIR, { recursive: true });
-    fs.copyFileSync(filePath, path.join(SPRITE_USER_DIR, name + ".gif"));
+    fs.copyFileSync(realSrc, path.join(SPRITE_USER_DIR, name + ".gif"));
     sendToRenderer("pet:sprites-changed", { name, moods: getMoodList() });
     return { ok: true, message: "已应用 ✅" };
   } catch (e) {
@@ -1070,6 +1077,18 @@ async function readAgentJson(req, maxBytes) {
 function startAgentApi() {
   const a = config.getConfig().agentApi || {};
   if (!a.enabled) return;
+  // v2.5.22 安全加固（P1-4）：master token 与 clients 都为空时自动生成随机 token——
+  // 杜绝"本机任何进程可无认证调用 /chat 消耗 LLM 额度"的零认证缺口。
+  // token 走 secrets（DPAPI 加密），config.json 只存指纹不落明文。
+  if (!a.bearerToken && !(Array.isArray(a.clients) && a.clients.length)) {
+    const autoToken = crypto.randomBytes(32).toString("base64url");
+    try {
+      config.replaceSecrets({ agentBearerToken: autoToken });
+      logTts("agent", "Agent 接口首次启用：已自动生成访问令牌（本地接口需 Bearer 认证，见设置页 Agent 区）");
+    } catch (e) {
+      logTts("agent", "自动生成令牌失败（安全存储不可用）: " + (e && e.message || e));
+    }
+  }
   const port = Math.max(1, Math.min(65535, parseInt(a.port, 10) || 8765));
   const server = http.createServer(async (req, res) => {
     let sent = false;
@@ -1789,6 +1808,24 @@ ipcMain.handle("pet:get-settings", () => {
 });
 ipcMain.handle("pet:save-settings", (_e, patch) => {
   if (!patch || typeof patch !== "object") return false;
+  // v2.5.22 安全加固（P0-1）：渲染层 patch 白名单过滤——
+  // 仅允许设置页实际可改的键。ttsGenie/ttsGsv 的 python/serverScript 是设置页
+  // 语音部署区的合法配置（用户主动填的引擎路径，保留）；zcodeCli/workspace/
+  // zcodeEnabled/translateApi 渲染层从不提交（仅 config.json 直改）→ 禁止写入，
+  // 防止渲染层 XSS 冒用 saveSettings 植入可执行路径（任意代码执行链）。
+  const ALLOWED_TOP = new Set([
+    "pet", "chat", "window", "features", "agentApi", "uiLang", "hotkey", "startHidden",
+    "renderMode", "walking", "walkSeatSink", "walkTiming", "rigScale", "rigMouseFollow",
+    "mouseTrackGlobal", "catToy", "fileGuard", "proactiveChat", "personify", "rpMode",
+    "dimMode", "greetingOnStart", "security", "spineSkinId", "tts", "ttsCloud", "ttsCosy",
+    "ttsGenie", "ttsGsv", "moods", "emotionalVoice", "emotionVoice", "live2dScale",
+    "autoLaunch", "walkGlobal", "walkSpeed", "proactiveMin", "agentClients"
+  ]);
+  const BLOCKED_TOP = new Set(["zcodeCli", "workspace", "zcodeEnabled", "translateApi"]);
+  for (const key of Object.keys(patch)) {
+    if (BLOCKED_TOP.has(key)) { delete patch[key]; logTts("settings", "已拦截渲染层写入敏感键: " + key); }
+    else if (!ALLOWED_TOP.has(key)) { delete patch[key]; } // 白名单外未知键静默丢弃
+  }
   try {
     if (Object.prototype.hasOwnProperty.call(patch, "autoLaunch")) { // 开机自启（系统级，不入 config）
       const al = !!patch.autoLaunch;

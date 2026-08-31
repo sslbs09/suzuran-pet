@@ -240,7 +240,9 @@ async function chat({ persona, history = [], text, state = "", onChunk = () => {
     } catch { /* 向量记忆故障不影响对话 */ }
     try { vectorMemory.add(text); } catch { /* 入库失败忽略 */ }
   }
-  for (const h of history.slice(-cfg.chat.maxHistoryTurns)) {
+  // v2.5.22 修复（P1-6）：maxHistoryTurns 是"轮数"（recent() 返回 2N 条 user+assistant），
+  // 这里按条数 slice 会把上下文砍半——改为 2N 与 recent 语义一致。
+  for (const h of history.slice(-(cfg.chat.maxHistoryTurns * 2))) {
     messages.push({ role: h.role, content: h.content });
   }
   messages.push({ role: "user", content: text });
