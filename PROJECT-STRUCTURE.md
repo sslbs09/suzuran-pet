@@ -10,12 +10,12 @@
 | `main.js` / `preload.js` | 主进程与 preload 桥（IPC 安全暴露） |
 | `src/` | 业务模块：config / chat-client / tts-manager / memory / bond / features（主动搭话·语音输入·日程）/ lines（台词库）/ ja-translate / schedules / tray-menu / router（zcode 任务）/ history / secrets / storage / file-guard / logger / utils / credential-import |
 | `renderer/` | 页面与运行库：index.html + pet.js（主窗口）、settings / moods / psd / voice / schedule / addchar / terms；`rig/`（2.5D 装配 rigger.js + genericparts.js）、`rig-runtime.js`、`sprites/`（表情 GIF：default 默认 / user 用户覆盖）、`spine/`（Spine 模型） |
-| `docs/` | 开发文档：optimization-progress.md（迭代账本）、ENV-CDP-DEVTOOLS-ISSUE.md（环境问题档案）、ROADMAP-C-SECURITY-TEST.md（安全测试）、`docs/TUTORIALS/`（小白教程合集）、docs/SELF-REVIEW.md（项目自审：多巩固/技术债清单） |
+| `docs/` | 用户文档：`快速开始.md`、`TUTORIALS/`（小白教程合集）、`assets/`（README 配图）；开发过程文档（交接/账本/测试报告等）统一归档在 `docs/internal/` |
 | `voice-ref/` | 情绪音色参考音频：`ref_<情绪>.trim.wav`（GSV 参考）+ `.mp3`（原始）+ `.txt`（转写原文），配 `voice-refs.json`（五档：撒娇/傲娇/惊讶/温柔/开心） |
 | `outputs/` | 对外输出物：情绪试听音频（v1/v2） |
 | `scripts/` | 工具脚本：stt_whisper.py（转写）、cosy_tts.py、gen-icon 等 |
 | `tests/` | Node 测试（flight-physics.test.js 等） |
-| `research/` | 调研资料（anime25drig 等） |
+| `docs/internal/research/` | 调研资料（anime25drig 等，2026-08-31 归档） |
 | `语音部署与训练指南/` | 语音方案部署/训练手册（含 genie_tts_server.py 与示例） |
 | `_backups/` | **统一备份目录**（见下） |
 | `data/` | 运行期数据（git 忽略） |
@@ -58,7 +58,7 @@
 
 **Bug 静态检查**
 - require() 全部可解析 ✅；渲染页 script/link 引用全部存在 ✅；全部 JS/PY 语法通过 ✅；飞行物理测试通过 ✅。
-- 已知环境问题（与本项目无关）：DevTools CDP 命令分发故障 → `docs/ENV-CDP-DEVTOOLS-ISSUE.md`。
+- 已知环境问题（与本项目无关）：DevTools CDP 命令分发故障 → `docs/internal/ENV-CDP-DEVTOOLS-ISSUE.md`。
 
 ## 5. 日常维护速查
 

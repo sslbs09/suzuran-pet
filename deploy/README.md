@@ -67,7 +67,7 @@ Get-AuthenticodeSignature -FilePath "<exe>"   # 确认 Signer 出现
 
 ## 4. VM 全新安装冒烟（引用 §14 追加 93/94 结论）
 
-1. 停 VM 内 pet；删 `C:\Users\pet\AppData\Roaming\苏苏洛桌宠 1.1 正式版`；`robocopy Z:\ C:\petapp-fresh /E`。
+1. 停 VM 内 pet；删 `C:\Users\pet\AppData\Roaming\苏苏洛桌宠 2.5 正式版`（旧快照里若还是「1.1 正式版」目录，删那个即可，升级启动会自动改名）；`robocopy Z:\ C:\petapp-fresh /E`。
 2. 启动 → 期望：**弹《使用条款》**（agreed=false）+ 日志两条「引擎路径不存在（首次安装未配置…）」
    + 5 进程 + `/health` ok + `DLL 基线已建立`。
 3. 测完停 pet；VM 保持 running。

@@ -2,12 +2,12 @@
 
 ## v2.5.0（2026-08-29）
 
-从 2.2 到 2.5 的大版本合集（完整变更见 docs/optimization-progress.md §49-§111），核心亮点：
+从 2.2 到 2.5 的大版本合集（完整变更见 docs/internal/optimization-progress.md §49-§111），核心亮点：
 
 ### 🎙 语音引擎完整随包（开箱即用）
-- 中文（GenieTTS 克隆音色）与日语（GPT-SoVITS v2Pro）推理引擎与苏苏洛训练成品全部随包（engines/ 约 15GB），新用户解压即说话，无需安装任何环境
+- 中文（GenieTTS 克隆音色）与日语（GPT-SoVITS v2Pro）推理引擎与苏苏洛训练成品全部随包（engines/ 约 15GB），完整版新用户解压即说话，无需安装任何环境
 - 首启自动探测引擎路径并回填配置；Genie venv 自动修复（包内 base-python）；VC++ 运行库随包（新机器 onnxruntime 可用）
-- 出厂默认开启语音；配置了「用完即停」式安全默认（无 API Key、无宿主路径、agreed=false 首启弹条款）
+- 完整版出厂默认开启语音，轻量版（GitHub Release，不含引擎）默认关闭、部署引擎后可开；配置了「用完即停」式安全默认（无 API Key、无宿主路径、agreed=false 首启弹条款）
 
 ### 📖 内置文档中心
 - 托盘右键即可阅读新手教程（9 篇）、使用说明、语音部署指南、API 接入指南（学生白嫖版：阿里云百炼学生券、智谱免费档、硅基流动、Gemini、OpenRouter 等）
