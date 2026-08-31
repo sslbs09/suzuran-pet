@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>开箱必读 · 三步上手（先看我！）</title>
+<style>
+  :root { --bg:#fff8f2; --card:#fffdf9; --accent:#e88a5a; --dark:#c96a3c; --text:#4a3a30; --light:#8a7365; --border:#f0ddd0; --ok:#3a8f5f; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:"Microsoft YaHei","PingFang SC",sans-serif; background:var(--bg); color:var(--text); line-height:1.9; font-size:16px; padding:34px 18px 60px; }
+  .wrap { max-width:760px; margin:0 auto; }
+  h1 { color:var(--dark); font-size:clamp(24px, 4vw, 32px); margin-bottom:4px; }
+  .sub { color:var(--light); margin-bottom:26px; }
+  h2 { color:var(--dark); font-size:clamp(18px, 2.6vw, 22px); margin:36px 0 14px; }
+  /* 可访问性：焦点可见环 + 减少动效（aesthetic-web） */
+  a:focus-visible, button:focus-visible, [tabindex]:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation:none !important; transition:none !important; } }
+  .step { background:var(--card); border:2px solid var(--border); border-radius:14px; padding:20px 24px; margin:16px 0; }
+  .step .n { display:inline-block; background:var(--accent); color:#fff; width:34px; height:34px; border-radius:50%; text-align:center; line-height:34px; font-weight:bold; margin-right:10px; font-size:18px; }
+  .step b.t { font-size:18px; }
+  .step p { margin-top:10px; }
+  .big { font-size:17px; }
+  .tip { background:#fff3e8; border-left:5px solid var(--accent); border-radius:0 10px 10px 0; padding:14px 18px; margin:14px 0; }
+  .warn { background:#fdeeee; border-left:5px solid #d9534f; border-radius:0 10px 10px 0; padding:14px 18px; margin:14px 0; }
+  table { border-collapse:collapse; width:100%; margin:14px 0; font-size:15px; }
+  th,td { border:1px solid var(--border); padding:10px 14px; text-align:left; }
+  th { background:#f5ece4; }
+  code { background:#f5ece4; padding:2px 7px; border-radius:5px; font-family:Consolas,monospace; font-size:14px; }
+  .foot { margin-top:44px; color:var(--light); text-align:center; font-size:13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎁 恭喜拿到苏苏洛！</h1>
+  <div class="sub">罗德岛医疗干员 · 你的专属桌宠——会聊天、会说话、会在桌面上散步、还会记住你的事。</div>
+  <div class="sub" style="margin-bottom:26px;">这份说明 2 分钟看完，看完就能玩。看不懂的地方不用研究，照着做就行。</div>
+
+  <h2>🚀 三步开始</h2>
+
+  <div class="step">
+    <span class="n">1</span><b class="t">解压，然后双击「苏苏洛桌宠 2.5 正式版.exe」</b>
+    <p>第一次启动如果 Windows 弹蓝色警告「已保护你的电脑」，点 <b>更多信息</b> → <b>仍要运行</b>（我们的程序没花钱买微软的信任章，不是病毒）。</p>
+    <p>杀毒软件如果报警，选「信任」或加入白名单。</p>
+  </div>
+
+  <div class="step">
+    <span class="n">2</span><b class="t">弹出《使用条款》→ 往下拉 → 点「同意」</b>
+    <p>同意之后桌宠就会出现在你的桌面上啦。右下角任务栏里有个小图标，<b>右键它</b>就是全部菜单。</p>
+  </div>
+
+  <div class="step">
+    <span class="n">3</span><b class="t">填一个 Key，她才能和你聊天</b>
+    <p>右键托盘图标 → <b>设置</b> → 聊天设置里填 <b>API Key</b>。没有 Key？看文档中心（右键托盘 → 📖 文档中心）里的<b>《API 接入指南》</b>，里面有免费白嫖渠道（学生还能领阿里云 300 元券），5 分钟能搞定。</p>
+    <p>填完发一句话，她回你，就成了 ✅</p>
+  </div>
+
+  <h2>🗣 关于说话（语音）</h2>
+  <div class="card">
+    <p class="big">🗣 完整版出厂就带着说话能力（中文 + 日语都是真人音色）。如果你下的是轻量版（几百 MB），需要先看《语音部署与训练指南》装好引擎，再开语音。</p>
+    <p>· <b>第一次说话前要等 1~2 分钟</b>（引擎在后台加载，不是卡住了），之后反应就快了</p>
+    <p>· 想让她说<b>日语</b>：右键托盘 → 「🗣 日语模式」打开即可</p>
+    <p>· 说话没声音？右键托盘看「🔊 语音」是否开着，再检查系统音量</p>
+  </div>
+
+  <h2>🖥 我的电脑配置行不行？</h2>
+  <table>
+    <tr><th>你想干什么</th><th>需要什么</th></tr>
+    <tr><td>聊天（打字）</td><td>什么电脑都行，<b>不需要显卡</b>（AI 在云端）</td></tr>
+    <tr><td><b>中文语音</b></td><td>普通电脑就行，<b>不需要显卡</b>（第一次加载稍慢）</td></tr>
+    <tr><td>日语语音</td><td>建议有 NVIDIA 显卡（GTX 1060 以上体验好）；没有也能开，但说得非常慢，建议不开</td></tr>
+    <tr><td>内存</td><td>建议 8GB 以上</td></tr>
+    <tr><td>硬盘</td><td>整个包解压后约 16GB，别放在快满的盘里</td></tr>
+  </table>
+
+  <h2>🎮 再多玩两天之后</h2>
+  <div class="card">
+    <p>· <b>换形象</b>：设置 → 渲染模式，除了经典表情还有 Spine 小人、2.5D 角色、Live2D 角色（自带示例模型，自己的模型放进 <code>assets/live2d/</code> 文件夹就能选）</p>
+    <p>· <b>深色模式</b>：设置 → 主题颜色，可以自动（晚上 7 点后变深色）、跟随系统、或手动定</p>
+    <p>· <b>对她不满意？</b>气泡右下角有 <b>↻</b> 重新生成一个版本，<b>‹ ›</b> 来回切换对比</p>
+    <p>· <b>让她记住事</b>：直接说"记住我喜欢草莓"，她就记住了（设置页里能看到和删除）</p>
+    <p>· 这些在 📖 文档中心（右键托盘）都有详细说明</p>
+  </div>
+
+<h2>🆘 遇到问题怎么办</h2>
+  <div class="card">
+    <p><b>① 先看内置文档</b>：右键托盘 → 📖 文档中心 → 里面的《常见问题》《API 接入指南》覆盖了大部分情况。</p>
+    <p><b>② 角色消失了 / 点不动 / 花屏</b>：试试右键托盘 → 退出，重新双击 exe。还不行就把日志发给作者：<code>你的用户目录\AppData\Roaming\苏苏洛桌宠 2.5 正式版\logs\tts.log</code>（找不到就整个 <code>logs</code> 文件夹压缩发过去；从老版本升级的，文件夹可能还叫「苏苏洛桌宠 1.1 正式版」，升级启动时会自动改名）。</p>
+    <p><b>③ 换电脑 / 换文件夹</b>：整个文件夹拷走就能用，聊天记录和设置在 <code>C:\Users\你\AppData\Roaming\苏苏洛桌宠 2.5 正式版</code> 里。</p>
+  </div>
+
+  <div class="warn"><b>千万别做的事：</b>不要把 API Key 发给别人；不要删除 <code>engines</code> 文件夹（删了就不能说话了）；不要把整个包放进 C 盘快满的盘。</div>
+
+  <h2>🐌 低配电脑 / 没有独立显卡</h2>
+  <div class="card">
+    <p>· 没有独立显卡也能玩：聊天和<b>中文语音</b>都不需要显卡</p>
+    <p>· 如果小人动作<b>卡顿、变形、或者点了没反应</b>：设置 → 关掉「Spine 小人」相关行走功能，渲染模式切回<b>经典 GIF 表情</b>（最流畅、任何机器都能跑）</p>
+    <p>· 电脑<b>时间日期不准</b>也会出问题（联网请求会失败）：设置 → 时间 → 打开"自动设置时间"</p>
+  </div>
+
+  <h2>⚠ 重要说明</h2>
+  <div class="warn"><b>关于 AI 回复：</b>聊天回复来自你自配的 OpenAI 兼容接口（第三方服务），程序本身不内置任何模型。API Key 只存在你本机（加密存储），绝不上传。</div>
+  <div class="warn"><b>关于引擎：</b>完整版含语音引擎（约 15GB），删除 <code>engines</code> 文件夹后语音不可用（聊天不受影响）。</div>
+
+  <div class="foot">苏苏洛桌宠 · 开箱必读 —— 祝你玩得开心 🩺</div>
+</div>
+</body>
+</html>

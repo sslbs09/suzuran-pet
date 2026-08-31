@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>苏苏洛桌宠 · API 接入指南（白嫖版）</title>
+<style>
+  :root {
+    --bg: #fff8f2; --card: #fffdf9; --accent: #e88a5a; --accent-dark: #c96a3c;
+    --text: #4a3a30; --light: #8a7365; --border: #f0ddd0; --code-bg: #f5ece4; --ok: #3a8f5f;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background: var(--bg); color: var(--text); line-height: 1.8; font-size: 15px; padding: 30px 18px 60px; }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  h1 { color: var(--accent-dark); font-size: 26px; margin-bottom: 6px; }
+  .sub { color: var(--light); margin-bottom: 24px; font-size: 13.5px; }
+  h2 { color: var(--accent-dark); font-size: 20px; margin: 34px 0 12px; padding-bottom: 6px; border-bottom: 2px solid var(--border); }
+  h3 { font-size: 16px; margin: 20px 0 8px; }
+  p { margin: 8px 0; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px 22px; margin: 14px 0; }
+  .tip { background: #fff3e8; border-left: 4px solid var(--accent); border-radius: 0 10px 10px 0; padding: 12px 16px; margin: 12px 0; font-size: 14px; }
+  .warn { background: #fdeeee; border-left: 4px solid #d9534f; border-radius: 0 10px 10px 0; padding: 12px 16px; margin: 12px 0; font-size: 14px; }
+  code { background: var(--code-bg); padding: 2px 7px; border-radius: 5px; font-family: Consolas, monospace; font-size: 13px; word-break: break-all; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 13.5px; }
+  th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+  th { background: var(--code-bg); }
+  .tag { display: inline-block; background: var(--accent); color: #fff; border-radius: 20px; padding: 1px 10px; font-size: 12px; margin-right: 6px; }
+  .tag.free { background: var(--ok); }
+  ol, ul { padding-left: 26px; }
+  li { margin: 6px 0; }
+  .steps li { margin: 10px 0; }
+  a { color: var(--accent-dark); }
+  .foot { margin-top: 40px; color: var(--light); font-size: 13px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🔌 API 接入指南（学生党白嫖版）</h1>
+  <div class="sub">桌宠的聊天靠大模型 API 驱动。这篇教你从零拿到 Key、填进桌宠，顺便把能白嫖的渠道都列给你。额度政策随时会变，动手前以各家官网为准。</div>
+
+  <h2>一、先搞懂：桌宠要填哪三样</h2>
+  <div class="card">
+    <p>打开托盘菜单 → 设置 → 聊天设置，就三样东西：</p>
+    <ol class="steps">
+      <li><b>API 端点（baseUrl）</b>——接口地址，决定你用哪家的模型</li>
+      <li><b>API Key</b>——你在这家网站的"通行证"，一串字符</li>
+      <li><b>模型名</b>——具体用哪个模型，比如 <code>qwen-plus</code>、<code>glm-4-flash</code></li>
+    </ol>
+    <p>桌宠支持两种协议：<b>OpenAI 兼容</b>（绝大多数家都用这个）和 <b>Anthropic</b>（Claude 官方）。选对协议，填对地址就行。</p>
+  </div>
+
+  <h2>二、白嫖渠道总览（按推荐顺序）</h2>
+  <table>
+    <tr><th>渠道</th><th>免费情况</th><th>适合谁</th></tr>
+    <tr><td><b>阿里云百炼</b>（通义千问）</td><td>新人免费额度（约 90 天有效）+ 学生 300 元券</td><td>学生，想用正经大模型</td></tr>
+    <tr><td><b>智谱 GLM</b></td><td><code>glm-4-flash</code> 等模型免费</td><td>想要长期免费、不限量的人</td></tr>
+    <tr><td><b>硅基流动 SiliconFlow</b></td><td>注册送额度，部分小模型长期免费</td><td>想试多个开源模型</td></tr>
+    <tr><td><b>Google Gemini</b></td><td>免费档有每分钟/每日限额</td><td>能访问 Google 的人</td></tr>
+    <tr><td><b>OpenRouter</b></td><td>带 <code>:free</code> 后缀的模型免费</td><td>想一个 Key 试多家</td></tr>
+    <tr><td><b>Groq</b></td><td>免费档速度飞快、有每日限额</td><td>追回复速度</td></tr>
+    <tr><td><b>DeepSeek</b>（默认）</td><td>不免费但极便宜，充 10 块用很久</td><td>怕麻烦，直接充值</td></tr>
+  </table>
+  <div class="warn">免费额度政策变动很频繁，下面的步骤是通用路子，具体金额和期限请以官网页面为准。</div>
+
+  <h2>三、阿里云百炼 + 学生 300 元券（重点推荐学生党）</h2>
+  <div class="card">
+    <h3>第 1 步：领学生券（云工开物计划）</h3>
+    <ol class="steps">
+      <li>打开 <code>university.aliyun.com</code>（阿里云云工开物·高校计划）</li>
+      <li>用支付宝/淘宝账号登录，完成<b>学生认证</b>（学信网学籍信息）</li>
+      <li>在权益页领 <b>300 元无门槛优惠券</b>——大模型（百炼）也在适用范围里</li>
+    </ol>
+    <h3>第 2 步：开通百炼拿新人额度</h3>
+    <ol class="steps">
+      <li>进 <code>bailian.console.aliyun.com</code> 开通"百炼"大模型服务平台</li>
+      <li>新人自动送<b>免费额度</b>（开通后约 90 天内有效），150+ 款模型都能用</li>
+      <li><b>重要：</b>在费用设置里打开「用完即停」开关——额度用完自动停，不会偷偷扣你钱</li>
+      <li>左侧「API-KEY」页面 → 创建 API Key → 复制保存</li>
+    </ol>
+    <h3>第 3 步：填进桌宠</h3>
+    <table>
+      <tr><th>项</th><th>填什么</th></tr>
+      <tr><td>协议</td><td>OpenAI 兼容</td></tr>
+      <tr><td>端点</td><td><code>https://dashscope.aliyuncs.com/compatible-mode/v1</code></td></tr>
+      <tr><td>Key</td><td>刚创建的 <code>sk-xxx</code></td></tr>
+      <tr><td>模型名</td><td><code>qwen-plus</code>（均衡）或 <code>qwen-turbo</code>（快、便宜）</td></tr>
+    </table>
+    <p>学生券额度用完，还可以关注百炼的「先用后返」「全模型抵扣包」活动接着薅。</p>
+  </div>
+
+  <h2>四、其他渠道快速上手</h2>
+
+  <div class="card">
+    <h3><span class="tag free">长期免费</span>智谱 GLM</h3>
+    <ol class="steps">
+      <li>注册 <code>open.bigmodel.cn</code>（智谱开放平台），手机号就行</li>
+      <li>在「API Keys」页面创建 Key</li>
+      <li>端点 <code>https://open.bigmodel.cn/api/paas/v4</code>，模型填 <code>glm-4-flash</code>——这个档位<b>免费</b>，日常聊天够用</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h3><span class="tag free">注册送额度</span>硅基流动 SiliconFlow</h3>
+    <ol class="steps">
+      <li>注册 <code>siliconflow.cn</code>，送一笔体验额度</li>
+      <li>端点 <code>https://api.siliconflow.cn/v1</code></li>
+      <li>模型列表里挑带「免费」标记的小模型（如 <code>Qwen/Qwen2.5-7B-Instruct</code>，以站内标注为准）</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h3><span class="tag">需网络条件</span>Google Gemini</h3>
+    <p>到 <code>aistudio.google.com</code> 用 Google 账号登录，点「Get API key」生成。OpenAI 兼容端点是 <code>https://generativelanguage.googleapis.com/v1beta/openai/</code>，模型如 <code>gemini-2.0-flash</code>。免费档有限速，个人聊天一般够。</p>
+  </div>
+
+  <div class="card">
+    <h3><span class="tag free">聚合平台</span>OpenRouter</h3>
+    <p><code>openrouter.ai</code> 注册拿 Key，端点 <code>https://openrouter.ai/api/v1</code>。模型列表里名字带 <code>:free</code> 的不花钱，一个 Key 能试几十家的模型，适合"都想尝尝"的人。</p>
+  </div>
+
+  <div class="card">
+    <h3><span class="tag">便宜省事</span>DeepSeek（桌宠默认）</h3>
+    <p><code>platform.deepseek.com</code> 注册充值（10 块钱能用很久），端点 <code>https://api.deepseek.com/v1</code>，模型 <code>deepseek-chat</code>。桌宠出厂就配好这个端点，你只要填 Key。</p>
+  </div>
+
+  <h2>五、填完之后</h2>
+  <div class="card">
+    <ol class="steps">
+      <li>设置页保存，桌宠气泡会提示连接结果</li>
+      <li>发一句话试试——苏苏洛回你，就成了</li>
+      <li>开了语音的话，她会读出来</li>
+    </ol>
+    <div class="tip">连不上怎么办？按顺序查：① Key 有没有复制全（前后别带空格）② 端点结尾要不要 <code>/v1</code>（OpenAI 兼容一般要，桌宠会自动补）③ 账户里还有没有额度 ④ 看日志 <code>logs/tts.log</code> 里的报错。</div>
+  </div>
+
+  <h2>六、安全三句话</h2>
+  <div class="warn">
+    <p>① API Key 等于钱包，别发群里、别贴网上；</p>
+    <p>② 用免费额度也开着「用完即停」或限额，防超额；</p>
+    <p>③ 桌宠的 Key 存在本机加密存储（DPAPI），不随发布包外泄，放心。</p>
+  </div>
+
+  <div class="foot">苏苏洛桌宠 · API 接入指南 —— 额度政策以各家官网实时页面为准</div>
+</div>
+</body>
+</html>

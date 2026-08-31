@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>苏苏洛桌宠 · 使用说明</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: linear-gradient(160deg, #fdf8f2 0%, #eef6fc 100%);
+    color: #44505c;
+    padding: 26px 34px 40px;
+    line-height: 1.8;
+    font-size: 14px;
+    max-width: 800px;
+    margin: 0 auto;
+  }
+  h1 { font-size: clamp(20px, 3vw, 26px); color: #7aa9c9; margin-bottom: 4px; }
+  .sub { color: #9ab3c6; font-size: 13px; margin-bottom: 18px; }
+  h2 { font-size: clamp(15px, 2.2vw, 18px); color: #5f8db0; margin: 24px 0 8px; padding-left: 10px; border-left: 4px solid #8ec7e8; }
+  /* 可访问性：焦点可见环 + 减少动效（aesthetic-web） */
+  a:focus-visible, button:focus-visible, [tabindex]:focus-visible { outline: 2px solid #8ec7e8; outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+  .card { background: #fff; border: 1px solid #e3eef6; border-radius: 12px; padding: 14px 20px; margin-bottom: 12px; }
+  ol, ul { padding-left: 22px; }
+  li { margin-bottom: 4px; }
+  code { background: #eef3f7; padding: 1px 6px; border-radius: 4px; font-family: Consolas, monospace; font-size: 13px; }
+  .note { background: #fff8ec; border: 1px solid #f0dfc0; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #8a6d3b; margin-top: 10px; }
+  .foot { text-align: center; color: #a8bfcf; font-size: 12px; margin-top: 28px; }
+</style>
+</head>
+<body>
+  <h1>🦊 苏苏洛桌宠 · 使用说明</h1>
+  <div class="sub">罗德岛医疗干员 · 你的专属桌宠（绿色免安装版）——会聊天、会说话、会在桌面上散步、会记住你的事。</div>
+
+  <div class="card" style="background:#fff8ec;border-color:#f0dfc0;">
+    <b>⚠ 第一次运行被 SmartScreen 拦截？</b>这是程序没买数字签名导致的正常提示：点「更多信息」→「仍要运行」即可。放心，这是绿色程序，不解压到别处也能用。
+  </div>
+
+  <h2>🚀 三步开始使用</h2>
+  <ol>
+    <li>双击 <code>苏苏洛桌宠.exe</code></li>
+    <li>首次启动会自动弹出「⚙️ 设置」：选服务商 → 填 API Key →「测试连接」→「保存」；再把「桌宠对你的称呼」改成你的名字</li>
+    <li>单击小狐狸 → 输入框 → 回车，开始聊天 🩺</li>
+  </ol>
+
+  <h2>🖱 日常操作</h2>
+  <ul>
+    <li>单击小狐狸：打开/关闭聊天框</li>
+    <li>按住拖动：移动位置（会自动记住）</li>
+    <li>右键小狐狸 或 <code>Alt+Shift+S</code>：隐藏/显示</li>
+    <li>右下角托盘图标：单击隐藏/显示，右键打开菜单（设置、重载人设、退出等）</li>
+    <li>透明区域完全点击穿透，不挡其他软件</li>
+  </ul>
+
+  <h2>⚙️ 配置 API 与换人设</h2>
+  <ul>
+    <li>托盘右键 →「⚙️ 设置」：API（支持 DeepSeek / Kimi / OpenAI / GLM / Qwen / 本地 Ollama 等）、称呼、人设编辑、语音方案，都在这里</li>
+    <li>人设里 <code>{{userName}}</code> 会自动替换成你的称呼，保存立即生效，不用重启</li>
+    <li>托盘 →「🎙️ 音色克隆与训练」：部署好本地 Genie 后，在窗口里选参考音频、填文本、试听、一键应用，就能直接克隆出喜欢的音色（全界面操作，不用命令行）</li>
+    <li>「语音部署与训练指南」文件夹里有开语音的完整教程（默认是关的，文字交流不需要）</li>
+  </ul>
+
+  <h2>🎁 其他</h2>
+  <ul>
+    <li>托盘 →「🎨 表情管理」：每个情绪单独换 GIF，还能自己加情绪（≤5 个字，最多 30 个）——AI 回复时会自动选最贴切的情绪表现</li>
+    <li>高级配置：<code>resources\app\config.json</code> 可改热键、窗口尺寸、记忆轮数、情绪表等</li>
+    <li>任务模式（/zcode 前缀操控电脑）：默认关闭，需要另装 ZCode 才能用</li>
+  </ul>
+
+  <h2>⚠ 重要说明</h2>
+  <div class="note"><b>关于 AI 回复：</b>聊天回复来自你自配的 OpenAI 兼容接口（第三方服务），程序不内置模型；API Key 只存在你本机（加密存储），不上传。</div>
+  <div class="note"><b>关于引擎：</b>完整版含语音引擎（约 15GB），删除 <code>engines</code> 后语音不可用（聊天不受影响）。</div>
+
+  <div class="foot">—— 苏苏洛桌宠 · 2.5 正式版 ——</div>
+</body>
+</html>

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>苏苏洛 · 语音部署与训练指南</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: linear-gradient(160deg, #fdf8f2 0%, #eef6fc 100%);
+    color: #44505c;
+    padding: 26px 34px 40px;
+    line-height: 1.8;
+    font-size: 14px;
+    max-width: 860px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 22px; color: #7aa9c9; margin-bottom: 4px; }
+  .sub { color: #9ab3c6; font-size: 13px; margin-bottom: 18px; }
+  h2 { font-size: 17px; color: #5f8db0; margin: 26px 0 10px; padding-left: 10px; border-left: 4px solid #8ec7e8; }
+  h3 { font-size: 15px; color: #6b96b5; margin: 16px 0 6px; }
+  .card {
+    background: #fff; border: 1px solid #e3eef6; border-radius: 12px;
+    padding: 16px 20px; margin-bottom: 14px;
+  }
+  .tag { display: inline-block; background: #eaf5fc; color: #4a7ea6; border-radius: 5px; padding: 1px 8px; font-size: 12px; margin-right: 6px; }
+  .tag.green { background: #e8f7ec; color: #3c8a55; }
+  .tag.orange { background: #fff4e5; color: #b57a24; }
+  .tag.red { background: #fdeeee; color: #b04a4a; }
+  code, .code {
+    background: #eef3f7; padding: 1px 6px; border-radius: 4px;
+    font-family: Consolas, "Microsoft YaHei", monospace; font-size: 13px;
+  }
+  pre {
+    background: #26323e; color: #d8e6f0; border-radius: 8px;
+    padding: 12px 16px; overflow-x: auto; margin: 8px 0;
+    font-family: Consolas, monospace; font-size: 12.5px; line-height: 1.6;
+  }
+  ol, ul { padding-left: 22px; }
+  li { margin-bottom: 4px; }
+  .note {
+    background: #fff8ec; border: 1px solid #f0dfc0; border-radius: 8px;
+    padding: 10px 14px; font-size: 13px; color: #8a6d3b; margin-top: 10px;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+  td, th { padding: 6px 10px; border-bottom: 1px dashed #d8e6f0; text-align: left; font-size: 13px; }
+  th { color: #5f8db0; }
+  .foot { text-align: center; color: #a8bfcf; font-size: 12px; margin-top: 30px; }
+</style>
+</head>
+<body>
+  <h1>🎤 苏苏洛 · 语音部署与训练指南</h1>
+  <div class="sub">桌宠默认是「文字气泡」交流，完全不需要语音。想让她开口说话？四种方案从易到难任选一个就行。</div>
+
+  <h2>先搞懂：语音是怎么走的</h2>
+  <p>桌宠的语音链路（按优先级）：</p>
+  <p class="code">本地克隆音色（Genie）→ 百炼 CosyVoice → edge-tts → Windows 系统语音</p>
+  <p>每一层失败会自动落到下一层，所以哪怕什么都不装，只要打开语音开关，至少会有「系统语音」出声。前几层都关掉的话，就直接用系统自带语音，<b>零安装</b>。</p>
+
+  <h2>方案一：系统自带语音（零配置，推荐先试）</h2>
+  <div class="card">
+    <span class="tag green">不需要装任何东西</span>
+    <ol>
+      <li>托盘图标右键 →「⚙️ 设置」→「③ 语音」</li>
+      <li>语音方案选「系统自带语音」→ 保存 → 把「语音总开关」设为「🔊 开启」→ 保存</li>
+      <li>让小狐狸说一句话试试（比如发一条聊天）</li>
+    </ol>
+    <div class="note">效果：微软系统中文语音（晓晓等），清晰自然但音色是大众化的。</div>
+  </div>
+
+  <h2>方案二：edge-tts 云端语音（免费、音色好听）</h2>
+  <div class="card">
+    <span class="tag">需要 Python</span><span class="tag orange">免费</span>
+    <ol>
+      <li>安装 Python 3.9+（<a href="https://www.python.org/downloads/">python.org</a>，安装时勾选 <code>Add python.exe to PATH</code>）</li>
+      <li>打开命令行（Win+R → 输入 <code>cmd</code> → 回车），执行：<pre>pip install edge-tts</pre></li>
+      <li>设置里：语音方案选「edge-tts 云端」→ 保存 → 打开语音开关</li>
+    </ol>
+    <div class="note">效果：微软神经网络语音（默认晓晓 zh-CN-XiaoxiaoNeural），免费无 Key。声音是通用的，不是苏苏洛。</div>
+  </div>
+
+  <h2>方案三：本地克隆音色（Genie / GPT-SoVITS）★ 苏苏洛本人音色</h2>
+  <div class="card">
+    <span class="tag red">需要 Python + 硬盘 2GB+</span><span class="tag orange">CPU 就能跑</span>
+    <p>用本文件夹里的 <code>genie_tts_server.py</code> + 一段苏苏洛参考音频，就能克隆出苏苏洛的音色，全程本地、免费。</p>
+    <h3>第 1 步：装 Python</h3>
+    <p>安装 Python 3.9+（同上，勾选 Add to PATH）。</p>
+    <h3>第 2 步：建环境并装 genie-tts</h3>
+    <p>假设放到 <code>D:GenieTTS</code>（可自定，后面保持一致即可）。命令行执行：</p>
+    <pre>mkdir D:GenieTTS
+cd D:GenieTTS
+python -m venv venv
+venv\Scripts\pip install -r "语音部署与训练指南\requirements.txt"</pre>
+    <p class="code">注意：genie-tts 首次运行还会自动下载约 700MB 的语音模型资源（GenieData + 中文预置角色），走国内镜像，耐心等一次。</p>
+    <h3>第 3 步：放服务器脚本和参考音频</h3>
+    <ol>
+      <li>把本指南文件夹里的 <code>genie_tts_server.py</code> 复制到 <code>D:GenieTTS\</code></li>
+      <li>把 <code>config.example.json</code> 复制为 <code>D:GenieTTS\config.json</code> 并打开编辑：</li>
+    </ol>
+    <pre>{
+  "character": "sussurro",
+  "language": "Chinese",
+  "refAudio": "D:\\GenieTTS\\ref\\ref_sussurro.wav",
+  "refText": "你好呀，新手星，我是苏苏洛，罗德岛的医疗干员。今天也要好好休息哦。",
+  "hfEndpoint": "https://hf-mirror.com"
+}</pre>
+    <ol start="3">
+      <li>把自己想克隆的音色参考音频（3~10 秒干净人声 wav）放到 <code>D:GenieTTS\ref\ref_sussurro.wav</code>，并把它的原文填进 <code>refText</code>（本指南自带一份苏苏洛示例音频 <code>example_audio\</code>，可直接复制用）</li>
+    </ol>
+    <h3>第 4 步：测试服务器</h3>
+    <pre>D:GenieTTS\venv\Scripts\python.exe D:GenieTTS\genie_tts_server.py --port 9881</pre>
+    <p>看到 <code>服务就绪</code> 后，浏览器打开 <a href="http://127.0.0.1:9881/health">http://127.0.0.1:9881/health</a> 应显示 <code>ok</code>。首次启动会自动下载模型（约 700MB），耐心等待。</p>
+    <h3>第 5 步：填进桌宠设置（或直接用程序内一键克隆）</h3>
+    <ol>
+      <li>设置 →「③ 语音」→ 语音方案选「本地克隆音色 Genie」</li>
+      <li>Python 路径填：<code>D:GenieTTS\venv\Scripts\pythonw.exe</code></li>
+      <li>服务器脚本填：<code>D:GenieTTS\genie_tts_server.py</code></li>
+      <li>保存 → 打开语音开关。之后桌宠会自动拉起服务器，不用手动开</li>
+    </ol>
+    <p>💡 <b>换音色不用碰命令行：</b>托盘 →「🎙️ 音色克隆与训练」窗口，选参考音频 + 填文本 →「试听」→「应用音色」，一键完成克隆并立即生效。</p>
+    <div class="note">效果：克隆苏苏洛音色（参考音频是谁就是谁的声音）。CPU 即可实时合成；模型加载首次约 10~60 秒，之后秒回。<br>
+    想训练出更像的音色？看旁边的「训练指南.html」。</div>
+  </div>
+
+  <h2>方案四：百炼 CosyVoice 云端复刻</h2>
+  <div class="card">
+    <span class="tag">需要阿里云百炼 API Key</span><span class="tag orange">付费</span>
+    <ol>
+      <li>开通阿里云百炼，在控制台「声音复刻」上传参考音频生成音色 ID</li>
+      <li>设置里：语音方案选「百炼 CosyVoice」，在 <code>config.json</code> 的 <code>ttsCosy</code> 填入 <code>apiKey</code> 与 <code>voice</code>（音色 ID），保存并开语音</li>
+    </ol>
+  </div>
+
+  <h2>常见问题</h2>
+  <ul>
+    <li><b>开了语音没声音？</b> 确认语音总开关是「🔊」；本地克隆的话先确认服务器 /health 返回 ok（可能是模型还在下载）</li>
+    <li><b>服务器起不来？</b> 命令行直接跑 <code>genie_tts_server.py</code> 看报错；多半是 Python 版本或网络问题</li>
+    <li><b>想换音色？</b> 换参考音频 + 对应 refText，重启服务器即可</li>
+    <li><b>占不占显存？</b> Genie 是 CPU 推理，不占显存；约占 2~4GB 内存，建议内存 8GB+</li>
+  </ul>
+
+  <div class="foot">—— 苏苏洛桌宠 · 语音部署与训练指南 v1（Genie/GPT-SoVITS 引擎）——</div>
+</body>
+</html>
