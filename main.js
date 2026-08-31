@@ -161,21 +161,37 @@ function toggleWindow() {
 /* ---------- 显示层级（置顶眼前 / 桌面层级）与坐任务栏 ---------- */
 /** 应用显示层级：top=置顶（所有窗口之上）| desktop=桌面层级（可被其他程序窗口遮挡）。
  *  桌面层级下仅当窗口接触任务栏表面（贴地/坐姿下沉探入任务栏区）时才置顶，防止被任务栏盖住；
- *  其余情况（走在图标区、跳上图标/窗顶）让位于普通程序窗口＝真的在桌面上。
- *  参数已废弃：是否接触任务栏改由窗口几何位置判断，调用处无需再传。 */
-function applyLayer(_forceTop) {
+ *  其余情况（走在图标区、跳上图标/窗顶）让位于普通程序窗口＝真的在桌面上。 */
+function touchesTaskbar(bounds) {
+  try {
+    const wa = walkGeo.workAreaOf(screen, bounds);
+    // 窗口底边贴近/越过工作区底边（容差 24px）= 脚踩在任务栏上（贴地/坐姿下沉）
+    return bounds.y + bounds.height >= wa.y + wa.height - 24;
+  } catch { return false; }
+}
+function applyLayer() {
   if (!win || win.isDestroyed()) return;
   let onTop = (config.getConfig().layer || "top") !== "desktop";
   if (!onTop) {
-    // desktop 层级：仅主动交互（跳窗顶/跳跃/返回）临时置顶；坐姿/行走不再置顶（用户诉求：桌面级可被普通窗口覆盖）
-    if (walk.perched || walk.gotoPerch || walk.returning || walk.jump) onTop = true;
+    // desktop 层级：接触任务栏（脚在任务栏上）或主动交互（跳窗顶/跳跃/返回）临时置顶，
+    // 其余情况让位于普通窗口（真的在桌面上，可被遮挡）
+    if (touchesTaskbar(win.getBounds()) || walk.perched || walk.gotoPerch || walk.returning || walk.jump) onTop = true;
   }
   win.setAlwaysOnTop(onTop, "screen-saver");
+}
+/** 节流版 applyLayer：行走每帧 setPosition 都会触发，但 setAlwaysOnTop 高频切换有开销且会闪，
+ *  500ms 内只重判一次（位置已变时置顶状态随之更新，脚在任务栏上/下稳定）。 */
+let _layerThrottleAt = 0;
+function applyLayerThrottled() {
+  const now = Date.now();
+  if (now - _layerThrottleAt < 500) return;
+  _layerThrottleAt = now;
+  applyLayer();
 }
 function setPetLayer(v) {
   config.saveConfig({ layer: v === "desktop" ? "desktop" : "top" });
   refreshTrayMenu();
-  applyLayer(walk.active || walk.seated); // 接触任务栏表面时仍保持置顶
+  applyLayer(); // 坐姿/贴地接触任务栏时内部判定置顶，脚不被任务栏盖住
   logTts("walk", "显示层级: " + config.getConfig().layer);
 }
 ipcMain.handle("pet:set-layer", (_e, v) => { setPetLayer(v); return true; });
@@ -2435,7 +2451,7 @@ function walkSetPosition(x, y, where) {
     logTts("walk", "拦截非法窗口坐标(" + where + "): x=" + px + " y=" + py);
     return false;
   }
-  try { win.setPosition(px, py); return true; }
+  try { win.setPosition(px, py); applyLayerThrottled(); return true; }
   catch (e) {
     let bounds = "";
     try { bounds = " bounds=" + JSON.stringify(win.getBounds()); } catch { /* 忽略 */ }
@@ -2600,7 +2616,7 @@ function safeSetPosition(x, y, source = "position") {
     logTts("walk", source + " 坐标越界：x=" + px + " y=" + py);
     return false;
   }
-  try { win.setPosition(px, py); return true; }
+  try { win.setPosition(px, py); applyLayerThrottled(); return true; }
   catch (e) {
     if (Date.now() - (safeSetPosition._lastLog || 0) > 5000) { // 节流：防连续失败刷爆日志
       safeSetPosition._lastLog = Date.now();
