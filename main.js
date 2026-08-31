@@ -49,6 +49,7 @@ const router = require("./src/router");
 const chatClient = require("./src/chat-client");
 const zcodeClient = require("./src/zcode-client");
 const history = require("./src/history");
+const settingsPatch = require("./src/settings-patch"); // 渲染层 patch 白名单过滤纯函数（v2.5.23 抽取，可单测）
 const schedules = require("./src/schedules");
 const i18n = require("./src/i18n");
 const features = require("./src/features");
@@ -1733,7 +1734,7 @@ async function handleAskInner(sender, { id, text }) {
     // 长期记忆摘要：每 20 轮对话自动生成一次
     const _fc = config.getConfig();
     if (_fc.features && _fc.features.longTermMemory) {
-      const turns = history.recent("chat", 999).length;
+      const turns = history.count("chat"); // P1-5：内存计数替代 recent("chat",999) 全量读盘
       if (turns > 0 && turns % 20 === 0) {
         const recent = history.recent("chat", 20);
         features.generateMemorySummary(chatClient, recent).then((summary) => {
@@ -1858,54 +1859,26 @@ ipcMain.handle("pet:get-settings", () => {
 });
 ipcMain.handle("pet:save-settings", (_e, patch) => {
   if (!patch || typeof patch !== "object") return false;
-  // v2.5.22 安全加固（P0-1）：渲染层 patch 白名单过滤——
-  // 仅允许设置页实际可改的键。ttsGenie/ttsGsv 的 python/serverScript 是设置页
-  // 语音部署区的合法配置（用户主动填的引擎路径，保留）；zcodeCli/workspace/
-  // zcodeEnabled/translateApi 渲染层从不提交（仅 config.json 直改）→ 禁止写入，
-  // 防止渲染层 XSS 冒用 saveSettings 植入可执行路径（任意代码执行链）。
-  const ALLOWED_TOP = new Set([
-    "pet", "chat", "window", "features", "agentApi", "uiLang", "hotkey", "startHidden",
-    "renderMode", "walking", "walkSeatSink", "walkTiming", "rigScale", "rigMouseFollow",
-    "mouseTrackGlobal", "catToy", "fileGuard", "proactiveChat", "personify", "rpMode",
-    "dimMode", "greetingOnStart", "security", "spineSkinId", "tts", "ttsCloud", "ttsCosy",
-    "ttsGenie", "ttsGsv", "moods", "emotionalVoice", "emotionVoice", "live2dScale",
-    "autoLaunch", "walkGlobal", "walkSpeed", "proactiveMin", "agentClients"
-  ]);
-  const BLOCKED_TOP = new Set(["zcodeCli", "workspace", "zcodeEnabled", "translateApi"]);
-  for (const key of Object.keys(patch)) {
-    if (BLOCKED_TOP.has(key)) { delete patch[key]; logTts("settings", "已拦截渲染层写入敏感键: " + key); }
-    else if (!ALLOWED_TOP.has(key)) { delete patch[key]; logTts("settings", "已丢弃白名单外键: " + key); } // P2-2：与黑名单同样留痕，便于发现设置页新增字段未同步白名单
-  }
+  // v2.5.22 安全加固（P0-1）：渲染层 patch 白名单过滤——仅允许设置页实际可改的键
+  // （过滤逻辑在 src/settings-patch.js 纯函数，可单测）。ttsGenie/ttsGsv 的
+  // python/serverScript 是设置页语音部署区的合法配置（用户主动填的引擎路径，保留）；
+  // zcodeCli/workspace/zcodeEnabled/translateApi 渲染层从不提交 → 禁止写入，防止
+  // 渲染层 XSS 冒用 saveSettings 植入可执行路径（任意代码执行链）。
+  // secrets 放行（复审新-1 修复）：走 DPAPI 通道不入 config.json，提取只认三个已知
+  // 槽位的 replace action，放行无安全影响。
+  const { patch: safePatch, secrets, autoLaunch, blocked, unknown } = settingsPatch.filterSettingsPatch(patch);
+  for (const key of blocked) logTts("settings", "已拦截渲染层写入敏感键: " + key);
+  for (const key of unknown) logTts("settings", "已丢弃白名单外键: " + key); // P2-2：与黑名单同样留痕，便于发现设置页新增字段未同步白名单
   try {
-    if (Object.prototype.hasOwnProperty.call(patch, "autoLaunch")) { // 开机自启（系统级，不入 config）
-      const al = !!patch.autoLaunch;
-      delete patch.autoLaunch;
+    if (autoLaunch !== undefined) { // 开机自启（系统级，不入 config）
       try {
-        app.setLoginItemSettings({ openAtLogin: al, openAsHidden: !!config.getConfig().startHidden });
-        logTts("settings", "开机自启: " + (al ? "开" : "关"));
+        app.setLoginItemSettings({ openAtLogin: autoLaunch, openAsHidden: !!config.getConfig().startHidden });
+        logTts("settings", "开机自启: " + (autoLaunch ? "开" : "关"));
       } catch (e) { logTts("settings", "设置开机自启失败: " + (e && e.message || e)); }
     }
-    const secretPatch = patch.secrets || {};
-    delete patch.secrets;
-    if (patch.chat && Object.prototype.hasOwnProperty.call(patch.chat, "apiKey")) {
-      secretPatch.chatApiKey = { action: "replace", value: patch.chat.apiKey };
-      delete patch.chat.apiKey;
-    }
-    if (patch.ttsCosy && Object.prototype.hasOwnProperty.call(patch.ttsCosy, "apiKey")) {
-      secretPatch.ttsCosyApiKey = { action: "replace", value: patch.ttsCosy.apiKey };
-      delete patch.ttsCosy.apiKey;
-    }
-    if (patch.agentApi && String(patch.agentApi.bearerToken || "").trim()) {
-      secretPatch.agentBearerToken = { action: "replace", value: patch.agentApi.bearerToken };
-      delete patch.agentApi.bearerToken;
-    }
-    const secretValues = {};
-    if (secretPatch.chatApiKey && secretPatch.chatApiKey.action === "replace") secretValues.chatApiKey = String(secretPatch.chatApiKey.value || "");
-    if (secretPatch.ttsCosyApiKey && secretPatch.ttsCosyApiKey.action === "replace") secretValues.ttsCosyApiKey = String(secretPatch.ttsCosyApiKey.value || "");
-    if (secretPatch.agentBearerToken && secretPatch.agentBearerToken.action === "replace") secretValues.agentBearerToken = String(secretPatch.agentBearerToken.value || "");
-    if (Object.keys(secretValues).length) config.replaceSecrets(secretValues);
+    if (Object.keys(secrets).length) config.replaceSecrets(secrets);
     const before = config.getConfig();
-    config.saveConfig(patch);
+    config.saveConfig(safePatch);
     refreshTrayMenu();
     const after = config.getConfig();
     if ((after.pet && after.pet.name) !== (before.pet && before.pet.name)) refreshPetName();
@@ -2081,11 +2054,17 @@ ipcMain.handle("pet:rig-skins", () => rigSkinList());
 ipcMain.handle("pet:rig-apply", (_e, srcPath) => { // 从 PSD 工具导入：复制到 rigUser 并设为当前
   try {
     const src = String(srcPath || "");
-    if (!/\.psd$/i.test(src) || !fs.existsSync(src)) return { ok: false, message: "PSD 文件不存在" };
+    // v2.5.23 安全加固（P1-3 尾巴，同 apply-gif）：只允许 .psd 扩展名 + realpath 拒绝
+    // 符号链接/越权路径——防止渲染层传任意路径复制进可读目录（任意文件读取链）
+    if (!/\.psd$/i.test(src)) return { ok: false, message: "仅支持 .psd 文件" };
+    let realSrc = "";
+    try { realSrc = fs.realpathSync(src); } catch { return { ok: false, message: "PSD 文件不存在" }; }
+    if (!fs.existsSync(realSrc) || !fs.statSync(realSrc).isFile()) return { ok: false, message: "PSD 文件不存在" };
+    if (!/\.psd$/i.test(realSrc)) return { ok: false, message: "仅支持 .psd 文件" };
     fs.mkdirSync(config.STORAGE.rigUser, { recursive: true });
-    const id = path.basename(src);
+    const id = path.basename(realSrc);
     const dest = path.join(config.STORAGE.rigUser, id);
-    if (path.resolve(src) !== path.resolve(dest)) fs.copyFileSync(src, dest);
+    if (path.resolve(realSrc) !== path.resolve(dest)) fs.copyFileSync(realSrc, dest);
     config.saveConfig({ rigSkinId: id });
     sendToRenderer("pet:rig-skin-changed", id);
     logTts("rig", "应用 2.5D 皮肤: " + id);

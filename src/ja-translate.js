@@ -1,6 +1,7 @@
 "use strict";
 const config = require("./config");
 const { logTts } = require("./logger");
+const { normalizeOpenAIBase, normalizeAnthropicBase } = require("./chat-client");
 
 // 翻译缓存（简单 LRU）：相同文本不重复调 API——减少上游限流(429)压力，也加快重复句响应。
 // TTL 按结果分档：成功译文 10min 复用（cost-cut）；失败进「失败池」只做短暂冷却（FAIL_COOLDOWN），
@@ -55,19 +56,21 @@ async function translateToJa(text) {
   if (!c.apiKey || !c.baseUrl) return "";
   const cached = cacheGet(String(text || ""));
   if (cached !== undefined) return cached; // 命中缓存直接返回（成功译文=10min 复用；空串=失败冷却中，10s 后自动重试翻译）
-  const base = String(c.baseUrl || "").replace(/\/+$/, "");
+  const isAnthropic = String(c.apiType || "openai") === "anthropic"; // v2.5.2：兼容 anthropic 协议（聚合站常配 anthropic 通道）
+  // P1-8（v2.5.23）：复用 chat-client 的 baseUrl normalize——填 api.deepseek.com（无 /v1）
+  // 自动补 /v1 不再 404；Anthropic 填带 /v1 的不会拼出 /v1/v1/messages
+  const base = isAnthropic ? normalizeAnthropicBase(c.baseUrl) : normalizeOpenAIBase(c.baseUrl);
   const userName = String((c.userName || "")).trim();
   const sys = "你是中日翻译器。把用户输入的中文翻译成自然流畅、口语化的日语。只输出译文本身，不要任何解释、引号或多余内容。" +
     "强制术语：任何'博士'或'刀客塔'一律输出为日语片假名 ドクター（玩家称呼，发音 do-ku-tā），不得输出日语汉字'博士'、不得输出中文'刀客塔'，也不得输出英文 doctor；" +
     "任何对用户的称呼（如'主人'）一律输出为 マスター。" +
     "任何称呼/人名都必须用片假名音译，不得省略、不得保留中文汉字。" +
     (userName && userName !== "主人" ? "用户的名字是「" + userName + "」，提到时必须音译为片假名（如 タン・ズーヘン 这类读法），不得省略。" : "");
-  const isAnthropic = String(c.apiType || "openai") === "anthropic"; // v2.5.2：兼容 anthropic 协议（聚合站常配 anthropic 通道）
   for (let attempt = 1; attempt <= 2; attempt++) {
     let retryWaitMs = 1200;
     try {
       const url = isAnthropic
-        ? (base + "/v1/messages")
+        ? (base + "/messages")
         : (base + "/chat/completions");
       const headers = isAnthropic
         ? { "Content-Type": "application/json", "x-api-key": c.apiKey, "anthropic-version": "2023-06-01" }

@@ -613,7 +613,7 @@ async function restartGsvEngine(g) {
   for (let i = 0; i < 10; i++) {
     await new Promise((r) => setTimeout(r, 700));
     if (!(await portAlive(base))) break;
-    if (i >= 3) await killPortListener(port); // 迟迟不退则按端口强杀残留
+    if (i >= 3) await killPortListener(port, g2.serverScript); // 迟迟不退则按端口强杀残留（P1-7：杀前校验身份）
   }
   gsvServerChecked = false;
   gsvServerUp = false;
@@ -640,16 +640,32 @@ async function killGsvProcesses(g) {
   if (out) logTts("gsv", "已结束旧进程 PID: " + out.replace(/\s+/g, ","));
 }
 
-function killPortListener(port) {
+/**
+ * 强杀监听指定端口的残留进程（GSV 重启兜底）——v2.5.23 修复（P1-7）：
+ * 杀前校验进程身份——进程名必须 python 系（GSV 语音服务）且命令行含 serverScript
+ * 特征（默认 api.py），杜绝误杀同端口被其他程序占用（9880/9881 常被别的服务占用）。
+ * hint = serverScript 路径特征（可选）。
+ */
+function killPortListener(port, hint) {
   return new Promise((resolve) => {
     exec("netstat -ano -p tcp", { windowsHide: true, timeout: 10000 }, (err, stdout) => {
       if (err) return resolve(false);
-      let killed = false;
+      const pids = [];
       for (const ln of String(stdout || "").split(/\r?\n/)) {
         const m = ln.match(new RegExp(":" + port + "\\s+\\S+\\s+LISTENING\\s+(\\d+)"));
-        if (m) { try { process.kill(Number(m[1])); killed = true; } catch { /* 已退出 */ } }
+        if (m && Number(m[1]) > 0) pids.push(Number(m[1]));
       }
-      resolve(killed);
+      if (!pids.length) return resolve(false);
+      const pat = String(hint || "api.py").replace(/'/g, "''");
+      const conds = pids.map((pid) => "$_.ProcessId -eq " + pid).join(" -or ");
+      runPowerShell(
+        "Get-CimInstance Win32_Process -Filter \"Name='python.exe' or Name='pythonw.exe'\" | " +
+        "Where-Object { (" + conds + ") -and $_.CommandLine -like '*" + pat + "*' } | " +
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force; Write-Output $_.ProcessId }"
+      ).then((out) => {
+        if (out) logTts("gsv", "强杀残留 PID: " + out.replace(/\s+/g, ","));
+        resolve(!!out);
+      });
     });
   });
 }

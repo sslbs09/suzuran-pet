@@ -1,5 +1,26 @@
 # 更新日志
 
+## v2.5.23（2026-09-01）
+
+### 🚨 紧急修复（上版引入的回归）
+
+- **保存 API Key 失效回归（复审新-1）**：v2.5.22 白名单误杀 `secrets` 键——设置页填的 Key 被静默丢弃却提示"保存成功"。已放行 `secrets`（走 DPAPI 通道不入 config.json，提取只认三个已知槽位的 replace action，无安全影响），并把白名单过滤抽成 `src/settings-patch.js` 纯函数 + 单测覆盖"保存 Key → replaceSecrets 收到值"
+
+### 🔒 安全加固
+
+- **P1-7 killPortListener 身份校验**：强杀 GSV 残留进程前校验进程名（必须 python 系）+ 命令行含 serverScript 特征，杜绝误杀 9880/9881 同端口被其他程序占用
+- **P1-3 收尾 rig-apply 校验**：同 apply-gif，只允许 .psd + realpath 拒绝符号链接/越权路径（堵任意文件读取链）
+- **新-2 Live2D 缺失提示修复**：index.html 内联 onerror 被 CSP script-src 拦截永不执行，降级提示移到 pet.js initLive2d 主逻辑检测（缺失时 toast 提示 + 降级 GIF）
+
+### 🐛 行为修复
+
+- **新-3 Spine 启动竞态**：渲染库 defer 后启动即 Spine 模式时 PIXI 可能未就绪——initSpine 顶部等待就绪（最多 8s），超时才降级 GIF（此前静默回退）
+- **P1-8 日语翻译 baseUrl 规范化**：复用 chat-client 的 normalize——填 `api.deepseek.com`（无 /v1）自动补全不再 404；Anthropic 填带 /v1 的不会拼出 `/v1/v1/messages`
+
+### ⚡ 性能
+
+- **P1-5 历史记录轮转**：`history.jsonl` 从"只追加不收缩 + 每次读取全量解析"改为内存滚动窗口（启动载入一次常驻）+ 上限 4000 条自动裁掉最旧；长聊后聊天延迟不再持续恶化，"每 20 轮记忆摘要"的 999 条全量计数改走内存 `count()`
+
 ## v2.5.22（2026-08-31）
 
 ### 🔒 安全加固（重要，建议尽快升级）

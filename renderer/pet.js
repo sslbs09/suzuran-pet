@@ -132,6 +132,13 @@ let live2dActive = false;
 async function initLive2d(preferId) {
   const canvas = document.getElementById("live2d-canvas");
   if (!canvas || !window.Live2DRuntime) return false;
+  // v2.5.23 修复（新-2）：Live2D Core 缺失（克隆仓库未含 Live2D 专有文件）降级提示
+  // 移到主逻辑检测——index.html 内联 onerror 被 CSP script-src 拦截永远不会执行
+  if (!window.Live2DCubismCore) {
+    toast("Live2D 引擎组件缺失，已降级 GIF 模式（可切换到 Spine 模式）");
+    window.petAPI.playback && window.petAPI.playback("[live2d] Live2D Core 缺失，降级 GIF");
+    return false;
+  }
   let skins = [];
   try { skins = await window.petAPI.live2dList(); } catch { /* 忽略 */ }
   if (!skins || !skins.length) {
@@ -529,6 +536,18 @@ function spineAnimForMood(mood) {
 async function initSpine(epoch = renderModeEpoch) {
   try {
     if (spineApp) return true; // 已初始化
+    // v2.5.23 修复（新-3）：渲染库 defer 加载（P2-1）后，pet.js 不带 defer 先执行——
+    // 启动即 Spine 模式时 PIXI 可能尚未就绪。等待就绪（最多 8s）再初始化，超时降级 GIF。
+    if (typeof PIXI === "undefined") {
+      const t0 = Date.now();
+      while (typeof PIXI === "undefined" && Date.now() - t0 < 8000) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      if (typeof PIXI === "undefined") {
+        console.warn("[Spine] PIXI 渲染库未就绪（加载失败？），降级 GIF 模式");
+        return false;
+      }
+    }
     spineClassified = null;    // 新模型重新做动画名分类
 
     // 懒人换肤：主进程扫描 spine/user/ 下所有皮肤，返回当前选中的那套

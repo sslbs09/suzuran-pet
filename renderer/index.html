@@ -49,11 +49,12 @@
 <script src="i18n.js"></script>
 <script src="rp-render.js"></script>
 <!-- v2.5.22 优化（P2-1）：渲染库 defer 加载——GIF 模式启动不阻塞（pet.js 仅在 initSpine 时才用 PIXI），
-     1MB 库后台加载，切 Spine/Live2D 时已就绪；Live2D 专有文件缺失自动降级 -->
+     1MB 库后台加载，切 Spine/Live2D 时已就绪；Live2D 专有文件缺失降级提示在 pet.js
+     initLive2d 主逻辑检测（v2.5.23 修复新-2：内联 onerror 被 CSP script-src 拦截不会执行） -->
 <script defer src="pixi.min.js"></script>
 <script defer src="pixi-spine.js"></script>
-<script defer src="live2dcubismcore.min.js" onerror="console.warn('[live2d] Core 缺失（克隆仓库未含 Live2D 专有文件），Live2D 模式降级不可用')"></script>
-<script defer src="pixi-live2d.min.js" onerror="console.warn('[live2d] pixi-live2d 加载失败，Live2D 模式降级不可用')"></script>
+<script defer src="live2dcubismcore.min.js"></script>
+<script defer src="pixi-live2d.min.js"></script>
 <script defer src="live2d-runtime.js"></script>
 <script defer src="../node_modules/ag-psd/dist/bundle.js"></script>
 <script defer src="rig/rigger.js"></script>
