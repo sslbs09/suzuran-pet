@@ -295,11 +295,13 @@ function createWindow() {
   win.setIgnoreMouseEvents(true, { forward: true });
   startOutOfScreenGuard(); // 出屏哨兵：任何路径导致窗口严重滑出屏幕时 2s 内钳回（防角色在屏幕边缘“闪现”/消失）
   // 置顶层级周期重断言（借鉴 dsh-dafeiyu）：全屏游戏/其他置顶窗口抢占后自动恢复置顶；桌面层级/托盘隐藏不干预
+  // v2.5.21 修复：必须带 "screen-saver" level——无 level 的 setAlwaysOnTop(true) 用默认层级，
+  // 会每 5s 把 applyLayer 设的最高层级降级，导致脚被任务栏盖住（"时前时后"根因之一）。
   setInterval(() => {
     try {
       if (!win || win.isDestroyed() || !win.isVisible()) return;
       if ((config.getConfig().layer || "top") !== "top") return;
-      win.setAlwaysOnTop(true);
+      win.setAlwaysOnTop(true, "screen-saver");
     } catch { /* 忽略 */ }
   }, 5000);
 
