@@ -1,5 +1,50 @@
 # 更新日志
 
+## v2.5.22（2026-08-31）
+
+### 🔒 安全加固（重要，建议尽快升级）
+
+- **P0-1 渲染层配置写入白名单**：`pet:save-settings` 仅允许设置页可改的键；`zcodeCli/workspace/zcodeEnabled/translateApi` 等会被当可执行路径 spawn 的字段禁止从渲染层写入——堵住"渲染层 XSS 冒用 saveSettings 植入可执行路径"的任意代码执行链
+- **P0-2 硬件加速条件化**：删除无条件 `disableHardwareAcceleration`，设置页「软件渲染」开关真正生效
+- **P1-3 apply-gif 校验**：只允许 .gif 扩展名 + realpath 拒绝符号链接（堵任意文件读取链）
+- **P1-4 Agent 零认证自动令牌**：首次启用 Agent 接口自动生成随机 Bearer token（DPAPI 加密），杜绝本机进程无认证消耗 LLM 额度
+- **P1-6 maxHistoryTurns 语义修正**：轮数/条数混淆导致上下文砍半，已修正
+
+### ⚖️ 许可修正
+
+- **LICENSE 换官方 BUSL-1.1 模板原文**：Terms + Covenants of Licensor 逐字对齐 SPDX 官方文本（此前为自写改写版，缺失显著展示/违反终止/商标/免责大写等官方条款）；仅替换参数值
+
+### 🎨 渲染与性能
+
+- **渲染库 defer 加载**：GIF 模式启动不阻塞（PIXI/Spine/Live2D 约 1MB 后台加载，切模式时已就绪）
+- **工作区监听改 fs.watch**：事件驱动替代每 5s 全树同步遍历（大目录不再周期性卡死主进程）
+- **打字机增量渲染**：长回复从 O(n²) 全量重建改为 O(n) 增量 textContent，完成后再富渲染一次
+- **Agent lastSeen 60s 节流落盘**：不再每次请求全量重写 config.json（磨损 SSD）
+- **vector-memory 阈值收紧**：余弦 0.06 → 0.10，滤掉弱相关片段
+
+### 🐛 行为修复
+
+- **睡觉触发修复**：睡眠计时提前到初始化，未配 API Key 也会困（此前被 return 跳过永远不睡）
+- **睡觉悬浮修复**：躺下不再上抬窗口（此前窗口上浮导致角色悬空），恢复站立贴地位置
+- **小人脚在任务栏前后不稳定**：置顶重断言补 `screen-saver` 层级（无 level 会每 5s 降级致任务栏盖脚）+ 行走移动时按几何重判置顶
+
+### 📦 供应链
+
+- **xlsx vendor 本地化**：从 CDN tarball（无完整性校验）改为仓库内 `vendor/xlsx.js` + `vendor/dist/cpexcel.js`（Apache-2.0，附许可证，见 P1-3 说明）
+- **硬编码路径改 os.homedir()**：5 处 `C:\Users\xsbil` 兜底替换
+- **删除死代码**：`detectApiKeyFromZcode` / `detectDashScopeKey`（无调用，且与 README「不读取其他密钥」承诺存在误解空间）
+
+---
+
+## v2.5.20（2026-08-31）
+
+### 🎙 日语翻译预热
+
+- **固定台词预翻译**：165 句不含人称的台词启动后空闲批次预翻译进磁盘缓存（每批 3 句 15 秒间隔，约 15 分钟跑完）——翻译 API 挂了也能说出日语（"说不出来"根治）
+- **磁盘缓存优先级修复**：`translateToJa` 磁盘缓存提到 apiKey 检查之前——key 失效时已翻译台词仍可用
+
+---
+
 ## v2.5.19（2026-08-31）
 
 ### 🎙 语音稳定性

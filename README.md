@@ -25,7 +25,7 @@
 | --- | --- | --- | --- |
 | **轻量版** | 约 220 MB | ❌ 不含引擎，可自行部署 | [GitHub Releases](https://github.com/sslbs09/suzuran-pet/releases/latest) |
 | **完整版** | 约 16 GB | ✅ 含中文 + 日语引擎，开箱即说 | 联系 <1598184627@qq.com> |
-| **皮肤包** | 约 96 MB | 38 款皮肤补装 | [Releases 皮肤包资产](https://github.com/sslbs09/suzuran-pet/releases/download/v2.5.18/SuzuranPet-2.5.0-SkinPack.zip) |
+| **皮肤包** | 约 96 MB | 38 款皮肤补装 | [Releases 页资产（SuzuranPet-*-SkinPack.zip）](https://github.com/sslbs09/suzuran-pet/releases) |
 
 > ⚠️ GitHub 单文件上限 2 GB，这里只能放**轻量版**。
 > 想要「解压就能听见她说话」，请联系邮箱获取**完整版**。

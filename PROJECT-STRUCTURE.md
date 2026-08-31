@@ -23,6 +23,7 @@
 | `node_modules/` | 依赖（git 忽略） |
 | `.github/` | CI 工作流（lint/md-lint/release）+ FUNDING.yml + ISSUE_TEMPLATE（4 模板） |
 | `deploy/` | 部署脚本：pack.sh（asar 打包）/ sync-pages.sh（官网文档同步）/ publish.ps1 等 |
+| `vendor/` | **vendored 第三方库**（v2.5.22）：`xlsx.js` + `dist/cpexcel.js`（SheetJS 0.20.3，Apache-2.0，许可证见 `vendor/xlsx.LICENSE`）。⚠️ vendored 依赖不在 npm 依赖树，**Dependabot/npm audit 监控不到**——升级需手动跟踪 SheetJS 上游安全公告（历史 CVE：CVE-2023-30533 原型污染、CVE-2024-22363/23344 ReDoS） |
 
 ## 2. 备份策略（统一在 `_backups/`）
 

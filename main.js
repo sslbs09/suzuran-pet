@@ -1874,7 +1874,7 @@ ipcMain.handle("pet:save-settings", (_e, patch) => {
   const BLOCKED_TOP = new Set(["zcodeCli", "workspace", "zcodeEnabled", "translateApi"]);
   for (const key of Object.keys(patch)) {
     if (BLOCKED_TOP.has(key)) { delete patch[key]; logTts("settings", "已拦截渲染层写入敏感键: " + key); }
-    else if (!ALLOWED_TOP.has(key)) { delete patch[key]; } // 白名单外未知键静默丢弃
+    else if (!ALLOWED_TOP.has(key)) { delete patch[key]; logTts("settings", "已丢弃白名单外键: " + key); } // P2-2：与黑名单同样留痕，便于发现设置页新增字段未同步白名单
   }
   try {
     if (Object.prototype.hasOwnProperty.call(patch, "autoLaunch")) { // 开机自启（系统级，不入 config）

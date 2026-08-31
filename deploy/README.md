@@ -86,8 +86,8 @@ git tag vX.Y.Z && git push origin main && git push origin vX.Y.Z
 # 3) 创建 Release（curl API，用 git credential fill 取 token）
 #    → POST /repos/sslbs09/suzuran-pet/releases，body 写发布说明
 # 4) 上传资产（GitHub 单文件上限 2GB）：
-#    - 完整包（含 engines/ 约 9.5GB）超限 → 放 E:\SuzuranPetGit\release\vX.Y.Z\，网盘/其他渠道分发
-#    - 轻量版（deploy/publish-lite.ps1 排除 engines，约 235MB）→ 传 GitHub
+#    - 完整包（含 engines/ 约 16GB）超限 → 放 E:\SuzuranPetGit\release\vX.Y.Z\，网盘/其他渠道分发
+#    - 轻量版（deploy/publish-lite.ps1 排除 engines，约 220MB）→ 传 GitHub
 # 5) 完整包位置与说明写进 Release body
 ```
 
