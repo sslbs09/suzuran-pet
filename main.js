@@ -1404,7 +1404,9 @@ function sendProactive(text, emotion, { force = false } = {}) {
 
 function sendScheduleDue(item) {
   const text = "⏰ 日程提醒：" + item.title + (item.notes ? "\n" + item.notes : "");
-  sendProactive(text, item.emotion || "happy", { force: true });
+  // 日程情绪（动画档）映射到音色分档：surprised→惊讶 / happy→开心 / 其余→温柔（v2.5.26）
+  const mood = item.emotion === "surprised" ? "惊讶" : item.emotion === "happy" ? "开心" : "温柔";
+  sendProactive(text, mood, { force: true });
   sendToRenderer("pet:schedule-due", item);
   if (!isWindowVisible() && Notification.isSupported()) {
     new Notification({ title: "苏苏洛桌宠日程提醒", body: item.title + (item.notes ? "\n" + item.notes : "") }).show();
@@ -1480,7 +1482,7 @@ function maybePersonify(event, { chance = 0.3, cooldownMs = 60000 } = {}) {
   personifyCooldowns[event] = Date.now();
   // 入睡台词按时段（白天=午休口吻，晚上=晚安），见 lines.pickSleepLine
   const line = event === "sleep" ? lines.pickSleepLine(chatVars()) : lines.pickTpl(pool, chatVars());
-  sendProactive(line, "happy");
+  sendProactive(line, lines.LINE_MOODS[event] || "happy"); // 场景情绪→音色分档（v2.5.26）：被抛=惊讶/被逮=傲娇/睡醒=温柔
 }
 /** 观察 AI 工作流（v2.3）：Agent 接口被外部 AI/脚本调用时，偶尔小声嘀咕 */
 const workflowCalls = [];
@@ -1491,7 +1493,7 @@ function maybeWorkflowComment() {
   workflowCalls.push(now);
   if (!workflowCommentThrottle()) return;
   if (Math.random() > 0.25) return;
-  sendProactive(lines.pickTpl(lines.WORKFLOW_LINES, chatVars()), "idle");
+  sendProactive(lines.pickTpl(lines.WORKFLOW_LINES, chatVars()), lines.LINE_MOODS.workflow); // 温柔档（v2.5.26）
 }
 
 /* ---------- 感知工作区活动（v2.5.3）：她会在你改代码时小声嘀咕 ----------
@@ -1519,7 +1521,7 @@ function wsDebounceFire() {
   wsPending = false;
   if (wsWatchThrottle()) {
     const line = lines.pickTpl(lines.WORKFLOW_LINES, chatVars());
-    sendProactive(line, "idle");
+    sendProactive(line, lines.LINE_MOODS.workflow); // 温柔档音色（v2.5.26）
     logTts("watch", "工作区活动 → " + line);
   }
 }
@@ -1554,7 +1556,7 @@ function startWorkspaceWatch(cfg0) {
           wsWatchSig = sig;
           if (wsWatchThrottle()) {
             const line = lines.pickTpl(lines.WORKFLOW_LINES, chatVars());
-            sendProactive(line, "idle");
+            sendProactive(line, lines.LINE_MOODS.workflow); // 温柔档音色（v2.5.26）
             logTts("watch", "工作区活动 → " + line);
           }
         }
@@ -1705,7 +1707,7 @@ async function handleAskInner(sender, { id, text }) {
       sendToRenderer("pet:toast", "🥰 羁绊升级 Lv." + b.level);
       const st = bond.getStage();
       if (st.key !== stageBefore && lines.STAGE_LINES[st.key] && lines.STAGE_LINES[st.key].length) {
-        sendProactive(lines.pickTpl(lines.STAGE_LINES[st.key], chatVars()), "love");
+        sendProactive(lines.pickTpl(lines.STAGE_LINES[st.key], chatVars()), lines.LINE_MOODS["stage" + st.key] || "温柔"); // 羁绊阶段→音色分档（v2.5.26）
       }
     }
   } catch { /* 羁绊失败不影响对话 */ }
@@ -2215,7 +2217,7 @@ ipcMain.on("pet:pat", () => {
     if (b.leveledUp) sendToRenderer("pet:toast", "🥰 羁绊升级 Lv." + b.level);
   } catch { /* 忽略 */ }
   if (!patThrottle()) return;
-  sendProactive(lines.pickTpl(lines.PAT_LINES, chatVars()), "happy", { force: true });
+  sendProactive(lines.pickTpl(lines.PAT_LINES, chatVars()), lines.LINE_MOODS.pat, { force: true }); // 摸头=开心档
 });
 // 主动搭话 / 人格化开关（v2.3，设置页单独开启）
 function proactiveMin() { return (config.getConfig().features && config.getConfig().features.proactiveMin) || 8; }
@@ -2263,7 +2265,7 @@ function proactiveStateFn() {
 ipcMain.on("pet:set-proactive-chat", (_e, on) => {
   config.saveConfig({ proactiveChat: !!on });
   features.setProactiveEnabled(!!on);
-  if (on) features.startProactive((msg) => sendProactive(msg, "idle"), proactiveMin(), proactiveStateFn);
+  if (on) features.startProactive((msg, mood) => sendProactive(msg, mood || "idle"), proactiveMin(), proactiveStateFn); // mood 由台词池情绪映射给出（v2.5.26）
 });
 ipcMain.on("pet:set-personify", (_e, on) => {
   config.saveConfig({ personify: !!on });
@@ -3985,8 +3987,8 @@ if (!gotLock) {
     // 主动搭话（v2.3 增强）：闲置后 35% 概率开口；设置页 proactiveChat 可单独关闭
     features.setProactiveEnabled(_cfg.proactiveChat !== false);
     const _proactiveMin = (_cfg.features && _cfg.features.proactiveMin) || 8;
-    features.startProactive((msg) => {
-      sendProactive(msg, "idle"); // 隐藏到托盘时静默待命，不主动搭话
+    features.startProactive((msg, mood) => {
+      sendProactive(msg, mood || "idle"); // 台词池情绪→音色分档（v2.5.26）；隐藏到托盘时静默待命，不主动搭话
     }, _proactiveMin, proactiveStateFn);
 
     // 日语翻译预热（v2.5.20）：speakJa 模式下空闲批量翻译固定台词进磁盘缓存，

@@ -82,6 +82,7 @@ function startProactive(sendFn, intervalMin = 8, stateFn = null) {
     if (Math.random() > 0.35) return;
     const lines = require("./lines");
     let prompt;
+    let proactiveMood = "温柔"; // 台词情绪→GSV 音色分档默认温柔（v2.5.26，随由头分支覆盖）
     // v2.6 由头化扩展：记忆里有称谓/生日/健康/近期安排事实时，主动开口有"由头"（而非纯随机）
     try {
       const mem = require("./memory");
@@ -126,14 +127,16 @@ function startProactive(sendFn, intervalMin = 8, stateFn = null) {
       const cfg = config.getConfig();
       const vars = { name: (cfg.pet && cfg.pet.name) || "苏苏洛", user: (cfg.chat && cfg.chat.userName) || "博士" };
       const h = new Date().getHours();
+      let moodKey = lines.periodOf(); // 默认按时段取情绪（v2.5.26：情绪随台词场景 → GSV 音色分档）
       // 清晨专属（5-8 点）
-      if (h >= 5 && h < 8 && Math.random() < 0.25) prompt = lines.pickTpl(lines.EARLY_MORNING_LINES, vars);
+      if (h >= 5 && h < 8 && Math.random() < 0.25) prompt = lines.pickTpl(lines.EARLY_MORNING_LINES, vars), moodKey = "earlyMorning";
       // 关系阶段台词（熟悉起 18% 概率）
       if (!prompt) {
         try {
           const st = require("./bond").getStage();
           if ((st.key === "fd" || st.key === "xl" || st.key === "sy") && Math.random() < 0.18) {
             prompt = lines.pickTpl(lines.STAGE_LINES[st.key] || [], vars);
+            moodKey = "stage" + st.key;
           }
         } catch { /* 羁绊不可用则跳过 */ }
       }
@@ -146,6 +149,7 @@ function startProactive(sendFn, intervalMin = 8, stateFn = null) {
           if (isMilestone && days > lastMilestoneSaid && Math.random() < 0.2) {
             lastMilestoneSaid = days;
             prompt = "已经陪博士 " + days + " 天了……感觉像家人一样了呢";
+            moodKey = "stageXl"; // 里程碑=亲近感，用撒娇档
           }
         } catch { /* 忽略 */ }
       }
@@ -155,21 +159,23 @@ function startProactive(sendFn, intervalMin = 8, stateFn = null) {
           const st = (proactiveCfg.stateFn && proactiveCfg.stateFn()) || "";
           if (st === "walking" || st === "seated") {
             const pool = lines.PROACTIVE_BY_STATE[st];
-            if (pool && pool.length) prompt = lines.pickTpl(pool, vars);
+            if (pool && pool.length) prompt = lines.pickTpl(pool, vars), moodKey = st;
           }
         } catch { /* 状态不可用则走时段台词 */ }
       }
       if (!prompt) {
         if (idle > 45 * 60 * 1000 && Math.random() < 0.4) {
           prompt = lines.pickTpl(lines.LONG_IDLE_LINES, vars); // 超长闲置：想念系
+          moodKey = "longIdle";
         } else {
           prompt = lines.pickTpl(lines.PROACTIVE_BY_PERIOD[lines.periodOf()] || lines.PROACTIVE_BY_PERIOD.afternoon, vars);
         }
       }
+      if (prompt) proactiveMood = lines.LINE_MOODS[moodKey] || "温柔";
     }
     if (!prompt) return;
     lastChatTs = Date.now();
-    proactiveCfg.sendFn(prompt);
+    proactiveCfg.sendFn(prompt, proactiveMood);
   }, 60 * 1000); // 每分钟检查一次
 }
 

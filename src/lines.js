@@ -430,6 +430,19 @@ function throttled(minMs) {
   };
 }
 
+/** 池级情绪映射（v2.5.26）：固定台词播报时映射到 GSV 音色分档（撒娇/傲娇/惊讶/开心/温柔）。
+ *  翻译只管文本；「用哪个音色念」由本表按场景告诉桌宠——情绪随场景而非逐条标注。
+ *  未命中的值会落回默认音色（normEmotion 不识别即 null）。 */
+const LINE_MOODS = {
+  pat: "开心", thrown: "惊讶", grabbed: "傲娇",
+  wake: "温柔", sleep: "温柔", perch: "开心",
+  workflow: "温柔",
+  morning: "开心", noon: "开心", afternoon: "温柔", evening: "温柔", night: "温柔",
+  walking: "开心", seated: "温柔",
+  longIdle: "撒娇", earlyMorning: "温柔",
+  stageFd: "温柔", stageXl: "撒娇", stageSy: "温柔",
+};
+
 module.exports = {
   PAT_LINES,
   PERSONIFY_LINES,
@@ -440,4 +453,5 @@ module.exports = {
   pickTpl, pickSleepLine, STAGE_LINES, EARLY_MORNING_LINES, pick,
   periodOf,
   throttled,
+  LINE_MOODS,
 };
