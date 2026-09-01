@@ -197,3 +197,17 @@
 - 官网（gh-pages）狐橙+墨绿 vs 应用青系——品牌视觉分裂，统一是独立小项目
 - 设置页分区内容 stagger 入场（30-80ms/项，总<400ms）
 - 托盘图标主题感知
+
+---
+
+## 八、backlog 执行日志（2026-09-01 第二轮，用户确认后开工）
+
+> 约束：打包方式不变（继续 app_legacy + pack.sh + cp -f）；每完成一块续写本节。
+
+### 块 1：CSS 质感批（pet.css / ui.css）
+- ✅ backlog-1 reduced-motion 缺口：pet-squash/pet-squash-release/pet-dizzy 进关闭列表
+- ✅ backlog-5 对比度：浅色 `--pet-muted` #7f8f9c→#6e8090、`--pet-thinking`→#23736d；`--ui-subtle` #8aa0a4→#6f858c（11-12px 小字 ~4.5:1）
+- ✅ backlog-3 尾巴融合：`.bubble::before` 外层边框色三角（右/翻边/头顶三变体齐），rig 模式同隐
+- ✅ backlog-4 退出动画：面板三件 `transition: opacity .12s + display allow-discrete`，旧内核自动回退硬切
+- ✅ backlog-2 毛玻璃：`backdrop-filter: blur(8px)` 渐进增强；面板不透明度 .96→.90/.93 配合
+- 待块 5 部署后 vision 验证毛玻璃不穿帮。

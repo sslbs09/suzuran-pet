@@ -5,7 +5,7 @@
   --ui-surface-soft: #edf6f4;
   --ui-ink: #17313a;
   --ui-muted: #62777d;
-  --ui-subtle: #8aa0a4;
+  --ui-subtle: #6f858c; /* backlog-5：11px 脚注对比度提到 ~4.5:1（原 #8aa0a4 约 3:1） */
   --ui-line: #d7e5e3;
   --ui-line-strong: #b7d0cc;
   --ui-accent: #2f8f87;

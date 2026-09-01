@@ -6,11 +6,11 @@ input, textarea, #bubble-text { user-select: text; }
 
 /* ---------- 桌宠专属设计令牌（P1-1）：气泡/输入栏/信息版/按钮深浅双主题 ---------- */
 :root {
-  --pet-panel-bg: rgba(255, 255, 255, .96);          /* 气泡/输入栏/信息版表面（尾巴同色） */
+  --pet-panel-bg: rgba(255, 255, 255, .90);          /* 气泡/输入栏/信息版表面（尾巴同色；.90 配合毛玻璃） */
   --pet-panel-border: rgba(47, 143, 135, .32);
   --pet-shadow: 0 10px 26px rgba(30, 77, 77, .16), 0 2px 6px rgba(30, 77, 77, .10);
   --pet-ink: #44505c;
-  --pet-muted: #7f8f9c;
+  --pet-muted: #6e8090; /* backlog-5：12px 小字对比度提到 ~4.5:1 */
   --pet-accent: #2f8f87;
   --pet-accent-strong: #23736d;
   --pet-accent-ink: #28635f;
@@ -19,7 +19,7 @@ input, textarea, #bubble-text { user-select: text; }
   --pet-resizer: rgba(47, 143, 135, .9);
   --pet-scroll: rgba(47, 143, 135, .45);
   --pet-scroll-hover: #2f8f87;
-  --pet-thinking: #4da39b;
+  --pet-thinking: #23736d; /* backlog-5：原 #4da39b 白底对比不足 */
   --pet-chip-bg: #dff1ed;
   --pet-chip-ink: #28635f;
   --pet-chip-task-bg: #fff1dc;
@@ -40,7 +40,7 @@ input, textarea, #bubble-text { user-select: text; }
   --pet-ease: cubic-bezier(.23, 1, .32, 1);
 }
 body.theme-dark {
-  --pet-panel-bg: rgba(35, 44, 49, .96);
+  --pet-panel-bg: rgba(35, 44, 49, .93);
   --pet-panel-border: rgba(87, 188, 180, .25);
   --pet-shadow: 0 10px 26px rgba(0, 0, 0, .45), 0 2px 6px rgba(0, 0, 0, .30);
   --pet-ink: #e8eef0;
@@ -87,6 +87,18 @@ html, body {
   height: 100%;
 }
 
+/* 质感（backlog-2/4）：毛玻璃渐进增强（内核不支持 backdrop 时自动回退半透明实色）；
+   退出淡出用 display+allow-discrete，旧内核忽略 transition-behavior 自动回退硬切 */
+.bubble, .input-bar, .info-panel {
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  transition-property: opacity, display;
+  transition-duration: .12s;
+  transition-timing-function: cubic-bezier(.4, 0, 1, 1);
+  transition-behavior: allow-discrete;
+}
+.bubble.hidden, .input-bar.hidden, .info-panel.hidden { opacity: 0; }
+
 /* ---------- 气泡 ---------- */
 .bubble {
   position: absolute;
@@ -108,6 +120,18 @@ html, body {
   max-height: calc(100% - 46px); /* bottom 34px + 12px 顶部余量，小窗口（200px 高）里也不顶出窗口顶 */
   overflow: auto; /* 可滚动 + 右下角拖拽调大小 */
   resize: both;
+}
+/* 尾巴边框融合（backlog-3）：外层 ::before 画边框色三角垫底，内层 ::after 画背景色三角，
+   修复尾巴与气泡边框交接处的断线 */
+.bubble::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -8.5px;
+  transform: translateY(-50%);
+  border: 7px solid transparent;
+  border-left-color: var(--pet-panel-border);
+  border-right: 0;
 }
 .bubble::after {
   /* 尾巴朝右，指向桌宠 */
@@ -144,6 +168,12 @@ body.edge-left .bubble::after {
   border-left: 0;
   border-right: 5.5px solid var(--pet-panel-bg);  /* 尾巴朝左指向角色 */
 }
+body.edge-left .bubble::before {
+  right: auto;
+  left: -8.5px;
+  border-left: 0;
+  border-right: 7px solid var(--pet-panel-border);
+}
 /* 左缘延伸区模式（主进程 edge-left 事件）：气泡挪到桌宠头顶上方、尾巴朝下，避免被屏幕左缘裁掉 */
 .bubble.top {
   right: 4px;
@@ -158,6 +188,15 @@ body.edge-left .bubble::after {
   transform: translateX(50%);
   border: 5.5px solid transparent;
   border-top-color: var(--pet-panel-bg);  /* 尾巴朝下指向桌宠 */
+  border-bottom: 0;
+}
+.bubble.top::before {
+  top: auto;
+  bottom: -9.5px;
+  right: 50%;
+  transform: translateX(50%);
+  border: 7px solid transparent;
+  border-top-color: var(--pet-panel-border);
   border-bottom: 0;
 }
 .bubble.task { font-family: Consolas, "Courier New", monospace; font-size: calc(var(--chat-fz, 11px) - 1px); }
@@ -325,6 +364,7 @@ body.rig-mode .bubble {
 }
 body.rig-mode.edge-left .bubble { left: auto; right: 8px; } /* 贴屏幕左缘 → 气泡右上角 */
 body.rig-mode .bubble::after { display: none; }
+body.rig-mode .bubble::before { display: none; }
 /* rig 模式 ⤢ 放大：角色临时缩小让位，气泡占更大区域（能看到完整内容），角色不放大 */
 body.rig-mode.enlarged .rig-canvas { height: 45%; }
 body.rig-mode.enlarged .bubble {
@@ -484,7 +524,8 @@ body.edge-left .info-panel { right: 4px; width: 230px; } /* 翻边时与气泡�
 
 @media (prefers-reduced-motion: reduce) {
   .bubble:not(.hidden), .input-bar:not(.hidden), .info-panel:not(.hidden), .thinking span, .btn-mic.recording { animation: none; }
-  .btn, .bubble .btn-zoom, .bubble .btn-close, .swipe-bar button { transition: none; }
+  .pet.pet-squash, .pet.pet-squash-release, .pet.pet-dizzy { animation: none; } /* backlog-1：按压 Q 弹/落地眩晕也尊重减少动效 */
+  .btn, .bubble .btn-zoom, .bubble .btn-close, .swipe-bar button, .bubble, .input-bar, .info-panel { transition: none; }
 }
 
 /* v2.5.10 宽皮肤（如迷迭香第三皮肤 300px 画布）：气泡右缘避开更宽的角色条带 */
