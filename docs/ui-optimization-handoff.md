@@ -262,3 +262,4 @@
 - ✅ 「系统与高级（杂七杂八都在这）」拆分：sec-other→⚙系统界面（语言/尺寸/热键/启动/气泡字体/日程/保存动作）；新增 sec-agent🤝（Agent 全组+接入管理）；新增 sec-sense👀（工作区感知/剪贴板/系统监控/蜜标）；rig/live2d/walking 等模式专属归位 sec-render；feat-memory→sec-memory、feat-emotional→sec-voice
 - ✅ 导航 11 项与分区一一对应；i18n 三语补 set.agentTitle/set.senseTitle/set.nav.agent/set.nav.sense，set.other 三语改名；stagger 覆盖 11 分区；id 零重复、scroll-spy/搜索/data-rm 均为通用查询无需改 JS
 - ✅ 台词 248→293：PAT+4、thrown/grabbed/wake/sleepDay/sleepNight/perch 各+2、workflow+3、五时段各+3、walking/seated 各+3、idle+3、stage 各+1、early+2；23/23 单测绿、eslint 干净
+- ✅ 对齐修复（用户截图反馈「开关居中掉行下」）：根因=.switch-row 与 .col 同特异性且未写 flex-direction，column+align-items:center 组合成居中竖排；补 flex-direction:row+span flex:1；另加 :has 规则修复选框横排/滑杆数值右贴；已部署，**视觉验收移交用户**

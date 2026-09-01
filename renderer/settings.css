@@ -10,6 +10,12 @@
 .settings-page .col { grid-column: span 4; display: flex; min-width: 0; flex-direction: column; gap: 4px; }
 .settings-page .col.grow { grid-column: span 6; }
 .settings-page .col span { color: var(--ui-muted); font-size: 12px; font-weight: 550; }
+/* v2.5.26 对齐修复：复选框控件横排（框与文字同一行）；滑杆与数值横排（数值贴在滑杆右侧），
+   原先 .col 纵向 flex 把数值/复选文字甩到下一行，视觉错位 */
+.settings-page label.col:has(> input[type="checkbox"]) { flex-direction: row; align-items: center; gap: 6px; }
+.settings-page label.col:has(> input[type="checkbox"]) > span { color: var(--ui-ink); }
+.settings-page .col:has(> input[type="range"]) { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; }
+.settings-page .col:has(> input[type="range"]) > span:first-child, .settings-page .col:has(> input[type="range"]) > .hint { grid-column: 1 / -1; }
 .settings-page .keybox { display: flex; gap: 6px; }
 .settings-page .keybox input { flex: 1; }
 .settings-page .keybox .mini { width: 38px; flex: 0 0 38px; padding: 7px 0; }
@@ -39,7 +45,8 @@
 body.theme-dark .settings-page .cred-status.warn { color: #e0a458; }
 
 /* ---------- iOS 风格滑动开关（v2.2） ---------- */
-.settings-page .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.settings-page .switch-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; text-align: left; }
+.settings-page .switch-row > span { flex: 1 1 auto; }
 .settings-page .switch {
   position: relative; display: inline-block; width: 44px; height: 26px; flex: none;
 }
