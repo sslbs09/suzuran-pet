@@ -34,6 +34,7 @@ const SPRITE_BASE = "pet-user://sprites/user/";
 /* ---------- Spine 渲染系统（可切换 GIF/Spine；支持桌面行走） ---------- */
 let spineApp = null;         // PixiJS Application
 let spineObj = null;         // PIXI Spine 对象
+let skinSwitching = false;   // 换肤中：旧 context 销毁误触发的 lost 不触发整页 reload（v2.5.24）
 let renderMode = "gif";      // "gif" | "spine"
 let renderModeEpoch = 0;       // 异步 Spine 加载的会话号，最后一次模式选择获胜
 const SPINE_BASE = "spine/sussurro/";
@@ -198,6 +199,9 @@ function bindCtxLost(canvas, tag) { // 低配核显 WebGL 上下文丢失 → �
   canvas.addEventListener("webglcontextlost", (e) => {
     e.preventDefault();
     window.petAPI.playback && window.petAPI.playback("[gpu] WebGL 上下文丢失: " + tag);
+    // v2.5.24：换肤销毁旧 context 阶段 GPU 释放会误触发 lost（低配核显实测）——
+    // 此时新画布随后已重建，整页 reload 反而打断交互（"拿不起来"），换肤中吞掉
+    if (skinSwitching) return;
     window.petAPI.reloadRenderer && window.petAPI.reloadRenderer();
   });
 }
@@ -1642,6 +1646,7 @@ if (window.petAPI.onLive2dChanged) {
 
 /** 换肤：销毁旧模型与画布，重新探测皮肤并完整初始化 */
 async function rebuildSpine() {
+  skinSwitching = true; // 换肤全程吞掉旧 context 销毁触发的 lost（新画布随后重建，不整页 reload）
   try {
     if (spineObj) { try { spineObj.destroy(); } catch { /* 忽略 */ } spineObj = null; }
     if (spineApp) {
@@ -1661,6 +1666,8 @@ async function rebuildSpine() {
     reportGroundGap();
   } catch (e) {
     console.error("[Spine] 换肤重建失败:", e);
+  } finally {
+    skinSwitching = false;
   }
 }
 if (window.petAPI.onSpineSkinChanged) {
