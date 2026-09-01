@@ -2,13 +2,12 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 .settings-page { --gray-50: var(--ui-bg); --gray-100: var(--ui-surface-soft); --gray-200: var(--ui-line); --gray-300: var(--ui-line-strong); --gray-400: var(--ui-subtle); --gray-500: var(--ui-muted); --gray-600: var(--ui-muted); --gray-700: var(--ui-ink); --gray-900: var(--ui-ink); --primary-500: var(--ui-accent); --primary-600: var(--ui-accent-strong); --primary-700: var(--ui-accent-strong); --red-500: var(--ui-danger); --red-50: var(--ui-danger-soft); }
 .settings-page .ui-shell { width: min(100%, 960px); }
-.settings-page header { margin-bottom: 18px; }
-.settings-page h1 { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--ui-ink); font-size: 21px; font-weight: 650; }
+.settings-page header { margin-bottom: 24px; }
+.settings-page h1 { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--ui-ink); font-size: 20px; font-weight: 650; }
 .settings-page .sub { margin-top: 6px; color: var(--ui-muted); font-size: 12px; }
-.settings-page section { padding: 18px; }
 .settings-page h2 { color: var(--ui-ink); font-size: 14px; }
-.settings-page .row { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; align-items: end; }
-.settings-page .col { grid-column: span 4; display: flex; min-width: 0; flex-direction: column; gap: 5px; }
+.settings-page .row { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; align-items: end; }
+.settings-page .col { grid-column: span 4; display: flex; min-width: 0; flex-direction: column; gap: 4px; }
 .settings-page .col.grow { grid-column: span 6; }
 .settings-page .col span { color: var(--ui-muted); font-size: 12px; font-weight: 550; }
 .settings-page .keybox { display: flex; gap: 6px; }
@@ -67,7 +66,7 @@ html { scroll-behavior: smooth; }
 .settings-page .set-layout { display: grid; grid-template-columns: 164px minmax(0, 1fr); gap: 16px; align-items: start; }
 .settings-page .set-nav { position: sticky; top: 10px; display: flex; flex-direction: column; gap: 10px; max-height: calc(100vh - 20px); }
 .settings-page .set-nav nav { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
-.settings-page .set-nav a { padding: 7px 10px; border-radius: var(--ui-radius-sm); color: var(--ui-muted); text-decoration: none; font-size: 12.5px; line-height: 1.3; transition: background 140ms var(--ui-ease), color 140ms ease; }
+.settings-page .set-nav a { padding: 8px 12px; border-radius: var(--ui-radius-sm); color: var(--ui-muted); text-decoration: none; font-size: 12px; line-height: 1.3; transition: background 140ms var(--ui-ease), color 140ms ease; }
 .settings-page .set-nav a:hover { background: var(--ui-surface-soft); color: var(--ui-ink); }
 .settings-page .set-nav a:focus-visible { outline: none; box-shadow: var(--ui-focus); }
 .settings-page .set-nav a.active { background: var(--ui-accent-soft); color: var(--ui-accent-strong); font-weight: 650; }
@@ -75,7 +74,7 @@ html { scroll-behavior: smooth; }
 .settings-page .set-main { min-width: 0; }
 .settings-page .set-main section { scroll-margin-top: 54px; }
 /* 未保存提示条：顶部 sticky，替代原右下角悬浮按钮（作用域陷阱，见 settings.html 注释） */
-.settings-page .set-dirty { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 0 0 12px; padding: 9px 14px; border: 1px solid #ecd8b9; border-radius: var(--ui-radius-sm); background: #fff8ed; color: #80613b; font-size: 12.5px; box-shadow: var(--ui-shadow); }
+.settings-page .set-dirty { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; padding: 8px 16px; border: 1px solid #ecd8b9; border-radius: var(--ui-radius-sm); background: #fff8ed; color: #80613b; font-size: 12px; box-shadow: var(--ui-shadow); }
 .settings-page .set-dirty[hidden] { display: none; }
 .settings-page .set-dirty button { min-height: 28px; padding: 4px 12px; margin: 0; }
 .settings-page .set-dirty .result { margin-left: auto; }
@@ -87,4 +86,18 @@ body.theme-dark .settings-page .set-dirty { border-color: #4a4030; background: #
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
+  .settings-page .set-main section { animation: none; }
 }
+
+/* 分区 stagger 入场（v2.5.26，refactoring-ui）：40ms 步进、总<400ms，不挡交互 */
+.settings-page .set-main section { animation: sec-in 280ms var(--ui-ease) backwards; }
+.settings-page .set-main section:nth-of-type(1) { animation-delay: 0ms; }
+.settings-page .set-main section:nth-of-type(2) { animation-delay: 40ms; }
+.settings-page .set-main section:nth-of-type(3) { animation-delay: 80ms; }
+.settings-page .set-main section:nth-of-type(4) { animation-delay: 120ms; }
+.settings-page .set-main section:nth-of-type(5) { animation-delay: 160ms; }
+.settings-page .set-main section:nth-of-type(6) { animation-delay: 200ms; }
+.settings-page .set-main section:nth-of-type(7) { animation-delay: 240ms; }
+.settings-page .set-main section:nth-of-type(8) { animation-delay: 280ms; }
+.settings-page .set-main section:nth-of-type(9) { animation-delay: 320ms; }
+@keyframes sec-in { from { opacity: 0; transform: translateY(8px); } }
