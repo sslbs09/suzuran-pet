@@ -90,3 +90,22 @@
 5. **验证用视觉检查**：看截图必须走 vision skill（`node "C:/Users/xsbil/.zcode/skills/vision/vision.js" "<path>" "问题"`），禁止用 Read 直接读图
 6. **版本与日志**：`package.json` bump 到 2.5.26（本次基准 2.5.25）；`CHANGELOG.md` 顶部加 v2.5.26 段
 7. 完成后 commit（不 push），等用户验收后再发版
+
+---
+
+## 六、执行日志（接续会话逐段填写，防中途中断）
+
+> 说明：本节由 2026-09-01 接续会话（sess_e843ac02 之后）填写。每完成一个检查点追加一条并随代码一起提交。
+
+### 2026-09-01 检查点 0：现状盘点完成（代码未动）
+
+**已确认的事实与增量发现**（比交接报告第三节更具体）：
+
+1. **主窗口主题架构**：`pet.js:181 applyTheme()` 负责 `body.theme-dark`，含 auto（19 点-6 点）/system 逻辑，60s 定时 + `pet:theme-changed` IPC 监听，基建完好，CSS 侧补齐即可。
+2. **⚠️ 新发现（交接报告未覆盖）**：主进程 `sendToRenderer`（main.js:1386）只发**主窗口**；辅助窗口里只有 `docs.js` 在 init 时自己 `getState().theme` 补主题类。**help/quickstart/terms/schedule/psd/addchar/moods/voice 八个窗口拿不到 `body.theme-dark`**——ui.css 里给它们准备的暗色变量覆盖实际是死代码。
+   - **方案**：新增共享 `renderer/theme-init.js`（读取 state.theme + 订阅 theme-changed，逻辑与 pet.js applyTheme 完全一致），八个窗口 HTML 末尾加 `<script src="theme-init.js"></script>`（各窗口 CSP `script-src 'self'` 均允许）。不改任何现有 JS 行为。
+3. **pet.css 级联陷阱**（改前必读）：文件尾部 403-412 行"统一视觉令牌"块靠**后置同特异性覆盖**生效——它把 `.btn`（含气泡内 zoom/close 按钮）背景改成了纯青 `#2f8f87`、`.btn-stop` 的红色也被盖掉（停止按钮目前显示为青色 ■）。原 107-125 行 zoom/close 的半透明设计已成死代码。重做时此块删除，语义并入 `--pet-*` 变量；zoom/close 用 `.bubble .btn-zoom` 提升特异性，恢复半透明幽灵按钮观感（有意变更，见检查点 1）。
+4. 辅助窗口盘点结论：help/quickstart/addchar/schedule/terms 全走 `--ui-*` 变量 ✓；`docs.css` 浅色是**唯一橙色系离群窗口**（深色已切青）→ 统一到青系；`psd.html` 整页内联硬编码浅色（且声明 `color-scheme: light`）→ 需变量化+暗色；`moods.html .tag-new`、`voice.html .status-card.ok/.no`、`ui.css button.danger 边框`、`terms.html .terms-head` 白字浅底 → 深色残留点。
+5. `schedule.css` 已全变量化，无需动；`settings.css` 缺口仅 `.cred-status.warn`（#b45309）、iOS 开关轨道灰（#c8ccd0）、set-nav 焦点环三处。
+
+**接下来的顺序**：pet.css 令牌化（P1-1+P1-2）→ theme-init.js 与八窗口接入 + 各窗暗色补全（P2-1）→ settings/可访问性（P2-2/P3-1）→ 测试+打包+视觉验证 → 版本号/CHANGELOG → GitHub 页面（README）优化。
