@@ -348,7 +348,7 @@ async function testConnection(overrides = {}) {
   }
 }
 
-module.exports = { chat, testConnection, buildSystemMessage, parseEmotion, isLocalUrl, validateApiBase, normalizeOpenAIBase, normalizeAnthropicBase };
+module.exports = { chat, testConnection, buildSystemMessage, parseEmotion, isLocalUrl, validateApiBase, readSSE, normalizeOpenAIBase, normalizeAnthropicBase };
 
 // CLI 冒烟测试：node src/chat-client.js --test "你好"
 if (process.argv.includes("--test")) {
