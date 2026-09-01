@@ -1650,6 +1650,10 @@ async function rebuildSpine() {
       try { spineApp.destroy(false, { children: true, texture: false, baseTexture: false }); } catch { /* 忽略 */ }
       spineApp = null; // 共享纹理缓存保留（Assets 缓存按 URL 复用）
     }
+    // v2.5.24 修复：换肤 WebGL 上下文丢失——旧 context 释放与新 context 创建同帧交替，
+    // 低配核显/显存压力下触发 webglcontextlost → 整页 reload（表现为切皮肤后"拿不起来"）。
+    // 销毁后让出 200ms 等 GPU 完成旧 context 释放再重建
+    await new Promise((r) => setTimeout(r, 200));
     renderMode = "gif"; // 强制 setRenderMode("spine") 走一遍完整初始化
     spriteEl.style.display = "";
     await setRenderMode("spine");
@@ -2299,6 +2303,9 @@ function applyPetName(name) {
     await setRenderMode("spine");
     if (state.walkState) applyWalkState(state.walkState);
   }
+  // v2.5.24 修复：渲染层 reload 自愈（WebGL context lost）后穿透状态不随页面恢复——
+  // init 完成立即放行鼠标（角色在窗口内，初始可交互合理），后续 mousemove 再按命中精细重判
+  window.petAPI.setClickable(true);
 
   if (!agreed) {
     showBubble();
