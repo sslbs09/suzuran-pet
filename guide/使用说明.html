@@ -41,6 +41,20 @@
 </style>
 </head>
 <body>
+<button id="theme-toggle" title="切换深浅色" style="position:fixed;top:10px;right:12px;z-index:9;width:38px;height:38px;border-radius:50%;font-size:16px;cursor:pointer;background:var(--card,#fff);color:var(--text,#333);border:1px solid var(--border,#ccc);">☀️</button>
+<script>
+(function () {
+  if (localStorage.getItem('sp-guide-theme') === 'dark') document.body.classList.add('theme-dark');
+  var btn = document.getElementById('theme-toggle');
+  function sync() { btn.textContent = document.body.classList.contains('theme-dark') ? '🌙' : '☀️'; }
+  sync();
+  btn.addEventListener('click', function () {
+    document.body.classList.toggle('theme-dark');
+    localStorage.setItem('sp-guide-theme', document.body.classList.contains('theme-dark') ? 'dark' : 'light');
+    sync();
+  });
+})();
+</script>
   <h1>🦊 苏苏洛桌宠 · 使用说明</h1>
   <div class="sub">罗德岛医疗干员 · 你的专属桌宠（绿色免安装版）——会聊天、会说话、会在桌面上散步、会记住你的事。</div>
 
