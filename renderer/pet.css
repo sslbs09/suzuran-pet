@@ -1,6 +1,77 @@
-/* 苏苏洛桌宠样式（小尺寸版） */
+/* 苏苏洛桌宠样式（小尺寸版）
+   v2.5.26：颜色全部收进 --pet-* 令牌（:root 浅色 / body.theme-dark 深色），
+   删除旧尾部级联覆盖块；几何（定位/尺寸/z-index）与原版一致，勿改 */
 * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
 input, textarea, #bubble-text { user-select: text; }
+
+/* ---------- 桌宠专属设计令牌（P1-1）：气泡/输入栏/信息版/按钮深浅双主题 ---------- */
+:root {
+  --pet-panel-bg: rgba(255, 255, 255, .96);          /* 气泡/输入栏/信息版表面（尾巴同色） */
+  --pet-panel-border: rgba(47, 143, 135, .32);
+  --pet-shadow: 0 10px 26px rgba(30, 77, 77, .16), 0 2px 6px rgba(30, 77, 77, .10);
+  --pet-ink: #44505c;
+  --pet-muted: #7f8f9c;
+  --pet-accent: #2f8f87;
+  --pet-accent-strong: #23736d;
+  --pet-accent-ink: #28635f;
+  --pet-accent-soft: rgba(47, 143, 135, .14);
+  --pet-error-line: #f2b8b8;
+  --pet-resizer: rgba(47, 143, 135, .9);
+  --pet-scroll: rgba(47, 143, 135, .45);
+  --pet-scroll-hover: #2f8f87;
+  --pet-thinking: #4da39b;
+  --pet-chip-bg: #dff1ed;
+  --pet-chip-ink: #28635f;
+  --pet-chip-task-bg: #fff1dc;
+  --pet-chip-task-ink: #89602e;
+  --pet-chip-zcode-bg: #e5f4e8;
+  --pet-chip-zcode-ink: #32704b;
+  --pet-info-soft: #eef7f5;
+  --pet-info-line: #e3ecf3;
+  --pet-btn: #2f8f87;
+  --pet-btn-hover: #23736d;
+  --pet-btn-sub: #b8d9d5;
+  --pet-btn-stop: #e8a0a0;
+  --pet-btn-stop-hover: #dd8585;
+  --pet-close-hover: #e88a8a;
+  --pet-mic-rec: #e86060;
+  --pet-swipe: #8a7365;
+  --pet-swipe-hover: #c96a3c;
+  --pet-ease: cubic-bezier(.23, 1, .32, 1);
+}
+body.theme-dark {
+  --pet-panel-bg: rgba(35, 44, 49, .96);
+  --pet-panel-border: rgba(87, 188, 180, .25);
+  --pet-shadow: 0 10px 26px rgba(0, 0, 0, .45), 0 2px 6px rgba(0, 0, 0, .30);
+  --pet-ink: #e8eef0;
+  --pet-muted: #8ea3ab;
+  --pet-accent: #3aa89f;
+  --pet-accent-strong: #57bcb4;
+  --pet-accent-ink: #7fd0c9;
+  --pet-accent-soft: rgba(58, 168, 159, .16);
+  --pet-error-line: rgba(224, 122, 127, .55);
+  --pet-resizer: rgba(87, 188, 180, .8);
+  --pet-scroll: rgba(87, 188, 180, .4);
+  --pet-scroll-hover: #57bcb4;
+  --pet-thinking: #57bcb4;
+  --pet-chip-bg: #24383a;
+  --pet-chip-ink: #7fd0c9;
+  --pet-chip-task-bg: #3a3222;
+  --pet-chip-task-ink: #d6b06e;
+  --pet-chip-zcode-bg: #263a2e;
+  --pet-chip-zcode-ink: #86c9a2;
+  --pet-info-soft: #243036;
+  --pet-info-line: #2e3a40;
+  --pet-btn: #3aa89f;
+  --pet-btn-hover: #57bcb4;
+  --pet-btn-sub: #3d5654;
+  --pet-btn-stop: #c97474;
+  --pet-btn-stop-hover: #d98a8a;
+  --pet-close-hover: #d98a8a;
+  --pet-mic-rec: #e86060;
+  --pet-swipe: #a8927f;
+  --pet-swipe-hover: #e08a5a;
+}
 
 html, body {
   background: transparent;
@@ -24,14 +95,14 @@ html, body {
   min-width: 60px;
   min-height: 24px;
   max-width: calc(100% - 136px); /* 不盖住桌宠 */
-  background: rgba(255, 255, 255, 0.96);
-  border: 1.5px solid #cfe3f2;
+  background: var(--pet-panel-bg);
+  border: 1.5px solid var(--pet-panel-border);
   border-radius: 11px;
   padding: 8px 44px 14px 11px;
   font-size: max(12px, var(--chat-fz, 11px));
   line-height: 1.5;
-  color: #44505c;
-  box-shadow: 0 2px 8px rgba(90, 140, 180, 0.22);
+  color: var(--pet-ink);
+  box-shadow: var(--pet-shadow);
   z-index: 5;
   word-break: break-word;
   max-height: calc(100% - 46px); /* bottom 34px + 12px 顶部余量，小窗口（200px 高）里也不顶出窗口顶 */
@@ -46,13 +117,13 @@ html, body {
   right: -7px;
   transform: translateY(-50%);
   border: 5.5px solid transparent;
-  border-left-color: rgba(255, 255, 255, 0.96);
+  border-left-color: var(--pet-panel-bg);
   border-right: 0;
 }
-.bubble.error { border-color: #f2b8b8; }
+.bubble.error { border-color: var(--pet-error-line); }
 /* 右下角拖拽把手可视化（斜纹）：配合设置页「气泡宽度」滑杆调节大小 */
 .bubble::-webkit-resizer {
-  background: linear-gradient(135deg, transparent 0 44%, rgba(142, 199, 232, .95) 44% 55%, transparent 55% 64%, rgba(142, 199, 232, .95) 64% 73%, transparent 73%);
+  background: linear-gradient(135deg, transparent 0 44%, var(--pet-resizer) 44% 55%, transparent 55% 64%, var(--pet-resizer) 64% 73%, transparent 73%);
   border-bottom-right-radius: 9px;
 }
 /* 左缘延伸区模式（主进程 edge-left 事件）：角色条带切到窗口左侧，气泡自动落在角色右侧，
@@ -71,7 +142,7 @@ body.edge-left .bubble::after {
   right: auto;
   left: -7px;
   border-left: 0;
-  border-right: 5.5px solid rgba(255, 255, 255, 0.96);  /* 尾巴朝左指向角色 */
+  border-right: 5.5px solid var(--pet-panel-bg);  /* 尾巴朝左指向角色 */
 }
 /* 左缘延伸区模式（主进程 edge-left 事件）：气泡挪到桌宠头顶上方、尾巴朝下，避免被屏幕左缘裁掉 */
 .bubble.top {
@@ -86,7 +157,7 @@ body.edge-left .bubble::after {
   right: 50%;
   transform: translateX(50%);
   border: 5.5px solid transparent;
-  border-top-color: rgba(255, 255, 255, 0.96);  /* 尾巴朝下指向桌宠 */
+  border-top-color: var(--pet-panel-bg);  /* 尾巴朝下指向桌宠 */
   border-bottom: 0;
 }
 .bubble.task { font-family: Consolas, "Courier New", monospace; font-size: calc(var(--chat-fz, 11px) - 1px); }
@@ -95,8 +166,9 @@ body.edge-left .bubble::after {
    会被保留成幻影空行，把正文推出气泡外（rig 模式「留白」根因） */
 #bubble-text { padding-right: 14px; white-space: pre-wrap; }
 
-/* 放大/还原按钮（气泡右上角） */
-.btn-zoom {
+/* 放大/还原按钮（气泡右上角）：半透明幽灵按钮——.bubble 前缀提特异性，
+   避免被后面 .btn 基础样式级联盖掉（v2.5.26 修复旧令牌块的覆盖陷阱） */
+.bubble .btn-zoom {
   position: absolute;
   top: 2px;
   right: 20px;
@@ -104,13 +176,15 @@ body.edge-left .bubble::after {
   height: 20px;
   font-size: 12px;
   border-radius: 7px;
-  background: rgba(47, 143, 135, 0.14);
-  color: #28635f;
+  background: var(--pet-accent-soft);
+  color: var(--pet-accent-ink);
   z-index: 7;
+  transition: background 140ms var(--pet-ease), color 140ms ease, transform 120ms var(--pet-ease);
 }
-.btn-zoom:hover { background: #8ec7e8; color: #fff; }
+.bubble .btn-zoom:hover { background: var(--pet-accent); color: #fff; }
+.bubble .btn-zoom:active { transform: scale(.9); }
 /* 关闭按钮：与放大按钮并排，hover 红色调提示"收起"语义 */
-.btn-close {
+.bubble .btn-close {
   position: absolute;
   top: 2px;
   right: 2px;
@@ -118,25 +192,27 @@ body.edge-left .bubble::after {
   height: 20px;
   font-size: 12px;
   border-radius: 7px;
-  background: rgba(47, 143, 135, 0.14);
-  color: #28635f;
+  background: var(--pet-accent-soft);
+  color: var(--pet-accent-ink);
   z-index: 7;
+  transition: background 140ms var(--pet-ease), color 140ms ease, transform 120ms var(--pet-ease);
 }
-.btn-close:hover { background: #e88a8a; color: #fff; }
+.bubble .btn-close:hover { background: var(--pet-close-hover); color: #fff; }
+.bubble .btn-close:active { transform: scale(.9); }
 /* 气泡出现：淡入＋轻微上浮 */
 .bubble:not(.hidden) { animation: bubble-in 0.18s ease-out; }
 @keyframes bubble-in {
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-/* 气泡滚动条美化：细条圆角配蓝色主题 */
+/* 气泡滚动条美化：细条圆角配主题色 */
 .bubble::-webkit-scrollbar { width: 6px; height: 6px; }
 .bubble::-webkit-scrollbar-track { background: transparent; }
 .bubble::-webkit-scrollbar-thumb {
-  background: rgba(142, 199, 232, 0.6);
+  background: var(--pet-scroll);
   border-radius: 3px;
 }
-.bubble::-webkit-scrollbar-thumb:hover { background: #6fb3dc; }
+.bubble::-webkit-scrollbar-thumb:hover { background: var(--pet-scroll-hover); }
 
 /* 放大模式：窗口变大 + 气泡更大更清晰 */
 body.enlarged .bubble {
@@ -150,7 +226,7 @@ body.enlarged .input-bar { left: 50%; transform: translateX(-50%); width: 320px;
 body.enlarged #input { font-size: calc(var(--chat-fz, 11px) + 1px); }
 
 /* 思考点点 */
-.thinking { display: flex; gap: 2px; justify-content: center; font-size: 15px; color: #8ec7e8; height: 15px; }
+.thinking { display: flex; gap: 2px; justify-content: center; font-size: 15px; color: var(--pet-thinking); height: 15px; }
 .thinking span { animation: dot 1.1s infinite; }
 .thinking span:nth-child(2) { animation-delay: .18s; }
 .thinking span:nth-child(3) { animation-delay: .36s; }
@@ -302,25 +378,25 @@ body.rig-mode .info-panel {
   max-height: 60%;
   overflow-y: auto;
   touch-action: pan-y;  /* 触屏/触摸板上下滑动滚动内容 */
-  background: rgba(255, 255, 255, 0.97);
-  border: 1.5px solid #cfe3f2;
+  background: var(--pet-panel-bg);
+  border: 1.5px solid var(--pet-panel-border);
   border-radius: 11px;
   padding: 10px 12px;
   font-size: 12px;
   line-height: 1.6;
-  color: #44505c;
-  box-shadow: 0 2px 8px rgba(90, 140, 180, 0.22);
+  color: var(--pet-ink);
+  box-shadow: var(--pet-shadow);
   z-index: 8;
 }
 body.edge-left .info-panel { right: 4px; width: 230px; } /* 翻边时与气泡一起到右侧（右侧空间足够，保持原宽） */
 .info-panel.hidden { display: none; }
-.info-head { font-weight: bold; margin-bottom: 6px; color: #2f8f87; cursor: move; user-select: none; }
+.info-head { font-weight: bold; margin-bottom: 6px; color: var(--pet-accent-strong); cursor: move; user-select: none; }
 .info-panel.info-dragging { opacity: 0.85; }
-.info-companion { margin-bottom: 8px; padding: 6px 8px; background: #eef7f5; border-radius: 8px; }
-.info-schedules .info-sched { padding: 3px 0; border-bottom: 1px dashed #e3ecf3; }
+.info-companion { margin-bottom: 8px; padding: 6px 8px; background: var(--pet-info-soft); border-radius: 8px; }
+.info-schedules .info-sched { padding: 3px 0; border-bottom: 1px dashed var(--pet-info-line); }
 .info-schedules .info-sched:last-child { border-bottom: none; }
-.info-schedules .info-empty { color: #98a6b3; }
-.info-sched-time { color: #2f8f87; font-weight: bold; margin-right: 6px; }
+.info-schedules .info-empty { color: var(--pet-muted); }
+.info-sched-time { color: var(--pet-accent-strong); font-weight: bold; margin-right: 6px; }
 
 /* ---------- 输入栏 ---------- */
 .input-bar {
@@ -331,11 +407,11 @@ body.edge-left .info-panel { right: 4px; width: 230px; } /* 翻边时与气泡�
   align-items: center;
   gap: 3px;
   width: 136px;   /* 上限：右侧角色条带从 ~138px 起，输入栏不能更宽否则盖住角色；内容靠隐藏次要按钮释放空间 */
-  background: rgba(255, 255, 255, 0.97);
-  border: 1.5px solid #cfe3f2;
+  background: var(--pet-panel-bg);
+  border: 1.5px solid var(--pet-panel-border);
   border-radius: 15px;
   padding: 3px 5px;
-  box-shadow: 0 2px 8px rgba(90, 140, 180, 0.25);
+  box-shadow: var(--pet-shadow);
   z-index: 6;
 }
 /* 次要按钮隐藏（托盘/设置页有对应功能）：释放输入框空间，避免内容溢出 */
@@ -348,11 +424,12 @@ body.edge-left .info-panel { right: 4px; width: 230px; } /* 翻边时与气泡�
   cursor: pointer;
   padding: 1px 3px;
   border-radius: 8px;
-  background: #eaf5fc;
+  background: var(--pet-chip-bg);
+  color: var(--pet-chip-ink);
   line-height: 1.2;
 }
-.mode-chip.task { background: #fff3e0; }
-.mode-chip.zcode { background: #e8f7ee; }
+.mode-chip.task { background: var(--pet-chip-task-bg); color: var(--pet-chip-task-ink); }
+.mode-chip.zcode { background: var(--pet-chip-zcode-bg); color: var(--pet-chip-zcode-ink); }
 
 #input {
   flex: 1;
@@ -360,14 +437,17 @@ body.edge-left .info-panel { right: 4px; width: 230px; } /* 翻边时与气泡�
   outline: none;
   background: transparent;
   font-size: var(--chat-fz, 11px);
-  color: #333;
+  color: var(--pet-ink);
   padding: 2px;
   min-width: 40px;  /* 保证输入框有足够打字空间（次要按钮已隐藏） */
 }
+#input::placeholder { color: var(--pet-muted); opacity: .8; }
+/* 输入中反馈：边框从半透明青加深为实色（P1-2 微交互） */
+.input-bar:focus-within { border-color: var(--pet-accent); }
 
 .btn {
   border: none;
-  background: #8ec7e8;
+  background: var(--pet-btn);
   color: #fff;
   width: 18px;
   height: 18px;
@@ -376,23 +456,22 @@ body.edge-left .info-panel { right: 4px; width: 230px; } /* 翻边时与气泡�
   cursor: pointer;
   line-height: 1;
   flex-shrink: 0;
-  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s var(--pet-ease);
 }
-.btn:hover { transform: scale(1.08); }
+.btn:hover { transform: scale(1.08); background: var(--pet-btn-hover); }
 .btn:active { transform: scale(0.95); }
-.btn:focus-visible, .mode-chip:focus-visible { outline: 2px solid #2f8f87; outline-offset: 2px; }
-.btn:hover { background: #2f8f87; }
-.btn-stop { background: #e8a0a0; }
+.btn:focus-visible, .mode-chip:focus-visible { outline: 2px solid var(--pet-accent); outline-offset: 2px; }
+.btn-stop { background: var(--pet-btn-stop); }
 .btn-stop.hidden { display: none; }
-.btn-stop:hover { background: #dd8585; }
-.btn-tts { background: #c9d8e8; font-size: 9px; }
-.btn-tts.off { background: #e3e3e3; filter: grayscale(1); opacity: .7; }
+.btn-stop:hover { background: var(--pet-btn-stop-hover); transform: scale(1.08); }
+.btn-tts { background: var(--pet-btn-sub); font-size: 9px; }
+.btn-tts.off { filter: grayscale(1); opacity: .7; }
 
 /* 麦克风按钮 */
-.btn-mic { background: #c9d8e8; font-size: 10px; }
-.btn-mic:hover { background: #6fb3dc; }
+.btn-mic { background: var(--pet-btn-sub); font-size: 10px; }
+.btn-mic:hover { background: var(--pet-btn-hover); }
 .btn-mic.recording {
-  background: #e86060;
+  background: var(--pet-mic-rec);
   color: white;
   animation: micPulse 1s ease-in-out infinite;
 }
@@ -400,36 +479,17 @@ body.edge-left .info-panel { right: 4px; width: 230px; } /* 翻边时与气泡�
   0%, 100% { box-shadow: 0 0 0 0 rgba(232, 96, 96, 0.5); }
   50% { box-shadow: 0 0 0 6px rgba(232, 96, 96, 0); }
 }
-/* 统一桌宠交互层的视觉令牌，保持透明窗口与命中区域不变 */
-.bubble { border-color: rgba(47, 143, 135, .32); box-shadow: 0 8px 22px rgba(30, 77, 77, .18); }
-.bubble::-webkit-resizer { background: linear-gradient(135deg, transparent 0 44%, rgba(47, 143, 135, .9) 44% 55%, transparent 55% 64%, rgba(47, 143, 135, .9) 64% 73%, transparent 73%); }
-.input-bar { border-color: rgba(47, 143, 135, .32); box-shadow: 0 8px 18px rgba(30, 77, 77, .16); }
-.btn { background: #2f8f87; }
-.btn-tts, .btn-mic { background: #b8d9d5; }
-.btn-tts:hover, .btn-mic:hover { background: #2f8f87; }
-.mode-chip { color: #28635f; background: #dff1ed; }
-.mode-chip.task { background: #fff1dc; color: #89602e; }
-.mode-chip.zcode { background: #e5f4e8; color: #32704b; }
+/* 输入栏/信息版出现动画（v2.5.26）：与气泡同款淡入上浮，观感统一 */
+.input-bar:not(.hidden), .info-panel:not(.hidden) { animation: bubble-in 0.18s ease-out; }
 
 @media (prefers-reduced-motion: reduce) {
-  .bubble:not(.hidden), .thinking span, .btn-mic.recording { animation: none; }
-  .btn { transition: none; }
+  .bubble:not(.hidden), .input-bar:not(.hidden), .info-panel:not(.hidden), .thinking span, .btn-mic.recording { animation: none; }
+  .btn, .bubble .btn-zoom, .bubble .btn-close, .swipe-bar button { transition: none; }
 }
 
 /* v2.5.10 宽皮肤（如迷迭香第三皮肤 300px 画布）：气泡右缘避开更宽的角色条带 */
 body.wide-skin .bubble { right: 308px; max-width: calc(100% - 314px); }
 body.wide-skin.edge-left .bubble { right: 4px; max-width: calc(100% - 314px); }
-
-/* 深色主题（v2.5.1）：气泡/输入栏/信息面板 */
-body.theme-dark .bubble { background: rgba(35, 44, 49, 0.96); border-color: #2e3a40; color: #e8eef0; }
-body.theme-dark .input-bar { background: rgba(35, 44, 49, 0.96); border-color: #2e3a40; }
-body.theme-dark .input-bar #input { background: transparent; color: #e8eef0; }
-body.theme-dark .info-panel { background: rgba(35, 44, 49, 0.96); color: #e8eef0; border-color: #2e3a40; }
-body.theme-dark .info-head { color: #57bcb4; }
-body.theme-dark .info-companion { background: #243036; }
-body.theme-dark .info-sched { border-bottom-color: #2e3a40; }
-body.theme-dark .info-empty { color: #7d939a; }
-body.theme-dark .info-sched-time { color: #57bcb4; }
 
 /* RP 动作斜体 + Swipes 切换条（v2.5.1，酒馆学习） */
 .rp-action { font-style: italic; opacity: 0.72; }
@@ -441,9 +501,16 @@ body.theme-dark .info-sched-time { color: #57bcb4; }
   align-items: center;
   gap: 2px;
   font-size: 11px;
-  color: #8a7365;
+  color: var(--pet-swipe);
   user-select: none;
 }
 .swipe-bar.hidden { display: none; }
-.swipe-bar button { background: none; border: none; cursor: pointer; color: #8a7365; font-size: 13px; padding: 0 4px; line-height: 1; }
-.swipe-bar button:hover { color: #c96a3c; }
+.swipe-bar button {
+  background: none; border: none; cursor: pointer;
+  color: var(--pet-swipe); font-size: 13px; padding: 0 4px; line-height: 1;
+  border-radius: 4px;
+  transition: color 140ms ease, transform 120ms var(--pet-ease);
+}
+.swipe-bar button:hover { color: var(--pet-swipe-hover); }
+.swipe-bar button:active { transform: scale(.9); }
+.swipe-bar button:focus-visible { outline: 2px solid var(--pet-accent); outline-offset: 1px; }
