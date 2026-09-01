@@ -292,3 +292,11 @@
 - ✅ 官网（gh-pages 4b14fea 之上新提交）：变量化 + 深浅切换按钮（localStorage 记忆）
 - ⏸ ag-psd 懒加载：评估后放弃——index.html 已 defer 非阻塞，主窗口按需收益毫秒级，加载顺序敏感风险不值
 - 24+1 文件单测全绿、lint 0 error；已部署重启
+
+### 块 14：主动搭话重复感修复（用户反馈：几句话重复概率高）
+**机制核查结论**：抽取概率真实存在（pick RECENT_K=3 + 各触发概率门），重复感三大来源：
+1. 记忆事实由头（健康/称谓/日程/里程碑）是固定模板，每次一字不差 → 改 2-3 变体随机（lines.pick + banned）
+2. RECENT_K=3 对小池太小 → 自适应 K=min(len-1, max(3, len/3))
+3. 无跨池去重 → recentRawSent 窗口 8 句跨轮禁选（banned 参数；回退顺序=宁破池内去重不破 banned，池被全覆盖才放行）
+- ✅ pick/pickTpl 签名扩展（banned/track），调用点全接；预热补 PROACTIVE_BY_STATE
+- ✅ tests/pick-dedup.test.js 7 断言（间隔/banned/回退/track）；26 文件全绿；已部署重启

@@ -335,33 +335,43 @@ const LONG_IDLE_LINES = [
 ];
 
 /**
- * 防连续重复抽取（v2.5.14）：
- * 每个池子记住最近用过的 RECENT_K 条下标，抽取时先排除它们；
- * 若池子太小（全部被排除）则放行全部，保证永远有台词可说。
- * 池子变大后配合此机制，体感重复率大幅下降。
+ * 防连续重复抽取（v2.5.14，v2.5.26 增强）：
+ * 每个池子记住最近用过的下标（K 随池大小自适应：小池 3、大池最多池的 1/3），抽取时先排除；
+ * 支持 banned（跨池/跨轮禁选原文，由调用方维护），两层都排空才放行全部，保证永远有台词可说。
  */
-const RECENT_K = 3;
 const recentPicks = new WeakMap(); // Array → number[]
 
-function pick(arr) {
+function recentK(arr) {
+  return Math.min(arr.length - 1, Math.max(3, Math.floor(arr.length / 3)));
+}
+
+function pick(arr, banned) {
   if (!Array.isArray(arr) || !arr.length) return "";
   if (arr.length <= 1) return arr[0];
   let recent = recentPicks.get(arr);
   if (!recent) { recent = []; recentPicks.set(arr, recent); }
-  const banned = new Set(recent);
+  const recentSet = new Set(recent);
+  const k = recentK(arr);
   let idxs = [];
-  for (let i = 0; i < arr.length; i++) if (!banned.has(i)) idxs.push(i);
-  if (!idxs.length) idxs = arr.map((_, i) => i); // 池子太小，全部候选放行
+  for (let i = 0; i < arr.length; i++) {
+    if (recentSet.has(i)) continue;
+    if (banned && banned.has(arr[i])) continue; // 跨轮禁选（v2.5.26）
+    idxs.push(i);
+  }
+  if (!idxs.length && banned) for (let i = 0; i < arr.length; i++) if (!banned.has(arr[i])) idxs.push(i); // 宁可破池内去重，不破跨轮禁选
+  if (!idxs.length) idxs = arr.map((_, i) => i); // 池子被 banned 全覆盖才放行全部，保证永远有台词可说
   const idx = idxs[Math.floor(Math.random() * idxs.length)];
   recent.push(idx);
-  if (recent.length > RECENT_K) recent.shift();
+  if (recent.length > k) recent.shift();
   return arr[idx];
 }
 
-/** 模板挑选：随机取一条并把 {{name}}/{{user}} 替换成桌宠名/用户称呼（占位即答案） */
-function pickTpl(arr, vars = {}) {
-  const s = pick(arr);
+/** 模板挑选：随机取一条并把 {{name}}/{{user}} 替换成桌宠名/用户称呼（占位即答案）。
+ *  track（可选对象）回填本次选中的原文，供调用方做跨轮禁选；banned 为禁选原文集合 */
+function pickTpl(arr, vars = {}, track = null, banned = null) {
+  const s = pick(arr, banned);
   if (!s) return "";
+  if (track) track.raw = s;
   return s.replace(/\{\{\s*name\s*\}\}/g, vars.name || "苏苏洛")
           .replace(/\{\{\s*user\s*\}\}/g, vars.user || "博士"); // v2.5.26：默认称呼与硬编码台词统一为「博士」
 }

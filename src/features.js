@@ -54,6 +54,7 @@ let proactiveTimer = null;
 let lastChatTs = Date.now();
 let proactiveEnabled = true; // 设置页「主动搭话」开关（pet:set-proactive-chat）
 let proactiveCfg = { sendFn: null, intervalMin: 8 };
+let recentRawSent = []; // 主动搭话跨轮禁选窗口（最近 8 句原文，v2.5.26 重复感修复）
 let lastMilestoneSaid = 0; // 陪伴里程碑已说过的天数（v2.5.25 去重：每个里程碑值只开口一次，避免停在里程碑日反复刷屏）
 
 function touchChat() {
@@ -83,7 +84,10 @@ function startProactive(sendFn, intervalMin = 8, stateFn = null) {
     const lines = require("./lines");
     let prompt;
     let proactiveMood = "温柔"; // 台词情绪→GSV 音色分档默认温柔（v2.5.26，随由头分支覆盖）
+    const banned = new Set(recentRawSent); // 跨轮禁选：最近说过的 8 句不再抽（v2.5.26 重复感修复）
+    const track = {};
     // v2.6 由头化扩展：记忆里有称谓/生日/健康/近期安排事实时，主动开口有"由头"（而非纯随机）
+    // 事实由头多变体（v2.5.26）：原固定模板每次一字不差重复，是"重复感"头号来源
     try {
       const mem = require("./memory");
       const facts = mem.getFactsList() || [];
@@ -92,21 +96,37 @@ function startProactive(sendFn, intervalMin = 8, stateFn = null) {
         const now = new Date();
         const bd = facts.find((f) => f.type === "birthday" && (f.text.match(/(\d{1,2})月(\d{1,2})日/) || []).slice(1).join("|") === (now.getMonth() + 1) + "|" + now.getDate());
         if (bd) {
-          prompt = "（咦，今天好像是博士的生日？）生日快乐呀博士！要好好犒劳一下自己哦～";
+          prompt = lines.pick([
+            "（咦，今天好像是博士的生日？）生日快乐呀博士！要好好犒劳一下自己哦～",
+            "（捧着小蛋糕）博士生日快乐！今天的愿望，我会帮你一起记着的～",
+            "（认真脸）博士的生日我可没忘——今天不许加班太久，听到没？",
+          ], banned);
         } else if (mem.hasHealthFact() && Math.random() < 0.3) {
-          prompt = "（想起你之前说不太舒服）……博士，身体还好吗？别忘了多喝热水，不舒服要跟我说。";
+          prompt = lines.pick([
+            "（想起你之前说不太舒服）……博士，身体还好吗？别忘了多喝热水，不舒服要跟我说。",
+            "（小声）博士，今天身体怎么样？有没有比昨天好一点？",
+            "（递热水）记得你说过不太舒服——今天好点了吗？别硬撑哦。",
+          ], banned);
         } else {
           // ② 近期安排：考试/面试/答辩/加班… → 助威系
           const ev = facts.filter((f) => f.type === "event").pop();
           if (ev && Math.random() < 0.25) {
             const what = (ev.text.match(/「(.+?)」/) || [])[1] || "那件重要的事";
-            prompt = "（记得你最近有" + what + "的安排）博士加油呀～我会在旁边给你打气的！";
+            prompt = lines.pick([
+              "（记得你最近有" + what + "的安排）博士加油呀～我会在旁边给你打气的！",
+              what + " 准备得怎么样啦？别太累，慢慢来～",
+              "（掰手指算日子）" + what + " 快到了吧？博士一定没问题的！",
+            ], banned);
           } else {
             // ③ 称谓：博士希望被这样称呼时偶尔用
             const nm = facts.find((f) => f.type === "name");
             const name = nm && (nm.text.match(/「(.+?)」/) || [])[1];
             if (name && Math.random() < 0.2) {
-              prompt = "（今天也记得要这样叫博士）" + name + "～有没有按时喝水呀？";
+              prompt = lines.pick([
+                "（今天也记得要这样叫博士）" + name + "～有没有按时喝水呀？",
+                name + "～忙归忙，眼睛要休息哦。",
+                "（清了清嗓子）" + name + "！……没什么，就是想叫叫你～",
+              ], banned);
             }
           }
         }
@@ -129,26 +149,30 @@ function startProactive(sendFn, intervalMin = 8, stateFn = null) {
       const h = new Date().getHours();
       let moodKey = lines.periodOf(); // 默认按时段取情绪（v2.5.26：情绪随台词场景 → GSV 音色分档）
       // 清晨专属（5-8 点）
-      if (h >= 5 && h < 8 && Math.random() < 0.25) prompt = lines.pickTpl(lines.EARLY_MORNING_LINES, vars), moodKey = "earlyMorning";
+      if (h >= 5 && h < 8 && Math.random() < 0.25) { prompt = lines.pickTpl(lines.EARLY_MORNING_LINES, vars, track, banned); moodKey = "earlyMorning"; }
       // 关系阶段台词（熟悉起 18% 概率）
       if (!prompt) {
         try {
           const st = require("./bond").getStage();
           if ((st.key === "fd" || st.key === "xl" || st.key === "sy") && Math.random() < 0.18) {
-            prompt = lines.pickTpl(lines.STAGE_LINES[st.key] || [], vars);
+            prompt = lines.pickTpl(lines.STAGE_LINES[st.key] || [], vars, track, banned);
             moodKey = "stage" + st.key;
           }
         } catch { /* 羁绊不可用则跳过 */ }
       }
       // 里程碑由头：陪伴 7/30/100/整百 天（v2.5.25 去重：每个里程碑值只开口一次——
-      // days 停在里程碑日时会反复触发 20% 概率，改为首次到达该值才说）
+      // days 停在里程碑日时会反复触发 20% 概率，改为首次到达该值才说；v2.5.26 多变体）
       if (!prompt) {
         try {
           const days = require("./bond").getDays();
           const isMilestone = days === 7 || days === 30 || days === 100 || (days > 0 && days % 100 === 0);
           if (isMilestone && days > lastMilestoneSaid && Math.random() < 0.2) {
             lastMilestoneSaid = days;
-            prompt = "已经陪博士 " + days + " 天了……感觉像家人一样了呢";
+            prompt = lines.pick([
+              "已经陪博士 " + days + " 天了……感觉像家人一样了呢",
+              "（翻着小本子）不知不觉陪博士 " + days + " 天啦，纪念日快乐～",
+              days + " 天了呀……以后的每一天，也请多指教哦，博士",
+            ], banned);
             moodKey = "stageXl"; // 里程碑=亲近感，用撒娇档
           }
         } catch { /* 忽略 */ }
@@ -159,22 +183,25 @@ function startProactive(sendFn, intervalMin = 8, stateFn = null) {
           const st = (proactiveCfg.stateFn && proactiveCfg.stateFn()) || "";
           if (st === "walking" || st === "seated") {
             const pool = lines.PROACTIVE_BY_STATE[st];
-            if (pool && pool.length) prompt = lines.pickTpl(pool, vars), moodKey = st;
+            if (pool && pool.length) { prompt = lines.pickTpl(pool, vars, track, banned); moodKey = st; }
           }
         } catch { /* 状态不可用则走时段台词 */ }
       }
       if (!prompt) {
         if (idle > 45 * 60 * 1000 && Math.random() < 0.4) {
-          prompt = lines.pickTpl(lines.LONG_IDLE_LINES, vars); // 超长闲置：想念系
+          prompt = lines.pickTpl(lines.LONG_IDLE_LINES, vars, track, banned); // 超长闲置：想念系
           moodKey = "longIdle";
         } else {
-          prompt = lines.pickTpl(lines.PROACTIVE_BY_PERIOD[lines.periodOf()] || lines.PROACTIVE_BY_PERIOD.afternoon, vars);
+          prompt = lines.pickTpl(lines.PROACTIVE_BY_PERIOD[lines.periodOf()] || lines.PROACTIVE_BY_PERIOD.afternoon, vars, track, banned);
         }
       }
       if (prompt) proactiveMood = lines.LINE_MOODS[moodKey] || "温柔";
     }
     if (!prompt) return;
     lastChatTs = Date.now();
+    const rawKey = track.raw || prompt; // 事实由头无占位符，原文即 prompt
+    recentRawSent.push(rawKey);
+    if (recentRawSent.length > 8) recentRawSent.shift(); // 跨轮禁选窗口 8 句
     proactiveCfg.sendFn(prompt, proactiveMood);
   }, 60 * 1000); // 每分钟检查一次
 }
@@ -490,6 +517,7 @@ function jaPrewarmableLines() {
       lines.PERSONIFY_LINES.sleepNight, lines.PERSONIFY_LINES.perch,
       lines.WORKFLOW_LINES,
       ...Object.values(lines.PROACTIVE_BY_PERIOD),
+      ...Object.values(lines.PROACTIVE_BY_STATE), // v2.5.26 补：散步/坐着池此前漏预热
       lines.LONG_IDLE_LINES,
       ...Object.values(lines.STAGE_LINES),
       lines.EARLY_MORNING_LINES,
