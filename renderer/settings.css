@@ -20,6 +20,11 @@
 .settings-page .keybox input { flex: 1; }
 .settings-page .keybox .mini { width: 38px; flex: 0 0 38px; padding: 7px 0; }
 .settings-page input[type="range"] { width: 100%; accent-color: var(--ui-accent); }
+/* v2.5.26：自绘滑杆——深色下原生轨道偏亮刺眼，统一主题化 */
+.settings-page input[type="range"] { -webkit-appearance: none; appearance: none; height: 5px; border-radius: 3px; background: var(--ui-line-strong); outline: none; }
+.settings-page input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--ui-accent); border: 2px solid var(--ui-surface); box-shadow: 0 1px 4px rgba(0, 0, 0, .25); cursor: pointer; transition: transform 120ms var(--ui-ease); }
+.settings-page input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.12); }
+.settings-page input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: var(--ui-focus); }
 .settings-page input[type="checkbox"] { width: 15px; height: 15px; margin-right: 6px; vertical-align: -2px; accent-color: var(--ui-accent); }
 .settings-page .actions { display: flex; grid-column: 1 / -1; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
 .settings-page .actions button { margin: 0; }

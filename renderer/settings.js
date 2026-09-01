@@ -406,6 +406,22 @@ function toggleGenieFields() {
 }
 $("tts-plan").addEventListener("change", toggleGenieFields);
 
+/* ---------- 日语预热进度（v2.5.26）：语音区显示「已缓存 x/N 句」，5s 轻轮询 ---------- */
+const jaPrewarmEl = $("ja-prewarm-progress");
+if (jaPrewarmEl && window.petAPI.jaPrewarmStatus) {
+  const tickJaPrewarm = async () => {
+    try {
+      const p = await window.petAPI.jaPrewarmStatus();
+      if (!p || !p.total) { jaPrewarmEl.textContent = ""; return; }
+      jaPrewarmEl.textContent = p.done >= p.total && !p.running
+        ? `✅ 日语预热完成（${p.done}/${p.total} 句）`
+        : `⏳ 日语预热中：${p.done}/${p.total} 句`;
+    } catch { /* 忽略 */ }
+  };
+  tickJaPrewarm();
+  setInterval(tickJaPrewarm, 5000);
+}
+
 /* ---------- 一键重启日语 TTS ---------- */
 $("btn-restart-gsv").addEventListener("click", async () => {
   const btn = $("btn-restart-gsv");

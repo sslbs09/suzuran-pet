@@ -509,6 +509,8 @@ function jaPrewarmableLines() {
 }
 
 /** 启动日语翻译预热（仅在 speakJa 开启且有 key 时生效；幂等，可重复调用） */
+let jaPrewarmProgress = { done: 0, total: 0, running: false };
+function getJaPrewarmProgress() { return jaPrewarmProgress; }
 function startJaPrewarm() {
   stopJaPrewarm();
   const cfg = config.getConfig();
@@ -517,18 +519,22 @@ function startJaPrewarm() {
   const list = jaPrewarmableLines();
   if (!list.length) return;
   jaPrewarmIdx = 0;
+  jaPrewarmProgress = { done: 0, total: list.length, running: true }; // 进度（设置页可视化，v2.5.26）
   logJaPrewarm(`日语翻译预热启动（${list.length} 句固定台词，空闲批次翻译）`);
   const BATCH = 3, GAP = 15000; // 每批 3 句，间隔 15 秒（v2.5.20 调快：165 句约 15 分钟跑完；避免限流）
   jaPrewarmTimer = setInterval(async () => {
-    if (jaPrewarmIdx >= list.length) { stopJaPrewarm(); return; }
+    if (jaPrewarmIdx >= list.length) { jaPrewarmProgress.running = false; stopJaPrewarm(); return; }
     const batch = list.slice(jaPrewarmIdx, jaPrewarmIdx + BATCH);
     jaPrewarmIdx += BATCH;
     try {
       const { translateToJa } = require("./ja-translate");
       const { stripStage } = require("./utils");
-      for (const s of batch) {
-        const ja = await translateToJa(stripStage(s)); // 念白预热：剥（动作）只翻口播部分（v2.5.26）
+      for (const raw of batch) {
+        const s = stripStage(raw);
+        if (!s) { jaPrewarmProgress.done++; continue; } // 纯动作句无可念文本，跳过（v2.5.26 自查）
+        const ja = await translateToJa(s); // 念白预热：剥（动作）只翻口播部分（v2.5.26）
         if (ja) logJaPrewarm(`预热✓: ${s.slice(0, 18)} → ${ja.slice(0, 18)}`);
+        jaPrewarmProgress.done++;
       }
     } catch { /* 单批失败下轮重试 */ }
   }, GAP);
@@ -554,6 +560,7 @@ module.exports = {
   startProactive,
   stopProactive,
   setProactiveEnabled,
+  getJaPrewarmProgress,
 
   // 日程提醒
   parseTime,

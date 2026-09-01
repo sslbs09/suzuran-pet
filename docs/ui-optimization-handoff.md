@@ -278,3 +278,17 @@
 - ✅ 播报点全接：features.js 主动搭话各由头分支带 moodKey 经 sendFn(prompt, mood) 双参传出；main.js 人格化/工作流×3/羁绊升级/日程（动画情绪→分档映射）/摸头全部改传映射值
 - ✅ 日语文本本身不带情绪标记——语气由 GSV 参考音频（分档）控制，翻译链路无需改动即达成「翻译后仍有情绪」
 - 24 文件单测全绿；已部署重启。**设置页「音色启用」开关（tone-*）控制各档启用，逻辑不变**
+
+### 块 13：自查 + 优化清单落地（用户：先查 bug，优化都可以做）
+**自查结论**：
+- ✅ 纯动作台词 2 条（WORKFLOW 首条/perch 首条）剥动作后为空——渲染层 stripForSpeech 本就静音（非回归），但浪费：**改台词数据补正文**；主进程 TTS 加空串回退防御；预热跳过空句
+- ✅ 渲染层 pet.js 原有 stripForSpeech/emotionizeText 与主进程 stripStage 双保险，行为一致
+- ✅ LINE_MOODS 值全部命中 normEmotion 精确键；tone-* 停用档优雅回退默认音色
+**优化落地**：
+- ✅ 台词级情绪细标：sendProactive 入口解析行首【情绪】标记（不进气泡/朗读），3 条台词示范（noon 温柔/evening 傲娇/night 开心）
+- ✅ 日语预热进度：features 维护 {done,total,running} + pet:ja-prewarm-status IPC + preload.jaPrewarmStatus + 设置页语音区 5s 轻轮询显示
+- ✅ 滑杆主题化：自绘 track/thumb（变量驱动、hover 放大、focus-visible 焦点环）
+- ✅ 摸头情绪递进：6s 内连摸 3 次音色切撒娇档，停手重置
+- ✅ 官网（gh-pages 4b14fea 之上新提交）：变量化 + 深浅切换按钮（localStorage 记忆）
+- ⏸ ag-psd 懒加载：评估后放弃——index.html 已 defer 非阻塞，主窗口按需收益毫秒级，加载顺序敏感风险不值
+- 24+1 文件单测全绿、lint 0 error；已部署重启

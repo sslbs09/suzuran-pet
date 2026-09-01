@@ -1399,7 +1399,12 @@ function broadcastToRenderers(channel, payload) {
  *  提醒/番茄钟等用户明确设置的任务用 force=true 照常送达 */
 function sendProactive(text, emotion, { force = false } = {}) {
   if (!force && !isWindowVisible()) return;
-  sendToRenderer("pet:proactive", { text, emotion });
+  let t = String(text || "");
+  let emo = emotion;
+  // 台词级情绪细标（v2.5.26）：行首【撒娇/傲娇/惊讶/开心/温柔】覆盖池默认，标记不进气泡/朗读
+  const m = t.match(/^【(撒娇|傲娇|惊讶|开心|温柔)】/);
+  if (m) { emo = m[1]; t = t.slice(m[0].length); }
+  sendToRenderer("pet:proactive", { text: t, emotion: emo });
 }
 
 function sendScheduleDue(item) {
@@ -2211,13 +2216,19 @@ function setCatToy(on) {
 ipcMain.on("pet:set-cat-toy", (_e, on) => { setCatToy(!!on); });
 // 摸头互动（v2.3）：渲染层快速连点角色触发；主进程 10s 节流回复台词（避免连点刷屏）
 const patThrottle = lines.throttled(10000);
+// 摸头情绪递进（v2.5.26）：6s 内连摸 3 次起切撒娇档音色（越摸越黏），停手 6s 重置
+let patCombo = 0, patComboAt = 0;
 ipcMain.on("pet:pat", () => {
   try {
     const b = bond.addExp(1); // 摸头 +1 经验
     if (b.leveledUp) sendToRenderer("pet:toast", "🥰 羁绊升级 Lv." + b.level);
   } catch { /* 忽略 */ }
+  const now = Date.now();
+  patCombo = (now - patComboAt < 6000) ? patCombo + 1 : 1;
+  patComboAt = now;
   if (!patThrottle()) return;
-  sendProactive(lines.pickTpl(lines.PAT_LINES, chatVars()), lines.LINE_MOODS.pat, { force: true }); // 摸头=开心档
+  const patMood = patCombo >= 3 ? "撒娇" : lines.LINE_MOODS.pat;
+  sendProactive(lines.pickTpl(lines.PAT_LINES, chatVars()), patMood, { force: true });
 });
 // 主动搭话 / 人格化开关（v2.3，设置页单独开启）
 function proactiveMin() { return (config.getConfig().features && config.getConfig().features.proactiveMin) || 8; }
@@ -2267,6 +2278,8 @@ ipcMain.on("pet:set-proactive-chat", (_e, on) => {
   features.setProactiveEnabled(!!on);
   if (on) features.startProactive((msg, mood) => sendProactive(msg, mood || "idle"), proactiveMin(), proactiveStateFn); // mood 由台词池情绪映射给出（v2.5.26）
 });
+// 日语预热进度（v2.5.26）：设置页语音区显示「已缓存 x/N 句」
+ipcMain.handle("pet:ja-prewarm-status", () => features.getJaPrewarmProgress());
 ipcMain.on("pet:set-personify", (_e, on) => {
   config.saveConfig({ personify: !!on });
 });
