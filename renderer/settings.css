@@ -99,4 +99,6 @@ body.theme-dark .settings-page .set-dirty { border-color: #4a4030; background: #
 .settings-page .set-main section:nth-of-type(7) { animation-delay: 240ms; }
 .settings-page .set-main section:nth-of-type(8) { animation-delay: 280ms; }
 .settings-page .set-main section:nth-of-type(9) { animation-delay: 320ms; }
+.settings-page .set-main section:nth-of-type(10) { animation-delay: 360ms; }
+.settings-page .set-main section:nth-of-type(11) { animation-delay: 360ms; }
 @keyframes sec-in { from { opacity: 0; transform: translateY(8px); } }

@@ -32,7 +32,9 @@
       <a href="#sec-api" data-i18n="set.nav.api">💬 聊天 API</a>
       <a href="#sec-persona" data-i18n="set.nav.persona">🎭 人设</a>
       <a href="#sec-voice" data-i18n="set.nav.voice">🗣 语音</a>
-      <a href="#sec-other" data-i18n="set.nav.other">⚙ 系统与高级</a>
+      <a href="#sec-other" data-i18n="set.nav.other">⚙ 系统与界面</a>
+      <a href="#sec-agent" data-i18n="set.nav.agent">🤝 Agent 接口</a>
+      <a href="#sec-sense" data-i18n="set.nav.sense">👀 感知与监控</a>
       <a href="#sec-security" data-i18n="set.nav.security">🔐 密钥与凭据</a>
     </nav>
   </aside>
@@ -73,6 +75,52 @@
         <p class="hint" id="rm-hint" style="margin:0;">下方各区块按所选渲染模式显示：Spine 显示行走/模型选项，2.5D 显示角色/跟随选项，GIF 为经典表情。</p>
       </label>
     </div>
+    <!-- v2.5.26 重排：模式专属控件从「系统」区归位到渲染模式区 -->
+    <div class="row">
+      <div class="col switch-row" data-rm="rig">
+        <span>🎬 2.5D 角色（PSD 自动装配）</span>
+        <label class="switch"><input type="checkbox" id="rig-switch" /><span class="slider"></span></label>
+      </div>
+      <div class="col" data-rm="rig">
+        <span>🎬 2.5D 角色大小：<b id="rig-scale-val">100%</b></span>
+        <input type="range" id="rig-scale" min="0.3" max="1.5" step="0.05" value="1" style="width:100%" />
+      </div>
+      <div class="col switch-row" data-rm="rig">
+        <span>🎬 2.5D 头部/眼睛跟随鼠标（实验性）</span>
+        <label class="switch"><input type="checkbox" id="rig-mouse" checked /><span class="slider"></span></label>
+      </div>
+      <div class="col" data-rm="rig">
+        <span>🎬 已导入 2.5D 皮肤：</span>
+        <div id="rig-skins-list" class="rig-skin-hint">加载中…</div>
+      </div>
+      <div class="col" data-rm="live2d">
+        <span>🎭 Live2D 模型（点选即生效，无需保存）：</span>
+        <div id="live2d-skins-list" class="rig-skin-hint">加载中…</div>
+      </div>
+      <div class="col" data-rm="live2d">
+        <span>🎭 Live2D 角色大小：<b id="live2d-scale-val">100%</b>（渲染模式为 Live2D 时实时生效）</span>
+        <input type="range" id="live2d-scale" min="0.3" max="1.5" step="0.05" value="1" style="width:100%" />
+      </div>
+      <div class="col rig-skin-hint" data-rm="rig" id="rig-hint" style="width:100%">在「🧩 PSD 角色工具」拖入 PSD → 「应用到桌宠」即导入；托盘「🎬 2.5D 皮肤」可切换</div>
+    </div>
+    <div class="row">
+      <label class="col" data-rm="spine">
+        <input id="walking-opt" type="checkbox" />
+        <span data-i18n="set.walkingOpt">🚶 桌面行走（沿屏幕走动、走走停停；拖拽时自动暂停；仅 Spine 模式生效）</span>
+      </label>
+      <label class="col" data-rm="spine">
+        <span data-i18n="set.sitMax">单次坐下最久（秒）</span>
+        <input id="sit-max" type="range" min="15" max="180" step="5" />
+        <span id="sit-max-val" style="font-weight:600;">30 s</span>
+      </label>
+      <label class="col" data-rm="spine">
+        <span data-i18n="set.walkMax">单次散步最久（秒）</span>
+        <input id="walk-max" type="range" min="8" max="120" step="1" />
+        <span id="walk-max-val" style="font-weight:600;">20 s</span>
+      </label>
+      <label class="col" data-rm="spine"><input id="feat-desktop-icons" type="checkbox" /><span data-i18n="set.featDesktopIcons">🧩 桌面图标感知（实验性）：只读桌面图标的位置坐标（仅本机·不联网上传），让她能走到桌面图标上站/坐；仅「桌面层级」显示模式下生效</span></label>
+    </div>
+    <p class="hint" data-rm="spine" data-i18n="set.spineHint">💡 懒人换模型：把任意 Spine 模型的 .atlas + .skel（或 .json）+ .png 放入用户数据目录的 assets/spine/user/ 文件夹，重启即自动替换，无需任何配置</p>
   </section>
 
   <section id="sec-experimental" data-rm="rig spine">
@@ -130,6 +178,9 @@
           <button id="mem-add-btn" type="button">➕ 添加</button>
         </div>
       </div>
+    </div>
+    <div class="row">
+      <label class="col"><input id="feat-memory" type="checkbox" checked /><span data-i18n="set.featMemory">🧠 长期记忆（自动记住重要对话内容）</span></label>
     </div>
   </section>
 
@@ -331,11 +382,16 @@
       <label class="col tone-cb"><input type="checkbox" id="tone-温柔" checked />温柔</label>
       <label class="col tone-cb"><input type="checkbox" id="tone-开心" checked />开心</label>
     </div>
+    <div class="row">
+      <label class="col"><input id="feat-emotional" type="checkbox" checked /><span data-i18n="set.featEmotional">🎭 情绪语音（根据情绪调整语速音调）</span></label>
+    </div>
   </section>
 
   <!-- ============ 4. 系统与高级（原「④ 其他」，v2.5.18 改名明义） ============ -->
+  <!-- v2.5.26 重排：原「系统与高级（杂七杂八）」拆为 系统界面 / Agent 接口 / 感知监控 三区，
+       模式专属控件归位渲染模式区，记忆/情绪开关归位各自分区 -->
   <section id="sec-other">
-    <h2 data-i18n="set.other">系统与高级（杂七杂八都在这）</h2>
+    <h2 data-i18n="set.other">⚙ 系统与界面</h2>
     <div class="row">
       <label class="col">
         <span data-i18n="set.uiLang">界面语言（聊天内容始终为中文）</span>
@@ -374,7 +430,52 @@
           <option value="true">是</option>
         </select>
       </label>
+      <label class="col"><input id="auto-launch" type="checkbox" /><span data-i18n="set.autoLaunch">🖥️ 开机自启（随系统启动，配合「启动隐藏」可静默进托盘）</span></label>
     </div>
+    <div class="row">
+      <label class="col">
+        <span data-i18n="set.bubbleWidth">聊天气泡宽度</span>
+        <input id="bubble-width" type="range" min="0" max="600" step="20" />
+        <span id="bubble-width-val" style="font-weight:600;">自适应</span>
+      </label>
+      <label class="col">
+        <span data-i18n="set.chatFontSize">聊天字体大小</span>
+        <input id="chat-font-size" type="range" min="10" max="22" step="1" />
+        <span id="chat-font-size-val" style="font-weight:600;">11 px</span>
+      </label>
+      <label class="col">
+        <span data-i18n="set.chatFont">聊天字体</span>
+        <select id="chat-font">
+          <option value="">默认（微软雅黑）</option>
+          <option value="宋体">宋体</option>
+          <option value="黑体">黑体</option>
+          <option value="楷体">楷体</option>
+          <option value="仿宋">仿宋</option>
+          <option value="等线">等线</option>
+        </select>
+      </label>
+      <label class="col">
+        <span data-i18n="set.importFont">导入本地字体（ttf/otf/woff）</span>
+        <button id="btn-import-font" type="button">📂 <span data-i18n="set.importFontBtn">选择字体文件并应用</span></button>
+      </label>
+      <label class="col">
+        <span>日程与提醒</span>
+        <button id="btn-open-schedule" type="button">📅 打开日程安排</button>
+      </label>
+    </div>
+    <div class="row actions">
+      <button id="btn-save-other" type="button" class="primary" data-i18n="set.save">💾 保存</button>
+      <button id="btn-open-terms" type="button" data-i18n="set.openTerms">📄 使用条款与隐私政策</button>
+      <button id="btn-open-config" type="button" data-i18n="set.openConfigFile">📄 打开 config.json</button>
+      <button id="btn-clear-history" type="button" class="danger" data-i18n="set.clearHistory">🗑 清除聊天记录</button>
+      <span id="other-result" class="result"></span>
+    </div>
+    <p class="hint" data-i18n="set.taskHint">任务模式（/zcode 前缀操控电脑）默认关闭：想开启请打开 config.json，把 <code>zcodeEnabled</code> 改为 <code>true</code> 并配置 <code>zcodeCli</code> 路径（需自行安装 ZCode）。</p>
+    <p class="foot" id="version" data-i18n="set.version">苏苏洛桌宠 · 2.5 正式版</p>
+  </section>
+
+  <section id="sec-agent">
+    <h2 data-i18n="set.agentTitle">🤝 Agent 接口（其他 AI / 脚本调用她）</h2>
     <div class="row">
       <label class="col">
         <span data-i18n="set.agentApi">Agent 接口（其他 agent 调用）</span>
@@ -418,6 +519,11 @@
         <button id="btn-agent-client-add" type="button">➕ 新增接入</button>
       </div>
     </div>
+    <p class="hint" data-i18n="set.agentHint">其他 agent / 脚本可调用：<code>POST http://127.0.0.1:8765/chat</code>，请求体 <code>{"text":"苏苏洛 帮我…"}</code>；<code>GET /health</code> 查状态。仅监听本机，不对局域网开放。</p>
+  </section>
+
+  <section id="sec-sense">
+    <h2 data-i18n="set.senseTitle">👀 感知与监控</h2>
     <div class="row">
       <div class="col switch-row">
         <span>🧐 感知工作区活动：她会在你改代码时小声嘀咕（只读监听文件变化，不上传）</span>
@@ -433,93 +539,6 @@
       <label class="col"><input id="feat-sysmon" type="checkbox" /><span data-i18n="set.featSysmon">📊 系统监控播报（CPU/内存异常时提醒）</span></label>
       <label class="col"><input id="file-guard" type="checkbox" /><span>🛡️ 蜜标监控：检测其他程序访问我的敏感配置区域（配置/密钥/历史文件），发现即提醒（普通权限下无法显示具体进程名）</span></label>
     </div>
-    <div class="row">
-      <label class="col"><input id="feat-memory" type="checkbox" checked /><span data-i18n="set.featMemory">🧠 长期记忆（自动记住重要对话内容）</span></label>
-      <label class="col"><input id="feat-emotional" type="checkbox" checked /><span data-i18n="set.featEmotional">🎭 情绪语音（根据情绪调整语速音调）</span></label>
-      <label class="col" data-rm="spine"><input id="feat-desktop-icons" type="checkbox" /><span data-i18n="set.featDesktopIcons">🧩 桌面图标感知（实验性）：只读桌面图标的位置坐标（仅本机·不联网上传），让她能走到桌面图标上站/坐；仅「桌面层级」显示模式下生效</span></label>
-      <label class="col"><input id="auto-launch" type="checkbox" /><span data-i18n="set.autoLaunch">🖥️ 开机自启（随系统启动，配合「启动隐藏」可静默进托盘）</span></label>
-      <div class="col switch-row" data-rm="rig">
-        <span>🎬 2.5D 角色（PSD 自动装配）</span>
-        <label class="switch"><input type="checkbox" id="rig-switch" /><span class="slider"></span></label>
-      </div>
-      <div class="col" data-rm="rig">
-        <span>🎬 2.5D 角色大小：<b id="rig-scale-val">100%</b></span>
-        <input type="range" id="rig-scale" min="0.3" max="1.5" step="0.05" value="1" style="width:100%" />
-      </div>
-      <div class="col switch-row" data-rm="rig">
-        <span>🎬 2.5D 头部/眼睛跟随鼠标（实验性）</span>
-        <label class="switch"><input type="checkbox" id="rig-mouse" checked /><span class="slider"></span></label>
-      </div>
-      <div class="col" data-rm="rig">
-        <span>🎬 已导入 2.5D 皮肤：</span>
-        <div id="rig-skins-list" class="rig-skin-hint">加载中…</div>
-      </div>
-      <div class="col" data-rm="live2d">
-        <span>🎭 Live2D 模型（点选即生效，无需保存）：</span>
-        <div id="live2d-skins-list" class="rig-skin-hint">加载中…</div>
-      </div>
-      <div class="col" data-rm="live2d">
-        <span>🎭 Live2D 角色大小：<b id="live2d-scale-val">100%</b>（渲染模式为 Live2D 时实时生效）</span>
-        <input type="range" id="live2d-scale" min="0.3" max="1.5" step="0.05" value="1" style="width:100%" />
-      </div>
-      <div class="col rig-skin-hint" data-rm="rig" id="rig-hint" style="width:100%">在「🧩 PSD 角色工具」拖入 PSD → 「应用到桌宠」即导入；托盘「🎬 2.5D 皮肤」可切换</div>
-    </div>
-    <div class="row">
-      <label class="col" data-rm="spine">
-        <input id="walking-opt" type="checkbox" />
-        <span data-i18n="set.walkingOpt">🚶 桌面行走（沿屏幕走动、走走停停；拖拽时自动暂停；仅 Spine 模式生效）</span>
-      </label>
-      <label class="col" data-rm="spine">
-        <span data-i18n="set.sitMax">单次坐下最久（秒）</span>
-        <input id="sit-max" type="range" min="15" max="180" step="5" />
-        <span id="sit-max-val" style="font-weight:600;">30 s</span>
-      </label>
-      <label class="col" data-rm="spine">
-        <span data-i18n="set.walkMax">单次散步最久（秒）</span>
-        <input id="walk-max" type="range" min="8" max="120" step="1" />
-        <span id="walk-max-val" style="font-weight:600;">20 s</span>
-      </label>
-      <label class="col">
-        <span data-i18n="set.bubbleWidth">聊天气泡宽度</span>
-        <input id="bubble-width" type="range" min="0" max="600" step="20" />
-        <span id="bubble-width-val" style="font-weight:600;">自适应</span>
-      </label>
-      <label class="col">
-        <span data-i18n="set.chatFontSize">聊天字体大小</span>
-        <input id="chat-font-size" type="range" min="10" max="22" step="1" />
-        <span id="chat-font-size-val" style="font-weight:600;">11 px</span>
-      </label>
-      <label class="col">
-        <span data-i18n="set.chatFont">聊天字体</span>
-        <select id="chat-font">
-          <option value="">默认（微软雅黑）</option>
-          <option value="宋体">宋体</option>
-          <option value="黑体">黑体</option>
-          <option value="楷体">楷体</option>
-          <option value="仿宋">仿宋</option>
-          <option value="等线">等线</option>
-        </select>
-      </label>
-      <label class="col">
-        <span>日程与提醒</span>
-        <button id="btn-open-schedule" type="button">📅 打开日程安排</button>
-      </label>
-      <label class="col">
-        <span data-i18n="set.importFont">导入本地字体（ttf/otf/woff）</span>
-        <button id="btn-import-font" type="button">📂 <span data-i18n="set.importFontBtn">选择字体文件并应用</span></button>
-      </label>
-    </div>
-    <p class="hint" data-rm="spine" data-i18n="set.spineHint">💡 懒人换模型：把任意 Spine 模型的 .atlas + .skel（或 .json）+ .png 放入用户数据目录的 assets/spine/user/ 文件夹，重启即自动替换，无需任何配置</p>
-    <p class="hint" data-i18n="set.agentHint">其他 agent / 脚本可调用：<code>POST http://127.0.0.1:8765/chat</code>，请求体 <code>{"text":"苏苏洛 帮我…"}</code>；<code>GET /health</code> 查状态。仅监听本机，不对局域网开放。</p>
-    <div class="row actions">
-      <button id="btn-save-other" type="button" class="primary" data-i18n="set.save">💾 保存</button>
-      <button id="btn-open-terms" type="button" data-i18n="set.openTerms">📄 使用条款与隐私政策</button>
-      <button id="btn-open-config" type="button" data-i18n="set.openConfigFile">📄 打开 config.json</button>
-      <button id="btn-clear-history" type="button" class="danger" data-i18n="set.clearHistory">🗑 清除聊天记录</button>
-      <span id="other-result" class="result"></span>
-    </div>
-    <p class="hint" data-i18n="set.taskHint">任务模式（/zcode 前缀操控电脑）默认关闭：想开启请打开 config.json，把 <code>zcodeEnabled</code> 改为 <code>true</code> 并配置 <code>zcodeCli</code> 路径（需自行安装 ZCode）。</p>
-    <p class="foot" id="version" data-i18n="set.version">苏苏洛桌宠 · 2.5 正式版</p>
   </section>
   <!-- ============ 5. 密钥与凭据安全 ============ -->
   <section id="sec-security">
