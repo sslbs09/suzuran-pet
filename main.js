@@ -2243,10 +2243,19 @@ ipcMain.handle("pet:update-memory-fact", (_e, id, text) => { // 编辑单条记�
 ipcMain.handle("pet:clear-memory", () => {
   try { memory.clear(); return true; } catch { return false; }
 });
+/** 主动搭话状态分流键（v2.5.25）：散步/坐着时优先用贴合当下处境的台词 */
+function proactiveStateFn() {
+  try {
+    if (walk.active && !walk.resting && !walk.perched && !walk.sleeping) return "walking";
+    if (walk.seated && !walk.active) return "seated";
+  } catch { /* 忽略 */ }
+  return "";
+}
+
 ipcMain.on("pet:set-proactive-chat", (_e, on) => {
   config.saveConfig({ proactiveChat: !!on });
   features.setProactiveEnabled(!!on);
-  if (on) features.startProactive((msg) => sendProactive(msg, "idle"), proactiveMin());
+  if (on) features.startProactive((msg) => sendProactive(msg, "idle"), proactiveMin(), proactiveStateFn);
 });
 ipcMain.on("pet:set-personify", (_e, on) => {
   config.saveConfig({ personify: !!on });
@@ -3970,7 +3979,7 @@ if (!gotLock) {
     const _proactiveMin = (_cfg.features && _cfg.features.proactiveMin) || 8;
     features.startProactive((msg) => {
       sendProactive(msg, "idle"); // 隐藏到托盘时静默待命，不主动搭话
-    }, _proactiveMin);
+    }, _proactiveMin, proactiveStateFn);
 
     // 日语翻译预热（v2.5.20）：speakJa 模式下空闲批量翻译固定台词进磁盘缓存，
     // 翻译 API 挂了也能说出日语（"说不出来"根治）

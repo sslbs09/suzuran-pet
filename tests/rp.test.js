@@ -30,6 +30,8 @@ ok("pickTpl 替换占位", tpl === "你好呀阿米娅，苏苏洛在呢");
 ok("STAGE_LINES 键齐", ["ms", "fd", "xl", "sy"].length >= 3 && !!lines.STAGE_LINES.xl && !!lines.STAGE_LINES.sy);
 ok("EARLY_MORNING 非空", lines.EARLY_MORNING_LINES.length > 0);
 ok("PROACTIVE 每时段≥2 条", Object.values(lines.PROACTIVE_BY_PERIOD).every((a) => a.length >= 2));
+ok("状态分流台词池齐（walking/seated 各≥3）", Object.keys(lines.PROACTIVE_BY_STATE).length === 2 &&
+  lines.PROACTIVE_BY_STATE.walking.length >= 3 && lines.PROACTIVE_BY_STATE.seated.length >= 3);
 
 /* ---- bond 关系阶段：陌生→熟悉→信赖→誓约（先查初始，再推高） ---- */
 const st0 = bond.getStage();

@@ -54,6 +54,7 @@ let proactiveTimer = null;
 let lastChatTs = Date.now();
 let proactiveEnabled = true; // 设置页「主动搭话」开关（pet:set-proactive-chat）
 let proactiveCfg = { sendFn: null, intervalMin: 8 };
+let lastMilestoneSaid = 0; // 陪伴里程碑已说过的天数（v2.5.25 去重：每个里程碑值只开口一次，避免停在里程碑日反复刷屏）
 
 function touchChat() {
   lastChatTs = Date.now();
@@ -63,14 +64,14 @@ function touchChat() {
 function setProactiveEnabled(on) {
   proactiveEnabled = !!on;
   if (on) {
-    if (proactiveCfg.sendFn) startProactive(proactiveCfg.sendFn, proactiveCfg.intervalMin);
+    if (proactiveCfg.sendFn) startProactive(proactiveCfg.sendFn, proactiveCfg.intervalMin, proactiveCfg.stateFn);
   } else {
     stopProactive();
   }
 }
 
-function startProactive(sendFn, intervalMin = 8) {
-  proactiveCfg = { sendFn, intervalMin };
+function startProactive(sendFn, intervalMin = 8, stateFn = null) {
+  proactiveCfg = { sendFn, intervalMin, stateFn };
   stopProactive();
   const intervalMs = intervalMin * 60 * 1000;
   proactiveTimer = setInterval(() => {
@@ -136,14 +137,27 @@ function startProactive(sendFn, intervalMin = 8) {
           }
         } catch { /* 羁绊不可用则跳过 */ }
       }
-      // 里程碑由头：陪伴 7/30/100/整百 天
+      // 里程碑由头：陪伴 7/30/100/整百 天（v2.5.25 去重：每个里程碑值只开口一次——
+      // days 停在里程碑日时会反复触发 20% 概率，改为首次到达该值才说）
       if (!prompt) {
         try {
           const days = require("./bond").getDays();
-          if ((days === 7 || days === 30 || days === 100 || (days > 0 && days % 100 === 0)) && Math.random() < 0.2) {
+          const isMilestone = days === 7 || days === 30 || days === 100 || (days > 0 && days % 100 === 0);
+          if (isMilestone && days > lastMilestoneSaid && Math.random() < 0.2) {
+            lastMilestoneSaid = days;
             prompt = "已经陪博士 " + days + " 天了……感觉像家人一样了呢";
           }
         } catch { /* 忽略 */ }
+      }
+      // 状态分流（v2.5.25）：散步/坐着时优先说贴合当下处境的话（用户反馈想多点坐/闲逛的句子）
+      if (!prompt) {
+        try {
+          const st = (proactiveCfg.stateFn && proactiveCfg.stateFn()) || "";
+          if (st === "walking" || st === "seated") {
+            const pool = lines.PROACTIVE_BY_STATE[st];
+            if (pool && pool.length) prompt = lines.pickTpl(pool, vars);
+          }
+        } catch { /* 状态不可用则走时段台词 */ }
       }
       if (!prompt) {
         if (idle > 45 * 60 * 1000 && Math.random() < 0.4) {
