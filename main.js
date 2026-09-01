@@ -377,7 +377,7 @@ function refreshTrayMenu() {
   const items = buildTrayItems({
     cfg, lang, i18n, zcodeOn, forcedMode,
     isWindowVisible, toggleWindow, setMode, setTts, setRate, setSpeakJa, setWalking,
-    detectSpineModels, skinParseDir, SPINE_CN, SKIN_CHAR_NAMES, SKIN_PERSON_NAMES, setSpineSkin,
+    detectSpineModels, skinParseDir, SPINE_CN, SKIN_CHAR_NAMES, SKIN_PERSON_NAMES, setSpineSkin, skinIconOf,
     sendToRenderer, setPetLayer, openPsdWindow, rigSkinList, setRigSkin,
     setDimMode, sitOnTaskbar, setScale, clampScale, setWalkSpeed, setCatToy,
     setFileGuard,
@@ -2280,6 +2280,15 @@ ipcMain.on("pet:set-proactive-chat", (_e, on) => {
 });
 // 日语预热进度（v2.5.26）：设置页语音区显示「已缓存 x/N 句」
 ipcMain.handle("pet:ja-prewarm-status", () => features.getJaPrewarmProgress());
+// 清空日语翻译磁盘缓存（v2.5.26）：旧译文（如含动作版）焕新；7 天 TTL 外的本就会过期
+ipcMain.handle("pet:clear-translate-cache", () => {
+  try {
+    const tc = require("./src/translate-cache");
+    tc.save(config.STORAGE.userDir, {});
+    require("./src/ja-translate").clearTrDisk();
+    return { ok: true };
+  } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+});
 ipcMain.on("pet:set-personify", (_e, on) => {
   config.saveConfig({ personify: !!on });
 });
@@ -2782,7 +2791,14 @@ function applySeatPosition() {
   applyLayer(walk.seated || walk.active); // 接触任务栏表面时保证在任务栏之上
 }
 
-function chooseWalkBehavior() { return walkCore.behaviorOf({ now: Date.now(), lastPerchEnd: walk._lastPerchEnd }); }
+function chooseWalkBehavior() {
+  // v2.5.26：跳窗顶概率设置页可调（walkPerchPct，0=不跳，默认 8%）
+  return walkCore.behaviorOf({ now: Date.now(), lastPerchEnd: walk._lastPerchEnd, weights: { idle: 0.45, walk: 0.40, perch: perchPctOf() / 100 } });
+}
+function perchPctOf() {
+  const v = Number(config.getConfig().walkPerchPct);
+  return Number.isFinite(v) && v >= 0 ? Math.min(30, v) : 8;
+}
 
 async function walkOnPhaseEnd() {
   if (!walk.active) return;
@@ -3620,7 +3636,8 @@ ipcMain.on("pet:set-char-inset", (_e, px) => { // 渲染层上报：窗口左缘
 });
 ipcMain.handle("pet:get-walk-timing", () => ({
   sitMaxSec: timingSec("sitMaxSec", 15, 180) || 30,
-  walkMaxSec: timingSec("walkMaxSec", 8, 120) || 20
+  walkMaxSec: timingSec("walkMaxSec", 8, 120) || 20,
+  perchPct: perchPctOf()
 }));
 ipcMain.handle("pet:set-walk-timing", (_e, patch) => {
   patch = patch || {};
@@ -3630,9 +3647,13 @@ ipcMain.handle("pet:set-walk-timing", (_e, patch) => {
   if (patch.walkMaxSec != null) {
     config.saveConfig({ walkTiming: { walkMaxSec: Math.max(8, Math.min(120, Math.round(Number(patch.walkMaxSec) || 20))) } });
   }
+  if (patch.perchPct != null) {
+    config.saveConfig({ walkPerchPct: Math.max(0, Math.min(30, Math.round(Number(patch.perchPct) || 0))) }); // v2.5.26：跳窗顶概率可调（0=不跳）
+  }
   return {
     sitMaxSec: timingSec("sitMaxSec", 15, 180) || 30,
-    walkMaxSec: timingSec("walkMaxSec", 8, 120) || 20
+    walkMaxSec: timingSec("walkMaxSec", 8, 120) || 20,
+    perchPct: perchPctOf()
   };
 });
 
@@ -3708,7 +3729,8 @@ function detectSpineModels() {
     id: "builtin",
     name: "苏苏洛",
     atlas: "spine/sussurro/build_char_298_susuro.atlas",
-    skel: "spine/sussurro/build_char_298_susuro.skel"
+    skel: "spine/sussurro/build_char_298_susuro.skel",
+    png: path.join(config.APP_DIR, "renderer", "spine", "sussurro", "build_char_298_susuro.png") // v2.5.26 托盘预览图
   }];
   const userDir = config.STORAGE.spineUser;
   const scan = (relDir) => {
@@ -3726,12 +3748,24 @@ function detectSpineModels() {
         id: prefix + base,
         name: SPINE_CN[relDir] || base.replace(/^(build_char_\d+_)/, "").replace(/_/g, " "),
         atlas: "pet-user://spine/user/" + prefix + e.name,
-        skel: "pet-user://spine/user/" + prefix + skelName
+        skel: "pet-user://spine/user/" + prefix + skelName,
+        png: (() => { const p = path.join(userDir, relDir, base + ".png"); return fs.existsSync(p) ? p : ""; })() // v2.5.26 托盘预览图
       });
     }
   };
   scan("");
   return list;
+}
+
+/** v2.5.26 托盘皮肤预览图：atlas 同目录 png 缩略（高 20px），失败返回 undefined 不影响菜单 */
+function skinIconOf(m) {
+  try {
+    const p = m && m.png;
+    if (!p || !fs.existsSync(p)) return undefined;
+    const img = nativeImage.createFromPath(p);
+    if (img.isEmpty()) return undefined;
+    return img.resize({ height: 20 });
+  } catch { return undefined; }
 }
 
 /** v2.5.10 按皮肤窗口宽度：渲染层上报宽模型需要的窗口宽（如迷迭香第三皮肤），

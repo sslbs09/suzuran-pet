@@ -97,6 +97,8 @@ async function toast(msg) {
     $("sit-max-val").textContent = wt.sitMaxSec + " s";
     $("walk-max").value = String(wt.walkMaxSec);
     $("walk-max-val").textContent = wt.walkMaxSec + " s";
+    $("perch-pct").value = String(wt.perchPct != null ? wt.perchPct : 8);
+    $("perch-pct-val").textContent = (wt.perchPct != null ? wt.perchPct : 8) + " %";
     const ap = await window.petAPI.getAppearance();
     fillChatFontOptions(ap.customFonts);
     $("chat-font").value = ap.fontFamily || "";
@@ -421,6 +423,15 @@ if (jaPrewarmEl && window.petAPI.jaPrewarmStatus) {
   setInterval(tickJaPrewarm, 5000);
 }
 
+/* ---------- 清空日语翻译缓存（v2.5.26） ---------- */
+$("btn-clear-trcache").addEventListener("click", async () => {
+  const out = $("gsv-result");
+  try {
+    const r = await window.petAPI.clearTranslateCache();
+    setResult(out, r.ok ? "✅ 翻译缓存已清空（预热会重新翻译）" : "❌ " + (r.error || "failed"));
+  } catch { setResult(out, "❌ failed"); }
+});
+
 /* ---------- 一键重启日语 TTS ---------- */
 $("btn-restart-gsv").addEventListener("click", async () => {
   const btn = $("btn-restart-gsv");
@@ -501,6 +512,14 @@ $("walk-max").addEventListener("change", async () => {
   const r = await window.petAPI.setWalkTiming({ walkMaxSec: Number($("walk-max").value) });
   $("walk-max").value = String(r.walkMaxSec);
   $("walk-max-val").textContent = r.walkMaxSec + " s";
+});
+$("perch-pct").addEventListener("input", () => {
+  $("perch-pct-val").textContent = $("perch-pct").value + " %";
+});
+$("perch-pct").addEventListener("change", async () => {
+  const r = await window.petAPI.setWalkTiming({ perchPct: Number($("perch-pct").value) });
+  $("perch-pct").value = String(r.perchPct);
+  $("perch-pct-val").textContent = r.perchPct + " %";
 });
 
 /* ---------- 聊天外观（字体/字号/气泡宽度，松手即生效） ---------- */

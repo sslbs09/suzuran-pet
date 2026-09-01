@@ -14,7 +14,7 @@ function buildTrayItems(deps) {
   const {
     cfg, lang, i18n, zcodeOn, forcedMode,
     isWindowVisible, toggleWindow, setMode, setTts, setRate, setSpeakJa, setWalking,
-    detectSpineModels, skinParseDir, SPINE_CN, SKIN_CHAR_NAMES, SKIN_PERSON_NAMES, setSpineSkin,
+    detectSpineModels, skinParseDir, SPINE_CN, SKIN_CHAR_NAMES, SKIN_PERSON_NAMES, setSpineSkin, skinIconOf,
     sendToRenderer, setPetLayer, openPsdWindow, rigSkinList, setRigSkin,
     setDimMode, sitOnTaskbar, setScale, clampScale, setWalkSpeed, setCatToy,
     setFileGuard,
@@ -62,6 +62,7 @@ function buildTrayItems(deps) {
           if (skin && cn && cn.includes("·")) return cn.split("·").slice(1).join("·");
           return skin ? skin.replace(/_/g, " ") : "默认";
         })(),
+        icon: skinIconOf ? skinIconOf(m) : undefined, // v2.5.26 皮肤预览图
         type: "radio",
         checked: (cfg.spineSkinId || "builtin") === m.id,
         click: () => setSpineSkin(m.id)

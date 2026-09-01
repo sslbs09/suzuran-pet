@@ -42,6 +42,8 @@ function ensureTrDisk() {
   }
   return trDisk;
 }
+/** 清空磁盘翻译缓存后重置内存引用（v2.5.26 设置页「清空翻译缓存」） */
+function clearTrDisk() { trDisk = null; }
 async function translateToJa(text) {
   const cfg = config.getConfig();
   const c = cfg.chat || {};
@@ -139,4 +141,4 @@ async function translateToJa(text) {
   return "";
 }
 
-module.exports = { translateToJa };
+module.exports = { translateToJa, clearTrDisk };

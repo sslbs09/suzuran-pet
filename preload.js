@@ -147,6 +147,7 @@ contextBridge.exposeInMainWorld("petAPI", {
   onTermsAgreed: (cb) => ipcRenderer.on("pet:terms-agreed", (_e) => cb()),
   speakClone: (text, opts) => ipcRenderer.invoke("pet:tts-clone", text, opts || {}),
   jaPrewarmStatus: () => ipcRenderer.invoke("pet:ja-prewarm-status"), // 日语预热进度（v2.5.26 设置页可视化）
+  clearTranslateCache: () => ipcRenderer.invoke("pet:clear-translate-cache"), // 清空翻译缓存（v2.5.26）
   onTtsPart: (cb) => ipcRenderer.on("pet:tts-part", (_e, part) => cb(part)), // v2.5.5 逐句流式
   setSkinWindowWidth: (px) => ipcRenderer.send("pet:set-skin-window-width", px),
   playback: (msg) => ipcRenderer.send("pet:tts-playback", msg),

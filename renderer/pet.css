@@ -203,7 +203,7 @@ body.edge-left .bubble::before {
 .bubble.hidden { display: none; }
 /* pre-wrap 只放正文容器：气泡本体保持 normal——否则 index.html 里按钮间的缩进换行
    会被保留成幻影空行，把正文推出气泡外（rig 模式「留白」根因） */
-#bubble-text { padding-right: 14px; white-space: pre-wrap; }
+#bubble-text { padding-right: 14px; white-space: pre-wrap; line-height: 1.6; text-wrap: pretty; letter-spacing: .01em; } /* v2.5.26 长文排版：行高/换行美化 */
 
 /* 放大/还原按钮（气泡右上角）：半透明幽灵按钮——.bubble 前缀提特异性，
    避免被后面 .btn 基础样式级联盖掉（v2.5.26 修复旧令牌块的覆盖陷阱） */

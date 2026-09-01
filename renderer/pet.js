@@ -2123,10 +2123,13 @@ let patFeedbackTimer = null;
 function showPatFeedback() {
   if (!bubbleEl) return;
   if (patFeedbackTimer) clearTimeout(patFeedbackTimer);
-  bubbleText.textContent = "❤";
+  // 连击视觉递进（v2.5.26）：连摸越多心越多，≥5 加 ⁺（与主进程撒娇档音色同步递进）
+  const combo = (patSeq && patSeq.count) || 1;
+  const hearts = "❤".repeat(Math.max(1, Math.min(combo, 4))) + (combo >= 5 ? "⁺" : "");
+  bubbleText.textContent = hearts;
   showBubble();
   patFeedbackTimer = setTimeout(() => {
-    if (bubbleText.textContent === "❤") hideBubble(); // 主进程台词已覆盖则不动
+    if (bubbleText.textContent.startsWith("❤")) hideBubble(); // 主进程台词已覆盖则不动
   }, 2000);
 }
 /* 被抛出去：约落地时刻给"晕乎/抗议"短反馈（借鉴 dsh-dafeiyu 拖拽反馈；5% 概率，避免频繁晕眩） */

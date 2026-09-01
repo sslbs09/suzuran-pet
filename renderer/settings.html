@@ -118,6 +118,11 @@
         <input id="walk-max" type="range" min="8" max="120" step="1" />
         <span id="walk-max-val" style="font-weight:600;">20 s</span>
       </label>
+      <label class="col" data-rm="spine">
+        <span data-i18n="set.perchPct">跳上窗顶概率（%；0=不跳）</span>
+        <input id="perch-pct" type="range" min="0" max="30" step="1" />
+        <span id="perch-pct-val" style="font-weight:600;">8 %</span>
+      </label>
       <label class="col" data-rm="spine"><input id="feat-desktop-icons" type="checkbox" /><span data-i18n="set.featDesktopIcons">🧩 桌面图标感知（实验性）：只读桌面图标的位置坐标（仅本机·不联网上传），让她能走到桌面图标上站/坐；仅「桌面层级」显示模式下生效</span></label>
     </div>
     <p class="hint" data-rm="spine" data-i18n="set.spineHint">💡 懒人换模型：把任意 Spine 模型的 .atlas + .skel（或 .json）+ .png 放入用户数据目录的 assets/spine/user/ 文件夹，重启即自动替换，无需任何配置</p>
@@ -353,6 +358,7 @@
       </div>
       <div class="row actions">
         <button id="btn-restart-gsv" type="button" data-i18n="set.restartJa">🔄 重启日语语音服务</button>
+        <button id="btn-clear-trcache" type="button" data-i18n="set.clearTrCache">🗑 清空翻译缓存</button>
         <span id="ja-prewarm-progress" class="result"></span>
         <span id="gsv-result" class="result"></span>
       </div>

@@ -314,3 +314,13 @@
 - ✅ **托盘「🪑 一键坐到任务栏」**：原 `pet:sit-taskbar`/sitOnTaskbar 是死 API（无调用方），接进动作子菜单（walkingOn 时可用）——手动归位+坐姿验证入口
 - 若仍见「坐不到任务栏」，看日志区分：「自主坐下」y 值异常=几何问题；「坐姿自愈」频繁=有漂移源；坐窗顶=perch 设计行为（8% 概率跳窗顶休息）
 - 27 测试全绿、lint 0 error；已部署重启
+
+### 块 17（用户：清单都做，另立/外部留档）：体验类六项
+- ✅ **groundGap 上报**：核查发现渲染层早已实现（reportGroundGap/setGroundGap，含 visibleCanvasGap 采样；之前 grep 大小写漏看）——无需修，纠正记录
+- ✅ **perch 开关**：config.walkPerchPct（0-30，默认 8，0=不跳窗顶）；walk-timing IPC 扩展 + 设置页滑杆 + 三语 i18n；behaviorOf weights 接入
+- ✅ **情绪细标补标 14 条**（全库扫不符池情绪的：撒娇/傲娇/惊讶/开心/温柔 前缀标记）
+- ✅ **翻译缓存清空按钮**：pet:clear-translate-cache IPC + ja-translate.clearTrDisk + 设置页按钮 + 三语
+- ✅ **摸头连击视觉递进**：气泡 ❤ 随连击数递增（≥5 加 ⁺），与主进程撒娇档音色同步
+- ✅ **气泡长文排版**：#bubble-text 行高 1.6 + text-wrap:pretty + 字距 .01em
+- ✅ **托盘皮肤预览图**：detectSpineModels 补 png 字段（builtin+user），skinIconOf 缩略 20px 注入菜单 icon
+- 27 测试全绿；已部署重启日志干净
