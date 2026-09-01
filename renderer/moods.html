@@ -22,9 +22,10 @@
   .mood-card .actions { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
   .mood-card button { min-height: 28px; padding: 4px 9px; font-size: 11px; }
   .tag-new { display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 5px; background: #fff1d9; color: var(--ui-warm); font-size: 10px; }
-  /* 深色主题（v2.5.26）：暖色标签压暗；「自定义」标签由 moods.js 内联样式生成，需 !important 覆盖 */
+  /* 深色主题（v2.5.26）：暖色标签压暗；「自定义」标签样式已类名化（moods.js，backlog-tech-2） */
+  .moods-page .tag-custom { background: #fff4e5; color: #b57a24; }
   body.theme-dark .moods-page .tag-new { background: rgba(214, 154, 88, .18); }
-  body.theme-dark .moods-page .mood-card .tag[style] { background: rgba(214, 154, 88, .18) !important; color: #d6b06e !important; }
+  body.theme-dark .moods-page .tag-custom { background: rgba(214, 154, 88, .18); color: #d6b06e; }
 </style>
 </head>
 <body class="ui-page moods-page">

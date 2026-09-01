@@ -541,7 +541,7 @@ $("btn-rig").addEventListener("click", async () => {
     cv.id = "rig-canvas";
     cv.style.maxWidth = "100%";
     cv.style.maxHeight = "380px";
-    cv.style.background = "repeating-conic-gradient(#f0f3f6 0 25%, #fff 0 50%) 0 0/16px 16px";
+    cv.classList.add("checker"); // 棋盘格走 CSS 变量（--psd-check-*），深色自动跟随（backlog-tech-2）
     wrap.appendChild(cv);
     const psdImg = rigPsdSource();
     const pre = window.Rigger.cleanPsdLayers(psdImg);

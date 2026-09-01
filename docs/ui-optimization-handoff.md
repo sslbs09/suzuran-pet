@@ -218,3 +218,11 @@
 - ✅ 11 个 HTML 挂 `<script src="theme.js">`（主窗口/文档/设置 + 8 辅助窗口在 theme-init 之前）
 - ✅ main.js 新增 `broadcastToRenderers()`，`pet:set-theme` 改全窗广播——辅助窗口**实时**跟主题（原仅打开时）
 - ✅ 新增 `tests/theme.test.js` 9 断言（dark/light 直通 + auto 18/19/5/6 点边界 + system 无 window 不抛错）；全量 23/23 绿；新文件 eslint 零警告
+
+### 块 3：JS 内联样式类名化（tech-debt-2）
+- ✅ moods.js「自定义」标签改 `class="tag tag-custom"`；moods.html 补 `.tag-custom` 浅色+深色规则，删除 `!important [style]` 覆盖
+- ✅ psd.js 2.5D 预览画布棋盘格改 `classList.add("checker")`；psd.html `#preview, .checker` 共用 CSS 变量棋盘格——深色自动跟随
+
+### 块 4：schedule 导入预览弹窗焦点管理（a11y-debt）
+- ✅ 打开时记录 `document.activeElement` 并聚焦「取消」（安全默认）；关闭时焦点回还
+- ✅ 弹窗 keydown：Esc 关闭；Tab/Shift+Tab 在弹窗按钮间圈定（focus trap）

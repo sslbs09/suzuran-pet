@@ -18,7 +18,7 @@ function cardHTML(m) {
   const safeLabel = escapeHtml(m.label);
   const src = "pet-user://sprites/user/" + encodeURIComponent(m.name) + ".gif?t=" + Date.now();
   const tag = m.custom
-    ? '<span class="tag" style="background:#fff4e5;color:#b57a24;">自定义</span>'
+    ? '<span class="tag tag-custom">自定义</span>'
     : m.emotion
       ? '<span class="tag">情绪</span>'
       : '<span class="tag">待机</span>';

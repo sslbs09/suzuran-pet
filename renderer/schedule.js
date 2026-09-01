@@ -44,9 +44,26 @@ function showImportPreview(p, onConfirm) {
   $("preview-rows").replaceChildren(table);
   $("preview-confirm").onclick = () => { hideImportPreview(); onConfirm(); };
   $("preview-cancel").onclick = hideImportPreview;
+  previewReturnFocus = document.activeElement;
   $("import-preview").classList.remove("hidden");
+  $("preview-cancel").focus(); // 焦点进入弹窗（取消为安全默认）
 }
-function hideImportPreview() { $("import-preview").classList.add("hidden"); }
+function hideImportPreview() {
+  $("import-preview").classList.add("hidden");
+  if (previewReturnFocus && previewReturnFocus.focus) previewReturnFocus.focus(); // 焦点回还（backlog-a11y）
+  previewReturnFocus = null;
+}
+let previewReturnFocus = null;
+/* 弹窗可访问性（backlog-a11y）：Tab 焦点圈定弹窗内 + Esc 关闭 */
+$("import-preview").addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { hideImportPreview(); return; }
+  if (e.key !== "Tab") return;
+  const items = [...$("import-preview").querySelectorAll("button")].filter((b) => !b.disabled);
+  if (!items.length) return;
+  const first = items[0], last = items[items.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
 $("template").onclick = async () => { const ok = await window.petAPI.exportScheduleTemplate(); $("import-result").textContent = ok ? "模板已保存" : "已取消"; };
 window.petAPI.onScheduleDue(() => refresh());
 const now = new Date(); $("date").value = now.toISOString().slice(0, 10); $("time").value = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()+1).padStart(2,"0")}`; refresh();
