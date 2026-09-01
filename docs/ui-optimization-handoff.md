@@ -264,3 +264,10 @@
 - ✅ 台词 248→293：PAT+4、thrown/grabbed/wake/sleepDay/sleepNight/perch 各+2、workflow+3、五时段各+3、walking/seated 各+3、idle+3、stage 各+1、early+2；23/23 单测绿、eslint 干净
 - ✅ 对齐修复（用户截图反馈「开关居中掉行下」）：根因=.switch-row 与 .col 同特异性且未写 flex-direction，column+align-items:center 组合成居中竖排；补 flex-direction:row+span flex:1；另加 :has 规则修复选框横排/滑杆数值右贴；已部署，**视觉验收移交用户**
 - ✅ 二轮优化（用户再反馈）：开关 align-items:flex-start 置顶+.row:has(.switch-row) stretch 顶对齐；记忆区 .col.full 全宽；音色试听改 h3.subhead 子标题 + .tone-row 横排徽章（tone-cb 脱 col 网格）；JS 仅按 id 查询无耦合；已部署待用户验收
+
+### 块 11：台词念白合理性（用户反馈：考虑念出来翻译的合理性）
+- **根因**：sanitizeJaText 只删括号不删内容——「（眯起眼睛）摸头」被念成「眯起眼睛摸头」；中文链路（cleanZh）同样不剥动作
+- ✅ 新增 `utils.stripStage()`：剥（动作/舞台指示）+句首残留标点，气泡显示不受影响
+- ✅ 接入四处：中文合成入口 clean、日语合成出口（防御旧译文缓存）、features.js 日语预热（只翻口播部分，省 token）
+- ✅ 翻译提示词：补拟声词语气词自然化 + 括号保底规则；userName=「博士」（新默认）不再触发音译子句（与强制术语冲突）
+- ✅ tests/strip-stage.test.js 9 断言（23+1=24 文件全绿）；已部署重启
