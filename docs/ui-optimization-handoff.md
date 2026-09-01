@@ -1,0 +1,92 @@
+# 交接报告：苏苏洛桌宠 UI 优化
+
+- 编写日期：2026-09-01
+- 代码基准：v2.5.25（HEAD = 本地 main）
+- 仓库：`E:\SuzuranPetGit`（GitHub: https://github.com/sslbs09/suzuran-pet）
+- 本任务由另一位模型/AI 承接，以下内容自包含，可直接开工
+
+---
+
+## 一、背景与目标
+
+桌宠 UI 已有一轮代际基础（设计变量系统 + 设置页左侧导航改版），但存在三类明显短板：
+
+1. **暗色主题适配不完整**：设计变量层支持 `body.theme-dark`，但 `pet.css` 有约 50 处硬编码颜色，暗色只覆盖了气泡/输入栏/信息版四个组件；辅助窗口（help/quickstart/docs 等）深浅色下观感不一致
+2. **主窗口桌宠本体观感偏朴素**：气泡、输入栏、信息版是纯色块，缺少层次（阴影/渐变/微动效），与设置页的打磨程度不匹配
+3. **辅助窗口风格不统一**：各窗口复用 ui.css 变量但不完整，头部/卡片/按钮细节各有出入
+
+目标：在不改功能逻辑的前提下，统一视觉语言、补全暗色主题、提升主窗口质感与微交互。
+
+## 二、现状盘点（先读这些）
+
+### 设计系统（已有，别推翻，只扩展）
+- `renderer/ui.css` — 全部窗口的设计变量层：
+  - `:root` 定义 `--ui-bg/surface/surface-soft/ink/muted/subtle/line/line-strong/accent/accent-strong/accent-soft/warm/danger/danger-soft/success` + 阴影/圆角/缓动/焦点环（1-18 行）
+  - 123 行起 `body.theme-dark` 覆盖变量层（深色），**所有 ui-page 窗口跟随**——这是暗色主题的主通道
+  - `--ui-focus: 0 0 0 3px rgba(...)` 焦点可见性已就绪
+- `renderer/settings.css` — 设置页组件层：左侧分类导航 + scroll-spy（v2.5.18）、iOS 滑动开关、未保存提示条、响应式（620/720px 断点）、`prefers-reduced-motion` 已支持
+- `renderer/pet.css` — 桌宠主窗口（气泡/输入栏/信息版/拖拽反馈动画/摸头），**硬编码色最多（50 处）**
+
+### 文件清单
+| 文件 | 内容 | 说明 |
+|---|---|---|
+| `renderer/index.html` | 桌宠主窗口（气泡/输入栏/信息版/画布） | 65 行，结构简单 |
+| `renderer/pet.css` | 主窗口样式 | 449 行，暗色适配缺失重点 |
+| `renderer/settings.html/css/js` | 设置页 | 579 行 HTML，已较完善 |
+| `renderer/ui.css` | 通用变量/页面骨架 | 144 行，所有窗口共用 |
+| `renderer/help.html` `quickstart.html` `docs.html` `terms.html` `schedule.html` `psd.html` `addchar.html` `moods.html` `voice.html` | 辅助窗口 | 复用 ui.css，风格统一度待查 |
+| `renderer/docs.css` `schedule.css` | 辅助窗口专用样式 | 与 ui.css 的变量接入度待查 |
+
+### 主题切换机制
+- 主进程 `applyTheme(theme)` → `body.theme-dark` 类（自动/浅/深三态，i18n 设置页 theme-select）
+- 变量层切换是全窗口自动的，**只有硬编码颜色需要手动补 dark 覆盖**——这是本任务工作量主体
+
+## 三、优化任务清单（按优先级）
+
+### P1-1 补全暗色主题适配（工作量最大，先做）
+- **目标**：`pet.css` 50 处硬编码颜色全部纳入深浅双主题
+- **做法**：
+  - 能映射到 `--ui-*` 变量的直接替换（如 `#eef7f5` → `var(--ui-surface-soft)`）
+  - 桌宠专用色（气泡蓝 `#8ec7e8`、hover 蓝、信息版等）在 `pet.css` 顶部补一组私有变量 `:root { --pet-*: ... }` + `body.theme-dark { --pet-*: ... }`，替换硬编码
+  - 逐组件核对：气泡（含 error/task 变体）、放大按钮/关闭按钮 hover、thinking 点点、拖拽把手斜纹、输入栏、信息版、info-companion/info-sched/info-empty/info-sched-time、摸头反馈
+- **验收**：设置页把主题切到深色，主窗口所有组件均无刺眼亮色残留；切回浅色无回归
+
+### P1-2 主窗口质感与微交互（pet.css + index.html）
+- 气泡：纯色背景 → 半透明 + 轻微毛玻璃（`backdrop-filter: blur` 需配合窗口透明，先验证不穿帮）；增加层次阴影；`.bubble::after` 尾巴微调
+- 输入栏：与气泡视觉对齐（同背景/边框体系）；按钮 hover 过渡统一用 `var(--ui-ease)`
+- 信息版：组件卡片化（间距/圆角/分组标题统一）
+- 微交互：气泡出现动画（现有 `bubble-in` 0.18s）保留；新增按钮按下反馈（`:active` scale 0.97 等，注意 `prefers-reduced-motion`）
+- **注意**：桌宠窗口透明 + `setIgnoreMouseEvents` 穿透逻辑在 main.js/pet.js，**不要改 JS 行为**，只动 CSS
+
+### P2-1 辅助窗口风格统一（help/quickstart/docs/terms/schedule/psd/addchar/moods/voice）
+- 逐窗口核对：标题（`.ui-header h1`）、卡片（`.ui-page h2` + section）、按钮、表格、代码块是否都走 `--ui-*` 变量
+- `docs.css`/`schedule.css` 里的硬编码色同样补变量或 dark 覆盖
+- **验收**：深色主题下所有辅助窗口观感一致，无亮色残留
+
+### P2-2 设置页小窗/细节打磨（settings.css，v2.5.18 已大改，只做增量）
+- 检查 iOS 开关滑块灰色 `#c8ccd0`、未保存提示条（已有 dark 覆盖）之外的硬编码色
+- 键盘可达性：`set-nav` 锚点链接的 `:focus-visible` 样式
+- 分区图标/间距微调（可选）
+
+### P3-1 可访问性基线
+- 对比度：`--ui-muted (#62777d)` 小字号（12px）对比度核对，不足则微调
+- `prefers-reduced-motion: reduce` 下关掉气泡/开关/按钮动效（settings.css 已有先例，pet.css 补齐）
+- 焦点可见性：按钮/输入框补 `--ui-focus` 焦点环
+
+## 四、验收标准
+
+1. 深浅双主题下：主窗口 + 设置页 + 全部辅助窗口无硬编码亮色残留，观感一致
+2. 主窗口气泡/输入栏/信息版质感提升，动效顺滑且尊重 `prefers-reduced-motion`
+3. **功能零回归**：拖拽、摸头、气泡定位（edge-left/top 变体）、点击穿透、放大模式均正常——只动 CSS，不碰 JS 行为
+4. `node --check` 通过改动文件；现有 22 个单测全绿（本任务基本不涉及 JS，若有涉及必须补测）
+5. 打包重启后桌宠各模式（GIF/Spine）显示正常，日志无 error
+
+## 五、红线注意事项（务必遵守）
+
+1. **Mimosa 安全门禁**：改源码一律用 Write/Edit 工具，禁止 Bash 直接写源码/配置；git 用 `git -C "E:/SuzuranPetGit"`
+2. **打包升级方式不要改**（用户红线）：继续 app_legacy 散目录 + `pack.sh` + `cp -f app.asar.new app.asar` 流程
+3. **部署循环**：改 dev → PowerShell `Copy-Item` 同步到 `release/v2.5/苏苏洛桌宠 2.5 正式版/resources/app_legacy/`（Bash `cp` 会被 Mimosa 拦）→ 停桌宠 → `bash deploy/pack.sh` → `cp -f` 覆盖 asar（mv 常因文件锁失败）→ 重启 → 验证 `E:\SuzuranPetData-Roaming-2.5\logs\tts.log`
+4. **只动 CSS/HTML 结构，不动 JS 交互逻辑**：拖拽、穿透、行走、气泡定位都是 JS 管的事，改坏了影响面大
+5. **验证用视觉检查**：看截图必须走 vision skill（`node "C:/Users/xsbil/.zcode/skills/vision/vision.js" "<path>" "问题"`），禁止用 Read 直接读图
+6. **版本与日志**：`package.json` bump 到 2.5.26（本次基准 2.5.25）；`CHANGELOG.md` 顶部加 v2.5.26 段
+7. 完成后 commit（不 push），等用户验收后再发版
