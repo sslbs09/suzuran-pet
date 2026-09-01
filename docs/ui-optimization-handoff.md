@@ -300,3 +300,10 @@
 3. 无跨池去重 → recentRawSent 窗口 8 句跨轮禁选（banned 参数；回退顺序=宁破池内去重不破 banned，池被全覆盖才放行）
 - ✅ pick/pickTpl 签名扩展（banned/track），调用点全接；预热补 PROACTIVE_BY_STATE
 - ✅ tests/pick-dedup.test.js 7 断言（间隔/banned/回退/track）；26 文件全绿；已部署重启
+
+### 块 15：清单收尾（i18n/README_EN/官网 guide/Playwright）
+- ✅ 新 UI 文案三语 i18n 补齐：set.audTitle/audHint/toneTitle/prewarmRun/prewarmDone（中英日），settings.html 接 data-i18n、settings.js 预热文案走 L()
+- ✅ README_EN 全量同步：补提供商表/Under the Hood（记忆三层/语音五级回退/行走物理/渲染/安全）/语音对比表/数据位置表/FAQ/文档链（浓缩风格保持）
+- ✅ 官网 guide 四文档加深浅切换按钮（localStorage 记忆，gh-pages 47fb393）
+- ✅ Playwright 视觉回归落地：@playwright/test + chromium（代理下载成功）；tests/visual.spec.js 4 用例（11 分区导航断言/标题无首字变色/深浅截图存档）全过；`npm run test:visual`
+- 已部署重启；27 测试文件（26 node + 1 playwright）全绿

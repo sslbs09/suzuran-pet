@@ -56,6 +56,66 @@ Chat · long-term memory · cloned real voice (CN/JP) · walks along your taskba
 
 No API key yet? Local [Ollama](http://localhost:11434/v1) works with zero cost and no key.
 
+## 🔌 Supported Providers
+
+Any OpenAI-compatible endpoint works via "Custom" (baseUrl + model name). Presets included:
+
+| Provider | baseUrl | Notes |
+| --- | --- | --- |
+| DeepSeek | `https://api.deepseek.com/v1` | Cheap & solid, recommended |
+| Kimi (Moonshot) | `https://api.moonshot.cn/v1` | Long context |
+| OpenAI | `https://api.openai.com/v1` | Requires proxy in CN |
+| Zhipu GLM | `https://open.bigmodel.cn/api/paas/v4` | Free tier |
+| Alibaba Bailian | `https://dashscope.aliyuncs.com/compatible-mode/v1` | Multi-model |
+| SiliconFlow | `https://api.siliconflow.cn/v1` | Aggregates many models |
+| Ollama (local) | `http://localhost:11434/v1` | Free, offline, no key |
+| Anthropic Claude | `https://api.anthropic.com` | Set protocol type = Anthropic |
+
+## 🧠 Under the Hood
+
+- **Memory, three layers**: rule-extracted facts (deduped, capped) → conversation summaries every ~20 rounds → a bond level (1–10) raised by chats & head-pats that unlocks closer lines. All stored locally, DPAPI-encrypted, viewable/editable in Settings.
+- **Voice, five-step fallback**: local cloned voice (Genie) → GPT-SoVITS Japanese fine-tuned → Bailian CosyVoice → edge-tts → Windows system voice. If nothing is installed, system voice still works with zero setup.
+- **Walking physics**: taskbar as ground, sits to rest, hops onto window tops; drag-pause and throw-with-dizzy-feedback; a self-heal fuse guarantees she can never get stuck frozen.
+- **Rendering**: classic GIF / Spine walker / PSD 2.5D auto-rigged / Live2D — switchable live; transparent regions are fully click-through; topmost level re-asserts itself over fullscreen games.
+- **Security by default**: keys in DPAPI vault, localhost-only services, DLL baseline self-check, honeytoken alerts on external access to sensitive config.
+
+## 🗣 Voice Options
+
+Voice is **off by default**. Tray → Voice Settings, or Settings → Voice:
+
+| Option | Needs | Result |
+| --- | --- | --- |
+| Windows system voice | nothing | Easiest |
+| edge-tts (cloud) | Python + `pip install edge-tts` | Microsoft voices |
+| **Local cloned voice (recommended)** | bundled in Full build | Sussurro's own voice, CN (Genie) + JP (GPT-SoVITS) |
+| Bailian CosyVoice | API key + voice id | Cloud cloning |
+
+**Japanese voice mode**: Settings → Voice → tick "Japanese voice mode" — bubbles stay Chinese, replies are translated to Japanese and spoken with the JP fine-tuned voice.
+
+## 📂 Where Your Data Lives
+
+| What | Where |
+| --- | --- |
+| User data (chat history / memory / settings / keys) | `%APPDATA%\苏苏洛桌宠 2.5 正式版\` (migrates automatically from older versions) |
+| Logs | same folder, `logs\tts.log` — attach it when asking for help |
+| Voice engines (Full build) | install dir `engines\` (~15 GB; deleting silences voice but chat is unaffected) |
+
+## ❓ FAQ
+
+- **SmartScreen blocks the exe** → "More info" → "Run anyway" (unsigned, not malware).
+- **"API Key not configured"** → Settings → Chat API → paste key → Test → Save.
+- **No reply** → make sure the input bar is open (click the fox); check API balance / model name.
+- **Can't find a setting** → the Settings page has a left nav + search box; some options only appear under their render mode.
+- **Task mode (/zcode prefix)** → off by default; enable via `zcodeEnabled` in config.json with your own ZCode install.
+
+## 📚 Docs & Links
+
+- 🌐 **Website**: [sslbs09.github.io/suzuran-pet](https://sslbs09.github.io/suzuran-pet/) (guides, API hookup, voice deployment)
+-  **Beginner tutorial**: [`新手教程/快速开始.md`](新手教程/快速开始.md) (CN; all 8 guides also in the in-app Docs Center)
+- 🔌 **API guide**: [`API接入指南.html`](API接入指南.html)
+- 📦 **Project structure**: [`PROJECT-STRUCTURE.md`](PROJECT-STRUCTURE.md) ｜ **Security**: [`SECURITY.md`](SECURITY.md) ｜ **Disclaimer**: [`DISCLAIMER.md`](DISCLAIMER.md)
+- 📜 **Changelog**: [`CHANGELOG.md`](CHANGELOG.md)
+
 ## 🔒 Privacy & License
 
 - **No built-in models, no telemetry, no uploads.** Your API key is stored locally with Windows DPAPI encryption.

@@ -413,9 +413,8 @@ if (jaPrewarmEl && window.petAPI.jaPrewarmStatus) {
     try {
       const p = await window.petAPI.jaPrewarmStatus();
       if (!p || !p.total) { jaPrewarmEl.textContent = ""; return; }
-      jaPrewarmEl.textContent = p.done >= p.total && !p.running
-        ? `✅ 日语预热完成（${p.done}/${p.total} 句）`
-        : `⏳ 日语预热中：${p.done}/${p.total} 句`;
+      const tpl = p.done >= p.total && !p.running ? L("set.prewarmDone") : L("set.prewarmRun");
+      jaPrewarmEl.textContent = tpl.replace("{d}", p.done).replace("{n}", p.total);
     } catch { /* 忽略 */ }
   };
   tickJaPrewarm();

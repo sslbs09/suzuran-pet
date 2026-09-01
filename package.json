@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "lint:css": "stylelint \"renderer/*.css\"",
     "lint:md": "markdownlint-cli2 README.md",
+    "test:visual": "playwright test",
     "test:chat": "node src/chat-client.js --test",
     "test:zcode": "node src/zcode-client.js --test",
     "test:router": "node src/router.js --test",
@@ -18,6 +19,7 @@
   },
   "license": "BUSL-1.1",
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "electron": "^43.3.0",
     "electron-packager": "^17.1.2",
     "eslint": "^10.8.1",
