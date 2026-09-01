@@ -4,31 +4,46 @@
 <meta charset="UTF-8" />
 <title>苏苏洛 · 语音部署与训练指南</title>
 <style>
+  /* v2.5.26：统一青系变量 + 深色主题（docs.js 把 body.theme-dark 传进 iframe） */
+  :root {
+    --bg: #f4f8f7; --card: #ffffff; --accent: #2f8f87; --accent-dark: #23736d;
+    --text: #17313a; --light: #62777d; --border: #d7e5e3; --code-bg: #e4efec;
+    --warn-bg: #fff8ed; --warn-ink: #80613b;
+    --tag-bg: #dff1ed; --tag-ink: #28635f; --tag-green-bg: #e5f4e8; --tag-green-ink: #32704b;
+    --tag-orange-bg: #fff1dc; --tag-orange-ink: #89602e; --tag-red-bg: #ffecec; --tag-red-ink: #b04a4a;
+  }
+  body.theme-dark {
+    --bg: #1b2226; --card: #232c31; --accent: #3aa89f; --accent-dark: #57bcb4;
+    --text: #e8eef0; --light: #9db2b7; --border: #2e3a40; --code-bg: #243036;
+    --warn-bg: #2e2a20; --warn-ink: #d6b98a;
+    --tag-bg: #24383a; --tag-ink: #7fd0c9; --tag-green-bg: #263a2e; --tag-green-ink: #86c9a2;
+    --tag-orange-bg: #3a3222; --tag-orange-ink: #d6b06e; --tag-red-bg: #3a2a2b; --tag-red-ink: #e07a7f;
+  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
-    background: linear-gradient(160deg, #fdf8f2 0%, #eef6fc 100%);
-    color: #44505c;
+    background: var(--bg);
+    color: var(--text);
     padding: 26px 34px 40px;
     line-height: 1.8;
     font-size: 14px;
     max-width: 860px;
     margin: 0 auto;
   }
-  h1 { font-size: 22px; color: #7aa9c9; margin-bottom: 4px; }
-  .sub { color: #9ab3c6; font-size: 13px; margin-bottom: 18px; }
-  h2 { font-size: 17px; color: #5f8db0; margin: 26px 0 10px; padding-left: 10px; border-left: 4px solid #8ec7e8; }
-  h3 { font-size: 15px; color: #6b96b5; margin: 16px 0 6px; }
+  h1 { font-size: 22px; color: var(--accent-dark); margin-bottom: 4px; }
+  .sub { color: var(--light); font-size: 13px; margin-bottom: 18px; }
+  h2 { font-size: 17px; color: var(--accent-dark); margin: 26px 0 10px; padding-left: 10px; border-left: 4px solid var(--accent); }
+  h3 { font-size: 15px; color: var(--accent-dark); margin: 16px 0 6px; }
   .card {
-    background: #fff; border: 1px solid #e3eef6; border-radius: 12px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
     padding: 16px 20px; margin-bottom: 14px;
   }
-  .tag { display: inline-block; background: #eaf5fc; color: #4a7ea6; border-radius: 5px; padding: 1px 8px; font-size: 12px; margin-right: 6px; }
-  .tag.green { background: #e8f7ec; color: #3c8a55; }
-  .tag.orange { background: #fff4e5; color: #b57a24; }
-  .tag.red { background: #fdeeee; color: #b04a4a; }
+  .tag { display: inline-block; background: var(--tag-bg); color: var(--tag-ink); border-radius: 5px; padding: 1px 8px; font-size: 12px; margin-right: 6px; }
+  .tag.green { background: var(--tag-green-bg); color: var(--tag-green-ink); }
+  .tag.orange { background: var(--tag-orange-bg); color: var(--tag-orange-ink); }
+  .tag.red { background: var(--tag-red-bg); color: var(--tag-red-ink); }
   code, .code {
-    background: #eef3f7; padding: 1px 6px; border-radius: 4px;
+    background: var(--code-bg); padding: 1px 6px; border-radius: 4px;
     font-family: Consolas, "Microsoft YaHei", monospace; font-size: 13px;
   }
   pre {
@@ -39,13 +54,13 @@
   ol, ul { padding-left: 22px; }
   li { margin-bottom: 4px; }
   .note {
-    background: #fff8ec; border: 1px solid #f0dfc0; border-radius: 8px;
-    padding: 10px 14px; font-size: 13px; color: #8a6d3b; margin-top: 10px;
+    background: var(--warn-bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 14px; font-size: 13px; color: var(--warn-ink); margin-top: 10px;
   }
   table { width: 100%; border-collapse: collapse; margin: 8px 0; }
-  td, th { padding: 6px 10px; border-bottom: 1px dashed #d8e6f0; text-align: left; font-size: 13px; }
-  th { color: #5f8db0; }
-  .foot { text-align: center; color: #a8bfcf; font-size: 12px; margin-top: 30px; }
+  td, th { padding: 6px 10px; border-bottom: 1px dashed var(--border); text-align: left; font-size: 13px; }
+  th { color: var(--accent-dark); }
+  .foot { text-align: center; color: var(--light); font-size: 12px; margin-top: 30px; }
 </style>
 </head>
 <body>

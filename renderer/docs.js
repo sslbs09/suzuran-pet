@@ -104,6 +104,15 @@ const $ = (id) => document.getElementById(id);
 
 async function applyTheme(theme) { // 规则唯一来源 renderer/theme.js（v2.5.26 收敛）
   window.petTheme.apply(theme);
+  syncIframeTheme();
+}
+
+/* iframe 文档主题同步（v2.5.26）：srcdoc 同源可写，把 theme-dark 传进文档 body */
+function syncIframeTheme() {
+  try {
+    const d = $("docs-iframe").contentDocument;
+    if (d && d.body) d.body.classList.toggle("theme-dark", document.body.classList.contains("theme-dark"));
+  } catch { /* 忽略 */ }
 }
 
 async function init() {
@@ -150,6 +159,7 @@ async function openDoc(doc, btn) {
     const iframe = $("docs-iframe");
     iframe.srcdoc = r.srcdoc || "";
     iframe.hidden = false;
+    iframe.addEventListener("load", syncIframeTheme, { once: true }); // srcdoc 异步加载，载入后补主题
     document.title = "苏苏洛 · " + doc.name;
     return;
   }

@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>开箱必读 · 三步上手（先看我！）</title>
 <style>
-  :root { --bg:#fff8f2; --card:#fffdf9; --accent:#e88a5a; --dark:#c96a3c; --text:#4a3a30; --light:#8a7365; --border:#f0ddd0; --ok:#3a8f5f; }
+  :root { --bg:#f4f8f7; --card:#ffffff; --accent:#2f8f87; --dark:#23736d; --text:#17313a; --light:#62777d; --border:#d7e5e3; --ok:#2f8a62; --code-bg:#e4efec; --tip-bg:#edf6f4; --warn-bg:#fff8ed; --danger:#c65c61; }
+  /* 深色主题（v2.5.26）：docs.js 把 body.theme-dark 传进 iframe */
+  body.theme-dark { --bg:#1b2226; --card:#232c31; --accent:#3aa89f; --dark:#57bcb4; --text:#e8eef0; --light:#9db2b7; --border:#2e3a40; --ok:#46a878; --code-bg:#243036; --tip-bg:#243036; --warn-bg:#2e2a20; --danger:#e07a7f; }
   * { box-sizing:border-box; margin:0; padding:0; }
   body { font-family:"Microsoft YaHei","PingFang SC",sans-serif; background:var(--bg); color:var(--text); line-height:1.9; font-size:16px; padding:34px 18px 60px; }
   .wrap { max-width:760px; margin:0 auto; }
@@ -20,12 +22,12 @@
   .step b.t { font-size:18px; }
   .step p { margin-top:10px; }
   .big { font-size:17px; }
-  .tip { background:#fff3e8; border-left:5px solid var(--accent); border-radius:0 10px 10px 0; padding:14px 18px; margin:14px 0; }
-  .warn { background:#fdeeee; border-left:5px solid #d9534f; border-radius:0 10px 10px 0; padding:14px 18px; margin:14px 0; }
+  .tip { background:var(--tip-bg); border-left:5px solid var(--accent); border-radius:0 10px 10px 0; padding:14px 18px; margin:14px 0; }
+  .warn { background:var(--warn-bg); border-left:5px solid var(--danger); border-radius:0 10px 10px 0; padding:14px 18px; margin:14px 0; }
   table { border-collapse:collapse; width:100%; margin:14px 0; font-size:15px; }
   th,td { border:1px solid var(--border); padding:10px 14px; text-align:left; }
-  th { background:#f5ece4; }
-  code { background:#f5ece4; padding:2px 7px; border-radius:5px; font-family:Consolas,monospace; font-size:14px; }
+  th { background:var(--code-bg); }
+  code { background:var(--code-bg); padding:2px 7px; border-radius:5px; font-family:Consolas,monospace; font-size:14px; }
   .foot { margin-top:44px; color:var(--light); text-align:center; font-size:13px; }
 </style>
 </head>

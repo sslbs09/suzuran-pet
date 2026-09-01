@@ -6,8 +6,15 @@
 <title>苏苏洛桌宠 · API 接入指南（白嫖版）</title>
 <style>
   :root {
-    --bg: #fff8f2; --card: #fffdf9; --accent: #e88a5a; --accent-dark: #c96a3c;
-    --text: #4a3a30; --light: #8a7365; --border: #f0ddd0; --code-bg: #f5ece4; --ok: #3a8f5f;
+    --bg: #f4f8f7; --card: #ffffff; --accent: #2f8f87; --accent-dark: #23736d;
+    --text: #17313a; --light: #62777d; --border: #d7e5e3; --code-bg: #e4efec; --ok: #2f8a62;
+    --tip-bg: #edf6f4; --warn-bg: #fff8ed; --danger: #c65c61;
+  }
+  /* 深色主题（v2.5.26）：docs.js 把 body.theme-dark 传进 iframe */
+  body.theme-dark {
+    --bg: #1b2226; --card: #232c31; --accent: #3aa89f; --accent-dark: #57bcb4;
+    --text: #e8eef0; --light: #9db2b7; --border: #2e3a40; --code-bg: #243036; --ok: #46a878;
+    --tip-bg: #243036; --warn-bg: #2e2a20; --danger: #e07a7f;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background: var(--bg); color: var(--text); line-height: 1.8; font-size: 15px; padding: 30px 18px 60px; }
@@ -18,8 +25,8 @@
   h3 { font-size: 16px; margin: 20px 0 8px; }
   p { margin: 8px 0; }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px 22px; margin: 14px 0; }
-  .tip { background: #fff3e8; border-left: 4px solid var(--accent); border-radius: 0 10px 10px 0; padding: 12px 16px; margin: 12px 0; font-size: 14px; }
-  .warn { background: #fdeeee; border-left: 4px solid #d9534f; border-radius: 0 10px 10px 0; padding: 12px 16px; margin: 12px 0; font-size: 14px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--accent); border-radius: 0 10px 10px 0; padding: 12px 16px; margin: 12px 0; font-size: 14px; }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--danger); border-radius: 0 10px 10px 0; padding: 12px 16px; margin: 12px 0; font-size: 14px; }
   code { background: var(--code-bg); padding: 2px 7px; border-radius: 5px; font-family: Consolas, monospace; font-size: 13px; word-break: break-all; }
   table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 13.5px; }
   th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
