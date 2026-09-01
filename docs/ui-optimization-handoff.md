@@ -172,3 +172,28 @@
 - About/topics：本机无 gh CLI，未动；如需要用户在本机 `gh auth login` 后补 `gh repo edit --add-topic ...`。
 - 官网（gh-pages 分支）未动——用户若指官网再另做。
 - **未 push**（红线）：UI 优化 4 个提交 + 本提交均在本地 main，等用户验收后一起推。
+
+---
+
+## 七、未来 backlog（2026-09-01 评估，按优先级）
+
+### UI 可继续优化
+1. **reduced-motion 缺口**：pet-squash（按压 Q 弹）/ pet-dizzy（落地眩晕）未进 `prefers-reduced-motion` 关闭列表——一行修复
+2. **毛玻璃质感**：气泡/输入栏 `backdrop-filter: blur(6-8px)` + 面板不透明度降到 ~.85；需在透明窗下验证不穿帮，失败自动回退（本次保守未做）
+3. **气泡尾巴融合**：尾巴是实心三角不带边框色，与气泡边框交接处断线；双层三角（外边框色+内背景色）可修
+4. **退出动画**：气泡/输入栏消失是 display:none 硬切，可加 ~120ms 淡出（退出快于进入），需 JS 配合 class
+5. **对比度微调**：浅色 `--pet-muted`/`--ui-subtle` 在 11-12px 小字下略低于 4.5:1；thinking 点浅色偏亮
+
+### 技术债
+1. **主题逻辑 4 份拷贝**（pet.js/docs.js/settings.js/theme-init.js 的 auto=19-6 规则）→ 收敛成 `renderer/theme.js` 共享模块；主进程 `sendToRenderer` 改全窗广播后辅助窗口可实时跟主题（现在只在打开时跟随）
+2. **JS 内联样式债**：psd.js:544 棋盘格硬编码浅色；moods.js「自定义」标签内联色（现靠 !important 压，根治是 JS 改用类名）
+3. **iframe 文档暗色未验证**：文档中心 iframe 加载的 HTML 文档（API 接入指南等）自带样式，暗色链条可能在内容层断
+4. **无 stylelint、无视觉回归测试**：可加 stylelint + Playwright 截图快照，主题回归让测试兜底
+5. **schedule 导入预览弹窗**：有 role=dialog 但零焦点管理（focus trap/回还）——a11y 债
+6. **部署三件套手工**（Copy-Item→pack.sh→cp -f）→ 可收成一个 deploy.ps1（带锁检测/回滚）
+7. **README_EN 与中文版发散**：EN 缺多个章节
+
+### 方向性（感知价值高）
+- 官网（gh-pages）狐橙+墨绿 vs 应用青系——品牌视觉分裂，统一是独立小项目
+- 设置页分区内容 stagger 入场（30-80ms/项，总<400ms）
+- 托盘图标主题感知
