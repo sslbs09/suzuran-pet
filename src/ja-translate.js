@@ -62,10 +62,12 @@ async function translateToJa(text) {
   const base = isAnthropic ? normalizeAnthropicBase(c.baseUrl) : normalizeOpenAIBase(c.baseUrl);
   const userName = String((c.userName || "")).trim();
   const sys = "你是中日翻译器。把用户输入的中文翻译成自然流畅、口语化的日语。只输出译文本身，不要任何解释、引号或多余内容。" +
+    "输入是桌面宠物角色台词（口语短句），按日常说话的语气翻译，拟声词/语气词（嘿嘿、唔嗯、呜哇等）翻成日语里对应的自然说法。" +
+    "若输入含（动作/舞台指示），保留括号原样翻译括号内内容，不要把括号丢掉或并入正文。" +
     "强制术语：任何'博士'或'刀客塔'一律输出为日语片假名 ドクター（玩家称呼，发音 do-ku-tā），不得输出日语汉字'博士'、不得输出中文'刀客塔'，也不得输出英文 doctor；" +
     "任何对用户的称呼（如'主人'）一律输出为 マスター。" +
     "任何称呼/人名都必须用片假名音译，不得省略、不得保留中文汉字。" +
-    (userName && userName !== "主人" ? "用户的名字是「" + userName + "」，提到时必须音译为片假名（如 タン・ズーヘン 这类读法），不得省略。" : "");
+    (userName && userName !== "主人" && userName !== "博士" ? "用户的名字是「" + userName + "」，提到时必须音译为片假名（如 タン・ズーヘン 这类读法），不得省略。" : "");
   for (let attempt = 1; attempt <= 2; attempt++) {
     let retryWaitMs = 1200;
     try {

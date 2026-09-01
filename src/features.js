@@ -519,8 +519,9 @@ function startJaPrewarm() {
     jaPrewarmIdx += BATCH;
     try {
       const { translateToJa } = require("./ja-translate");
+      const { stripStage } = require("./utils");
       for (const s of batch) {
-        const ja = await translateToJa(s);
+        const ja = await translateToJa(stripStage(s)); // 念白预热：剥（动作）只翻口播部分（v2.5.26）
         if (ja) logJaPrewarm(`预热✓: ${s.slice(0, 18)} → ${ja.slice(0, 18)}`);
       }
     } catch { /* 单批失败下轮重试 */ }

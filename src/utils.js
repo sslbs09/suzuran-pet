@@ -33,4 +33,14 @@ function clampScale(s) {
   return Math.max(0.6, Math.min(2.0, parseFloat(s) || 1.0));
 }
 
-module.exports = { randInt, clamp, easeOutCubic, easeImpact, clampScale, runPowerShell };
+/** 剥离台词里的（动作/舞台指示）——气泡显示保留，TTS 念白不读（v2.5.26：
+ *  此前 sanitizeJaText 只删括号不删内容，「（眯起眼睛）摸头」会被念成「眯起眼睛摸头」） */
+function stripStage(t) {
+  return String(t || "")
+    .replace(/[（(][^（）()]*[）)]/g, "")
+    .replace(/^[、。．，,!！?？…~～\s]+/, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+module.exports = { randInt, clamp, easeOutCubic, easeImpact, clampScale, stripStage, runPowerShell };

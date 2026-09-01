@@ -5,7 +5,7 @@ const { spawn, exec, execFile } = require("child_process");
 const config = require("./config");
 const { logTts } = require("./logger");
 const { translateToJa } = require("./ja-translate");
-const { runPowerShell } = require("./utils");
+const { runPowerShell, stripStage } = require("./utils");
 
 /**
  * TTS 语音链路（模块化第四步）：本地 Genie（克隆音色）→ GPT-SoVITS 日语 → CosyVoice → edge-tts → 空（渲染层回退系统语音）。
@@ -123,7 +123,7 @@ async function ttsCloneImplInner(text, opts, jobId) {
       } catch { /* 转储失败不影响主流程 */ }
     };
     const cfg = config.getConfig();
-    const clean = String(text || "").slice(0, 400); // 长回复句尾称呼不再被切（与 ja-translate 截断一致）
+    const clean = stripStage(String(text || "")).slice(0, 400); // 剥（动作）后截断：舞台指示只显示不念（v2.5.26）
     // 游戏习惯称呼：中文朗读用“刀客塔”；日语翻译仍用原文“博士”（让翻译器输出ドクター）
     const cleanZh = clean.replace(/博士/g, "刀客塔");
     const q = cfg.ttsGenie || {};
@@ -146,7 +146,7 @@ async function ttsCloneImplInner(text, opts, jobId) {
       if (g.enabled && gsvAvailableNow()) {
         const up = await ensureGsvServer(g);
         if (up) {
-          const sents = splitJaSentences(sanitizeJaText(jaText));
+          const sents = splitJaSentences(sanitizeJaText(stripStage(jaText))); // 旧译文缓存可能仍带（动作），出口再剥一次
           const parts = [];
           let skipped = 0;
           const emoRef = emotionGsvRef(opts && (opts.emotion || opts.emo)); // 仅情绪命中才带参考音频（兼容 emo/emotion 键名）
