@@ -5,64 +5,102 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>苏苏洛桌宠 · 官网</title>
 <style>
-  /* v2.5.26 品牌统一：狐橙+墨绿退役 → 应用同款青系深色（--ui 深色令牌同族） */
+  /* v2.5.26 品牌统一：应用同款青系；v2.5.26b 深浅切换（变量驱动，默认深色） */
+  :root {
+    --page-bg: linear-gradient(165deg, #10181b 0%, #16262b 55%, #1d3a38 100%);
+    --page-ink: #e8eef0; --page-sub: #9db2b7; --page-head: #57bcb4; --page-em: #7fd0c9;
+    --page-line: rgba(87, 188, 180, .22); --page-line-soft: rgba(87, 188, 180, .12);
+    --page-chip: rgba(255, 255, 255, .05); --page-chip-hover: rgba(255, 255, 255, .09);
+    --page-accent: #2f8f87;
+  }
+  body.light {
+    --page-bg: linear-gradient(165deg, #f4f8f7 0%, #e9f3f0 60%, #e2efe9 100%);
+    --page-ink: #17313a; --page-sub: #62777d; --page-head: #23736d; --page-em: #2f8f87;
+    --page-line: rgba(47, 143, 135, .28); --page-line-soft: rgba(47, 143, 135, .15);
+    --page-chip: rgba(255, 255, 255, .75); --page-chip-hover: rgba(47, 143, 135, .08);
+    --page-accent: #2f8f87;
+  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
-    background: linear-gradient(165deg, #10181b 0%, #16262b 55%, #1d3a38 100%);
-    color: #e8eef0;
+    background: var(--page-bg);
+    color: var(--page-ink);
     min-height: 100vh;
     line-height: 1.8;
+    transition: background .3s, color .3s;
   }
+  #theme-toggle {
+    position: fixed; top: 14px; right: 16px; z-index: 9;
+    width: 40px; height: 40px; border-radius: 50%; font-size: 17px; cursor: pointer;
+    background: var(--page-chip); color: var(--page-ink);
+    border: 1px solid var(--page-line); transition: transform 120ms;
+  }
+  #theme-toggle:hover { transform: scale(1.08); }
   .hero { text-align: center; padding: 64px 24px 36px; }
   .hero .badge {
-    display: inline-block; background: rgba(58,168,159,.16); color: #7fd0c9;
+    display: inline-block; background: rgba(58,168,159,.16); color: var(--page-em);
     border: 1px solid rgba(58,168,159,.5); border-radius: 999px;
     font-size: 13px; padding: 4px 16px; letter-spacing: .12em; margin-bottom: 18px;
   }
   .hero h1 { font-size: clamp(30px, 5vw, 48px); font-weight: 900; letter-spacing: .04em; }
-  .hero h1 em { font-style: normal; color: #7fd0c9; }
-  .hero .sub { color: #9db2b7; font-size: 16px; margin-top: 14px; max-width: 640px; margin-left: auto; margin-right: auto; }
+  .hero h1 em { font-style: normal; color: var(--page-em); }
+  .hero .sub { color: var(--page-sub); font-size: 16px; margin-top: 14px; max-width: 640px; margin-left: auto; margin-right: auto; }
   .hero .meta { margin-top: 26px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
   .hero .meta a {
-    color: #e8eef0; text-decoration: none; font-size: 14px;
-    border: 1px solid rgba(87,188,180,.35); border-radius: 999px; padding: 9px 22px;
+    color: var(--page-ink); text-decoration: none; font-size: 14px;
+    border: 1px solid var(--page-line); border-radius: 999px; padding: 9px 22px;
     transition: background .2s;
   }
-  .hero .meta a.primary { background: #2f8f87; border-color: #2f8f87; color: #fff; font-weight: 700; }
-  .hero .meta a:hover { background: rgba(87,188,180,.18); }
+  .hero .meta a.primary { background: var(--page-accent); border-color: var(--page-accent); color: #fff; font-weight: 700; }
+  .hero .meta a:hover { background: var(--page-chip-hover); }
   .demo { text-align: center; margin: 10px auto 0; max-width: 480px; }
-  .demo img { width: 100%; border-radius: 14px; border: 1px solid rgba(87,188,180,.25); box-shadow: 0 8px 30px rgba(0,0,0,.35); }
-  .demo figcaption { color: #7d939a; font-size: 12.5px; margin-top: 8px; }
+  .demo img { width: 100%; border-radius: 14px; border: 1px solid var(--page-line); box-shadow: 0 8px 30px rgba(0,0,0,.2); }
+  .demo figcaption { color: var(--page-sub); font-size: 12.5px; margin-top: 8px; }
 
   .cards { max-width: 880px; margin: 26px auto 8px; padding: 0 24px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
   .card {
-    background: rgba(255,255,255,.05); border: 1px solid rgba(87,188,180,.22);
+    background: var(--page-chip); border: 1px solid var(--page-line);
     border-radius: 14px; padding: 20px 22px;
     display: block; transition: background .2s, transform .2s;
   }
   a.card { text-decoration: none; color: inherit; }
-  a.card:hover { background: rgba(255,255,255,.09); transform: translateY(-2px); }
-  .card h3 { font-size: 16px; color: #57bcb4; margin-bottom: 6px; }
-  .card p { color: #9db2b7; font-size: 13.5px; }
-  .card .arrow { float: right; color: #7d939a; font-size: 18px; }
+  a.card:hover { background: var(--page-chip-hover); transform: translateY(-2px); }
+  .card h3 { font-size: 16px; color: var(--page-head); margin-bottom: 6px; }
+  .card p { color: var(--page-sub); font-size: 13.5px; }
+  .card .arrow { float: right; color: var(--page-sub); font-size: 18px; }
 
   section { max-width: 880px; margin: 40px auto; padding: 0 24px; }
-  section h2 { font-size: 21px; color: #57bcb4; margin-bottom: 14px; }
+  section h2 { font-size: 21px; color: var(--page-head); margin-bottom: 14px; }
   .feat { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
-  .feat div { background: rgba(255,255,255,.04); border: 1px solid rgba(87,188,180,.15); border-radius: 10px; padding: 13px 16px; font-size: 14px; }
-  .feat b { color: #57bcb4; }
+  .feat div { background: var(--page-chip); border: 1px solid var(--page-line-soft); border-radius: 10px; padding: 13px 16px; font-size: 14px; }
+  .feat b { color: var(--page-head); }
 
-  .dltable { width: 100%; border-collapse: collapse; margin-top: 8px; background: rgba(255,255,255,.04); border-radius: 12px; overflow: hidden; }
-  .dltable th, .dltable td { padding: 12px 16px; text-align: left; border-bottom: 1px solid rgba(87,188,180,.12); font-size: 14px; }
-  .dltable th { background: rgba(87,188,180,.10); color: #57bcb4; font-size: 13px; }
-  .dltable td a { color: #57bcb4; }
+  .dltable { width: 100%; border-collapse: collapse; margin-top: 8px; background: var(--page-chip); border-radius: 12px; overflow: hidden; }
+  .dltable th, .dltable td { padding: 12px 16px; text-align: left; border-bottom: 1px solid var(--page-line-soft); font-size: 14px; }
+  .dltable th { background: rgba(87, 188, 180, .10); color: var(--page-head); font-size: 13px; }
+  .dltable td a { color: var(--page-head); }
 
-  footer { text-align: center; color: #7d939a; font-size: 13px; padding: 20px 0 44px; }
-  footer a { color: #57bcb4; text-decoration: none; }
+  footer { text-align: center; color: var(--page-sub); font-size: 13px; padding: 20px 0 44px; }
+  footer a { color: var(--page-head); text-decoration: none; }
 </style>
 </head>
 <body>
+<button id="theme-toggle" title="切换深浅色">☀️</button>
+
+<script>
+  /* 深浅切换（v2.5.26b）：记忆偏好，默认深色 */
+  (function () {
+    if (localStorage.getItem("sp-theme") === "light") document.body.classList.add("light");
+    const btn = document.getElementById("theme-toggle");
+    const sync = () => { btn.textContent = document.body.classList.contains("light") ? "🌙" : "☀️"; };
+    sync();
+    btn.addEventListener("click", function () {
+      document.body.classList.toggle("light");
+      localStorage.setItem("sp-theme", document.body.classList.contains("light") ? "light" : "dark");
+      sync();
+    });
+  })();
+</script>
 
 <div class="hero">
   <span class="badge">🩺 罗德岛医疗干员 · 桌面陪伴</span>
