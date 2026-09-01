@@ -263,3 +263,4 @@
 - ✅ 导航 11 项与分区一一对应；i18n 三语补 set.agentTitle/set.senseTitle/set.nav.agent/set.nav.sense，set.other 三语改名；stagger 覆盖 11 分区；id 零重复、scroll-spy/搜索/data-rm 均为通用查询无需改 JS
 - ✅ 台词 248→293：PAT+4、thrown/grabbed/wake/sleepDay/sleepNight/perch 各+2、workflow+3、五时段各+3、walking/seated 各+3、idle+3、stage 各+1、early+2；23/23 单测绿、eslint 干净
 - ✅ 对齐修复（用户截图反馈「开关居中掉行下」）：根因=.switch-row 与 .col 同特异性且未写 flex-direction，column+align-items:center 组合成居中竖排；补 flex-direction:row+span flex:1；另加 :has 规则修复选框横排/滑杆数值右贴；已部署，**视觉验收移交用户**
+- ✅ 二轮优化（用户再反馈）：开关 align-items:flex-start 置顶+.row:has(.switch-row) stretch 顶对齐；记忆区 .col.full 全宽；音色试听改 h3.subhead 子标题 + .tone-row 横排徽章（tone-cb 脱 col 网格）；JS 仅按 id 查询无耦合；已部署待用户验收

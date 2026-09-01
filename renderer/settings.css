@@ -45,8 +45,19 @@
 body.theme-dark .settings-page .cred-status.warn { color: #e0a458; }
 
 /* ---------- iOS 风格滑动开关（v2.2） ---------- */
-.settings-page .switch-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; text-align: left; }
+.settings-page .switch-row { display: flex; flex-direction: row; align-items: flex-start; justify-content: space-between; gap: 8px; text-align: left; } /* 开关置顶对齐首行（用户反馈） */
 .settings-page .switch-row > span { flex: 1 1 auto; }
+.settings-page .switch-row .switch { margin-top: 1px; flex: none; }
+.settings-page .row:has(> .switch-row) { align-items: stretch; } /* 开关行各列顶对齐 */
+/* 全宽列（记忆区等，用户反馈太窄） */
+.settings-page .col.full { grid-column: 1 / -1; }
+/* 子标题（语音试听等） */
+.settings-page h3.subhead { margin: 16px 0 10px; color: var(--ui-ink); font-size: 13px; font-weight: 650; }
+.settings-page h3.subhead small { margin-left: 6px; color: var(--ui-muted); font-size: 12px; font-weight: 400; }
+/* 音色启用横排徽章组（替代原 3 列网格散排） */
+.settings-page .tone-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 10px; }
+.settings-page .tone-row .tone-title { width: 100%; color: var(--ui-muted); font-size: 12px; }
+.settings-page .tone-cb { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ui-ink); }
 .settings-page .switch {
   position: relative; display: inline-block; width: 44px; height: 26px; flex: none;
 }

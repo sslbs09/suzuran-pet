@@ -168,7 +168,7 @@
   <section id="sec-memory" data-rm="gif spine rig">
     <h2>🧠 记忆管理（v2.5）</h2>
     <div class="row">
-      <div class="col">
+      <div class="col full">
         <span>她记得的事（称谓/喜好/生日/健康/近期安排，本地加密存储，不联网上传）。可在聊天中自然更新，或在此逐条删除 / 清空。</span>
         <p class="hint" id="mem-stats" style="margin:6px 0 4px;">加载中…</p>
         <div id="mem-list" style="max-height:180px;overflow:auto;border:1px solid var(--ui-line);border-radius:6px;padding:6px 10px;background:var(--ui-surface);"></div>
@@ -362,9 +362,7 @@
       <button id="btn-open-guide" type="button" data-i18n="set.openGuide">📖 语音部署与训练指南</button>
       <span id="voice-result" class="result"></span>
     </div>
-    <div class="row" style="margin-top:10px">
-      <span class="col">🎭 <b>情绪音色试听</b>（日语 GSV 链路，含实时播放参数模拟；需已启用日语语音模式与 GSV）</span>
-    </div>
+    <h3 class="subhead">🎭 情绪音色试听<small>（日语 GSV 链路，含实时播放参数模拟；需已启用日语语音模式与 GSV）</small></h3>
     <div class="row actions">
       <button id="btn-aud-default" type="button">默认音色</button>
       <button id="btn-aud-coquetry" type="button">撒娇</button>
@@ -374,13 +372,13 @@
       <button id="btn-aud-happy" type="button">开心</button>
       <span id="aud-result" class="result"></span>
     </div>
-    <div class="row" style="margin-top:6px" id="emotion-tone-row">
-      <span class="col">音色启用（停用=该情绪用默认音色/默认语气）：</span>
-      <label class="col tone-cb"><input type="checkbox" id="tone-撒娇" checked />撒娇</label>
-      <label class="col tone-cb"><input type="checkbox" id="tone-傲娇" checked />傲娇</label>
-      <label class="col tone-cb"><input type="checkbox" id="tone-惊讶" checked />惊讶</label>
-      <label class="col tone-cb"><input type="checkbox" id="tone-温柔" checked />温柔</label>
-      <label class="col tone-cb"><input type="checkbox" id="tone-开心" checked />开心</label>
+    <div class="tone-row" id="emotion-tone-row">
+      <span class="tone-title">音色启用（停用=该情绪用默认音色/默认语气）：</span>
+      <label class="tone-cb"><input type="checkbox" id="tone-撒娇" checked />撒娇</label>
+      <label class="tone-cb"><input type="checkbox" id="tone-傲娇" checked />傲娇</label>
+      <label class="tone-cb"><input type="checkbox" id="tone-惊讶" checked />惊讶</label>
+      <label class="tone-cb"><input type="checkbox" id="tone-温柔" checked />温柔</label>
+      <label class="tone-cb"><input type="checkbox" id="tone-开心" checked />开心</label>
     </div>
     <div class="row">
       <label class="col"><input id="feat-emotional" type="checkbox" checked /><span data-i18n="set.featEmotional">🎭 情绪语音（根据情绪调整语速音调）</span></label>
