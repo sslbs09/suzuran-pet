@@ -8,6 +8,7 @@
     "start": "electron .",
     "dist": "electron-packager . --platform=win32 --arch=x64 --out=dist --asar=false --icon=icon.ico --overwrite --prune=true",
     "lint": "eslint .",
+    "lint:css": "stylelint \"renderer/*.css\"",
     "lint:md": "markdownlint-cli2 README.md",
     "test:chat": "node src/chat-client.js --test",
     "test:zcode": "node src/zcode-client.js --test",
@@ -21,7 +22,8 @@
     "electron-packager": "^17.1.2",
     "eslint": "^10.8.1",
     "globals": "^17.11.0",
-    "markdownlint-cli2": "^0.23.2"
+    "markdownlint-cli2": "^0.23.2",
+    "stylelint": "^17.14.1"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.8",

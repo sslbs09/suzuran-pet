@@ -337,11 +337,6 @@ body:not(.spine-mode):not(.rig-mode):not(.live2d-mode) .pet.pet-squash-release {
 .live2d-canvas.hidden { display: none; }
 /* rig 模式：隐藏 GIF/Spine 角色条带（2.5D 独立显示，互不干扰） */
 body.rig-mode #pet { display: none; }
-/* rig 角色始终占满窗口高度（大小由窗口高度联动控制，rigScale 调窗口尺寸，角色不超出画布） */
-body.rig-mode .rig-canvas {
-  height: 100%;
-  transform-origin: bottom center;
-}
 /* ---------- rig 模式独立聊天框（v2.2）：与 gif/spine 完全分开，气泡在左上角，
    桌宠贴屏幕左缘时翻到右上角；输入框在底部。角色画布占窗口高度 88%。 ---------- */
 body.rig-mode .rig-canvas {
@@ -455,11 +450,8 @@ body.edge-left .info-panel { right: 4px; width: 230px; } /* 翻边时与气泡�
   z-index: 6;
 }
 /* 次要按钮隐藏（托盘/设置页有对应功能）：释放输入框空间，避免内容溢出 */
-.mode-chip { display: none !important; }
-#btn-tts { display: none !important; }
-.input-bar.hidden { display: none; }
-
 .mode-chip {
+  display: none !important;
   font-size: 12px;
   cursor: pointer;
   padding: 1px 3px;
@@ -468,6 +460,9 @@ body.edge-left .info-panel { right: 4px; width: 230px; } /* 翻边时与气泡�
   color: var(--pet-chip-ink);
   line-height: 1.2;
 }
+#btn-tts { display: none !important; }
+.input-bar.hidden { display: none; }
+
 .mode-chip.task { background: var(--pet-chip-task-bg); color: var(--pet-chip-task-ink); }
 .mode-chip.zcode { background: var(--pet-chip-zcode-bg); color: var(--pet-chip-zcode-ink); }
 

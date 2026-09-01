@@ -19,6 +19,8 @@ Chat · long-term memory · cloned real voice (CN/JP) · walks along your taskba
 
 > Fan-made desktop pet based on *Arknights* (明日方舟). Windows only. This project ships **no AI models** — chat replies come from any OpenAI-compatible API you configure yourself.
 
+> 🌗 **New in v2.5.26**: full dark theme across every window (main pet, settings, all helpers), refined main-window visuals (layered shadows, frosted glass, fused bubble tail, exit fades), unified auxiliary-window design, theme logic consolidated with live cross-window switching — see [CHANGELOG](CHANGELOG.md).
+
 ## ✨ Features
 
 | | | |

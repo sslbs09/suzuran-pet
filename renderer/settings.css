@@ -72,7 +72,7 @@ html { scroll-behavior: smooth; }
 .settings-page .set-nav a.active { background: var(--ui-accent-soft); color: var(--ui-accent-strong); font-weight: 650; }
 .settings-page .set-nav .no-result { padding: 6px 10px; color: var(--ui-subtle); font-size: 12px; }
 .settings-page .set-main { min-width: 0; }
-.settings-page .set-main section { scroll-margin-top: 54px; }
+.settings-page .set-main section { scroll-margin-top: 54px; animation: sec-in 280ms var(--ui-ease) backwards; }
 /* 未保存提示条：顶部 sticky，替代原右下角悬浮按钮（作用域陷阱，见 settings.html 注释） */
 .settings-page .set-dirty { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; padding: 8px 16px; border: 1px solid #ecd8b9; border-radius: var(--ui-radius-sm); background: #fff8ed; color: #80613b; font-size: 12px; box-shadow: var(--ui-shadow); }
 .settings-page .set-dirty[hidden] { display: none; }
@@ -90,7 +90,6 @@ body.theme-dark .settings-page .set-dirty { border-color: #4a4030; background: #
 }
 
 /* 分区 stagger 入场（v2.5.26，refactoring-ui）：40ms 步进、总<400ms，不挡交互 */
-.settings-page .set-main section { animation: sec-in 280ms var(--ui-ease) backwards; }
 .settings-page .set-main section:nth-of-type(1) { animation-delay: 0ms; }
 .settings-page .set-main section:nth-of-type(2) { animation-delay: 40ms; }
 .settings-page .set-main section:nth-of-type(3) { animation-delay: 80ms; }
