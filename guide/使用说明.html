@@ -4,29 +4,40 @@
 <meta charset="UTF-8" />
 <title>苏苏洛桌宠 · 使用说明</title>
 <style>
+  /* v2.5.26：统一青系变量 + 深色主题（docs.js 把 body.theme-dark 传进 iframe） */
+  :root {
+    --bg: #f4f8f7; --card: #ffffff; --accent: #2f8f87; --accent-dark: #23736d;
+    --text: #17313a; --light: #62777d; --border: #d7e5e3; --code-bg: #e4efec;
+    --warn-bg: #fff8ed; --warn-ink: #80613b;
+  }
+  body.theme-dark {
+    --bg: #1b2226; --card: #232c31; --accent: #3aa89f; --accent-dark: #57bcb4;
+    --text: #e8eef0; --light: #9db2b7; --border: #2e3a40; --code-bg: #243036;
+    --warn-bg: #2e2a20; --warn-ink: #d6b98a;
+  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
-    background: linear-gradient(160deg, #fdf8f2 0%, #eef6fc 100%);
-    color: #44505c;
+    background: var(--bg);
+    color: var(--text);
     padding: 26px 34px 40px;
     line-height: 1.8;
     font-size: 14px;
     max-width: 800px;
     margin: 0 auto;
   }
-  h1 { font-size: clamp(20px, 3vw, 26px); color: #7aa9c9; margin-bottom: 4px; }
-  .sub { color: #9ab3c6; font-size: 13px; margin-bottom: 18px; }
-  h2 { font-size: clamp(15px, 2.2vw, 18px); color: #5f8db0; margin: 24px 0 8px; padding-left: 10px; border-left: 4px solid #8ec7e8; }
+  h1 { font-size: clamp(20px, 3vw, 26px); color: var(--accent-dark); margin-bottom: 4px; }
+  .sub { color: var(--light); font-size: 13px; margin-bottom: 18px; }
+  h2 { font-size: clamp(15px, 2.2vw, 18px); color: var(--accent-dark); margin: 24px 0 8px; padding-left: 10px; border-left: 4px solid var(--accent); }
   /* 可访问性：焦点可见环 + 减少动效（aesthetic-web） */
-  a:focus-visible, button:focus-visible, [tabindex]:focus-visible { outline: 2px solid #8ec7e8; outline-offset: 2px; }
+  a:focus-visible, button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
-  .card { background: #fff; border: 1px solid #e3eef6; border-radius: 12px; padding: 14px 20px; margin-bottom: 12px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 20px; margin-bottom: 12px; }
   ol, ul { padding-left: 22px; }
   li { margin-bottom: 4px; }
-  code { background: #eef3f7; padding: 1px 6px; border-radius: 4px; font-family: Consolas, monospace; font-size: 13px; }
-  .note { background: #fff8ec; border: 1px solid #f0dfc0; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #8a6d3b; margin-top: 10px; }
-  .foot { text-align: center; color: #a8bfcf; font-size: 12px; margin-top: 28px; }
+  code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-family: Consolas, monospace; font-size: 13px; }
+  .note { background: var(--warn-bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 13px; color: var(--warn-ink); margin-top: 10px; }
+  .foot { text-align: center; color: var(--light); font-size: 12px; margin-top: 28px; }
 </style>
 </head>
 <body>

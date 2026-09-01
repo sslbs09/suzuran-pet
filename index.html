@@ -5,60 +5,61 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>苏苏洛桌宠 · 官网</title>
 <style>
+  /* v2.5.26 品牌统一：狐橙+墨绿退役 → 应用同款青系深色（--ui 深色令牌同族） */
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
-    background: linear-gradient(165deg, #0f2a21 0%, #1b4a38 55%, #2a5f49 100%);
-    color: #e8f1e9;
+    background: linear-gradient(165deg, #10181b 0%, #16262b 55%, #1d3a38 100%);
+    color: #e8eef0;
     min-height: 100vh;
     line-height: 1.8;
   }
   .hero { text-align: center; padding: 64px 24px 36px; }
   .hero .badge {
-    display: inline-block; background: rgba(222,95,49,.18); color: #ffb59a;
-    border: 1px solid rgba(222,95,49,.5); border-radius: 999px;
+    display: inline-block; background: rgba(58,168,159,.16); color: #7fd0c9;
+    border: 1px solid rgba(58,168,159,.5); border-radius: 999px;
     font-size: 13px; padding: 4px 16px; letter-spacing: .12em; margin-bottom: 18px;
   }
   .hero h1 { font-size: clamp(30px, 5vw, 48px); font-weight: 900; letter-spacing: .04em; }
-  .hero h1 em { font-style: normal; color: #ffd9c4; }
-  .hero .sub { color: #b8cdbe; font-size: 16px; margin-top: 14px; max-width: 640px; margin-left: auto; margin-right: auto; }
+  .hero h1 em { font-style: normal; color: #7fd0c9; }
+  .hero .sub { color: #9db2b7; font-size: 16px; margin-top: 14px; max-width: 640px; margin-left: auto; margin-right: auto; }
   .hero .meta { margin-top: 26px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
   .hero .meta a {
-    color: #eaf2eb; text-decoration: none; font-size: 14px;
-    border: 1px solid rgba(159,195,174,.4); border-radius: 999px; padding: 9px 22px;
+    color: #e8eef0; text-decoration: none; font-size: 14px;
+    border: 1px solid rgba(87,188,180,.35); border-radius: 999px; padding: 9px 22px;
     transition: background .2s;
   }
-  .hero .meta a.primary { background: var(--fox, #de5f31); border-color: #de5f31; color: #fff; font-weight: 700; }
-  .hero .meta a:hover { background: rgba(159,195,174,.25); }
+  .hero .meta a.primary { background: #2f8f87; border-color: #2f8f87; color: #fff; font-weight: 700; }
+  .hero .meta a:hover { background: rgba(87,188,180,.18); }
   .demo { text-align: center; margin: 10px auto 0; max-width: 480px; }
-  .demo img { width: 100%; border-radius: 14px; border: 1px solid rgba(159,195,174,.3); box-shadow: 0 8px 30px rgba(0,0,0,.35); }
-  .demo figcaption { color: #8fb49d; font-size: 12.5px; margin-top: 8px; }
+  .demo img { width: 100%; border-radius: 14px; border: 1px solid rgba(87,188,180,.25); box-shadow: 0 8px 30px rgba(0,0,0,.35); }
+  .demo figcaption { color: #7d939a; font-size: 12.5px; margin-top: 8px; }
 
   .cards { max-width: 880px; margin: 26px auto 8px; padding: 0 24px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
   .card {
-    background: rgba(255,255,255,.05); border: 1px solid rgba(159,195,174,.28);
+    background: rgba(255,255,255,.05); border: 1px solid rgba(87,188,180,.22);
     border-radius: 14px; padding: 20px 22px;
     display: block; transition: background .2s, transform .2s;
   }
   a.card { text-decoration: none; color: inherit; }
   a.card:hover { background: rgba(255,255,255,.09); transform: translateY(-2px); }
-  .card h3 { font-size: 16px; color: #ffd9c4; margin-bottom: 6px; }
-  .card p { color: #b8cdbe; font-size: 13.5px; }
-  .card .arrow { float: right; color: #8fb49d; font-size: 18px; }
+  .card h3 { font-size: 16px; color: #57bcb4; margin-bottom: 6px; }
+  .card p { color: #9db2b7; font-size: 13.5px; }
+  .card .arrow { float: right; color: #7d939a; font-size: 18px; }
 
   section { max-width: 880px; margin: 40px auto; padding: 0 24px; }
-  section h2 { font-size: 21px; color: #ffd9c4; margin-bottom: 14px; }
+  section h2 { font-size: 21px; color: #57bcb4; margin-bottom: 14px; }
   .feat { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
-  .feat div { background: rgba(255,255,255,.04); border: 1px solid rgba(159,195,174,.18); border-radius: 10px; padding: 13px 16px; font-size: 14px; }
-  .feat b { color: #a7e3c2; }
+  .feat div { background: rgba(255,255,255,.04); border: 1px solid rgba(87,188,180,.15); border-radius: 10px; padding: 13px 16px; font-size: 14px; }
+  .feat b { color: #57bcb4; }
 
   .dltable { width: 100%; border-collapse: collapse; margin-top: 8px; background: rgba(255,255,255,.04); border-radius: 12px; overflow: hidden; }
-  .dltable th, .dltable td { padding: 12px 16px; text-align: left; border-bottom: 1px solid rgba(159,195,174,.15); font-size: 14px; }
-  .dltable th { background: rgba(159,195,174,.12); color: #ffd9c4; font-size: 13px; }
-  .dltable td a { color: #a7e3c2; }
+  .dltable th, .dltable td { padding: 12px 16px; text-align: left; border-bottom: 1px solid rgba(87,188,180,.12); font-size: 14px; }
+  .dltable th { background: rgba(87,188,180,.10); color: #57bcb4; font-size: 13px; }
+  .dltable td a { color: #57bcb4; }
 
-  footer { text-align: center; color: #6f8f7c; font-size: 13px; padding: 20px 0 44px; }
-  footer a { color: #a7e3c2; text-decoration: none; }
+  footer { text-align: center; color: #7d939a; font-size: 13px; padding: 20px 0 44px; }
+  footer a { color: #57bcb4; text-decoration: none; }
 </style>
 </head>
 <body>
@@ -106,6 +107,7 @@
     <div><b>四套渲染</b>：Spine 2D / 2.5D 摆件 / Live2D / 经典 GIF</div>
     <div><b>Agent 接口</b>：其他 AI/脚本可通过 127.0.0.1 调用她（可关闭、可鉴权）</div>
     <div><b>三语界面</b>：中文 / English / 日本語 一键切换</div>
+    <div><b>深浅双主题</b>：全部窗口跟随主题，夜间护眼（v2.5.26）</div>
   </div>
 </section>
 
