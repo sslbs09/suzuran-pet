@@ -307,3 +307,10 @@
 - ✅ 官网 guide 四文档加深浅切换按钮（localStorage 记忆，gh-pages 47fb393）
 - ✅ Playwright 视觉回归落地：@playwright/test + chromium（代理下载成功）；tests/visual.spec.js 4 用例（11 分区导航断言/标题无首字变色/深浅截图存档）全过；`npm run test:visual`
 - 已部署重启；27 测试文件（26 node + 1 playwright）全绿
+
+### 块 16（用户三轮反馈）：感知区布局再修 + 坐任务栏问题 + 托盘坐姿入口
+- ✅ **感知与监控区再修**：checkbox 改顶对齐首行（align-items:flex-start + margin-top 2px）+ 半宽（span 6，三勾不再挤成窄列多行）；switch-row 全局半宽——「感知工作区活动+监听目录」一行排平（原 4+6 挤成 4 行换行）
+- ✅ **坐任务栏**：代码排查结论——所有坐下分支（自主/拖拽磁吸/抛掷落地/站够落座/瞬态守卫）都调 applySeatPosition，几何自洽；groundGap 渲染层从未上报（恒 0，非 bug，脚底=窗口底）；残余风险=坐下后 Y 漂移无校正 → **坐姿自愈**：walkTick 5s 低频复检 seated 的 Y，漂移>1px 拉回任务栏（带 30s 节流日志「坐姿自愈」）；自主坐下加诊断日志（x/y/sink/tier），复现时可查
+- ✅ **托盘「🪑 一键坐到任务栏」**：原 `pet:sit-taskbar`/sitOnTaskbar 是死 API（无调用方），接进动作子菜单（walkingOn 时可用）——手动归位+坐姿验证入口
+- 若仍见「坐不到任务栏」，看日志区分：「自主坐下」y 值异常=几何问题；「坐姿自愈」频繁=有漂移源；坐窗顶=perch 设计行为（8% 概率跳窗顶休息）
+- 27 测试全绿、lint 0 error；已部署重启

@@ -12,8 +12,10 @@
 .settings-page .col span { color: var(--ui-muted); font-size: 12px; font-weight: 550; }
 /* v2.5.26 对齐修复：复选框控件横排（框与文字同一行）；滑杆与数值横排（数值贴在滑杆右侧），
    原先 .col 纵向 flex 把数值/复选文字甩到下一行，视觉错位 */
-.settings-page label.col:has(> input[type="checkbox"]) { flex-direction: row; align-items: center; gap: 6px; }
+.settings-page label.col:has(> input[type="checkbox"]) { flex-direction: row; align-items: flex-start; gap: 6px; grid-column: span 6; } /* v2.5.26b：顶对齐首行+半宽减换行（感知区再修） */
 .settings-page label.col:has(> input[type="checkbox"]) > span { color: var(--ui-ink); }
+.settings-page label.col:has(> input[type="checkbox"]) > input[type="checkbox"] { margin-top: 2px; flex: none; }
+.settings-page .row > .col.switch-row { grid-column: span 6; } /* v2.5.26b：开关行半宽，长文案不再挤成多行 */
 .settings-page .col:has(> input[type="range"]) { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; }
 .settings-page .col:has(> input[type="range"]) > span:first-child, .settings-page .col:has(> input[type="range"]) > .hint { grid-column: 1 / -1; }
 .settings-page .keybox { display: flex; gap: 6px; }

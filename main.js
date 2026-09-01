@@ -2855,6 +2855,7 @@ async function walkOnPhaseEnd() {
     walk.resting = true;
     walk.seated = true;
     applySeatPosition();                   // 坐下：腿垂进任务栏
+    logTts("walk", `自主坐下: x=${Math.round(win.getBounds().x)} y=${Math.round(win.getBounds().y)} sink=${getSeatSink()} tier=${seatSinkTier()}`); // v2.5.26 诊断：坐不到任务栏可查
     walkBroadcast();
     walkSchedulePhase(sitPhaseMs());
   }
@@ -3237,6 +3238,17 @@ function walkTick() {
       }
       const inset = walk.edgeLeft ? 2 : (Number(walk.charInset) || 0);
       let charLeft = eb.x + inset;
+      // 坐姿自愈（v2.5.26）：坐下后 Y 若漂移（皮肤 Sit 姿态/多屏匹配/瞬态残留），5s 低频拉回任务栏
+      if (walk.seated && !walk.sleeping && Date.now() - (walk._seatHealAt || 0) > 5000) {
+        walk._seatHealAt = Date.now();
+        const before = eb.y;
+        applySeatPosition();
+        const after = win.getBounds().y;
+        if (Math.abs(after - before) > 1 && Date.now() - (walk._seatHealLog || 0) > 30000) {
+          walk._seatHealLog = Date.now();
+          logTts("walk", `坐姿自愈: y=${before}→${after} sink=${getSeatSink()}`);
+        }
+      }
       // 出屏兜底：角色条带左缘越出边界 → 钳回贴边（崩溃/状态错乱后角色滑出屏幕）。
       // 死区处理（§14 追加 89 遗留）：越界 ≤8px 视为行走推进/贴边翻边的瞬时像素噪声，
       // 只记录不 setPosition——否则高频钳位与行走推进成「推出→拽回」拉锯 = 左缘微闪。

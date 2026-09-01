@@ -135,7 +135,8 @@ function buildTrayItems(deps) {
       { label: "🚶 标准", type: "radio", checked: !cfg.walkSpeedMul || ((cfg.walkSpeedMul > 0.8) && (cfg.walkSpeedMul < 1.4)), click: () => setWalkSpeed(1) },
       { label: "🏃 快速", type: "radio", checked: cfg.walkSpeedMul >= 1.4 && cfg.walkSpeedMul < 2.2, click: () => setWalkSpeed(1.6) },
       { label: "⚡ 飞快", type: "radio", checked: cfg.walkSpeedMul >= 2.2, click: () => setWalkSpeed(2.5) }
-    ] }
+    ] },
+    { label: "🪑 一键坐到任务栏", enabled: walkingOn, click: () => sitOnTaskbar() }, // v2.5.26：原死 API 接进托盘，坐姿验证/手动归位
   ];
 
   /* ---------- 🗣 语音设置子菜单：语速 / 克隆 / 部署指南 ---------- */
