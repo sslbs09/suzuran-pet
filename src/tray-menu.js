@@ -87,7 +87,7 @@ function buildTrayItems(deps) {
   if (isRig) { // v2.2：2.5D 角色开关 + 皮肤列表 + PSD 工具（仅 2.5D 模式）
     const on = !!cfg.rigSkinId;
     appearanceItems.push({
-      label: "🎬 2.5D 角色：" + (on ? "开" : "关"), type: "checkbox", checked: on,
+      label: i18n.t(lang, "tray.rigLabel") + "：" + i18n.t(lang, on ? "tray.on" : "tray.off"), type: "checkbox", checked: on,
       click: (item) => {
         if (item.checked) {
           const list = rigSkinList();
@@ -100,11 +100,11 @@ function buildTrayItems(deps) {
     const sub = skins.length ? skins.map((s) => ({
       label: "🎬 " + s.id, type: "radio", checked: cfg.rigSkinId === s.id,
       click: () => setRigSkin(s.id)
-    })) : [{ label: "（暂无皮肤，先导入）", enabled: false }];
+    })) : [{ label: i18n.t(lang, "tray.noRigSkin"), enabled: false }];
     sub.push({ type: "separator" });
-    sub.push({ label: "🧩 PSD 角色工具…", click: () => openPsdWindow() });
-    appearanceItems.push({ label: "🎬 2.5D 皮肤", submenu: sub });
-    appearanceItems.push({ label: "🧩 PSD 角色工具（v2.1）", click: () => openPsdWindow() });
+    sub.push({ label: i18n.t(lang, "tray.psdTool") + "…", click: () => openPsdWindow() });
+    appearanceItems.push({ label: i18n.t(lang, "tray.rigSkins"), submenu: sub });
+    appearanceItems.push({ label: i18n.t(lang, "tray.psdTool"), click: () => openPsdWindow() });
   }
   appearanceItems.push(
     { type: "separator" },
@@ -120,7 +120,7 @@ function buildTrayItems(deps) {
         { label: i18n.t(lang, "tray.layerTop"), type: "radio", checked: (cfg.layer || "top") !== "desktop", click: () => setPetLayer("top") },
         { label: i18n.t(lang, "tray.layerDesktop"), type: "radio", checked: cfg.layer === "desktop", click: () => setPetLayer("desktop") }
       ] },
-    { label: "🌗 半透明模式", type: "checkbox", checked: !!cfg.dimMode, click: () => setDimMode(!cfg.dimMode) }
+    { label: i18n.t(lang, "tray.dimMode"), type: "checkbox", checked: !!cfg.dimMode, click: () => setDimMode(!cfg.dimMode) }
   );
 
   /* ---------- 🎬 动作与逗弄子菜单（仅 Spine 模式） ---------- */
@@ -129,15 +129,15 @@ function buildTrayItems(deps) {
       submenu: ["Relax", "Move", "Sit", "Sleep", "Interact"].map((a) => ({
         label: a, click: () => sendToRenderer("pet:play-anim", a)
       })) },
-    { label: "🐈 逗猫棒：" + (cfg.catToy ? "开" : "关"), type: "checkbox", checked: !!cfg.catToy,
+    { label: i18n.t(lang, "tray.catToy") + "：" + i18n.t(lang, cfg.catToy ? "tray.on" : "tray.off"), type: "checkbox", checked: !!cfg.catToy,
       click: () => setCatToy(!cfg.catToy) },
-    { label: "🚶 散步速度", submenu: [
-      { label: "🐢 慢速", type: "radio", checked: (cfg.walkSpeedMul || 1) <= 0.8, click: () => setWalkSpeed(0.6) },
-      { label: "🚶 标准", type: "radio", checked: !cfg.walkSpeedMul || ((cfg.walkSpeedMul > 0.8) && (cfg.walkSpeedMul < 1.4)), click: () => setWalkSpeed(1) },
-      { label: "🏃 快速", type: "radio", checked: cfg.walkSpeedMul >= 1.4 && cfg.walkSpeedMul < 2.2, click: () => setWalkSpeed(1.6) },
-      { label: "⚡ 飞快", type: "radio", checked: cfg.walkSpeedMul >= 2.2, click: () => setWalkSpeed(2.5) }
+    { label: i18n.t(lang, "tray.walkSpeed"), submenu: [
+      { label: i18n.t(lang, "tray.speedSlow"), type: "radio", checked: (cfg.walkSpeedMul || 1) <= 0.8, click: () => setWalkSpeed(0.6) },
+      { label: i18n.t(lang, "tray.speedNormal"), type: "radio", checked: !cfg.walkSpeedMul || ((cfg.walkSpeedMul > 0.8) && (cfg.walkSpeedMul < 1.4)), click: () => setWalkSpeed(1) },
+      { label: i18n.t(lang, "tray.speedFast"), type: "radio", checked: cfg.walkSpeedMul >= 1.4 && cfg.walkSpeedMul < 2.2, click: () => setWalkSpeed(1.6) },
+      { label: i18n.t(lang, "tray.speedMax"), type: "radio", checked: cfg.walkSpeedMul >= 2.2, click: () => setWalkSpeed(2.5) }
     ] },
-    { label: "🪑 一键坐到任务栏", enabled: walkingOn, click: () => sitOnTaskbar() }, // v2.5.26：原死 API 接进托盘，坐姿验证/手动归位
+    { label: i18n.t(lang, "tray.sitTaskbar"), enabled: walkingOn, click: () => sitOnTaskbar() }, // v2.5.26：原死 API 接进托盘，坐姿验证/手动归位
   ];
 
   /* ---------- 🗣 语音设置子菜单：语速 / 克隆 / 部署指南 ---------- */
@@ -155,12 +155,12 @@ function buildTrayItems(deps) {
 
   /* ---------- 🔧 高级与工具子菜单：低频操作收纳 ---------- */
   const advancedItems = [
-    { label: "🔍 点击诊断", click: () => diagClick() },
+    { label: i18n.t(lang, "tray.diagClick"), click: () => diagClick() },
     { label: i18n.t(lang, "tray.reloadPersona"), click: () => reloadPersona() },
-    { label: "➕ 添加人物…", click: () => openAddChar() },
+    { label: i18n.t(lang, "tray.addChar"), click: () => openAddChar() },
     { label: i18n.t(lang, "tray.openConfig"), click: () => openConfigPath() },
     { label: i18n.t(lang, "tray.openPersona"), click: () => openPersonaPath() },
-    { label: "🛡️ 蜜标监控：" + (cfg.fileGuard ? "开" : "关"), type: "checkbox", checked: !!cfg.fileGuard, click: () => setFileGuard(!cfg.fileGuard) }
+    { label: i18n.t(lang, "tray.fileGuard") + "：" + i18n.t(lang, cfg.fileGuard ? "tray.on" : "tray.off"), type: "checkbox", checked: !!cfg.fileGuard, click: () => setFileGuard(!cfg.fileGuard) }
   ];
 
   /* ---------- 组装 ---------- */
