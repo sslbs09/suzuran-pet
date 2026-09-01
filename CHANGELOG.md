@@ -1,5 +1,16 @@
 # 更新日志
 
+## v2.5.24（2026-09-01）
+
+### 🐛 行为修复
+
+- **关语音停 GSV 引擎（回归）**：此前语音关只停 Genie 中文引擎、GSV 日语引擎残留占显存；且从设置页保存关语音只广播不停任何引擎。已抽 `applyTtsEngine()` 供托盘/按钮/设置页三入口共用——关语音时 Genie + GSV 一起停（GSV 按 api.py 进程特征精准杀）
+- **换肤后"拿不起来"（回归）**：切换皮肤时销毁旧 PIXI 画布（WebGL context）触发 `webglcontextlost`（低配核显实测，销毁阶段即触发）→ 误走整页 reload 自愈 → 交互被打断。换肤全程置 `skinSwitching` 标志吞掉旧 context 销毁的 lost（新画布随后重建，不 reload）；另加销毁后 200ms 延迟再重建 + reload 后 init 完成立即 `setClickable(true)` 恢复可交互
+
+### 🎨 渲染
+
+- **换肤重建缓冲**：旧 context 释放与新 context 创建不再同帧交替（200ms 间隔），降低低配核显 lost 概率
+
 ## v2.5.23（2026-09-01）
 
 ### 🚨 紧急修复（上版引入的回归）
