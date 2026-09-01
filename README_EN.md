@@ -6,7 +6,7 @@
 
 **Sussurro, the medic operator of Rhodes Island, steps out of your terminal and moves onto your desktop.**
 
-Chat · long-term memory · cloned real voice (CN/JP) · walks along your taskbar
+Chat · long-term memory · cloned real voice (CN/JP) · walks along your taskbar · light & dark themes
 
 [![Latest release](https://img.shields.io/github/v/release/sslbs09/suzuran-pet?label=Release)](https://github.com/sslbs09/suzuran-pet/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/sslbs09/suzuran-pet/total?label=Downloads)](https://github.com/sslbs09/suzuran-pet/releases)
@@ -25,6 +25,7 @@ Chat · long-term memory · cloned real voice (CN/JP) · walks along your taskba
 | :---: | :---: | :---: |
 | 💬 **Chat companion**<br>Any OpenAI-compatible API | 🧠 **Long-term memory**<br>Remembers names / likes / birthdays | 🗣 **Real cloned voice**<br>Chinese & Japanese, TTS fallback chain |
 | 🦊 **Desktop walking**<br>Strolls the taskbar, hops onto windows | 🎨 **Four render modes**<br>GIF / Spine / 2.5D PSD / Live2D | 📅 **Schedule reminders**<br>Bubble + voice + Windows notification |
+| 🌗 **Light & dark themes**<br>Every window follows your theme | 🖱 **Click-through**<br>Transparent areas never block apps | 🛡 **Always-on-top self-heal**<br>Returns to top over fullscreen games |
 
 ![Mood sprites preview](docs/assets/moods-preview.png)
 

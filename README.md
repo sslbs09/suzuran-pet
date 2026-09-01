@@ -6,12 +6,14 @@
 
 **罗德岛医疗干员苏苏洛，从终端里走出来，住进你的桌面。**
 
-会聊天 · 会记住你的事 · 真人音色说话（中/日） · 在任务栏上散步
+会聊天 · 会记住你的事 · 真人音色说话（中/日） · 在任务栏上散步 · 深浅双主题
 
 [![最新版](https://img.shields.io/github/v/release/sslbs09/suzuran-pet?label=%E6%9C%80%E6%96%B0%E7%89%88)](https://github.com/sslbs09/suzuran-pet/releases/latest)
 [![下载量](https://img.shields.io/github/downloads/sslbs09/suzuran-pet/total?label=%E4%B8%8B%E8%BD%BD)](https://github.com/sslbs09/suzuran-pet/releases)
 ![平台](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows-blue)
 ![许可](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF-BUSL--1.1%20%E7%A6%81%E6%AD%A2%E5%95%86%E7%94%A8-lightgrey)
+
+> 🌗 **v2.5.26 新**：暗色主题全窗口闭环、主窗口质感升级、辅助窗口视觉统一——详见 [CHANGELOG](CHANGELOG.md)。
 
 [**⬇ 下载**](#-下载) ｜ [快速开始](#-四步开始) ｜ [🌐 官网](https://sslbs09.github.io/suzuran-pet/) ｜ [English](README_EN.md)
 
@@ -40,6 +42,7 @@
 | :---: | :---: | :---: |
 | 💬 **聊天陪伴**<br>任意 OpenAI 兼容 API | 🧠 **长期记忆**<br>记得你的喜好/生日/安排 | 🗣 **真人音色**<br>中/日双语，可克隆 |
 | 🦊 **桌面行走**<br>任务栏散步、跳上窗口 | 🎨 **四种形象**<br>GIF / Spine / 2.5D / Live2D | 📅 **日程提醒**<br>到点气泡 + 语音 + 通知 |
+| 🌗 **深浅双主题**<br>主窗口/设置/辅助窗口全跟随 | 🖱 **点击穿透**<br>透明区域完全不挡软件 | 🛡 **置顶自愈**<br>全屏游戏也能自己回最上层 |
 
 ![情绪表情预览](docs/assets/moods-preview.png)
 
