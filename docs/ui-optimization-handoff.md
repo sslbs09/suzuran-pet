@@ -271,3 +271,10 @@
 - ✅ 接入四处：中文合成入口 clean、日语合成出口（防御旧译文缓存）、features.js 日语预热（只翻口播部分，省 token）
 - ✅ 翻译提示词：补拟声词语气词自然化 + 括号保底规则；userName=「博士」（新默认）不再触发音译子句（与强制术语冲突）
 - ✅ tests/strip-stage.test.js 9 断言（23+1=24 文件全绿）；已部署重启
+
+### 块 12：台词情绪→音色分档（用户反馈：翻译要返还情绪，告诉桌宠用什么音色说）
+- **根因**：音色分档链路（speakClone opts.emo → emotionGsvRef 5 档参考音频）早已存在，但固定台词播报传的情绪大多是无效值——主动搭话恒传 "idle"、工作流 "idle"、羁绊 "love"（normEmotion 均不识别→永远默认音色）
+- ✅ lines.js 新增 `LINE_MOODS` 池级情绪映射（pat 开心/thrown 惊讶/grabbed 傲娇/wake·sleep 温柔/perch 开心/workflow 温柔/时段早晚开心午晚温柔/walking 开心/seated 温柔/longIdle 撒娇/stageFd 温柔·stageXl 撒娇·stageSy 温柔）
+- ✅ 播报点全接：features.js 主动搭话各由头分支带 moodKey 经 sendFn(prompt, mood) 双参传出；main.js 人格化/工作流×3/羁绊升级/日程（动画情绪→分档映射）/摸头全部改传映射值
+- ✅ 日语文本本身不带情绪标记——语气由 GSV 参考音频（分档）控制，翻译链路无需改动即达成「翻译后仍有情绪」
+- 24 文件单测全绿；已部署重启。**设置页「音色启用」开关（tone-*）控制各档启用，逻辑不变**
