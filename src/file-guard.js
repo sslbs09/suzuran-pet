@@ -56,14 +56,17 @@ function noteConfigWritten() {
   const p = path.join(storage.PATHS.userDir, "config.json");
   configHash = hashFile(p);
   try { lastCleanConfig = fs.readFileSync(p, "utf8"); } catch { /* 忽略 */ }
+  // v2.5.25（优化建议 P2）：干净副本持久化——内存基线随进程消失，进程被杀后重启仍能恢复
+  try { fs.writeFileSync(path.join(storage.PATHS.userDir, "config.clean.json"), lastCleanConfig || "", "utf8"); } catch { /* 副本写失败不影响主流程 */ }
 }
 
 const lastAlertAt = {};
 function alert(type, fileName, detail) {
   const now = Date.now();
   changeWindow.push(now);
-  // 限频：30s 内同类型只报一次（fs.watch 事件可能多次触发，避免噪音）
-  if (now - (lastAlertAt[type] || 0) < 30000) return;
+  // v2.5.25（优化建议 P2）：勒索/篡改类告警限频 30s→10s——30s 静默期太长，
+  // 攻击者可在静默期内完成大量加密不触发额外告警；10s 仍可压住 fs.watch 重复事件噪音
+  if (now - (lastAlertAt[type] || 0) < 10000) return;
   lastAlertAt[type] = now;
   if (onAlert) onAlert(type, fileName, detail);
 }
@@ -136,7 +139,22 @@ function start(cb) {
   ensureHoneyFiles();
   const cfgP = path.join(storage.PATHS.userDir, "config.json");
   configHash = hashFile(cfgP);
-  try { lastCleanConfig = fs.readFileSync(cfgP, "utf8"); } catch { /* 忽略 */ } // 启动时的 config 作为干净基线（阻断恢复用）
+  // v2.5.25（优化建议 P2）：干净基线优先取持久化副本——进程重启后内存基线丢失，
+  // 若磁盘 config 已被外部篡改，用上次的干净副本恢复而非把篡改内容当新基线
+  try {
+    const cleanP = path.join(storage.PATHS.userDir, "config.clean.json");
+    if (fs.existsSync(cleanP)) {
+      const cleanTxt = fs.readFileSync(cleanP, "utf8");
+      const curTxt = fs.existsSync(cfgP) ? fs.readFileSync(cfgP, "utf8") : "";
+      if (curTxt && cleanTxt && curTxt !== cleanTxt) { // 磁盘与上次干净副本不一致 → 启动即恢复
+        try { fs.copyFileSync(cfgP, cfgP + ".tampered"); } catch { /* 忽略 */ }
+        fs.writeFileSync(cfgP, cleanTxt, "utf8");
+      }
+      lastCleanConfig = cleanTxt || (fs.existsSync(cfgP) ? fs.readFileSync(cfgP, "utf8") : null);
+    } else {
+      lastCleanConfig = fs.readFileSync(cfgP, "utf8"); // 首次运行：磁盘当前 config 作基线
+    }
+  } catch { /* 忽略 */ } // 基线读取失败则保持 null（后续 saveConfig 会填充）
   for (const f of WATCH_JSON) fileMtime[f] = statTimes(path.join(storage.PATHS.userDir, f));
   // userData 目录 fs.watch（异常新文件）
   try {

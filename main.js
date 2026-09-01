@@ -1076,6 +1076,10 @@ function safeTokenEqual(actual, expected) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 async function readAgentJson(req, maxBytes) {
+  // 优化建议 P0：校验 Content-Type——显式非 JSON 直接 415（防探测解析逻辑）；
+  // 缺失时放行（兼容 curl -d 等不带头的老脚本）
+  const ct = String(req.headers["content-type"] || "");
+  if (ct && !/application\/json/i.test(ct)) return { error: 415 };
   const declared = Number(req.headers["content-length"] || 0);
   if (declared > maxBytes) return { error: 413 };
   const parts = [];
@@ -1131,7 +1135,10 @@ function startAgentApi() {
       const master = String(apiCfg.bearerToken || "");
       const clients = Array.isArray(apiCfg.clients) ? apiCfg.clients : [];
       const clientHit = provided ? clients.find((c) => c && c.token && safeTokenEqual(provided, c.token)) : null;
-      const needsAuth = !!master || clients.length > 0;
+      // 优化建议 P0：写操作（/chat /stop 消耗 LLM 额度/改状态）始终要求认证——
+      // 即使 master/clients 全空（如自动生成 token 失败）也不开放无认证写入
+      const isWrite = url.pathname === "/chat" || url.pathname === "/stop";
+      const needsAuth = isWrite || !!master || clients.length > 0;
       const authOk = provided && (safeTokenEqual(provided, master) || !!clientHit);
       if (needsAuth && !authOk) { send(401, { ok: false, error: "unauthorized" }, { "WWW-Authenticate": "Bearer" }); return; }
       if (clientHit) { // 接入名单：记录该 agent 最近活跃（在线状态展示）

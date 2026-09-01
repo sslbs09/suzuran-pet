@@ -103,7 +103,31 @@ function isLocalUrl(url) {
   }
 }
 
-/** 解析 SSE 流，逐段回调 content 增量；返回完整文本 */
+/** SSRF 防护（优化建议 P0）：baseUrl 目标主机校验——
+ *  放行回环（本地 Ollama/聚合站等合法场景），拒绝内网/链路本地/ULA 地址
+ *  （防配置被篡改/钓鱼后请求内网）。确需内网网关的用户可传 allowPrivate=true
+ *  逃生（对应 config.chat.allowPrivateBaseUrl，本机自担风险）。纯函数可单测。 */
+function validateApiBase(base, allowPrivate) {
+  let u;
+  try { u = new URL(base); } catch { throw new Error("API 地址无效: " + String(base).slice(0, 80)); }
+  if (!/^https?:$/.test(u.protocol)) throw new Error("仅支持 http/https: " + String(base).slice(0, 80));
+  const h = String(u.hostname).toLowerCase().replace(/^\[|\]$/g, "");
+  if (/^(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|::1)$/.test(h)) return; // 回环放行
+  if (allowPrivate) return; // 显式逃生开关
+  const ipv4 = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  const priv = !!ipv4 && (
+    ipv4[1] === "10" ||
+    (ipv4[1] === "172" && Number(ipv4[2]) >= 16 && Number(ipv4[2]) <= 31) ||
+    (ipv4[1] === "192" && ipv4[2] === "168") ||
+    (ipv4[1] === "169" && ipv4[2] === "254")
+  );
+  if (priv || /^fe[89ab][0-9a-f]:/.test(h) || /^f[cd][0-9a-f]{2}:/.test(h)) {
+    throw new Error("拒绝向内网/链路本地地址发送请求（SSRF 防护）：" + h);
+  }
+}
+
+/** 解析 SSE 流，逐段回调 content 增量；返回完整文本。
+ *  OpenAI 兼容 error 帧（data: {"error": ...}）会向上抛出（v2.5.24 优化建议 P1） */
 async function readSSE(resp, onChunk, extractor) {
   const reader = resp.body.getReader();
   const decoder = new TextDecoder("utf-8");
@@ -121,12 +145,17 @@ async function readSSE(resp, onChunk, extractor) {
       const data = t.slice(5).trim();
       if (data === "[DONE]") continue;
       try {
-        const delta = extractor(JSON.parse(data));
+        const j = JSON.parse(data);
+        if (j && j.error) throw Object.assign(new Error("流式响应错误: " + JSON.stringify(j.error).slice(0, 200)), { sseError: true });
+        const delta = extractor(j);
         if (delta) {
           full += delta;
           onChunk(delta);
         }
-      } catch { /* 忽略无法解析的行 */ }
+      } catch (e) {
+        if (e && e.sseError) throw e; // 流内 error 帧向上抛（调用方已有错误处理），不静默吞掉
+        /* 忽略无法解析的行 */
+      }
     }
   }
   return full;
@@ -137,6 +166,7 @@ async function chatOpenAI(cfg, messages, opts) {
     throw new Error("未配置 API Key：" + cfg._keySource);
   }
   const url = normalizeOpenAIBase(cfg.chat.baseUrl) + "/chat/completions";
+  validateApiBase(url, !!cfg.chat.allowPrivateBaseUrl); // SSRF 防护（优化建议 P0）
   const smp = cfg.chat.sampling || {};
   const body0 = {
     model: cfg.chat.model,
@@ -173,6 +203,7 @@ async function chatOpenAI(cfg, messages, opts) {
 async function chatAnthropic(cfg, system, history, opts) {
   if (!cfg.chat.apiKey) throw new Error("未配置 API Key：" + cfg._keySource);
   const url = normalizeAnthropicBase(cfg.chat.baseUrl) + "/messages";
+  validateApiBase(url, !!cfg.chat.allowPrivateBaseUrl); // SSRF 防护（优化建议 P0）
   const smpA = cfg.chat.sampling || {};
   const bodyA = {
     model: cfg.chat.model,
@@ -281,6 +312,7 @@ async function testConnection(overrides = {}) {
     if (o.apiType === "anthropic") {
       if (!o.apiKey) throw new Error("未填写 API Key");
       const url = normalizeAnthropicBase(o.baseUrl) + "/messages";
+      validateApiBase(url, !!cfg.chat.allowPrivateBaseUrl); // SSRF 防护（优化建议 P0）
       const resp = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": o.apiKey, "anthropic-version": "2023-06-01" },
@@ -292,6 +324,7 @@ async function testConnection(overrides = {}) {
     }
     if (!o.apiKey && !isLocalUrl(normalizeOpenAIBase(o.baseUrl))) throw new Error("未填写 API Key");
     const url = normalizeOpenAIBase(o.baseUrl) + "/chat/completions";
+    validateApiBase(url, !!cfg.chat.allowPrivateBaseUrl); // SSRF 防护（优化建议 P0）
     const resp = await fetch(url, {
       method: "POST",
       headers: {
@@ -315,7 +348,7 @@ async function testConnection(overrides = {}) {
   }
 }
 
-module.exports = { chat, testConnection, buildSystemMessage, parseEmotion, isLocalUrl, normalizeOpenAIBase, normalizeAnthropicBase };
+module.exports = { chat, testConnection, buildSystemMessage, parseEmotion, isLocalUrl, validateApiBase, normalizeOpenAIBase, normalizeAnthropicBase };
 
 // CLI 冒烟测试：node src/chat-client.js --test "你好"
 if (process.argv.includes("--test")) {
