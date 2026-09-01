@@ -1,13 +1,15 @@
 :root {
-  --bg: #fff8f2;
-  --sidebar-bg: #fdeee2;
-  --accent: #e88a5a;
-  --accent-dark: #c96a3c;
-  --text: #4a3a30;
-  --text-light: #8a7365;
-  --code-bg: #f5ece4;
-  --border: #f0ddd0;
-  --content-bg: #fffdf9;
+  --bg: #f4f8f7;
+  --sidebar-bg: #edf6f4;
+  --accent: #2f8f87;
+  --accent-dark: #23736d;
+  --text: #17313a;
+  --text-light: #62777d;
+  --code-bg: #e4efec;
+  --border: #d7e5e3;
+  --content-bg: #ffffff;
+  --accent-hover: rgba(47, 143, 135, .10);
+  --tip-bg: #edf6f4;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
@@ -51,7 +53,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible { outline: 2px s
   color: var(--text);
   font-size: 13.5px;
 }
-.doc-item:hover { background: rgba(232, 138, 90, 0.12); }
+.doc-item:hover { background: var(--accent-hover); }
 .doc-item.active { background: var(--accent); color: #fff; font-weight: 600; }
 
 /* 内容区 */
@@ -59,7 +61,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible { outline: 2px s
 .docs-pane { padding: 34px 46px; max-width: 860px; }
 #docs-welcome h1 { color: var(--accent-dark); font-size: 24px; margin-bottom: 14px; }
 #docs-welcome p { margin-bottom: 10px; }
-.docs-tip { background: #fff3e8; border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; font-size: 13.5px; }
+.docs-tip { background: var(--tip-bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; font-size: 13.5px; }
 
 /* md 渲染样式 */
 .docs-md h1 { font-size: 24px; color: var(--accent-dark); margin: 0 0 16px; padding-bottom: 8px; border-bottom: 2px solid var(--border); }
@@ -79,7 +81,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible { outline: 2px s
 .docs-md pre code { background: none; padding: 0; }
 .docs-md blockquote {
   border-left: 4px solid var(--accent); margin: 12px 0;
-  padding: 8px 16px; background: #fff3e8; border-radius: 0 8px 8px 0;
+  padding: 8px 16px; background: var(--tip-bg); border-radius: 0 8px 8px 0;
   color: var(--text-light);
 }
 .docs-md a { color: var(--accent-dark); }
@@ -88,12 +90,14 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible { outline: 2px s
 .docs-md th { background: var(--sidebar-bg); }
 
 /* iframe（html 文档） */
-#docs-iframe { width: 100%; height: 100%; border: none; background: #fff; }
+#docs-iframe { width: 100%; height: 100%; border: none; background: var(--content-bg); }
 
 #docs-loading { text-align: center; padding-top: 80px; color: var(--text-light); }
 
 body.theme-dark {
   --bg: #1b2226; --sidebar-bg: #20282c; --accent: #3aa89f; --accent-dark: #57bcb4;
   --text: #e8eef0; --text-light: #9db2b7; --code-bg: #243036; --border: #2e3a40; --content-bg: #1f282d;
+  --accent-hover: rgba(58, 168, 159, .14); --tip-bg: #243036;
 }
-body.theme-dark .docs-tip, body.theme-dark .docs-md blockquote { background: #243036; color: var(--text); }
+/* 深色下选中项用亮青底+深字，保证对比度（浅底白字在 #3aa89f 上不足 3:1） */
+body.theme-dark .doc-item.active { background: #57bcb4; color: #10322e; }

@@ -5,47 +5,62 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: blob:; connect-src 'self' data: blob:; font-src 'self' data:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'">
 <title>苏苏洛 · PSD 角色工具</title>
 <style>
-  :root { color-scheme: light; }
+  /* v2.5.26：颜色令牌化 + 深色主题（theme-init.js 挂 body.theme-dark） */
+  :root {
+    color-scheme: light;
+    --psd-bg: #f4f8f7; --psd-card: #ffffff; --psd-ink: #33414e; --psd-muted: #6d8494;
+    --psd-accent: #2f8f87; --psd-line: #e3ecf3; --psd-line-strong: #9cc4d8;
+    --psd-soft: #eef7f5; --psd-sel: #d8efea; --psd-tip-ink: #4a6a70; --psd-err: #c4553c;
+    --psd-check-a: #f0f3f6; --psd-check-b: #ffffff;
+  }
+  body.theme-dark {
+    color-scheme: dark;
+    --psd-bg: #1b2226; --psd-card: #232c31; --psd-ink: #e8eef0; --psd-muted: #9db2b7;
+    --psd-accent: #3aa89f; --psd-line: #2e3a40; --psd-line-strong: #3a4a51;
+    --psd-soft: #20282c; --psd-sel: #24383a; --psd-tip-ink: #9db2b7; --psd-err: #e07a7f;
+    --psd-check-a: #242c31; --psd-check-b: #1f262a;
+  }
   * { box-sizing: border-box; }
   body {
     margin: 0; padding: 14px 18px;
     font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
-    font-size: 13px; color: #33414e; background: #f4f8fb;
+    font-size: 13px; color: var(--psd-ink); background: var(--psd-bg);
   }
-  h1 { font-size: 16px; margin: 0 0 10px; color: #2f8f87; }
+  h1 { font-size: 16px; margin: 0 0 10px; color: var(--psd-accent); }
   .drop {
-    border: 2px dashed #9cc4d8; border-radius: 10px;
-    padding: 26px 12px; text-align: center; color: #6d8494;
-    background: #fff; cursor: pointer; transition: border-color .15s;
+    border: 2px dashed var(--psd-line-strong); border-radius: 10px;
+    padding: 26px 12px; text-align: center; color: var(--psd-muted);
+    background: var(--psd-card); cursor: pointer; transition: border-color .15s;
   }
-  .drop.over { border-color: #2f8f87; background: #eef7f5; }
+  .drop.over { border-color: var(--psd-accent); background: var(--psd-soft); }
   .row { display: flex; gap: 10px; margin: 10px 0; align-items: center; flex-wrap: wrap; }
   button {
-    border: 1px solid #bcd4e4; background: #fff; border-radius: 8px;
+    border: 1px solid var(--psd-line-strong); background: var(--psd-card); color: var(--psd-ink); border-radius: 8px;
     padding: 6px 14px; cursor: pointer; font-size: 13px;
   }
-  button:hover { background: #eef7f5; }
-  button.primary { background: #2f8f87; color: #fff; border-color: #2f8f87; }
+  button:hover { background: var(--psd-soft); }
+  button.primary { background: var(--psd-accent); color: #fff; border-color: var(--psd-accent); }
   button:disabled { opacity: .5; cursor: not-allowed; }
   .cols { display: flex; gap: 14px; margin-top: 12px; }
-  .col { flex: 1; min-width: 0; background: #fff; border-radius: 10px; padding: 12px; border: 1px solid #e3ecf3; }
-  .col h2 { font-size: 13px; margin: 0 0 8px; color: #44505c; }
+  .col { flex: 1; min-width: 0; background: var(--psd-card); border-radius: 10px; padding: 12px; border: 1px solid var(--psd-line); }
+  .col h2 { font-size: 13px; margin: 0 0 8px; color: var(--psd-ink); }
   #tree { max-height: 340px; overflow: auto; font-size: 12px; line-height: 1.9; }
   #tree .lvl { padding-left: 12px; }
-  #tree .grp { color: #2f8f87; font-weight: bold; padding: 1px 6px; border-radius: 6px; background: #f0f8f6; }
+  #tree .grp { color: var(--psd-accent); font-weight: bold; padding: 1px 6px; border-radius: 6px; background: var(--psd-soft); }
   #tree .leaf-row { cursor: pointer; padding: 1px 6px; border-radius: 6px; display: flex; align-items: center; gap: 6px; }
-  #tree .leaf-row:hover { background: #eef7f5; }
-  #tree .leaf-row.sel { background: #d8efea; outline: 1px solid #2f8f87; }
+  #tree .leaf-row:hover { background: var(--psd-soft); }
+  #tree .leaf-row.sel { background: var(--psd-sel); outline: 1px solid var(--psd-accent); }
   #tree .eye { cursor: pointer; font-size: 12px; opacity: .75; user-select: none; flex: none; }
   #tree .eye:hover { opacity: 1; }
   #tree .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #tree .dim { color: #98a6b3; font-size: 11px; flex: none; }
+  #tree .dim { color: var(--psd-muted); font-size: 11px; flex: none; }
   #preview-wrap { text-align: center; min-height: 200px; }
-  #preview { max-width: 100%; max-height: 360px; image-rendering: pixelated; background: repeating-conic-gradient(#f0f3f6 0 25%, #fff 0 50%) 0 0/16px 16px; border-radius: 6px; }
-  .meta { color: #98a6b3; font-size: 12px; margin-top: 8px; }
-  .tip { background: #eef7f5; border-radius: 8px; padding: 10px 12px; margin-top: 12px; font-size: 12px; color: #4a6a70; line-height: 1.7; }
-  #status { font-size: 12px; color: #2f8f87; margin-top: 8px; min-height: 18px; }
-  #status.err { color: #c4553c; }
+  #preview { max-width: 100%; max-height: 360px; image-rendering: pixelated; background: repeating-conic-gradient(var(--psd-check-a) 0 25%, var(--psd-check-b) 0 50%) 0 0/16px 16px; border-radius: 6px; }
+  .meta { color: var(--psd-muted); font-size: 12px; margin-top: 8px; }
+  .tip { background: var(--psd-soft); border-radius: 8px; padding: 10px 12px; margin-top: 12px; font-size: 12px; color: var(--psd-tip-ink); line-height: 1.7; }
+  #status { font-size: 12px; color: var(--psd-accent); margin-top: 8px; min-height: 18px; }
+  #status.err { color: var(--psd-err); }
+  input[type="number"] { border: 1px solid var(--psd-line-strong); background: var(--psd-card); color: var(--psd-ink); border-radius: 6px; padding: 4px 6px; font: inherit; }
 </style>
 </head>
 <body>
@@ -69,7 +84,7 @@
     <button id="btn-layer-del" disabled>🗑 删除选中</button>
     <button id="btn-layer-undo" disabled>↩ 撤销</button>
     <button id="btn-layer-redo" disabled>↪ 重做</button>
-    <span class="meta" id="sel-info" style="color:#2f8f87">未选择图层</span>
+    <span class="meta" id="sel-info" style="color:var(--psd-accent)">未选择图层</span>
   </div>
   <input type="file" id="layer-file" accept=".png,.jpg,.jpeg,.webp,.gif" style="display:none" />
   <div id="status"></div>
@@ -97,6 +112,7 @@
     （眨眼/口型/发丝物理/鼠标跟随）。编辑过的图层会随「应用到桌宠」一并生效。<br/>
     导出文件保存在用户数据目录 <code>assets/psd-export/</code> 下。
   </div>
+<script src="theme-init.js"></script>
 <script src="../node_modules/ag-psd/dist/bundle.js"></script>
 <script src="rig/rigger.js"></script>
 <script src="rig/genericparts.js"></script>

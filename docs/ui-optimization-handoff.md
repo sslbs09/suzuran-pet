@@ -125,3 +125,24 @@
 **待验证**：深色下主窗口整体观感（打包后 vision 截图）。
 
 **下一步**：P2-1——theme-init.js + 八窗口接入 + docs.css 统一 + psd/moods/voice/ui/terms 暗色补全。
+
+### 2026-09-01 检查点 2：P2-1 + P2-2 + P3-1 完成，测试全绿
+
+**做了什么**：
+- **新增 `renderer/theme-init.js`**：辅助窗口主题引导（读 `getState().theme` + 订阅 theme-changed，逻辑与 pet.js applyTheme 一致），并在 **help/quickstart/terms/schedule/psd/addchar/moods/voice** 八个 HTML 末尾挂 `<script src="theme-init.js">`（各窗 CSP 均允许）。docs 窗口已有 docs.js 自处理，不重复挂。
+- **⚠️ 唯一 main.js 改动（已核对红线，属窗口配置非交互逻辑）**：`openHelp()` 的 webPreferences 是裸配置缺 preload（历史遗漏，其余窗口都走 `winChild.childWebPrefs`），改为与其他窗口一致的 `winChild.childWebPrefs(config.APP_DIR)`——否则 help 窗口拿不到 petAPI，暗色永不生效。
+- **docs.css**：浅色从橙色离群系统一到全局青系（bg/sidebar/accent/text/border 全换 `--ui-*` 同值）；新增 `--accent-hover`/`--tip-bg` 变量；`#docs-iframe` 背景走变量（暗色不再白底）；深色选中项改亮青底+深字（对比度）。
+- **psd.html**：整页内联样式令牌化为 `--psd-*`（12 枚）+ `body.theme-dark` 深色组；透明预览棋盘格双主题；数字输入框补主题样式；`color-scheme` 深浅声明；`#sel-info` 内联色改变量。
+- **moods.html**：`.tag-new` 与 moods.js 生成的内联「自定义」标签（`!important`）深色覆盖。
+- **voice.html**：`.status-card.ok/.no` 深色改半透明色罩。
+- **terms.html**：`.terms-head` 深色改 `#1d4742` 深青底（浅青底白字对比度不足）。
+- **ui.css**：`:root`/`body.theme-dark` 加 `color-scheme`（原生控件跟随）；`button.danger` 深色边框改半透明红。
+- **settings.css（P2-2）**：`.cred-status.warn` 深色提亮；iOS 开关轨道深色压暗 + `input:focus-visible` 焦点环；`.set-nav a:focus-visible` 焦点环（P3-1）。
+- **已知不动项**：psd.js:544 的 2.5D 预览棋盘格是 JS 内联（按图像编辑器惯例保留浅色）；moods.js「情绪/待机」标签本就无样式，不动。
+
+**验证（本检查点）**：
+- 22 个单测（tests/*.test.js）**全部通过**；`node --check` main.js/theme-init.js 通过；ESLint 0 error（theme-init.js 零警告，main.js 8 条警告均为历史未用变量）。
+- `test:chat` 为需真实 API Key 的在线冒烟，本机未配钥匙退出 1——环境问题，与本次改动无关（改动不涉 chat 链路）。
+- CSS 括号配对与变量定义完整性全部校验通过。
+
+**下一步**：部署到 release 打包重启 → vision 截图验收深浅主题 → bump 2.5.26 + CHANGELOG → GitHub README。

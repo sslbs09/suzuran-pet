@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light; /* 原生控件（滚动条/日期选择等）跟随主题（v2.5.26） */
   --ui-bg: #f4f8f7;
   --ui-surface: #ffffff;
   --ui-surface-soft: #edf6f4;
@@ -122,6 +123,7 @@ body.ui-page {
 
 /* 深色主题（v2.5.1）：body.theme-dark 覆盖变量层，全部 ui-page 窗口跟随 */
 body.theme-dark {
+  color-scheme: dark;
   --ui-bg: #1b2226;
   --ui-surface: #232c31;
   --ui-surface-soft: #20282c;
@@ -142,3 +144,5 @@ body.theme-dark {
 }
 
 body.theme-dark .ui-page .note { border-color: #4a4030; background: #2e2a20; color: #d6b98a; }
+/* 危险按钮浅粉边框在深色下过亮，改半透明红（v2.5.26） */
+body.theme-dark .ui-page button.danger { border-color: rgba(224, 122, 127, .45); }

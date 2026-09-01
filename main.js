@@ -403,7 +403,7 @@ function openHelp() {
     resizable: true,
     title: "苏苏洛使用说明",
     autoHideMenuBar: true,
-    webPreferences: { nodeIntegration: false, contextIsolation: true }
+    webPreferences: winChild.childWebPrefs(config.APP_DIR) // v2.5.26：补 preload（其余窗口均有），让 theme-init 能读主题
   });
   helpWin.setMenuBarVisibility(false);
   helpWin.loadFile(path.join(config.APP_DIR, "renderer", "help.html"));

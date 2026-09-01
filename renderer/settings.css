@@ -36,6 +36,8 @@
 .settings-page .cred-status.ok { color: var(--ui-success); }
 .settings-page .cred-status.warn { color: #b45309; }
 .settings-page .cred-status.err { color: var(--ui-danger); }
+/* 深色主题（v2.5.26）：warn 橙加深底上提亮 */
+body.theme-dark .settings-page .cred-status.warn { color: #e0a458; }
 
 /* ---------- iOS 风格滑动开关（v2.2） ---------- */
 .settings-page .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -54,6 +56,9 @@
 }
 .settings-page .switch input:checked + .slider { background: var(--ui-accent, #2f8f87); }
 .settings-page .switch input:checked + .slider::before { transform: translateX(18px); }
+/* 深色主题：轨道压暗（iOS 风格）；键盘焦点环（P3-1 可访问性） */
+body.theme-dark .settings-page .switch .slider { background: #46545b; }
+.settings-page .switch input:focus-visible + .slider { box-shadow: var(--ui-focus); }
 .settings-page .rig-skin-hint { color: var(--ui-muted, #6d8494); font-size: 11px; margin-top: 2px; }
 
 /* ---------- 左侧分类导航 + 未保存提示条（v2.5.18） ---------- */
@@ -64,6 +69,7 @@ html { scroll-behavior: smooth; }
 .settings-page .set-nav nav { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
 .settings-page .set-nav a { padding: 7px 10px; border-radius: var(--ui-radius-sm); color: var(--ui-muted); text-decoration: none; font-size: 12.5px; line-height: 1.3; transition: background 140ms var(--ui-ease), color 140ms ease; }
 .settings-page .set-nav a:hover { background: var(--ui-surface-soft); color: var(--ui-ink); }
+.settings-page .set-nav a:focus-visible { outline: none; box-shadow: var(--ui-focus); }
 .settings-page .set-nav a.active { background: var(--ui-accent-soft); color: var(--ui-accent-strong); font-weight: 650; }
 .settings-page .set-nav .no-result { padding: 6px 10px; color: var(--ui-subtle); font-size: 12px; }
 .settings-page .set-main { min-width: 0; }

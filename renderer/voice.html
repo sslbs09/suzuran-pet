@@ -11,6 +11,9 @@
   .status-card { margin-bottom: 14px; padding: 12px 14px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-md); font-size: 13px; }
   .status-card.ok { border-color: #b9dfca; background: #effaf3; color: var(--ui-success); }
   .status-card.no { border-color: #edc3c1; background: var(--ui-danger-soft); color: var(--ui-danger); }
+  /* 深色主题（v2.5.26）：状态卡浅底改半透明色罩，避免亮色残留 */
+  body.theme-dark .voice-page .status-card.ok { border-color: rgba(70, 168, 120, .45); background: rgba(70, 168, 120, .12); }
+  body.theme-dark .voice-page .status-card.no { border-color: rgba(224, 122, 127, .45); }
   .file-row { display: flex; gap: 8px; align-items: center; }
   .file-path { flex: 1; min-width: 0; padding: 8px 10px; overflow-wrap: anywhere; border: 1px dashed var(--ui-line-strong); border-radius: var(--ui-radius-sm); background: var(--ui-surface-soft); color: var(--ui-muted); font-size: 12px; }
   .small { color: var(--ui-subtle); font-size: 12px; }
@@ -48,6 +51,7 @@
 
     <p class="foot">苏苏洛桌宠 · 音色克隆与训练</p>
   </div>
+<script src="theme-init.js"></script>
 <script src="voice.js"></script>
 </body>
 </html>
