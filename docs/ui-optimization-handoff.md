@@ -334,3 +334,8 @@
   1. `lazybag_v3/auto_train.py`+`zip_auto_train.py` 54 高危（路径穿越/代码注入）——默认工作区另一项目，Mimosa 每次提交扫描都报；修法是标准加固（路径 sanitize/subprocess 列表化/zip 解压校验），需另开任务且要懂其业务
   2. GitHub About/topics 描述优化——需 gh CLI 登录授权（本机未装 gh），或网页手改（建议文案：Q版狐狸医师桌面宠物 · 深浅双主题 · 任意 OpenAI 兼容 API · 本地语音克隆 · Spine/Live2D/GIF 多形态）
   3. ag-psd 懒加载——评估不值（defer 已非阻塞）
+
+### 块 19：发版（用户授权「都做」）
+- ✅ tag `v2.5.26` + push：main（46f7a7a..309d8c8，本会话 24 提交）、gh-pages（2886b50..47fb393，3 提交）、tag
+- release.yml 随 tag 自动构建发布（正文自动抽 CHANGELOG v2.5.26 段）；皮肤包仍需手动传
+- **本会话 UI 优化任务完结**。后续另开任务清单见块 18 ⏸ 三项
