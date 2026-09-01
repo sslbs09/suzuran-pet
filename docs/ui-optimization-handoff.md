@@ -146,3 +146,22 @@
 - CSS 括号配对与变量定义完整性全部校验通过。
 
 **下一步**：部署到 release 打包重启 → vision 截图验收深浅主题 → bump 2.5.26 + CHANGELOG → GitHub README。
+
+### 2026-09-01 检查点 3：部署验证通过 + 顺手修一个历史 bug
+
+**版本/CHANGELOG**：package.json → 2.5.26；CHANGELOG 顶部加 v2.5.26 段（UI 优化六条）。
+
+**部署验证（按红线流程）**：PowerShell Copy-Item 同步 17 个文件 → 停桌宠 → `bash deploy/pack.sh` → `cp -f app.asar.new app.asar`（mv 因文件锁失败是已知现象）→ 重启 → `tts.log` 无 error，行走/预热正常。
+
+**视觉验收方法（后人可复用）**：透明窗 + 点击穿透导致 computer-use 坐标点击不可靠；可靠路径是
+`--remote-debugging-port=9222` 启动 → CDP `Runtime.evaluate` 读计算样式/临时展开组件 → `Page.captureScreenshot` 抓渲染表面落盘 PNG → `vision.js` 验收。临时验证脚本已删，方法留档。
+
+**验收结论**：
+- 深色：`body.theme-dark` ✓；气泡/输入栏 `rgba(35,44,49,.96)` 底 + `rgba(87,188,180,.25)` 边 + `#e8eef0` 字；⤢/× 幽灵按钮 `rgba(58,168,159,.16)` 底 + `#7fd0c9` 字；vision 确认无刺眼纯白。
+- 浅色：白底 `rgba(255,255,255,.96)` + 青边 `rgba(47,143,135,.32)` + `#44505c` 字，vision 确认协调无回归。
+
+**顺手修的历史 bug（index.html，纯结构）**：`#btn-stop` 的 class 原本只有 `btn hidden`，缺 `btn-stop`——导致 `.btn-stop.hidden{display:none}` 与 `.btn-stop` 红色语义两条规则从未匹配，停止按钮常年青色常显。已补 `class="btn btn-stop hidden"`，已随最终包部署。
+
+**待用户手动验收**：鼠标单击桌宠弹输入栏看深色观感（模拟点击会被 pet.js 判成拖动，人工点一下最直观）；设置页切浅色回看无回归。
+
+**下一步**：GitHub 仓库页面（README/About）优化。
