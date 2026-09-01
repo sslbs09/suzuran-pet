@@ -345,3 +345,9 @@
 - ✅ **托盘菜单 i18n**：18 个硬编码中文项（2.5D/PSD/半透明/逗猫棒/散步速度/一键坐/诊断/添加人物/蜜标）→ tray.* 键三语
 - ✅ 已部署重启；提交后 push main
 - ⏸ **CI 复查待办**：v2.5.26 push 后 Actions（新 test.yml 首跑）状态未确认（API 限流+网页超时）；用户可在 GitHub 仓库 Actions 页看，红了发我修
+
+### 块 21（夜间自主扫尾，用户睡觉前授权）
+- ✅ release.yml 人工预审：CHANGELOG 段落正则匹配 tag、npm ci/dist/zip/gh-release 链路无风险点；test.yml 两 job 预判绿（单测不依赖 electron、playwright --with-deps 标准用法）——API 限流无法实查，留用户早晨确认
+- ✅ visual.spec 改 fullPage 整页存档；vision 长图误报「perch 滑杆缺失」→ **Playwright DOM 断言复核：perch 滑杆存在且可见、感知区三复选框 flex-start 顶对齐**（DOM 断言比长图 vision 可靠，记方法论）
+- ✅ 硬编码色残扫：settings.css 剩余 #b45309/#c8ccd0/#ecd8b9 等均有深色覆盖，无漏网
+- 临时自检脚本已删；提交 push

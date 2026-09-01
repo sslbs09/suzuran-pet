@@ -31,7 +31,7 @@ test("设置页：标题颜色统一（h2 无首字变色伪元素）", async ({
 test("设置页：浅色截图存档", async ({ page }) => {
   await page.goto(settingsUrl);
   await page.waitForTimeout(600);
-  await page.screenshot({ path: "tests/__visual-out__/settings-light.png", fullPage: false });
+  await page.screenshot({ path: "tests/__visual-out__/settings-light.png", fullPage: true });
 });
 
 test("设置页：深色截图存档", async ({ page }) => {
@@ -40,5 +40,5 @@ test("设置页：深色截图存档", async ({ page }) => {
   });
   await page.goto(settingsUrl);
   await page.waitForTimeout(600);
-  await page.screenshot({ path: "tests/__visual-out__/settings-dark.png", fullPage: false });
+  await page.screenshot({ path: "tests/__visual-out__/settings-dark.png", fullPage: true });
 });
