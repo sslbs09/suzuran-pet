@@ -248,3 +248,12 @@
 - ✅ 去重改写 9 处近重复：noon 糖醋里脊×2/午休×2/餐盘×2、evening 毯子×2、idle 时钟×2、night 守着×3、seated 随时都在×3
 - ✅ 含糊台词改写 1 处（摸头「别停嘛」→ 痒痒的可爱版）；省略号统一「……」
 - 23/23 单测绿、eslint 干净
+
+### 块 9：README_EN / 官网 / stylelint / 最终验证
+- ✅ README_EN 补 v2.5.26 callout（浓缩版设计保留，不全文翻）
+- ✅ 官网 gh-pages（worktree 操作，已提交 4b14fea，worktree 已删）：index.html 狐橙+墨绿→应用同款青系深色；功能格补深浅双主题；guide/ 四文档同步青系+暗色版
+- ✅ stylelint 引入：.stylelintrc.json（12 条防真错规则）+ `lint:css` 脚本；修 3 处重复选择器（rig-canvas 死块删除、mode-chip 合并、set-main section 合并）；复跑 0 issue
+- ✅ 最终部署（打包方式未变）：13 文件同步→pack→cp -f→重启，日志 0 error
+- ✅ 设置页浏览器视觉验收：标题统一无首字变色、导航/卡片布局正常（vision）
+- **未做（取舍留档）**：托盘图标主题感知（彩色狐狸图标深浅任务栏均可读，收益低）；Playwright 视觉回归（需下载浏览器~百MB，本机未验证网络，建议下次专门做）
+- **Mimosa 提示**：默认工作区 lazybag_v3/auto_train.py 等另有 54 高危（路径穿越/代码注入）旧账，与本项目无关，未动；用户需另处理
