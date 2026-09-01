@@ -699,7 +699,7 @@ ipcMain.handle("pet:regenerate", async () => { // Swipes：重新生成最后一
 ipcMain.handle("pet:set-theme", (_e, theme) => {
   const v = ["auto", "light", "dark", "system"].includes(theme) ? theme : "auto";
   config.saveConfig({ theme: v });
-  sendToRenderer("pet:theme-changed", v);
+  broadcastToRenderers("pet:theme-changed", v); // v2.5.26：全窗实时跟随
   return true;
 });
 ipcMain.handle("pet:reload-renderer", () => { // WebGL 上下文丢失等场景的渲染层自愈（60s 节流）
@@ -1385,6 +1385,14 @@ function setMode(m) {
 
 function sendToRenderer(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
+}
+
+/** 全窗广播（v2.5.26）：主题等全局状态变更送达所有窗口，辅助窗口实时跟随
+    （此前 sendToRenderer 只推主窗口，辅助窗口只能打开时跟随） */
+function broadcastToRenderers(channel, payload) {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send(channel, payload);
+  }
 }
 
 /** 主动类消息网关：桌宠隐藏到托盘时保持静默待命（不说话不出声）；

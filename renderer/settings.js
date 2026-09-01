@@ -267,13 +267,8 @@ async function toast(msg) {
     });
     if (window.petAPI.onThemeChanged) window.petAPI.onThemeChanged((th) => { applyThemeToPage(th); themeSel.value = th === "dark" || th === "light" ? th : "auto"; });
   }
-  function applyThemeToPage(theme) {
-    let dark;
-    if (theme === "dark") dark = true;
-    else if (theme === "light") dark = false;
-    else if (theme === "system") dark = !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
-    else dark = new Date().getHours() >= 19 || new Date().getHours() < 6; // auto：19 点-6 点
-    document.body.classList.toggle("theme-dark", dark);
+  function applyThemeToPage(theme) { // 规则唯一来源 renderer/theme.js（v2.5.26 收敛）
+    window.petTheme.apply(theme);
   }
 
   renderKeyStatuses();

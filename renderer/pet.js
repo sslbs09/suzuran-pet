@@ -178,13 +178,8 @@ function destroyLive2d() {
   if (canvas) canvas.classList.add("hidden");
 }
 
-function applyTheme(theme) { // 主题：auto=19 点-6 点深色
-  let dark;
-  if (theme === "dark") dark = true;
-  else if (theme === "light") dark = false;
-  else if (theme === "system") dark = !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
-  else dark = new Date().getHours() >= 19 || new Date().getHours() < 6; // auto：19 点-6 点
-  document.body.classList.toggle("theme-dark", dark);
+function applyTheme(theme) { // 规则唯一来源 renderer/theme.js（v2.5.26 收敛）
+  window.petTheme.apply(theme);
 }
 
 window.addEventListener("error", (e) => { // 渲染层全局错误上报（诊断基建）

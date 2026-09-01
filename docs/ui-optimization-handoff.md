@@ -211,3 +211,10 @@
 - ✅ backlog-4 退出动画：面板三件 `transition: opacity .12s + display allow-discrete`，旧内核自动回退硬切
 - ✅ backlog-2 毛玻璃：`backdrop-filter: blur(8px)` 渐进增强；面板不透明度 .96→.90/.93 配合
 - 待块 5 部署后 vision 验证毛玻璃不穿帮。
+
+### 块 2：主题逻辑收敛（tech-debt-1）
+- ✅ 新增 `renderer/theme.js`：`isDark(theme, now)`（now 可注入，纯函数可测）+ `apply` + `init`，UMD 双出口（浏览器 window.petTheme / Node module.exports）
+- ✅ 四份副本委托：pet.js applyTheme / docs.js applyTheme / settings.js applyThemeToPage / theme-init.js（瘦身为 `window.petTheme.init()`）
+- ✅ 11 个 HTML 挂 `<script src="theme.js">`（主窗口/文档/设置 + 8 辅助窗口在 theme-init 之前）
+- ✅ main.js 新增 `broadcastToRenderers()`，`pet:set-theme` 改全窗广播——辅助窗口**实时**跟主题（原仅打开时）
+- ✅ 新增 `tests/theme.test.js` 9 断言（dark/light 直通 + auto 18/19/5/6 点边界 + system 无 window 不抛错）；全量 23/23 绿；新文件 eslint 零警告

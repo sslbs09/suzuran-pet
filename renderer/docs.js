@@ -102,13 +102,8 @@ function mdToHtml(src) {
 /* ---------- 文档加载 ---------- */
 const $ = (id) => document.getElementById(id);
 
-async function applyTheme(theme) {
-  let dark;
-  if (theme === "dark") dark = true;
-  else if (theme === "light") dark = false;
-  else if (theme === "system") dark = !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
-  else dark = new Date().getHours() >= 19 || new Date().getHours() < 6; // auto：19 点-6 点
-  document.body.classList.toggle("theme-dark", dark);
+async function applyTheme(theme) { // 规则唯一来源 renderer/theme.js（v2.5.26 收敛）
+  window.petTheme.apply(theme);
 }
 
 async function init() {
