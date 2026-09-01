@@ -1887,6 +1887,9 @@ if (window.petAPI && window.petAPI.onProactive) {
     setMood(emotion || "idle");
     speak(text, emotion);
     scheduleBubbleHide(30000); // 主动消息显示 30s（用户反馈 15s 偏短）
+    // v2.5.25b 修复：说话后恢复行走/待机动画——与聊天回复(onDone)同款延迟回 idle。
+    // 此前主动搭话说完后情绪动画一直挂着，走路动作不再回来（用户反馈"说话时没走路动作"）
+    setTimeout(() => { if (!busy) setMood("idle"); }, 2600);
   });
 }
 
