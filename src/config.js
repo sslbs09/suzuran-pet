@@ -66,7 +66,7 @@ const DEFAULTS = {
     baseUrl: "https://api.deepseek.com/v1",
     model: "deepseek-chat",
     apiKey: "",                             // 朋友自己填（localhost 可留空，如 Ollama）
-    userName: "主人",                        // 桌宠对你的称呼（人设占位符 {{userName}}）
+    userName: "博士",                        // 桌宠对你的称呼（人设占位符 {{userName}}；v2.5.26 默认与 IP 设定/硬编码台词统一，可在设置改）
     temperature: 0.85,
     maxTokens: 800,
     maxHistoryTurns: 20,
@@ -307,7 +307,7 @@ function saveConfig(patch) {
 function fillTokens(text) {
   const cfg = getConfig();
   const petName = normalizePetName(cfg.pet && cfg.pet.name);
-  const userName = (cfg.chat && cfg.chat.userName) || "主人";
+  const userName = (cfg.chat && cfg.chat.userName) || "博士";
   return String(text || "")
     .replace(/\{\{\s*petName\s*\}\}/g, petName)
     .replace(/\{\{\s*userName\s*\}\}/g, userName)

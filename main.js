@@ -1431,7 +1431,7 @@ function todayMood() {
 }
 function chatVars() {
   const cfg = config.getConfig();
-  return { name: (cfg.pet && cfg.pet.name) || "苏苏洛", user: (cfg.chat && cfg.chat.userName) || "主人" };
+  return { name: (cfg.pet && cfg.pet.name) || "苏苏洛", user: (cfg.chat && cfg.chat.userName) || "博士" };
 }
 function buildChatPersona() {
   const base = personaCache || config.getPersonaText();

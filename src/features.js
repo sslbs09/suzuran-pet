@@ -124,7 +124,7 @@ function startProactive(sendFn, intervalMin = 8, stateFn = null) {
     }
     if (!prompt) {
       const cfg = config.getConfig();
-      const vars = { name: (cfg.pet && cfg.pet.name) || "苏苏洛", user: (cfg.chat && cfg.chat.userName) || "主人" };
+      const vars = { name: (cfg.pet && cfg.pet.name) || "苏苏洛", user: (cfg.chat && cfg.chat.userName) || "博士" };
       const h = new Date().getHours();
       // 清晨专属（5-8 点）
       if (h >= 5 && h < 8 && Math.random() < 0.25) prompt = lines.pickTpl(lines.EARLY_MORNING_LINES, vars);
