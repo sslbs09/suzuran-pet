@@ -226,3 +226,10 @@
 ### 块 4：schedule 导入预览弹窗焦点管理（a11y-debt）
 - ✅ 打开时记录 `document.activeElement` 并聚焦「取消」（安全默认）；关闭时焦点回还
 - ✅ 弹窗 keydown：Esc 关闭；Tab/Shift+Tab 在弹窗按钮间圈定（focus trap）
+
+### 块 5：部署验证（打包方式未变）
+- 同步 23 文件 → 停桌宠 → pack.sh → cp -f → 重启；tts.log 0 error
+- vision 验收深/浅：尾巴融合无断线、毛玻璃无黑块/穿帮、配色协调 ✅
+- 验证用 cdp-verify.js（动态取 CDP 目标版）已删；方法同检查点 3 留档
+- 桌宠已正常重启（无调试口）
+- CHANGELOG v2.5.26 段补二批内容
