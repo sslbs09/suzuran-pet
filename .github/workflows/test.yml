@@ -1,0 +1,54 @@
+# Node 单测 + Stylelint + Playwright 视觉回归（v2.5.26 新增）
+name: Test (unit + css + visual)
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: Node 单测（visual.spec 由 visual job 跑）
+        run: |
+          for f in tests/*.test.js; do
+            case "$f" in *visual*) continue;; esac
+            echo "== $f"
+            node "$f" || exit 1
+          done
+
+      - name: Stylelint
+        run: npm run lint:css
+
+  visual:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 安装 Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright 视觉回归
+        run: npm run test:visual

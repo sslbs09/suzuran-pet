@@ -324,3 +324,13 @@
 - ✅ **气泡长文排版**：#bubble-text 行高 1.6 + text-wrap:pretty + 字距 .01em
 - ✅ **托盘皮肤预览图**：detectSpineModels 补 png 字段（builtin+user），skinIconOf 缩略 20px 注入菜单 icon
 - 27 测试全绿；已部署重启日志干净
+
+### 块 18：工程类 + 另立/外部留档（用户：另立外部先别搞写文档）
+- ✅ eslint 8 警告清零：删未用 child_process require/translateToJa/clamp/easeOutCubic/listAppWindows；stopOutOfScreenGuard 保留配对 API 加 disable 注释
+- ✅ CI 补 `.github/workflows/test.yml`：unit（全 node 单测，排除 visual）+ stylelint + visual（playwright chromium）两 job，push/PR 触发
+- ✅ `.github/PULL_REQUEST_TEMPLATE.md`：改动类型/验收清单（含红线部署验证勾选项）
+- ✅ PROJECT-STRUCTURE.md 补新模块（theme.js/theme-init.js/translate-cache/walk-*/LINE_MOODS/visual.spec）
+- ⏸ **另立/外部留档（不碰，后续另开任务）**：
+  1. `lazybag_v3/auto_train.py`+`zip_auto_train.py` 54 高危（路径穿越/代码注入）——默认工作区另一项目，Mimosa 每次提交扫描都报；修法是标准加固（路径 sanitize/subprocess 列表化/zip 解压校验），需另开任务且要懂其业务
+  2. GitHub About/topics 描述优化——需 gh CLI 登录授权（本机未装 gh），或网页手改（建议文案：Q版狐狸医师桌面宠物 · 深浅双主题 · 任意 OpenAI 兼容 API · 本地语音克隆 · Spine/Live2D/GIF 多形态）
+  3. ag-psd 懒加载——评估不值（defer 已非阻塞）

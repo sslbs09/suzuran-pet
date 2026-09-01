@@ -8,14 +8,14 @@
 | 路径 | 说明 |
 | --- | --- |
 | `main.js` / `preload.js` | 主进程与 preload 桥（IPC 安全暴露，含 `appVersion`） |
-| `src/` | 业务模块：config / chat-client / tts-manager / memory / bond / features（主动搭话·语音输入·日程）/ lines（台词库）/ ja-translate / schedules / tray-menu / router（zcode 任务）/ history / secrets / storage / file-guard / logger / utils / credential-import |
-| `renderer/` | 页面与运行库：index.html + pet.js（主窗口）、settings / moods / psd / voice / schedule / addchar / terms；`rig/`（2.5D 装配 rigger.js + genericparts.js）、`rig-runtime.js`、`sprites/`（表情 GIF：default 默认 / user 用户覆盖）、`spine/`（Spine 模型） |
+| `src/` | 业务模块：config / chat-client / tts-manager / memory / bond / features（主动搭话·语音输入·日程）/ lines（台词库+LINE_MOODS 情绪映射）/ ja-translate / translate-cache（翻译磁盘缓存）/ schedules / tray-menu / router（zcode 任务）/ history / secrets / storage / file-guard / logger / utils（stripStage 等）/ walk-core / walk-geo（行走纯函数）/ proactive-topic / render-mode / credential-import |
+| `renderer/` | 页面与运行库：index.html + pet.js（主窗口）、settings / moods / psd / voice / schedule / addchar / terms；**theme.js（主题唯一规则源）+ theme-init.js（辅助窗口引导）**；`rig/`（2.5D 装配 rigger.js + genericparts.js）、`rig-runtime.js`、`sprites/`（表情 GIF：default 默认 / user 用户覆盖）、`spine/`（Spine 模型） |
 | `新手教程/` | 小白教程合集（**应用内文档中心读取此目录**，唯一生效来源；同步仓库根与正式版目录） |
 | `docs/` | 公开文档：`assets/`（README 配图）、`persona-template.md`；**内部交接/账本/测试报告在 `docs/internal/`（已移出公开仓库，本地保留，git 忽略）** |
 | `voice-ref/` | 情绪音色参考音频：`ref_<情绪>.trim.wav`（GSV 参考）+ `.mp3`（原始）+ `.txt`（转写原文），配 `voice-refs.json`（五档：撒娇/傲娇/惊讶/温柔/开心） |
 | `outputs/` | 对外输出物：情绪试听音频（v1/v2） |
 | `scripts/` | 工具脚本：stt_whisper.py（转写）、cosy_tts.py、gen-icon 等 |
-| `tests/` | Node 测试（flight-physics.test.js 等） |
+| `tests/` | Node 测试（flight-physics.test.js 等）+ **visual.spec.js（Playwright 视觉回归，`npm run test:visual`）** |
 | `语音部署与训练指南/` | 语音方案部署/训练手册（含 genie_tts_server.py 与示例） |
 | `_backups/` | **统一备份目录**（见下） |
 | `data/` | 运行期数据（git 忽略） |

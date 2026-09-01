@@ -11,7 +11,6 @@ const { app, protocol, safeStorage, BrowserWindow, Tray, Menu, ipcMain, shell, n
 // 此前与下方按 softRender 配置的判断冲突，导致设置页「软件渲染」开关形同虚设。
 // 硬件加速默认开启（Spine/PIXI 性能更好）；若遇 GPU 崩溃，用户在设置开启 softRender 即回退 CPU 渲染。
 protocol.registerSchemesAsPrivileged([{ scheme: "pet-user", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
-const { spawn, exec, execFile } = require("child_process");
 const http = require("http");
 const crypto = require("crypto");
 const path = require("path");
@@ -54,13 +53,12 @@ const schedules = require("./src/schedules");
 const i18n = require("./src/i18n");
 const features = require("./src/features");
 const { logTts } = require("./src/logger");
-const { translateToJa } = require("./src/ja-translate");
 const { buildTrayItems } = require("./src/tray-menu");
 const fileGuard = require("./src/file-guard");
 const lines = require("./src/lines");
 const memory = require("./src/memory");
 const bond = require("./src/bond");
-const { randInt, clamp, easeOutCubic, easeImpact, clampScale, runPowerShell } = require("./src/utils");
+const { randInt, easeImpact, clampScale, runPowerShell } = require("./src/utils");
 const walkGeo = require("./src/walk-geo"); // 行走几何纯函数（2026-08-27 收敛）
 const walkCore = require("./src/walk-core");
 const { createAskQueue } = require("./src/ask-queue"); // /chat 串行化并发锁（2026-08-27 提取，可单测）
@@ -347,6 +345,7 @@ function startOutOfScreenGuard() {
     try { outOfScreenGuard(); } catch { /* 忽略 */ }
   }, 2000);
 }
+// eslint-disable-next-line no-unused-vars -- 与 startOutOfScreenGuard 配对的停止 API，预留给设置页/托盘入口
 function stopOutOfScreenGuard() {
   if (outOfScreenTimer) { clearInterval(outOfScreenTimer); outOfScreenTimer = null; }
 }
@@ -3003,12 +3002,6 @@ function invalidatePerchIfNeeded() {
   walkBroadcast();
   logTts("walk", "窗口屏障失效，返回地面");
 }
-
-/** 兼容旧调用方：窗口候选由屏障缓存提供。 */
-async function listAppWindows() {
-  return barrierRects().map((r) => ({ x: r.x, y: r.top, w: r.w, h: r.h, right: r.right, title: r.title, hwnd: r.hwnd }));
-}
-
 
 /* ---------- 桌面图标感知（需 features.desktopIcons 授权，默认关） ----------
  * 只读桌面图标的屏幕坐标（Win32 SysListView32 + ReadProcessMemory，不读内容、不上传），
