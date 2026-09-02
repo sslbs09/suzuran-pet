@@ -27,6 +27,14 @@ function verticalClampDecision({ y, groundY, seated, resting, transient, downTol
   return null;
 }
 
+/** 坐姿窗口尺寸变化重锚决策（TD-1 悬空坐）。返回 true = 应立即 applySeatPosition 重锚窗口底。
+ *  气泡开/关（pet:set-size）改变窗口高度时窗口顶不动、底边随动，坐姿脚底随之偏离任务栏沿口，
+ *  且放大暂停（zoomPaused）期间 5s 自愈不跑——必须随尺寸变化即时重锚。
+ *  仅坐姿生效：站姿/自由放置归相位机管，拖拽/飞行/跳跃/跳窗顶不能拽，避免把窗口拉离用户摆放位置。 */
+function seatReanchorOnResizeDecision({ seated, perched, dragPaused, flight, jump }) {
+  return !!seated && !perched && !dragPaused && !flight && !jump;
+}
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { edgeFlipDecision, verticalClampDecision };
+  module.exports = { edgeFlipDecision, verticalClampDecision, seatReanchorOnResizeDecision };
 }

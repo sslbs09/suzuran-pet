@@ -3013,6 +3013,16 @@ function enterRestPose() {
   applySeatPosition();
 }
 
+/** 坐姿窗口尺寸变化重锚（TD-1 winter 悬空坐）：气泡开/关走 pet:set-size 改变窗口高度，
+ *  窗口顶不动、底边随动，clamp 后坐姿脚底偏离任务栏沿口；且放大暂停（zoomPaused）期间
+ *  walkTick 的 5s 坐姿自愈不跑——悬空一直持续到气泡关闭/起身。凡坐姿中的尺寸变化都立即重锚。
+ *  判定抽到 walk-state 纯函数（v2.5.26 收敛①惯例），副作用留主干。 */
+function reseatAfterWindowSizeChange() {
+  if (!win || win.isDestroyed() || config.getConfig().renderMode !== "spine") return;
+  if (!walkState.seatReanchorOnResizeDecision({ seated: walk.seated, perched: walk.perched, dragPaused: walk.dragPaused, flight: walk.flight, jump: walk.jump })) return;
+  applySeatPosition();
+}
+
 function chooseWalkBehavior() {
   // v2.5.26：跳窗顶概率设置页可调（walkPerchPct，0=不跳，默认 8%）
   return walkCore.behaviorOf({ now: Date.now(), lastPerchEnd: walk._lastPerchEnd, weights: { idle: 0.45, walk: 0.40, perch: perchPctOf() / 100 } });
@@ -4093,9 +4103,11 @@ ipcMain.on("pet:set-size", (_e, w, h) => {
   // resizable:false 时 setSize 缩小会被忽略（放大接近原值看不出），先临时允许缩放
   try { if (!win.isResizable()) win.setResizable(true); } catch { /* 忽略 */ }
   win.setSize(ws, hs);
+  reseatAfterWindowSizeChange(); // TD-1：气泡开/关改窗口高后窗口底随动，坐姿立即重锚回任务栏沿口
   setTimeout(() => {
     try { win.setResizable(false); } catch { /* 忽略 */ }
     clampPetToWorkArea("窗口尺寸");
+    reseatAfterWindowSizeChange(); // clamp 可能又挪了 y，补一次重锚
   }, 150);
 });
 ipcMain.handle("pet:tts-clone", (_e, text, opts) => {
