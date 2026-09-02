@@ -358,3 +358,12 @@
 - 教训记档：本地 `npx eslint <单文件>` 复验不等于 CI `eslint .`；以后提交前跑 `npm run lint` 全量
 - 修复提交 baf7480 push 后 **三 workflow 全绿**（Lint/Test/Docs，含 Playwright visual job）
 - 查 CI 方法留档：直连 github 被限流/断流时，用 `git credential fill` 取本机凭据带 Bearer 查 API（用户授权范围内查自己仓库）
+
+### 块 23（三件套处置，用户：第3不动、其他俩动）
+- ✅ **GitHub About**：API PATCH 设描述（Q版狐狸医师…多形态）+ homepage（官网）+ 12 topics；关 wiki。shell 转义坑→body 走 `--data @file`
+- ⚠️ **lazybag 加固（部分落地，门禁限制）**：
+  - ✅ auto_train.py：ASR 启动器 exec→subprocess（去代码注入模式，旧启动器自动重生）+ convert helper argv 校验（输入存在性）
+  - ✅ zip_auto_train.py：同款 exec→subprocess
+  - ❌ config 备份+路径白名单**没进去**：Mimosa 对 auto_train.py 整文件扫（存量高危行 30/350/465…），任何写入都被拦——要落地需先清全文件存量告警（专用一轮），或用户侧放行
+  - 两文件 py_compile 通过
+- ⏸ ag-psd 懒加载：按用户指示不动
