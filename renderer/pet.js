@@ -516,8 +516,12 @@ function ensureAnimClasses() {
   return out;
 }
 
-// 情绪 → Spine 动画名映射（Spine 模型中的动画名可能不同于 GIF 名）
+// 情绪 → Spine 动画名映射（Spine 模型中的动画名可能不同于 GIF 名）。
+// 坐下系动画（Sit/sit/cls.sit）只在行走坐姿/窗顶状态下可用——
+// 否则"思考"等情绪会在站立窗口上播坐姿，下半身超出画布被任务栏切掉（"半条腿不见"）
+function isSitClassAnim(name) { return /(^|[^a-z])sit/i.test(String(name || "")); }
 function spineAnimForMood(mood) {
+  const seatedNow = walkState.seated || walkState.perched;
   // 尝试精确匹配
   if (spineObj && spineObj.spineData.animations.find(a => a.name === mood)) return mood;
   // 动画名自动分类兜底（未知模型）：按归类结果直接选
@@ -526,7 +530,7 @@ function spineAnimForMood(mood) {
     if (mood === "idle" && cls.idle && cls.idle[0]) return cls.idle[0];
     if ((mood === "sleep") && cls.sleep && cls.sleep[0]) return cls.sleep[0];
     if ((mood === "wave" || mood === "surprised") && cls.interact && cls.interact[0]) return cls.interact[0];
-    if ((mood === "think") && cls.sit && cls.sit[0]) return cls.sit[0];
+    if ((mood === "think") && seatedNow && cls.sit && cls.sit[0]) return cls.sit[0];
     if (cls.idle && cls.idle[0]) return cls.idle[0];
   }
   // 常见映射（明日方舟基建模型只有 Relax/Move/Interact，情绪统一回退 Relax）
@@ -539,7 +543,7 @@ function spineAnimForMood(mood) {
     angry: ["angry", "Angry", "Relax"],
     surprised: ["surprise", "Surprised", "Interact"],
   };
-  const candidates = map[mood] || [mood];
+  const candidates = (map[mood] || [mood]).filter((c) => seatedNow || !isSitClassAnim(c));
   for (const c of candidates) {
     if (spineObj && spineObj.spineData.animations.find(a => a.name === c)) return c;
   }
@@ -2119,6 +2123,19 @@ setInterval(() => {
   const target = moving ? 60 : (isSleeping ? 12 : 24);
   if (spineApp.ticker.maxFPS !== target) spineApp.ticker.maxFPS = target;
 }, 4000);
+
+/* ---------- 动画轨道看门狗（v2.5.27）：一次性动画播完没接上循环 → track0 空 → 定格 ----------
+ * 6s 低频巡检：非聊天/非睡眠/非试演时若轨道无正在播放的动画，按当前相位补回循环动画。
+ * 自愈所有"站着没有动画"的冻结路径（试演结束、poke 竞态、clearTrack 后无续播等）。 */
+setInterval(() => {
+  if (!spineObj || renderMode !== "spine" || busy || isSleeping) return;
+  if (Date.now() < animDemoUntil) return;
+  let cur = null;
+  try { cur = spineObj.state.getCurrent(0); } catch { return; }
+  if (cur && cur.animation) return; // 轨道有动画在播（含循环）
+  const next = spinePhaseAnim() || sitAnimName() || spineAnimForMood("idle");
+  if (next) { setSpineAnim(next, true); scheduleFitSpine(); }
+}, 6000);
 
 // 条款未同意：提示气泡并保持不可用
 window.petAPI.onTermsPending(() => {
