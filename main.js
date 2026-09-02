@@ -63,6 +63,7 @@ const walkGeo = require("./src/walk-geo"); // 行走几何纯函数（2026-08-27
 const walkState = require("./src/walk-state"); // 行走几何决策纯函数（v2.5.26 收敛①）
 const focusWatch = require("./src/focus-watch"); // 专注/离开状态机纯函数（v2.5.26 收敛②）
 const updater = require("./src/updater"); // asar-swap 自动更新（v2.5.26 ③）
+const weather = require("./src/weather"); // 免费天气 Open-Meteo（v2.5.26）
 const walkCore = require("./src/walk-core");
 const { createAskQueue } = require("./src/ask-queue"); // /chat 串行化并发锁（2026-08-27 提取，可单测）
 const { createDebounceBuffer } = require("./src/message-buffer"); // 消息生成防抖缓冲（2026-08-27 提取，可单测）
@@ -1438,6 +1439,38 @@ function startFocusWatch() {
     } catch { /* 忽略 */ }
   }, 15000);
 }
+
+// 天气（v2.5.26，Open-Meteo 免 key）：30min 拉一次；偶尔主动播报；信息版可查
+let lastWeather = null;
+let _weatherLastSay = 0;
+function startWeatherWatch() {
+  const tick = async () => {
+    try {
+      const w = config.getConfig().weather || {};
+      if (w.enabled === false || !w.city) return;
+      const data = await weather.fetchWeather(w.city);
+      if (!data) return;
+      const changed = !lastWeather || lastWeather.desc !== data.desc || lastWeather.temp !== data.temp;
+      lastWeather = data;
+      // 天气变化且非离开/专注时，低概率主动播报（4h 内不重复同类）
+      if (changed && !awaySince && isWindowVisible() && Date.now() - _weatherLastSay > 4 * 3600 * 1000 && Math.random() < 0.5) {
+        const cat = weather.moodCat(data);
+        const pool = lines.WEATHER_LINES[cat] || lines.WEATHER_LINES.cloudy;
+        if (pool && pool.length) { _weatherLastSay = Date.now(); sendProactive(lines.pickTpl(pool, chatVars()), "温柔"); }
+      }
+    } catch { /* 忽略 */ }
+  };
+  tick();
+  setInterval(tick, 30 * 60 * 1000); // 半小时一次
+}
+ipcMain.handle("pet:get-weather", () => lastWeather);
+ipcMain.handle("pet:get-weather-cfg", () => { const w = config.getConfig().weather || {}; return { enabled: w.enabled !== false, city: w.city || "" }; });
+ipcMain.handle("pet:set-weather", (_e, patch) => {
+  patch = patch || {};
+  const cur = config.getConfig().weather || {};
+  config.saveConfig({ weather: { enabled: patch.enabled !== false, city: String(patch.city != null ? patch.city : cur.city || "") } });
+  return { enabled: patch.enabled !== false, city: String(patch.city != null ? patch.city : cur.city || "") };
+});
 
 function sendProactive(text, emotion, { force = false } = {}) {
   if (!force && !isWindowVisible()) return;
@@ -4114,6 +4147,7 @@ if (!gotLock) {
     // 翻译 API 挂了也能说出日语（"说不出来"根治）
     features.startJaPrewarm();
     startFocusWatch(); // 专注/离开模式（v2.5.26）
+    startWeatherWatch(); // 天气监听（v2.5.26）
 
     // 感知工作区活动（v2.5.3，默认关）：她会在你改代码时小声嘀咕（只读监听）
     if (_cfg.features && _cfg.features.workspaceWatch && _cfg.features.workspaceWatch.enabled) {

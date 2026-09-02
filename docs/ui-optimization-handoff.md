@@ -427,4 +427,12 @@
 - ✅ 修：钳回后若 walk.dir<0 强制折返向右（walk.dir=1+walkUpdateFace），左缘不再原地走
 - 站立微调滑杆默认 0=不改变现状，需用户真机拖滑杆调到自己皮肤合适值（负=抬高）；"感觉没变化"是因默认 0
 - 已部署重启
+
+### 块 33（用户：做天气，免费半小时一次；写进新手文档；优化天气台词库）
+- 选型 **Open-Meteo**：免 API key、非商业免费、~1万/天；半小时一次=48/天，一个月零成本。地理编码用内置城市表免请求（代理挡 geocoding）
+- `src/weather.js`：resolveLoc/codeInfo/fetchWeather(30min 缓存)/moodCat；14 断言单测
+- `src/lines.js` WEATHER_LINES：sunny/cloudy/overcast/fog/rain/snow/thunder/hot/cold/windy 十池带情绪细标
+- main.js：startWeatherWatch(30min)+主动天气播报(4h 同类不重复、尊重离开/专注)+IPC get/set-weather；设置页「🌤 天气」开关+城市+当前天气；信息版天气行；三语 i18n
+- 新手教程/快速开始.md 加「看天气」小节
+- 31 测试全绿；已部署重启
 - ⏸ ag-psd 懒加载：按用户指示不动

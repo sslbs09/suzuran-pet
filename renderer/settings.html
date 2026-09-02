@@ -35,6 +35,7 @@
       <a href="#sec-other" data-i18n="set.nav.other">⚙ 系统与界面</a>
       <a href="#sec-agent" data-i18n="set.nav.agent">🤝 Agent 接口</a>
       <a href="#sec-sense" data-i18n="set.nav.sense">👀 感知与监控</a>
+      <a href="#sec-weather" data-i18n="set.nav.weather">🌤 天气</a>
       <a href="#sec-security" data-i18n="set.nav.security">🔐 密钥与凭据</a>
     </nav>
   </aside>
@@ -561,6 +562,21 @@
       <label class="col"><input id="feat-sysmon" type="checkbox" /><span data-i18n="set.featSysmon">📊 系统监控播报（CPU/内存异常时提醒）</span></label>
       <label class="col"><input id="focus-mode" type="checkbox" /><span data-i18n="set.focusMode">🎯 专注/离开模式（检测到你离开/长时间无操作时安静不打扰，回来打招呼）</span></label>
       <label class="col"><input id="file-guard" type="checkbox" /><span>🛡️ 蜜标监控：检测其他程序访问我的敏感配置区域（配置/密钥/历史文件），发现即提醒（普通权限下无法显示具体进程名）</span></label>
+    </div>
+  </section>
+  <!-- ============ 4.5 天气（v2.5.26，Open-Meteo 免 key 免费） ============ -->
+  <section id="sec-weather">
+    <h2 data-i18n="set.weatherTitle">🌤 天气（免费·无需密钥·半小时自动刷新）</h2>
+    <div class="row">
+      <label class="col switch-row">
+        <span data-i18n="set.weatherOn">开启天气（她会偶尔播报天气、信息版显示）</span>
+        <label class="switch"><input type="checkbox" id="weather-on" /><span class="slider"></span></label>
+      </label>
+      <label class="col">
+        <span data-i18n="set.weatherCity">城市（内置：北京/上海/广州/深圳/成都/杭州等；或直接填 纬度,经度）</span>
+        <input id="weather-city" type="text" placeholder="上海" />
+      </label>
+      <span id="weather-now" class="result" style="align-self:center;"></span>
     </div>
   </section>
   <!-- ============ 5. 密钥与凭据安全 ============ -->

@@ -1917,6 +1917,7 @@ window.petAPI.onRateChanged((v) => {
 const infoPanel = document.getElementById("info-panel");
 const infoCompanion = document.getElementById("info-companion");
 const infoSchedules = document.getElementById("info-schedules");
+const infoWeather = document.getElementById("info-weather");
 function formatCompanion(firstRunAt) {
   if (!firstRunAt) return "第一天陪伴 ~";
   const days = Math.max(0, Math.floor((Date.now() - firstRunAt) / 86400000));
@@ -1929,6 +1930,14 @@ async function openInfoPanel() {
   try {
     const info = await window.petAPI.getInfo();
     if (infoCompanion) infoCompanion.textContent = formatCompanion(info && info.firstRunAt);
+    // 天气行（v2.5.26）：开启且有数据时显示
+    if (infoWeather) {
+      try {
+        const w = await window.petAPI.getWeather();
+        if (w) { infoWeather.style.display = ""; infoWeather.textContent = `🌤 ${w.desc} ${w.temp}°C · 湿${w.humidity}% · 风${w.wind}km/h`; }
+        else infoWeather.style.display = "none";
+      } catch { infoWeather.style.display = "none"; }
+    }
     if (infoSchedules) {
       const list = (info && info.today) || [];
       infoSchedules.innerHTML = "";
