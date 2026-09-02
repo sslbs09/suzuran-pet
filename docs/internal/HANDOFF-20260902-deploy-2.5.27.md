@@ -79,6 +79,31 @@
   无异常日志。待用户实抛复验（若该皮肤 sit 系动画本身是"半站"姿态，观感仍偏沉，
   可在设置页把「坐姿下沉量」滑杆调小或归零，或告诉我动画名再收紧匹配）。
 
+## 五点六、追加：落地站陷第二层根因 + 固定台词离线模式（6b1652c，已部署）
+
+- 用户复测反馈：c797f13 后"还是会有，再点击一下就没了"。
+- 第二层根因（渲染层动画恢复链）：抛掷落地广播 seated=true 后，`onDropped → playSpineInteract()`
+  播完 Interact 用 `spinePhaseAnim()` 恢复动画——该函数此前只认 perched 不认 seated，
+  坐着时返回 `spineAnimForMood("idle")`（Relax 站姿），而窗口仍在坐姿下沉位 → 脚陷；
+  点击触发 walkingPause 广播 → applyWalkState 坐姿分支重新播 sit → "点一下才好"。
+- 修复：`spinePhaseAnim()` 增加 `walkState.seated || walkState.perched` 分支走 sitAnimName，
+  所有恢复路径（onDropped/poke/情绪回落）坐着时统一回到坐姿。
+- 新功能「固定台词离线模式」（用户诉求：想听固定台词但不想跑翻译/合成引擎、释放显存）：
+  - 设置页语音区新增开关（`tts-fixed-only`）→ `pet:set-fixed-only` IPC；
+  - 开启：保存 `tts.fixedOnly=true`，并立即停本地 Genie/GSV 引擎（shutdownGenieServer +
+    killGsvProcesses + killPortListener 9880/9881，与退出清理同链路）释放显存；
+    关闭：按当前配置重新 ensureGenieServer/ensureGsvServer+warmupGsv（与启动预热同分支）；
+  - 说话链路（tts-manager.ttsCloneImpl）：内存缓存 → **固定台词磁盘缓存（30 天）**命中即播；
+    离线模式下未缓存不再调用引擎合成，直接返回空 → 渲染层回退系统语音（文本照常显示）；
+  - 离线模式下禁用：日语翻译预热（features.startJaPrewarm 直接 return）、固定台词预加载
+    （fixed-line-preloader.start 返回 FIXED_ONLY_ON，设置页提示先关离线模式）；
+  - 预期用法：引擎开着 → 设置页「固定台词音频池」点开始预加载跑全量 → 开离线模式释放显存
+    → 固定台词照常播，聊天回复用系统语音念（或按现有回退链）。
+- 验证：40/40 测试通过；pack.sh 部署 app.asar 188,089,046B；新会话 5 进程、GSV 预热完成、
+  行走正常。日志中 `[ja] 翻译异常 timeout` 为翻译 API 偶发网络超时（既有行为，非本次引入）。
+- 待用户复验：① 抛掷落地稳定后是否还陷脚（现在应自动回坐姿，无需点击）；
+  ② 离线模式开关往返（显存释放/恢复、缓存台词照常播）。
+
 ## 六、回退方法（如新版异常）
 
 ```text
