@@ -1413,7 +1413,12 @@ function sendScheduleDue(item) {
   sendProactive(text, mood, { force: true });
   sendToRenderer("pet:schedule-due", item);
   if (!isWindowVisible() && Notification.isSupported()) {
-    new Notification({ title: "苏苏洛桌宠日程提醒", body: item.title + (item.notes ? "\n" + item.notes : "") }).show();
+    const n = new Notification({ title: "苏苏洛桌宠日程提醒", body: item.title + (item.notes ? "\n" + item.notes : "") });
+    n.on("click", () => { // 通知点击联动（v2.5.26）：置前+显示桌宠
+      try { if (win && !win.isDestroyed()) { if (!win.isVisible()) win.show(); win.focus(); win.moveTop(); } } catch { /* 忽略 */ }
+      sendToRenderer("pet:schedule-due", item);
+    });
+    n.show();
   }
   logTts("schedule", "触发: " + item.id + " " + item.title);
 }
