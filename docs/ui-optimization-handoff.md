@@ -351,3 +351,10 @@
 - ✅ visual.spec 改 fullPage 整页存档；vision 长图误报「perch 滑杆缺失」→ **Playwright DOM 断言复核：perch 滑杆存在且可见、感知区三复选框 flex-start 顶对齐**（DOM 断言比长图 vision 可靠，记方法论）
 - ✅ 硬编码色残扫：settings.css 剩余 #b45309/#c8ccd0/#ecd8b9 等均有深色覆盖，无漏网
 - 临时自检脚本已删；提交 push
+
+### 块 22（早晨用户报 CI 红 → 修复转绿）
+- **红因 1（ESLint）**：i18n 三语块 `tray.sitTaskbar` 重复键（块 20 加托盘 i18n 时与既有 📍 版键撞车，no-dupe-keys 3 error）→ 删我加的 🪑 重复键，保留原 📍 版
+- **红因 2（Stylelint）**：settings.css 滑杆自绘规则与旧 accent-color 行选择器完全重复（no-duplicate-selectors）→ 合并为一行（width:100% 保留）
+- 教训记档：本地 `npx eslint <单文件>` 复验不等于 CI `eslint .`；以后提交前跑 `npm run lint` 全量
+- 修复提交 baf7480 push 后 **三 workflow 全绿**（Lint/Test/Docs，含 Playwright visual job）
+- 查 CI 方法留档：直连 github 被限流/断流时，用 `git credential fill` 取本机凭据带 Bearer 查 API（用户授权范围内查自己仓库）
