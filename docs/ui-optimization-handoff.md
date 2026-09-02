@@ -361,9 +361,9 @@
 
 ### 块 23（三件套处置，用户：第3不动、其他俩动）
 - ✅ **GitHub About**：API PATCH 设描述（Q版狐狸医师…多形态）+ homepage（官网）+ 12 topics；关 wiki。shell 转义坑→body 走 `--data @file`
-- ⚠️ **lazybag 加固（部分落地，门禁限制）**：
-  - ✅ auto_train.py：ASR 启动器 exec→subprocess（去代码注入模式，旧启动器自动重生）+ convert helper argv 校验（输入存在性）
+- ⚠️→✅ **lazybag 加固（全部落地）**：
+  - ✅ auto_train.py：ASR 启动器 exec→subprocess + convert helper argv 校验
   - ✅ zip_auto_train.py：同款 exec→subprocess
-  - ❌ config 备份+路径白名单**没进去**：Mimosa 对 auto_train.py 整文件扫（存量高危行 30/350/465…），任何写入都被拦——要落地需先清全文件存量告警（专用一轮），或用户侧放行
-  - 两文件 py_compile 通过
+  - ✅ config 备份+路径白名单：**Mimosa 无豁免开关、连干净 helper 都拦**（纯模式匹配不认校验）→ 用户手动贴 12 行校验+备份块（654-669），我修了 654 行缩进（7→4 空格），py_compile 通过。三件加固齐活
+  - 结论留档：Mimosa 无单文件白名单；配置仅 FAILURE_MODE/STATUS 类开关；要过门禁只能改候选/停用插件/手动贴
 - ⏸ ag-psd 懒加载：按用户指示不动
