@@ -419,12 +419,19 @@
       </div>
       <div id="fixed-lines-summary" class="fixed-lines-summary">已加载 0 / 0 · 失败 0 · 缓存 0 B</div>
       <div class="fixed-lines-progress"><span id="fixed-lines-progress-bar"></span></div>
+      <div class="fixed-lines-pools" id="fixed-lines-pools">
+        <span class="fixed-lines-pools-title">预加载范围：</span>
+        <span id="fixed-lines-pools-box" class="fixed-lines-pools-box"></span>
+        <button id="btn-fixed-lines-pools-all" type="button" class="mini">全选</button>
+        <button id="btn-fixed-lines-pools-common" type="button" class="mini">常用</button>
+      </div>
       <p class="hint">只生成当前语音方案，缓存保留 30 天；云端语音可能产生 API 费用。系统语音无需预加载。</p>
       <div class="actions">
         <button id="btn-fixed-lines-start" type="button" class="primary">▶ 开始/继续预加载</button>
         <button id="btn-fixed-lines-retry" type="button">↻ 重试失败</button>
         <button id="btn-fixed-lines-cancel" type="button">暂停</button>
         <button id="btn-fixed-lines-clear" type="button" class="danger">清空当前缓存</button>
+        <button id="btn-fixed-lines-clear-old" type="button">清理旧版本缓存</button>
         <button id="btn-fixed-lines-toggle" type="button">显示未加载/失败</button>
         <span id="fixed-lines-result" class="result"></span>
       </div>

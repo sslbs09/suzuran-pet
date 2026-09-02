@@ -15,13 +15,16 @@ function cancel() {
   return true;
 }
 
-async function start({ config, vars = {}, retryFailed = false, onProgress = () => {} }) {
+async function start({ config, vars = {}, retryFailed = false, pools = null, onProgress = () => {} }) {
   if (active) return { ok: false, code: "ALREADY_RUNNING" };
   if ((config.tts || {}).fixedOnly) return { ok: false, code: "FIXED_ONLY_ON", message: "固定台词离线模式开启中（引擎已停），请先关闭离线模式再预加载" };
   const profile = fixedCache.profileFromConfig(config || {});
   if (profile.engine === "system") return { ok: false, code: "SYSTEM_NOT_PRELOADABLE", message: "系统语音由操作系统实时合成，无需预加载" };
   const initial = fixedCache.load(profile, vars);
-  const queue = initial.items.filter((item) => item.state === "pending" || (retryFailed && item.state === "failed"));
+  const poolSet = Array.isArray(pools) && pools.length ? new Set(pools.map(String)) : null;
+  const queue = initial.items.filter((item) =>
+    (item.state === "pending" || (retryFailed && item.state === "failed")) &&
+    (!poolSet || poolSet.has(item.pool)));
   active = { cancelled: false, profile };
   let completed = initial.summary.ready;
   let failed = retryFailed ? 0 : initial.summary.failed;

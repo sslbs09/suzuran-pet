@@ -3,7 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const storage = require("./storage");
-const { buildManifest, cacheKey, summarize, voiceFingerprint } = require("./fixed-lines");
+const { buildManifest, findItem, cacheKey, summarize, voiceFingerprint } = require("./fixed-lines");
 
 const ROOT = path.resolve(storage.PATHS.audio, "fixed-lines");
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -124,20 +124,44 @@ function clear(profile) {
   return true;
 }
 
-function readAudio(profile, item) {
-  if (!item || !item.id) return null;
+/** 按条目 id 直读缓存音频（lineId 透传路径，最快命中） */
+function readAudioById(profile, id) {
+  let itemId;
+  try { itemId = safeId(id); } catch { return null; }
   const paths = pathsFor(profile);
   const disk = readJson(paths.manifest) || {};
-  const record = disk.items && disk.items[cacheKey(item, profile)];
-  if (!record || record.state !== "ready" || record.audioFile !== safeId(item.id) + ".audio") return null;
+  const record = disk.items && disk.items[`${paths.fingerprint}:${itemId}`];
+  if (!record || record.state !== "ready" || record.audioFile !== itemId + ".audio") return null;
   if (Date.now() - (Number(record.updatedAt) || 0) > CACHE_TTL_MS) return null;
-  try { return fs.readFileSync(audioPath(paths.dir, item.id)); } catch { return null; }
+  try { return fs.readFileSync(audioPath(paths.dir, itemId)); } catch { return null; }
+}
+
+function readAudio(profile, item) {
+  if (!item || !item.id) return null;
+  return readAudioById(profile, item.id);
 }
 
 function findCachedAudio(profile, text, emotion, vars = {}) {
-  const expected = String(emotion || "idle");
-  const item = buildManifest(vars).find((candidate) => candidate.text === String(text || "") && candidate.emotion === expected);
-  return item ? readAudio(profile, item) : null;
+  const item = findItem(vars, text, emotion);
+  return item ? readAudioById(profile, item.id) : null;
 }
 
-module.exports = { CACHE_TTL_MS, ROOT, profileFromConfig, pathsFor, load, saveItem, markFailed, clear, readAudio, findCachedAudio };
+/** 列出全部缓存指纹目录（16 位 hex 白名单，防误删无关目录） */
+function listFingerprints() {
+  try {
+    return fs.readdirSync(ROOT).filter((d) => /^[a-f0-9]{16}$/i.test(d) && fs.statSync(path.join(ROOT, d)).isDirectory());
+  } catch { return []; }
+}
+
+/** 清理非当前语音方案的旧版本缓存目录（换音色/语言后的历史包），返回删除数 */
+function clearOldFingerprints(keepFingerprint) {
+  const keep = safeFingerprint(keepFingerprint);
+  let removed = 0;
+  for (const fp of listFingerprints()) {
+    if (fp === keep) continue;
+    try { fs.rmSync(insideRoot(ROOT, fp), { recursive: true, force: true }); removed++; } catch { /* 占用中跳过 */ }
+  }
+  return removed;
+}
+
+module.exports = { CACHE_TTL_MS, ROOT, profileFromConfig, pathsFor, load, saveItem, markFailed, clear, readAudio, readAudioById, findCachedAudio, listFingerprints, clearOldFingerprints };

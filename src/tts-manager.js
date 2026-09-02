@@ -108,12 +108,15 @@ async function ttsCloneImpl(text, opts, jobId) {
   }
   if (!(opts && opts.fixedLinePreload)) {
     const profile = fixedLineCache.profileFromConfig(config.getConfig());
-    const diskHit = fixedLineCache.findCachedAudio(profile, text, opts && (opts.emotion || opts.emo), {
-      name: (config.getConfig().pet || {}).name,
-      user: (config.getConfig().chat || {}).userName
-    });
+    // lineId 直查优先（sendProactive 透传，零文本匹配）；无 ID 时回退文本+情绪匹配
+    const diskHit = (opts && opts.lineId)
+      ? fixedLineCache.readAudioById(profile, opts.lineId)
+      : fixedLineCache.findCachedAudio(profile, text, opts && (opts.emotion || opts.emo), {
+          name: (config.getConfig().pet || {}).name,
+          user: (config.getConfig().chat || {}).userName
+        });
     if (diskHit && diskHit.length) {
-      logTts("route", "固定台词磁盘缓存命中");
+      logTts("route", "固定台词磁盘缓存命中" + (opts && opts.lineId ? "（lineId）" : ""));
       return diskHit.toString("base64");
     }
   }

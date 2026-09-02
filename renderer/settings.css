@@ -132,6 +132,12 @@ body.theme-dark .settings-page .set-dirty { border-color: #4a4030; background: #
 .settings-page .fixed-lines-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .settings-page .fixed-lines-profile { margin-top: 4px; font-size: 11px; }
 .settings-page .fixed-lines-summary { margin: 10px 0 7px; color: var(--ui-ink); font-size: 13px; font-weight: 650; }
+.settings-page .fixed-lines-pools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 4px; }
+.settings-page .fixed-lines-pools-title { color: var(--ui-muted); font-size: 11px; }
+.settings-page .fixed-lines-pools-box { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.settings-page .fixed-lines-pools-box label { color: var(--ui-ink); font-size: 11px; display: inline-flex; align-items: center; gap: 3px; }
+.settings-page .fixed-lines-pools-box input { width: 13px; height: 13px; accent-color: var(--ui-accent); }
+.settings-page .voice-pool-badge.offline { color: #b45309; border-color: #b45309; }
 .settings-page .fixed-lines-progress { height: 6px; overflow: hidden; border-radius: 999px; background: var(--ui-line); }
 .settings-page .fixed-lines-progress span { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--ui-accent); transition: width 180ms ease; }
 .settings-page .voice-pool-badge { padding: 4px 8px; border: 1px solid var(--ui-line); border-radius: 999px; background: var(--ui-bg); color: var(--ui-muted); font-size: 11px; white-space: nowrap; }

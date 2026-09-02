@@ -1534,7 +1534,14 @@ function sendProactive(text, emotion, { force = false } = {}) {
     logTts("lines", "跳过台词: " + gate.reason);
     return false;
   }
-  sendToRenderer("pet:proactive", { text: t, emotion: emo, force });
+  // lineId 透传（v2.5.27）：固定台词反查稳定 ID，渲染层 speak 带回 → TTS 按 ID 直查磁盘缓存，
+  // 不再依赖文本匹配（同文本不同池/情绪不会串音）
+  let lineId = null;
+  try {
+    const it = fixedLineCache.findItem(chatVars(), t, emo);
+    lineId = it ? it.id : null;
+  } catch { /* 反查失败走文本匹配兜底 */ }
+  sendToRenderer("pet:proactive", { text: t, emotion: emo, force, lineId });
   return true;
 }
 
@@ -2187,12 +2194,17 @@ ipcMain.handle("pet:list-models", async (_e, o = {}) => {
     return { ok: false, message: String(e.message || e) };
   }
 });
-ipcMain.handle("pet:fixed-lines-status", () => fixedLinePreloader.status(config.getConfig(), chatVars()));
+ipcMain.handle("pet:fixed-lines-status", () => {
+  const st = fixedLinePreloader.status(config.getConfig(), chatVars());
+  st.fixedOnly = !!(config.getConfig().tts || {}).fixedOnly; // 离线模式徽标（设置页展示）
+  return st;
+});
 ipcMain.handle("pet:fixed-lines-start", async (event, options = {}) => {
   const result = await fixedLinePreloader.start({
     config: config.getConfig(),
     vars: chatVars(),
     retryFailed: !!options.retryFailed,
+    pools: Array.isArray(options.pools) && options.pools.length ? options.pools : null, // 按池勾选预加载
     onProgress: (progress) => {
       if (win && !win.isDestroyed()) win.webContents.send("pet:fixed-lines-progress", progress);
       if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send("pet:fixed-lines-progress", progress);
@@ -2206,6 +2218,13 @@ ipcMain.handle("pet:fixed-lines-clear", () => {
     const profile = fixedLineCache.profileFromConfig(config.getConfig());
     fixedLineCache.clear(profile);
     return { ok: true };
+  } catch (e) { return { ok: false, message: String(e.message || e) }; }
+});
+ipcMain.handle("pet:fixed-lines-clear-old", () => {
+  try {
+    const profile = fixedLineCache.profileFromConfig(config.getConfig());
+    const removed = fixedLineCache.clearOldFingerprints(fixedLineCache.pathsFor(profile).fingerprint);
+    return { ok: true, removed };
   } catch (e) { return { ok: false, message: String(e.message || e) }; }
 });
 

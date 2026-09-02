@@ -37,7 +37,10 @@ function normalize(text) {
     .toLowerCase();
 }
 
+let _manifestCache = { key: "", list: null };
 function buildManifest(vars = {}) {
+  const key = JSON.stringify([vars.name || "", vars.user || ""]);
+  if (_manifestCache.key === key && _manifestCache.list) return _manifestCache.list;
   const seen = new Set();
   const manifest = [];
   for (const [pool, items, emotion] of POOLS) {
@@ -46,13 +49,21 @@ function buildManifest(vars = {}) {
       let emo = emotion;
       const tag = text.match(MOOD_TAG_RE); // 剥离行首情绪标签，与运行时 sendProactive 行为一致
       if (tag) { emo = tag[1]; text = text.slice(tag[0].length); }
-      const key = normalize(text);
-      if (!key || seen.has(key)) return;
-      seen.add(key);
+      const key2 = normalize(text);
+      if (!key2 || seen.has(key2)) return;
+      seen.add(key2);
       manifest.push({ id: `${pool}.${String(index + 1).padStart(2, "0")}`, pool, index, text, emotion: emo });
     });
   }
+  _manifestCache = { key, list: manifest };
   return manifest;
+}
+
+/** 按展开文本+情绪查固定台词条目（播放命中缓存/lineId 反查用） */
+function findItem(vars, text, emotion) {
+  const t = String(text || "");
+  const emo = String(emotion || "idle");
+  return buildManifest(vars).find((item) => item.text === t && item.emotion === emo) || null;
 }
 
 function voiceFingerprint(profile = {}) {
@@ -83,4 +94,4 @@ function summarize(items = []) {
   return summary;
 }
 
-module.exports = { POOLS, expand, normalize, buildManifest, voiceFingerprint, cacheKey, summarize };
+module.exports = { POOLS, expand, normalize, buildManifest, findItem, voiceFingerprint, cacheKey, summarize };

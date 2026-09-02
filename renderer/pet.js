@@ -1181,7 +1181,7 @@ function speakSystem(clean, rateOverride, pitchOverride) {
     u.pitch = pitchOverride || ttsConfig.pitch || 1.1;
     u.volume = 1;
     isSpeakingAudio = true;
-    const finish = () => { isSpeakingAudio = false; };
+    const finish = () => { isSpeakingAudio = false; setTimeout(flushPendingAmbient, 250); }; // 语音自然结束 → 补发暂存的后台台词
     u.onend = finish; u.onerror = finish;
     speechSynthesis.speak(u);
   } catch (e) { isSpeakingAudio = false; console.error("系统语音失败:", e); }
@@ -1270,6 +1270,7 @@ function playNextTtsPart() {
         setTimeout(() => { if (ttsPartQueue.length) playNextTtsPart(); }, pauseMs);
       } else {
         isSpeakingAudio = false;
+        setTimeout(flushPendingAmbient, 250); // 流式末句播完 → 补发暂存台词
       }
     };
     audio.onended = done;
@@ -1288,7 +1289,7 @@ if (window.petAPI.onTtsPart) {
 }
 
 let speakSession = 0;   // 语音会话号：新消息的 speak 让旧消息的合成结果/part 作废（消息生成防抖）
-async function speak(text, emotion) {
+async function speak(text, emotion, lineId) {
   if (!ttsConfig.enabled) return;
   const toneOn = !(emotionVoiceCfg[emotion] === false); // 该情绪音色分档是否启用（停用 → 默认音色/默认语气）
   let clean = stripForSpeech(text);
@@ -1311,7 +1312,7 @@ async function speak(text, emotion) {
   if (ttsCloudOn) {
     try {
       const partsBefore = ttsPartPlayedCount;
-      const b64 = await window.petAPI.speakClone(clean, { emo: emotion, session: mySession }); // 情绪 → 主进程切参考音频（仅撒娇/傲娇/惊讶命中）；会话号让旧任务让位
+      const b64 = await window.petAPI.speakClone(clean, { emo: emotion, session: mySession, lineId }); // 情绪 → 主进程切参考音频（仅撒娇/傲娇/惊讶命中）；会话号让旧任务让位；lineId 让固定台词直查磁盘缓存
       if (mySession !== speakSession) return; // 等待期间来了新消息：本会话结果整体作废
       if (b64 && ttsPartPlayedCount > partsBefore) {
         // 已逐句流式播放：跳过整段合并音频，避免重复
@@ -1336,7 +1337,7 @@ async function speak(text, emotion) {
             clearTimeout(timeout);
             if (activeAudioFinish === finish) activeAudioFinish = null;
             if (cloneAudio === audio) cloneAudio = null;
-            if (epoch === playbackEpoch) isSpeakingAudio = false;
+            if (epoch === playbackEpoch) { isSpeakingAudio = false; setTimeout(flushPendingAmbient, 250); } // 合并音频播完 → 补发暂存台词
             resolve();
           };
           const timeout = setTimeout(() => { try { audio.pause(); } catch { /* 忽略 */ } finish(); }, 180000);
@@ -1920,27 +1921,27 @@ function flushPendingAmbient() {
   showBubble();
   bubbleText.textContent = next.text;
   if (!isSleeping || next.force) setMood(next.emotion || "idle");
-  speak(next.text, next.emotion);
+  speak(next.text, next.emotion, next.lineId);
   scheduleBubbleHide(30000);
 }
 
 /* ---------- 主动搭话（主进程发送 → 显示气泡 + 语音） ---------- */
 if (window.petAPI && window.petAPI.onProactive) {
-  window.petAPI.onProactive(({ text, emotion, force }) => {
+  window.petAPI.onProactive(({ text, emotion, force, lineId }) => {
     if (!text) return;
     if (!force && (busy || speakActive || isSpeakingAudio)) {
-      pendingAmbient = { text, emotion, force: false };
+      pendingAmbient = { text, emotion, force: false, lineId };
       return;
     }
     if (!force && isSleeping) {
-      pendingAmbient = { text, emotion, force: false };
+      pendingAmbient = { text, emotion, force: false, lineId };
       return;
     }
     pendingAmbient = null;
     showBubble();
     bubbleText.textContent = text;
     if (!isSleeping || force) setMood(emotion || "idle");
-    speak(text, emotion);
+    speak(text, emotion, lineId);
     scheduleBubbleHide(30000); // 主动消息显示 30s（用户反馈 15s 偏短）
     // v2.5.25b 修复：说话后恢复行走/待机动画——与聊天回复(onDone)同款延迟回 idle。
     // 此前主动搭话说完后情绪动画一直挂着，走路动作不再回来（用户反馈"说话时没走路动作"）
