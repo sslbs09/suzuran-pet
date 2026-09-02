@@ -408,4 +408,10 @@
 - ✅ ④ 仓库卫生：.gitignore 加 app.asar.pending/apply-update.ps1/*.asar.bak；release/ 本就忽略
   - lazybag 移出工作区属用户工作区组织，不代挪（记档）
 - 30 测试全绿；更新器已部署（菜单项存在；因当前 release 无 asar 资产，检查会返回"已最新"，下一 tag 后生效）
+
+### 块 30（用户截图：桌宠站着时腿被任务栏盖/陷进任务栏）
+- 根因分析：桌面层级下靠 touchesTaskbar 判定"脚踩任务栏→临时置顶"，原容差 24px 偏小，站姿下沉稍多就判"没踩"→不置顶→任务栏盖腿
+- ✅ 修：touchesTaskbar 容差 24→48，站姿踩任务栏更可靠置顶（腿在任务栏前）
+- ⚠️→↩️ 站姿脚底对齐尝试（groundGap/spine layoutGap/preserveDrawingBuffer/sample 钳制）经用户真机验证「反而不如调整前」→ **全部回退**（pet.js 三处+main.js touchesTaskbar 回 24）。站姿脚底对齐是皮肤相关的测量难题，保留原行为，后续如要做需逐皮肤标定
+- 已部署重启；交接记录
 - ⏸ ag-psd 懒加载：按用户指示不动
