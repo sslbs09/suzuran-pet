@@ -82,6 +82,17 @@ function consumeLevelUp() {
 function getLevel() { return levelOf(load().exp); }
 function getDays() { return load().days; }
 
+/** 羁绊进度（v2.5.26 设置页进度条）：当前级起点/下一级阈值/百分比 */
+function getProgress() {
+  const mem = load();
+  const lv = levelOf(mem.exp);
+  const cur = LEVEL_EXP[lv - 1] || 0;
+  const maxed = lv >= MAX_LEVEL;
+  const next = maxed ? cur : LEVEL_EXP[lv];
+  const pct = maxed ? 100 : Math.max(0, Math.min(100, Math.round(((mem.exp - cur) / Math.max(1, next - cur)) * 100)));
+  return { exp: mem.exp, level: lv, cur, next, pct, max: maxed, days: mem.days };
+}
+
 /** 注入人设的羁绊描述（随等级变亲密） */
 /** 关系阶段：1-3 陌生 / 4-6 熟悉 / 7-9 信赖 / 10+ 誓约 */
 function getStage() {
@@ -105,4 +116,4 @@ function getText() {
   return `羁绊等级 Lv.${lv}（已陪伴 ${days} 天 · 关系：${getStage().name}）：${warmth}`;
 }
 
-module.exports = { addExp, consumeLevelUp, getLevel, getDays, getStage, getText, load, save };
+module.exports = { addExp, consumeLevelUp, getLevel, getDays, getStage, getText, getProgress, load, save };

@@ -855,6 +855,15 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
   const btnClear = document.getElementById("mem-clear");
   if (!statsEl || !listEl || !btnClear) return;
   const refresh = async () => {
+    // 羁绊进度条（v2.5.26）：等级+经验进度可视化
+    const renderBondBar = (b) => {
+      const bar = $("bond-bar"), lab = $("bond-bar-label");
+      if (!b || b.pct == null) { if (bar) bar.style.width = "0%"; if (lab) lab.textContent = ""; return; }
+      bar.style.width = b.pct + "%";
+      lab.textContent = b.max
+        ? `🥰 羁绊 Lv.${b.level}（MAX）· 已陪伴 ${b.days} 天`
+        : `🥰 羁绊 Lv.${b.level} · 距 Lv.${b.level + 1} 还差 ${b.next - b.exp} 经验（已陪伴 ${b.days} 天）`;
+    };
     const failText = "记忆读取失败，点击此处重试";
     const showFail = () => {
       statsEl.textContent = failText;
@@ -870,10 +879,11 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
       if (!r || !Array.isArray(r.facts) || !r.facts.length) {
         statsEl.textContent = "暂无已记住的信息——聊天中提到的称谓/喜好/生日/健康/安排会自动记住（本地加密）";
         listEl.innerHTML = "";
+        renderBondBar(r && r.bond);
         return;
       }
-      const bondPart = r.bond ? "｜🥰 羁绊 Lv." + r.bond.level + " · 已陪伴 " + r.bond.days + " 天" : "";
-      statsEl.textContent = "已记住 " + r.facts.length + " 条" + (r.summary ? "（含对话摘要）" : "") + bondPart;
+      renderBondBar(r.bond);
+      statsEl.textContent = "已记住 " + r.facts.length + " 条" + (r.summary ? "（含对话摘要）" : "");
       listEl.innerHTML = "";
       r.facts.forEach((f) => {
         const row = document.createElement("div");

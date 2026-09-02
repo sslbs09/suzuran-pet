@@ -2235,7 +2235,7 @@ function proactiveMin() { return (config.getConfig().features && config.getConfi
 ipcMain.handle("pet:get-memory", () => {
   try {
     const facts = memory.getFactsList();
-    return { facts, summary: memory.getSummary(), bond: { level: bond.getLevel(), days: bond.getDays() } };
+    return { facts, summary: memory.getSummary(), bond: bond.getProgress() };
   } catch (e) { logTts("memory", "getMemory 异常: " + (e && e.stack || e)); return { facts: [], summary: "", bond: null }; }
 });
 // 手动添加记忆（设置页记忆管理）：type 用时间戳唯一化避免互相覆盖；先经规则分类器识别类型/锚点/规范化文本

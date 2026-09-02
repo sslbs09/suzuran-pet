@@ -176,6 +176,12 @@
       <div class="col full">
         <span>她记得的事（称谓/喜好/生日/健康/近期安排，本地加密存储，不联网上传）。可在聊天中自然更新，或在此逐条删除 / 清空。</span>
         <p class="hint" id="mem-stats" style="margin:6px 0 4px;">加载中…</p>
+        <div id="bond-wrap" style="margin:6px 0 10px;">
+          <div id="bond-bar-label" style="font-size:12px;color:var(--ui-muted);margin-bottom:4px;"></div>
+          <div style="height:8px;border-radius:4px;background:var(--ui-line);overflow:hidden;">
+            <div id="bond-bar" style="height:100%;width:0%;border-radius:4px;background:linear-gradient(90deg,var(--ui-accent),var(--ui-accent-strong));transition:width .4s var(--ui-ease);"></div>
+          </div>
+        </div>
         <div id="mem-list" style="max-height:180px;overflow:auto;border:1px solid var(--ui-line);border-radius:6px;padding:6px 10px;background:var(--ui-surface);"></div>
         <button id="mem-clear" type="button" style="margin-top:8px;">🗑️ 清空全部记忆</button>
         <div style="display:flex;gap:6px;margin-top:8px;">
