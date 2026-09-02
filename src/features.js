@@ -69,16 +69,18 @@ function setProactiveEnabled(on) {
   }
 }
 
-function startProactive(sendFn, intervalMin = 8) {
-  proactiveCfg = { sendFn, intervalMin };
+const PROACTIVE_DEFAULTS = Object.freeze({ intervalMin: 12, chance: 0.18 });
+
+function startProactive(sendFn, intervalMin = PROACTIVE_DEFAULTS.intervalMin, chance = PROACTIVE_DEFAULTS.chance) {
+  proactiveCfg = { sendFn, intervalMin, chance };
   stopProactive();
   const intervalMs = intervalMin * 60 * 1000;
   proactiveTimer = setInterval(() => {
     if (!proactiveEnabled || !proactiveCfg.sendFn) return;
     const idle = Date.now() - lastChatTs;
     if (idle < intervalMs) return;
-    // 35% 概率触发（避免太频繁）
-    if (Math.random() > 0.35) return;
+    // 18% 概率触发：达到闲置阈值后仍保持低频，避免持续打扰
+    if (Math.random() > proactiveCfg.chance) return;
     const lines = require("./lines");
     let prompt;
     // v2.6 由头化扩展：记忆里有称谓/生日/健康/近期安排事实时，主动开口有"由头"（而非纯随机）
@@ -455,6 +457,7 @@ async function generateMemorySummary(chatClient, recentLines) {
  * 导出
  * ============================================================ */
 module.exports = {
+  PROACTIVE_DEFAULTS,
   // 语音输入
   speechToText,
 

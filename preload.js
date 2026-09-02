@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld("petAPI", {
   docsRead: (key) => ipcRenderer.invoke("docs:read", key),
   openDocs: () => ipcRenderer.invoke("pet:open-docs"),
   live2dList: () => ipcRenderer.invoke("pet:live2d-list"), // Live2D 模型扫描（v2.5.1）
+  live2dCapability: () => ipcRenderer.invoke("pet:live2d-capability"),
   reloadRenderer: () => ipcRenderer.invoke("pet:reload-renderer"), // 渲染层自愈
   setTheme: (theme) => ipcRenderer.invoke("pet:set-theme", theme),
   swipeMove: (dir) => ipcRenderer.invoke("pet:swipe-move", dir),
@@ -167,8 +168,13 @@ contextBridge.exposeInMainWorld("petAPI", {
   importCredential: (req) => ipcRenderer.invoke("pet:import-credential", req),
   clearSecret: (slot) => ipcRenderer.invoke("pet:clear-secret", slot),
 
-  // 音色克隆与训练
-  pickFile: () => ipcRenderer.invoke("pet:pick-file"),
+  // 固定台词音频池
+  getFixedLineAudioStatus: () => ipcRenderer.invoke("pet:fixed-lines-status"),
+  startFixedLineAudioPreload: (options) => ipcRenderer.invoke("pet:fixed-lines-start", options || {}),
+  cancelFixedLineAudioPreload: () => ipcRenderer.invoke("pet:fixed-lines-cancel"),
+  clearFixedLineAudioCache: () => ipcRenderer.invoke("pet:fixed-lines-clear"),
+  onFixedLineAudioProgress: (cb) => ipcRenderer.on("pet:fixed-lines-progress", (_e, p) => cb(p)),
+
   voiceStatus: () => ipcRenderer.invoke("pet:voice-status"),
   applyVoice: (payload) => ipcRenderer.invoke("pet:apply-voice", payload),
   previewVoice: (payload) => ipcRenderer.invoke("pet:tts-preview", payload),

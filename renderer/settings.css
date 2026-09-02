@@ -82,3 +82,25 @@ body.theme-dark .settings-page .set-dirty { border-color: #4a4030; background: #
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
 }
+
+/* ---------- 固定台词音频池 ---------- */
+.settings-page .fixed-lines-preload { margin-top: 14px; padding: 14px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-md); background: var(--ui-surface-soft); }
+.settings-page .fixed-lines-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.settings-page .fixed-lines-profile { margin-top: 4px; font-size: 11px; }
+.settings-page .fixed-lines-summary { margin: 10px 0 7px; color: var(--ui-ink); font-size: 13px; font-weight: 650; }
+.settings-page .fixed-lines-progress { height: 6px; overflow: hidden; border-radius: 999px; background: var(--ui-line); }
+.settings-page .fixed-lines-progress span { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--ui-accent); transition: width 180ms ease; }
+.settings-page .voice-pool-badge { padding: 4px 8px; border: 1px solid var(--ui-line); border-radius: 999px; background: var(--ui-bg); color: var(--ui-muted); font-size: 11px; white-space: nowrap; }
+.settings-page .voice-pool-badge.ready { color: var(--ui-success); border-color: var(--ui-success); }
+.settings-page .voice-pool-badge.loading { color: var(--ui-accent-strong); border-color: var(--ui-accent); }
+.settings-page .voice-pool-badge.failed { color: var(--ui-danger); border-color: var(--ui-danger); }
+.settings-page .fixed-lines-list { max-height: 260px; margin-top: 10px; overflow: auto; border-top: 1px solid var(--ui-line); }
+.settings-page .fixed-line-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 8px 2px; border-bottom: 1px dashed var(--ui-line); }
+.settings-page .fixed-line-text { min-width: 0; color: var(--ui-ink); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.settings-page .fixed-line-meta { margin-top: 2px; color: var(--ui-subtle); font-size: 10px; }
+.settings-page .fixed-line-state { align-self: center; color: var(--ui-muted); font-size: 11px; white-space: nowrap; }
+.settings-page .fixed-line-state.ready { color: var(--ui-success); }
+.settings-page .fixed-line-state.failed { color: var(--ui-danger); }
+@media (prefers-reduced-motion: reduce) {
+  .settings-page .fixed-lines-progress span { transition: none; }
+}

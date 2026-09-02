@@ -2,12 +2,13 @@
 
 const fs = require("fs");
 const path = require("path");
-const { app } = require("electron");
+let app = null;
+try { ({ app } = require("electron")); } catch { /* 纯 Node 单测/工具运行时没有 Electron */ }
 
 const APP_DIR = path.dirname(__dirname);
 // SUZURAN_TEST_USERDIR：仅供自动化测试重定向 userData；正常运行永远走 Electron userData
 const USER_DIR = process.env.SUZURAN_TEST_USERDIR ||
-  (app ? app.getPath("userData") : path.join(process.env.APPDATA || APP_DIR, "SuzuranPet"));
+  (app && typeof app.getPath === "function" ? app.getPath("userData") : path.join(process.env.APPDATA || APP_DIR, "SuzuranPet"));
 const PATHS = {
   userDir: USER_DIR,
   config: path.join(USER_DIR, "config.json"),
@@ -100,9 +101,14 @@ function initializeStorage() {
 
 function atomicWrite(file, content) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = file + ".tmp";
-  fs.writeFileSync(tmp, content, "utf8");
-  fs.renameSync(tmp, file);
+  const tmp = file + ".tmp-" + process.pid + "-" + Date.now().toString(36);
+  try {
+    fs.writeFileSync(tmp, content, "utf8");
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch { /* 清理失败不覆盖原始错误 */ }
+    throw e;
+  }
 }
 
 module.exports = { APP_DIR, PATHS, initializeStorage, atomicWrite };

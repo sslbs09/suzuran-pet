@@ -28,6 +28,13 @@ function append(entry) {
   } catch { /* 持久化失败不影响使用 */ }
 }
 
+/** 清空历史文件；后续 load() 总是从磁盘读取，因此无需常驻旧缓存。 */
+function clear() {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(HISTORY_FILE, "", "utf8");
+  return true;
+}
+
 /** 取最近 N 轮的对话（按 mode 过滤） */
 function recent(mode, maxTurns) {
   const rows = load();
@@ -55,4 +62,4 @@ function updateLast(mode, role, fn) {
   return null;
 }
 
-module.exports = { load, append, recent, updateLast };
+module.exports = { load, append, clear, recent, updateLast };

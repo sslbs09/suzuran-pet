@@ -834,7 +834,7 @@ let awake = true;
 let isSleeping = false;    // 睡觉状态（同步给行走引擎暂停移动）
 let idleIdx = 0;
 
-function setMood(mood) {
+function setMood(mood, { preserveSleep = false } = {}) {
   // mood = 内部状态名（happy/think/sleep/…或自定义情绪名）；"idle"/未知 → 从待机池轮换
   const names = moodNames();
   const idles = idleNames();
@@ -845,9 +845,14 @@ function setMood(mood) {
   const file = pool.length > 1 ? pool[++idleIdx % pool.length] : pool[0];
   lastMood = mood;
 
-  // 睡觉/醒来同步行走引擎（睡着后不再移动）
-  if (mood === "sleep" && !isSleeping) { isSleeping = true; window.petAPI.setSleeping(true); }
-  else if (mood !== "sleep" && isSleeping) { isSleeping = false; window.petAPI.setSleeping(false); }
+  // 睡觉/醒来同步行走引擎（睡着后不再移动）；程序消息不应隐式唤醒
+  if (mood === "sleep") {
+    if (!isSleeping) { isSleeping = true; awake = false; window.petAPI.setSleeping(true); }
+  } else if (!preserveSleep && isSleeping) {
+    isSleeping = false;
+    awake = true;
+    window.petAPI.setSleeping(false);
+  }
 
   // PSD 2.5D 角色（v2.2）：情绪 → 表情预设（独立于 Spine）
   if (rigSkinId && rigRuntime) { rigPresetForMood(mood); petEl.dataset.mood = mood; return; }
@@ -908,8 +913,10 @@ function scheduleMoodReset(mood) {
 }
 
 function wake() {
-  if (!awake) {
+  if (isSleeping || !awake) {
+    isSleeping = false;
     awake = true;
+    window.petAPI.setSleeping(false);
     if (!busy) setMood("surprised"); // 被叫醒
   }
   resetSleepTimer();
@@ -1496,6 +1503,7 @@ window.petAPI.onDone(({ mode, full, emotion, swipes, swipeIndex }) => {
   setTimeout(() => { if (!busy) setMood("idle"); }, 2600);
   scheduleBubbleHide(90000); // 回复气泡：等语音播完再隐藏，防止提前消失
   updateControls();
+  setTimeout(flushPendingAmbient, 250);
   resetSleepTimer();
 });
 
@@ -1503,6 +1511,7 @@ window.petAPI.onError(({ message }) => {
   showError(message);
   maybeFlushPendingSend(); // 防抖：错误后补发等待中的消息（用户想说的还是会被回答）
   speak("唔……出错了。");
+  setTimeout(flushPendingAmbient, 250);
 });
 
 // v2.6 主动停止：主进程中止路径不再发 done/error，收到 stopped 才复位 busy/语音，丢弃防抖缓冲
@@ -1513,6 +1522,7 @@ if (window.petAPI.onStopped) {
     busy = false;
     updateControls();
     hideThinking();
+    setTimeout(flushPendingAmbient, 250);
   });
 }
 
@@ -1835,13 +1845,34 @@ if (window.petAPI && window.petAPI.onScheduleDue) {
   window.petAPI.onScheduleDue(() => playReminderBeep());
 }
 
+let pendingAmbient = null;
+function flushPendingAmbient() {
+  if (!pendingAmbient || busy || speakActive || isSpeakingAudio) return;
+  const next = pendingAmbient;
+  pendingAmbient = null;
+  showBubble();
+  bubbleText.textContent = next.text;
+  if (!isSleeping || next.force) setMood(next.emotion || "idle");
+  speak(next.text, next.emotion);
+  scheduleBubbleHide(30000);
+}
+
 /* ---------- 主动搭话（主进程发送 → 显示气泡 + 语音） ---------- */
 if (window.petAPI && window.petAPI.onProactive) {
-  window.petAPI.onProactive(({ text, emotion }) => {
+  window.petAPI.onProactive(({ text, emotion, force }) => {
     if (!text) return;
+    if (!force && (busy || speakActive || isSpeakingAudio)) {
+      pendingAmbient = { text, emotion, force: false };
+      return;
+    }
+    if (!force && isSleeping) {
+      pendingAmbient = { text, emotion, force: false };
+      return;
+    }
+    pendingAmbient = null;
     showBubble();
     bubbleText.textContent = text;
-    setMood(emotion || "idle");
+    if (!isSleeping || force) setMood(emotion || "idle");
     speak(text, emotion);
     scheduleBubbleHide(30000); // 主动消息显示 30s（用户反馈 15s 偏短）
   });

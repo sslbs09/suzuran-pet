@@ -1,25 +1,28 @@
-# ESLint 代码规范检查：每次提交 / PR 自动校验 JS 语法与格式
-name: Lint (ESLint)
+# Node 纯逻辑回归测试
+name: Test
 
 on:
   push:
   pull_request:
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
+  test:
+    runs-on: windows-latest
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
-
       - name: 安装 Node
         uses: actions/setup-node@v4
         with:
           node-version: 22.12.0
           cache: npm
-
       - name: 安装依赖
         run: npm ci
-
+      - name: 资源完整性检查
+        run: npm run check:assets
       - name: ESLint 检查
         run: npm run lint
+      - name: 运行测试
+        run: npm test
+      - name: 密钥存储回归
+        run: npm run test:secrets

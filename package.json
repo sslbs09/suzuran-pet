@@ -9,6 +9,8 @@
     "dist": "electron-packager . --platform=win32 --arch=x64 --out=dist --asar=false --icon=icon.ico --overwrite --prune=true",
     "lint": "eslint .",
     "lint:md": "markdownlint-cli2 README.md",
+    "test": "node scripts/run-tests.cjs",
+    "check:assets": "node scripts/check-assets.mjs",
     "test:chat": "node src/chat-client.js --test",
     "test:zcode": "node src/zcode-client.js --test",
     "test:router": "node src/router.js --test",
@@ -16,6 +18,9 @@
     "gen:icon": "node scripts/gen-icon-ico.js"
   },
   "license": "BUSL-1.1",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "devDependencies": {
     "electron": "^43.3.0",
     "electron-packager": "^17.1.2",

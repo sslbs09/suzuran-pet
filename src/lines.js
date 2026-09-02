@@ -238,7 +238,7 @@ const LONG_IDLE_LINES = [
 const RECENT_K = 3;
 const recentPicks = new WeakMap(); // Array → number[]
 
-function pick(arr) {
+function pick(arr, random = Math.random) {
   if (!Array.isArray(arr) || !arr.length) return "";
   if (arr.length <= 1) return arr[0];
   let recent = recentPicks.get(arr);
@@ -247,25 +247,25 @@ function pick(arr) {
   let idxs = [];
   for (let i = 0; i < arr.length; i++) if (!banned.has(i)) idxs.push(i);
   if (!idxs.length) idxs = arr.map((_, i) => i); // 池子太小，全部候选放行
-  const idx = idxs[Math.floor(Math.random() * idxs.length)];
+  const idx = idxs[Math.floor(random() * idxs.length)];
   recent.push(idx);
   if (recent.length > RECENT_K) recent.shift();
   return arr[idx];
 }
 
 /** 模板挑选：随机取一条并把 {{name}}/{{user}} 替换成桌宠名/用户称呼（占位即答案） */
-function pickTpl(arr, vars = {}) {
-  const s = pick(arr);
+function pickTpl(arr, vars = {}, random = Math.random) {
+  const s = pick(arr, random);
   if (!s) return "";
   return s.replace(/\{\{\s*name\s*\}\}/g, vars.name || "苏苏洛")
           .replace(/\{\{\s*user\s*\}\}/g, vars.user || "主人");
 }
 
 /** 入睡台词按本机时段选择：22:00~次日5:00 说"晚安"，其余时段说"午休/眯一会儿" */
-function pickSleepLine(vars = {}) {
-  const h = new Date().getHours();
+function pickSleepLine(vars = {}, now = new Date(), random = Math.random) {
+  const h = now.getHours();
   const pool = (h >= 22 || h < 5) ? PERSONIFY_LINES.sleepNight : PERSONIFY_LINES.sleepDay;
-  return pickTpl(pool, vars);
+  return pickTpl(pool, vars, random);
 }
 
 /** 关系阶段专属台词（bond 阶段：fd=熟悉 / xl=信赖 / sy=誓约） */
