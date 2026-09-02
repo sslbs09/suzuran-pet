@@ -1958,8 +1958,14 @@ if (window.petAPI && window.petAPI.onScheduleDue) {
 }
 
 let pendingAmbient = null;
+const PENDING_AMBIENT_TTL_MS = 3 * 60 * 1000; // TD-2：暂存搭话 3 分钟过期——被忙/睡拦截的消息不该几分钟后还补发旧话
 function flushPendingAmbient() {
   if (!pendingAmbient || busy || speakActive || isSpeakingAudio) return;
+  if (pendingAmbient.createdAt && Date.now() - pendingAmbient.createdAt > PENDING_AMBIENT_TTL_MS) {
+    window.petAPI.playback && window.petAPI.playback("[ambient] 丢弃过期暂存搭话（>" + (PENDING_AMBIENT_TTL_MS / 60000) + "分钟）: " + String(pendingAmbient.text || "").slice(0, 40));
+    pendingAmbient = null;
+    return;
+  }
   const next = pendingAmbient;
   pendingAmbient = null;
   showBubble();
@@ -1974,11 +1980,11 @@ if (window.petAPI && window.petAPI.onProactive) {
   window.petAPI.onProactive(({ text, emotion, force, lineId }) => {
     if (!text) return;
     if (!force && (busy || speakActive || isSpeakingAudio)) {
-      pendingAmbient = { text, emotion, force: false, lineId };
+      pendingAmbient = { text, emotion, force: false, lineId, createdAt: Date.now() };
       return;
     }
     if (!force && isSleeping) {
-      pendingAmbient = { text, emotion, force: false, lineId };
+      pendingAmbient = { text, emotion, force: false, lineId, createdAt: Date.now() };
       return;
     }
     pendingAmbient = null;
