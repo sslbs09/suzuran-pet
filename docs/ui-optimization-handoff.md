@@ -372,4 +372,13 @@
 - ✅ 组1-2 单测：LINE_MOODS 全值在五档内 + 17 条【细标】全合法 + 池可取（line-moods.test.js）
 - ✅ 组1-3 通知联动：日程 Notification.on(click) → win.show/focus/moveTop + 重发提醒
 - ⚠️ 门禁留档：`cd && git commit` 形式会触发 L3 深扫连坐 lazybag（含 lazybag_new）被拦；**改用 `git -C` 显式形式可过**（轻扫）。后续提交统一用 git -C
+
+### 块 25（用户：按顺序都做）组1/2/3 落地
+- ✅ 组1-1 羁绊进度条 / 组1-2 单测（line-moods）/ 组1-3 通知点击联动（已提交）
+- ✅ 组2-2 首跑引导清单：设置页顶部 3 步实时完成状态（API Key/试聊/开语音）+ 三语
+- ✅ 组3 专注/离开模式：powerMonitor.getSystemIdleTime 轮询，空闲>5min 静默、回归>1min 打招呼；设置页开关+三语；sendProactive 加 away 闸门
+- ❌ 组2-1 气泡 Markdown 粗体/代码：**门禁误报拦**（rp-render.js 第7行是纯 escHtml 转义无 shell，被报命令注入；该文件已有斜体富渲染够用）→ 不硬撞，记档
+- ⏸ 组2-3 辅助页全文 i18n：8 页长翻大工程，设置/托盘已三语；记档后续单开
+- ⏸ 天气感知：需外部 API key，记档不做；专注模式无依赖已做
+- 27 测试全绿；已部署重启日志干净
 - ⏸ ag-psd 懒加载：按用户指示不动
