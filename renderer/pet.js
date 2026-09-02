@@ -506,7 +506,11 @@ function probeSeatGeometry(animName) {
       rt.destroy(true);
       const b = spineObj.getBounds();
       const visibleGap = y1 >= 0 ? Math.round(H - (y1 + step) * fy) : -1;
-      window.petAPI.playback && window.petAPI.playback("[fit-probe] " + animName + " H=" + Math.round(H) + " visibleBottom=" + (y1 >= 0 ? Math.round((y1 + step) * fy) : "?") + " visibleGap=" + visibleGap + " bboxBottom=" + Math.round(b.y + b.height) + " bboxGap=" + Math.round(H - (b.y + b.height)) + " y=" + Math.round(spineObj.y) + " scale=" + spineObj.scale.x.toFixed(3));
+      // 画布在窗口内的布局：canvasRect 底边距窗口视口底边的距离（=座位线离窗口底的真实间隙）
+      const view = spineApp.view;
+      const cr = view && view.getBoundingClientRect ? view.getBoundingClientRect() : null;
+      const cssGapBelow = cr ? Math.round(window.innerHeight - cr.bottom) : -1;
+      window.petAPI.playback && window.petAPI.playback("[fit-probe] " + animName + " H=" + Math.round(H) + " visibleBottom=" + (y1 >= 0 ? Math.round((y1 + step) * fy) : "?") + " visibleGap=" + visibleGap + " bboxBottom=" + Math.round(b.y + b.height) + " bboxGap=" + Math.round(H - (b.y + b.height)) + " y=" + Math.round(spineObj.y) + " scale=" + spineObj.scale.x.toFixed(3) + " innerH=" + Math.round(window.innerHeight) + " canvasBottom=" + (cr ? Math.round(cr.bottom) : "?") + " cssGapBelow=" + cssGapBelow + " zoom=" + (window.getComputedStyle(document.body).zoom || "1"));
     } catch { /* 探针失败不影响显示 */ }
   }, 4600);
 }

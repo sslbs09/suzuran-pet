@@ -3095,7 +3095,7 @@ async function walkOnPhaseEnd() {
     walkSchedulePhase(walkPhaseMs());
   } else {                                  // 散步结束 → 坐下休息（Sit）
     enterRestPose();                        // 有坐姿动画坐下（腿垂进任务栏），无则站立歇脚
-    logTts("walk", `自主休息: x=${Math.round(win.getBounds().x)} y=${Math.round(win.getBounds().y)} seated=${walk.seated} sink=${effectiveSeatSink()} tier=${seatSinkTier()}`); // v2.5.26 诊断：坐不到任务栏可查
+    logTts("walk", `自主休息: x=${Math.round(win.getBounds().x)} y=${Math.round(win.getBounds().y)} h=${Math.round(win.getBounds().height)} seated=${walk.seated} sink=${effectiveSeatSink()} gap=${walk.groundGap} tier=${seatSinkTier()}`); // v2.5.27 诊断：坐不到任务栏可查（含窗口高/贴地间隙）
     walkBroadcast();
     walkSchedulePhase(sitPhaseMs());
   }
