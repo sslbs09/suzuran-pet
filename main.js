@@ -61,6 +61,7 @@ const bond = require("./src/bond");
 const { randInt, easeImpact, clampScale, runPowerShell } = require("./src/utils");
 const walkGeo = require("./src/walk-geo"); // 行走几何纯函数（2026-08-27 收敛）
 const walkState = require("./src/walk-state"); // 行走几何决策纯函数（v2.5.26 收敛①）
+const focusWatch = require("./src/focus-watch"); // 专注/离开状态机纯函数（v2.5.26 收敛②）
 const walkCore = require("./src/walk-core");
 const { createAskQueue } = require("./src/ask-queue"); // /chat 串行化并发锁（2026-08-27 提取，可单测）
 const { createDebounceBuffer } = require("./src/message-buffer"); // 消息生成防抖缓冲（2026-08-27 提取，可单测）
@@ -1404,12 +1405,11 @@ function startFocusWatch() {
     try {
       if ((config.getConfig().features || {}).focusMode === false) { awaySince = 0; return; }
       const idle = powerMonitor.getSystemIdleTime();
-      if (idle > 300) { if (!awaySince) awaySince = Date.now(); }
-      else {
-        if (awaySince && Date.now() - awaySince > 60000 && isWindowVisible()) {
-          sendProactive("【开心】（看你回来眼睛一亮）回来啦～刚才没打扰你，现在要聊聊吗？", "开心");
-        }
-        awaySince = 0;
+      // 状态转移抽到 focus-watch 纯函数（v2.5.26 收敛②），副作用留主干
+      const t = focusWatch.focusTransition({ idleSec: idle, awaySince, now: Date.now() });
+      awaySince = t.awaySince;
+      if (t.greet && isWindowVisible()) {
+        sendProactive("【开心】（看你回来眼睛一亮）回来啦～刚才没打扰你，现在要聊聊吗？", "开心");
       }
     } catch { /* 忽略 */ }
   }, 15000);
