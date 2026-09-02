@@ -403,6 +403,12 @@
     <div class="row">
       <label class="col"><input id="feat-emotional" type="checkbox" checked /><span data-i18n="set.featEmotional">🎭 情绪语音（根据情绪调整语速音调）</span></label>
     </div>
+    <div class="row">
+      <div class="col switch-row">
+        <span>🔋 固定台词离线模式：本地语音引擎关停释放显存，已缓存的固定台词照常播；未缓存的话不现场合成（回退系统语音）</span>
+        <label class="switch"><input type="checkbox" id="tts-fixed-only" /><span class="slider"></span></label>
+      </div>
+    </div>
     <div id="fixed-lines-preload" class="fixed-lines-preload" aria-live="polite">
       <div class="fixed-lines-head">
         <div>

@@ -544,6 +544,7 @@ function getJaPrewarmProgress() { return jaPrewarmProgress; }
 function startJaPrewarm() {
   stopJaPrewarm();
   const cfg = config.getConfig();
+  if ((cfg.tts || {}).fixedOnly) return; // 固定台词离线模式：不翻译不合成（引擎已关省显存）
   if (!(cfg.ttsGenie || {}).speakJa) return; // 非日语模式不预热
   if (!(cfg.chat || {}).apiKey) return;      // 无 key 无法翻译
   const list = jaPrewarmableLines();

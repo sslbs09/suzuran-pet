@@ -117,6 +117,10 @@ async function ttsCloneImpl(text, opts, jobId) {
       return diskHit.toString("base64");
     }
   }
+  if ((config.getConfig().tts || {}).fixedOnly && !(opts && opts.fixedLinePreload)) {
+    logTts("route", "固定台词离线模式：无缓存，跳过引擎合成（省显存；渲染层回退系统语音）");
+    return "";
+  }
   const b64 = await ttsCloneImplInner(text, opts, jobId);
   if (b64 && !isStale()) {
     audioCache.set(akey, { t: Date.now(), b64 });

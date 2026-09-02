@@ -477,10 +477,12 @@ function reportHasSit() {
   try { window.petAPI.setHasSit && window.petAPI.setHasSit(!!sitAnimName()); } catch { /* 忽略 */ }
 }
 
-/** 当前应播放的移动相位动画：窗顶→Sit，地面放松→待机（Relax），走动→Move */
+/** 当前应播放的移动相位动画：坐/窗顶→Sit，地面放松→待机（Relax），走动→Move。
+ *  注意必须认识 seated：抛掷落地后 playSpineInteract/onDropped 用本函数恢复动画，
+ *  若只认 perched 会在坐姿下沉窗口上恢复站姿（"脚陷进任务栏，点一下才好"根因）。 */
 function spinePhaseAnim() {
   if (!walkState.active) return null;
-  if (walkState.perched) {
+  if (walkState.seated || walkState.perched) {
     const sn = sitAnimName();
     if (sn) return sn;
   }

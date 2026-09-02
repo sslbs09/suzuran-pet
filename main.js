@@ -3827,6 +3827,31 @@ ipcMain.on("pet:set-has-sit", (_e, v) => { // 渲染层皮肤加载后上报：�
   logTts("walk", "皮肤坐下动画: " + (next ? "有" : "无（坐姿不下沉）"));
   if (walk.seated && !walk.perched) applySeatPosition(); // 立即校正当前坐姿窗口高度
 });
+/* ---------- 固定台词离线模式（省显存）：引擎可关，只播已缓存固定台词 ---------- */
+ipcMain.handle("pet:set-fixed-only", async (_e, on) => {
+  try {
+    const prev = !!(config.getConfig().tts || {}).fixedOnly;
+    config.saveConfig({ tts: { ...(config.getConfig().tts || {}), fixedOnly: !!on } });
+    if (on && !prev) {
+      // 释放显存：停本地 Genie/GSV 引擎（与退出清理同链路）
+      try { await tts.shutdownGenieServer(); } catch { /* 忽略 */ }
+      try { await tts.killGsvProcesses(config.getConfig().ttsGsv || {}); } catch { /* 忽略 */ }
+      try { await tts.killPortListener(9881); } catch { /* 忽略 */ }
+      try { await tts.killPortListener(9880); } catch { /* 忽略 */ }
+      logTts("voice", "固定台词离线模式开启：本地语音引擎已停止释放显存，仅播已缓存音频");
+    } else if (!on && prev) {
+      // 退出离线模式：按配置重新拉起/预热引擎（与启动预热同分支）
+      const cfg = config.getConfig();
+      const q = cfg.ttsGenie || {};
+      const g = cfg.ttsGsv || {};
+      const ttsOn = !!(cfg.tts || {}).enabled;
+      if (ttsOn && q.enabled && !q.speakJa) tts.ensureGenieServer(q).then((ok) => logTts("genie", "离线模式退出预热: " + (ok ? "已就绪" : "不可用")));
+      if (ttsOn && g.enabled && q.speakJa) tts.ensureGsvServer(g).then((up) => { if (up) tts.warmupGsv(g); });
+      logTts("voice", "固定台词离线模式关闭：引擎按配置重新拉起");
+    }
+    return { ok: true };
+  } catch (e) { return { ok: false, message: String(e && (e.message || e)) }; }
+});
 ipcMain.on("pet:set-ground-gap", (_e, px) => {
   const v = Number(px);
   if (!Number.isFinite(v)) return;

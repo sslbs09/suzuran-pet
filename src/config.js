@@ -98,7 +98,7 @@ const DEFAULTS = {
   walkTiming: { sitMaxSec: 30, walkMaxSec: 20 }, // 行走节奏：单次坐下/散步的最长秒数（保底随机），设置页可调
   appearance: { fontFamily: "", fontSize: 0, bubbleWidth: 0, customFonts: [] }, // 聊天外观：字体（""=默认雅黑/"custom:文件名"）、字号px(0=默认11)、气泡宽度px(0=自适应)、已导入本地字体
   firstRun: true,                           // 首次启动自动弹设置引导
-  tts: { enabled: false, voice: "", rate: 0.9, pitch: 1.1 }, // 语音总开关（默认关）；rate=语速（<1 慢 >1 快）
+  tts: { enabled: false, voice: "", rate: 0.9, pitch: 1.1, fixedOnly: false }, // 语音总开关（默认关）；rate=语速（<1 慢 >1 快）；fixedOnly=固定台词离线模式（引擎可关省显存，只播已缓存音频）
   ttsCloud: { // edge-tts 云端语音（需安装 Python + edge-tts；失败自动回退系统语音）
     enabled: false,
     voice: "zh-CN-XiaoxiaoNeural",

@@ -176,6 +176,7 @@ contextBridge.exposeInMainWorld("petAPI", {
   clearSecret: (slot) => ipcRenderer.invoke("pet:clear-secret", slot),
 
   // 固定台词音频池
+  setFixedOnly: (on) => ipcRenderer.invoke("pet:set-fixed-only", !!on), // 离线模式开关（引擎关停省显存/重新拉起）
   getFixedLineAudioStatus: () => ipcRenderer.invoke("pet:fixed-lines-status"),
   startFixedLineAudioPreload: (options) => ipcRenderer.invoke("pet:fixed-lines-start", options || {}),
   cancelFixedLineAudioPreload: () => ipcRenderer.invoke("pet:fixed-lines-cancel"),

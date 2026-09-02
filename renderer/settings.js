@@ -101,6 +101,7 @@ async function renderOnboard(S) {
   $("genie-ref-audio").value = genie.refAudio || "";
   $("genie-ref-text").value = genie.refText || "";
   $("genie-speak-ja").checked = !!genie.speakJa;
+  $("tts-fixed-only").checked = !!(S.tts && S.tts.fixedOnly); // 固定台词离线模式（省显存）
   $("greeting-on-start").checked = S.greetingOnStart !== false;
   // 语音方案推断
   let plan = "system";
@@ -627,6 +628,19 @@ refreshFixedLinePool();
 $("btn-open-guide").addEventListener("click", () => window.petAPI.openTtsGuide());
 
 $("btn-open-studio").addEventListener("click", () => window.petAPI.openVoiceStudio());
+
+/* ---------- 固定台词离线模式（省显存开关） ---------- */
+$("tts-fixed-only").addEventListener("change", async () => {
+  const on = $("tts-fixed-only").checked;
+  setResult($("voice-result"), on ? "正在停止语音引擎、释放显存…" : "正在重新拉起语音引擎…");
+  let r;
+  try { r = await window.petAPI.setFixedOnly(on); }
+  catch (e) { r = { ok: false, message: String(e && e.message || e) }; }
+  setResult($("voice-result"),
+    r && r.ok ? (on ? "离线模式已开启：只播已缓存的固定台词" : "离线模式已关闭：引擎恢复工作") : "切换失败：" + (r && r.message || ""),
+    !!(r && r.ok));
+  await refreshFixedLinePool();
+});
 
 /* ---------- 界面语言（即时切换） ---------- */
 $("ui-lang").addEventListener("change", () => {
