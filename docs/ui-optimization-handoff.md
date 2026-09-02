@@ -381,4 +381,9 @@
 - ⏸ 组2-3 辅助页全文 i18n：8 页长翻大工程，设置/托盘已三语；记档后续单开
 - ⏸ 天气感知：需外部 API key，记档不做；专注模式无依赖已做
 - 27 测试全绿；已部署重启日志干净
+
+### 块 26（用户截图：桌宠有时悬在屏幕中间压窗）
+- 根因：walkTick 垂直钳位只处理「掉太低」(eb.y>groundY+120)，没处理「悬太高」；坐姿自愈只管 seated。跳/perch/拖拽瞬态残留或 resting 非 seated 悬空时无人拉回
+- ✅ 修：垂直兜底②——非瞬态(非 perched/iconRest/gotoPerch/returning/iconTarget/dragPaused/freeStand)且 resting/seated 且 eb.y<groundY-140 → 拉回地面(坐姿再 applySeatPosition)，10s 节流日志「悬空钳回」
+- 已部署重启日志干净；提交 62434a7
 - ⏸ ag-psd 懒加载：按用户指示不动
