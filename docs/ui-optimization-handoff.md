@@ -414,4 +414,11 @@
 - ✅ 修：touchesTaskbar 容差 24→48，站姿踩任务栏更可靠置顶（腿在任务栏前）
 - ⚠️→↩️ 站姿脚底对齐尝试（groundGap/spine layoutGap/preserveDrawingBuffer/sample 钳制）经用户真机验证「反而不如调整前」→ **全部回退**（pet.js 三处+main.js touchesTaskbar 回 24）。站姿脚底对齐是皮肤相关的测量难题，保留原行为，后续如要做需逐皮肤标定
 - 已部署重启；交接记录
+
+### 块 31（用户：先备份再试站姿）站立脚底微调滑杆
+- 备份：`resources/app.asar.bak-good-2526`（已知好包）；pet.js 由 git 兜底（回退版已提交）
+- 实现「站立脚底微调」滑杆（设置→行走区，-30..+30，默认 0=现状）：config.walk.standSink，经 setWalkTiming IPC；main set-ground-gap 应用 raw+offset。负=抬高、正=下沉，用户按自己皮肤调到脚贴任务栏上沿
+- 三语 i18n set.standSink；设置页滑杆+读写
+- 说明：站姿脚底偏移是皮肤相关测量难题，自动测不准（WebGL 读回+尾巴干扰），故改为用户可调旋钮，默认不改变现状、可回退
+- 已部署重启；待用户真机调到合适值
 - ⏸ ag-psd 懒加载：按用户指示不动

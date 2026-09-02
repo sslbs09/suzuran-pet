@@ -2847,6 +2847,12 @@ function perchPctOf() {
   const v = Number(config.getConfig().walkPerchPct);
   return Number.isFinite(v) && v >= 0 ? Math.min(30, v) : 8;
 }
+// 站立脚底微调（v2.5.26）：用户按皮肤补偿站立下沉，默认 0=现状，范围 -30..+30
+function standSinkOffset() {
+  const w = config.getConfig().walk || {};
+  const s = Number(w.standSink);
+  return Number.isFinite(s) ? Math.max(-30, Math.min(30, Math.round(s))) : 0;
+}
 
 async function walkOnPhaseEnd() {
   if (!walk.active) return;
@@ -3671,7 +3677,8 @@ ipcMain.on("pet:set-sleeping", (_e, v) => {
 ipcMain.on("pet:set-ground-gap", (_e, px) => {
   const v = Number(px);
   if (!Number.isFinite(v)) return;
-  const next = Math.max(0, Math.min(80, Math.round(v)));
+  const raw = Math.max(0, Math.min(80, Math.round(v)));
+  const next = Math.max(0, Math.min(80, raw + standSinkOffset())); // v2.5.26 站立脚底微调偏移
   if (next === walk.groundGap) return;
   walk.groundGap = next;
   if (!walk.paused && !walk.flight && !walk.jump && walk.seated) applySeatPosition();
@@ -3683,7 +3690,8 @@ ipcMain.on("pet:set-char-inset", (_e, px) => { // 渲染层上报：窗口左缘
 ipcMain.handle("pet:get-walk-timing", () => ({
   sitMaxSec: timingSec("sitMaxSec", 15, 180) || 30,
   walkMaxSec: timingSec("walkMaxSec", 8, 120) || 20,
-  perchPct: perchPctOf()
+  perchPct: perchPctOf(),
+  standSink: standSinkOffset()
 }));
 ipcMain.handle("pet:set-walk-timing", (_e, patch) => {
   patch = patch || {};
@@ -3696,10 +3704,14 @@ ipcMain.handle("pet:set-walk-timing", (_e, patch) => {
   if (patch.perchPct != null) {
     config.saveConfig({ walkPerchPct: Math.max(0, Math.min(30, Math.round(Number(patch.perchPct) || 0))) }); // v2.5.26：跳窗顶概率可调（0=不跳）
   }
+  if (patch.standSink != null) {
+    config.saveConfig({ walk: { standSink: Math.max(-30, Math.min(30, Math.round(Number(patch.standSink) || 0))) } }); // v2.5.26：站立脚底微调
+  }
   return {
     sitMaxSec: timingSec("sitMaxSec", 15, 180) || 30,
     walkMaxSec: timingSec("walkMaxSec", 8, 120) || 20,
-    perchPct: perchPctOf()
+    perchPct: perchPctOf(),
+    standSink: standSinkOffset()
   };
 });
 

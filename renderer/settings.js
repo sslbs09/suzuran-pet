@@ -125,6 +125,8 @@ async function renderOnboard(S) {
     $("walk-max-val").textContent = wt.walkMaxSec + " s";
     $("perch-pct").value = String(wt.perchPct != null ? wt.perchPct : 8);
     $("perch-pct-val").textContent = (wt.perchPct != null ? wt.perchPct : 8) + " %";
+    $("stand-sink").value = String(wt.standSink != null ? wt.standSink : 0);
+    $("stand-sink-val").textContent = (wt.standSink != null ? wt.standSink : 0) + " px";
     const ap = await window.petAPI.getAppearance();
     fillChatFontOptions(ap.customFonts);
     $("chat-font").value = ap.fontFamily || "";
@@ -547,6 +549,14 @@ $("perch-pct").addEventListener("change", async () => {
   const r = await window.petAPI.setWalkTiming({ perchPct: Number($("perch-pct").value) });
   $("perch-pct").value = String(r.perchPct);
   $("perch-pct-val").textContent = r.perchPct + " %";
+});
+$("stand-sink").addEventListener("input", () => {
+  $("stand-sink-val").textContent = $("stand-sink").value + " px";
+});
+$("stand-sink").addEventListener("change", async () => {
+  const r = await window.petAPI.setWalkTiming({ standSink: Number($("stand-sink").value) });
+  $("stand-sink").value = String(r.standSink);
+  $("stand-sink-val").textContent = r.standSink + " px";
 });
 
 /* ---------- 聊天外观（字体/字号/气泡宽度，松手即生效） ---------- */
