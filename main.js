@@ -56,6 +56,7 @@ const features = require("./src/features");
 const { logTts } = require("./src/logger");
 const { buildTrayItems } = require("./src/tray-menu");
 const fileGuard = require("./src/file-guard");
+const lines = require("./src/lines");
 const fixedLineCache = require("./src/fixed-line-cache");
 const fixedLinePreloader = require("./src/fixed-line-preloader");
 const fixedLines = require("./src/fixed-lines");
