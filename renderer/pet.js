@@ -487,6 +487,29 @@ function sitAnimName() {
 function reportHasSit() {
   try { window.petAPI.setHasSit && window.petAPI.setHasSit(!!sitAnimName()); } catch { /* 忽略 */ }
 }
+/** 坐姿几何探针（v2.5.27 诊断）：fit 收敛后量可见像素底边与包围盒底边相对画布底边的间隙。
+ *  若 visibleGap 远大于 0 → 皮肤坐姿的可见内容在画布内偏上（包围盒含隐藏骨骼），
+ *  窗口下沉 30px 不足以让"座位线"落到任务栏沿口 → 悬空坐。拿到数据后做针对性补偿。 */
+function probeSeatGeometry(animName) {
+  setTimeout(() => {
+    try {
+      if (!spineObj || !spineApp || renderMode !== "spine" || !(walkState.seated || walkState.perched)) return;
+      const W = spineApp.screen.width, H = spineApp.screen.height;
+      const rt = PIXI.RenderTexture.create({ width: Math.ceil(W), height: Math.ceil(H) });
+      spineApp.renderer.render(spineObj, { renderTexture: rt, clear: true });
+      const px = spineApp.renderer.extract.pixels(rt);
+      const pw = rt.width, ph = rt.height, fy = H / ph, step = 4, thr = 32;
+      let y1 = -1;
+      for (let y = 0; y < ph; y += step) for (let x = 0; x < pw; x += step) {
+        if (px[(y * pw + x) * 4 + 3] > thr) { if (y > y1) y1 = y; break; }
+      }
+      rt.destroy(true);
+      const b = spineObj.getBounds();
+      const visibleGap = y1 >= 0 ? Math.round(H - (y1 + step) * fy) : -1;
+      window.petAPI.playback && window.petAPI.playback("[fit-probe] " + animName + " H=" + Math.round(H) + " visibleBottom=" + (y1 >= 0 ? Math.round((y1 + step) * fy) : "?") + " visibleGap=" + visibleGap + " bboxBottom=" + Math.round(b.y + b.height) + " bboxGap=" + Math.round(H - (b.y + b.height)) + " y=" + Math.round(spineObj.y) + " scale=" + spineObj.scale.x.toFixed(3));
+    } catch { /* 探针失败不影响显示 */ }
+  }, 4600);
+}
 
 /** 当前应播放的移动相位动画：坐/窗顶→Sit，地面放松→待机（Relax），走动→Move。
  *  注意必须认识 seated：抛掷落地后 playSpineInteract/onDropped 用本函数恢复动画，
@@ -781,6 +804,7 @@ function applyWalkState(s) {
       setSpineAnim(target, true, "seat-phase");
       try { window.petAPI.playback && window.petAPI.playback("[fit] seat-phase anim=" + target); } catch { /* 忽略 */ }
       scheduleFitSpine({ seatPhase: true });
+      probeSeatGeometry(target); // 几何探针：fit 收敛后量"可见像素底边 vs 画布底边"，定位悬空坐
     }
     return;
   }
