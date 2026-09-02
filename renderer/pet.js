@@ -467,13 +467,21 @@ function spineFaceDir(face) {
   }
 }
 
-/** 当前皮肤的坐下动画名：精确 Sit/sit 优先，其次按名字分类器兜底（Sit01/sit_down 等）。
- *  返回 null = 该皮肤没有可播的坐姿动画——主进程据此不做坐姿下沉（修复"站着脚陷进任务栏"）。 */
+/** 当前皮肤的坐下动画名。
+ *  优先"坐姿待机循环"（明日方舟皮肤惯例：Sitd=坐定循环，Sit=坐下过渡动作——
+ *  循环播过渡动作会反复"正在坐下"，位置姿态都怪异，winter 皮肤悬空坐根因），
+ *  其次精确 Sit/sit，最后按名字分类器兜底（Sit01/sit_down 等）。
+ *  返回 null = 该皮肤没有可播的坐姿动画——主进程据此不做坐姿下沉。 */
 function sitAnimName() {
-  const exact = ["Sit", "sit"].find((n) => spineHas(n));
+  const exact = ["Sitd", "sitd", "Sit", "sit"].find((n) => spineHas(n));
   if (exact) return exact;
   const cls = ensureAnimClasses();
-  return (cls && cls.sit && cls.sit[0]) || null;
+  if (cls && cls.sit) {
+    const hold = cls.sit.find((n) => /d$/i.test(n)) || cls.sit.find((n) => /idle|loop|hold/i.test(n));
+    if (hold) return hold;
+    return cls.sit[0] || null;
+  }
+  return null;
 }
 /** 皮肤加载/重建后上报是否有坐下动画（主进程 applySeatPosition 依赖此标志） */
 function reportHasSit() {

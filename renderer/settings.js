@@ -611,7 +611,7 @@ function renderFixedLinePool(status = fixedLineStatus) {
     row.append(text, badge);
     list.appendChild(row);
   }
-  $("fixed-lines-toggle").textContent = fixedLineShowAll ? "只显示未加载/失败" : `显示未加载/失败（${total - ready}）`;
+  $("btn-fixed-lines-toggle").textContent = fixedLineShowAll ? "只显示未加载/失败" : `显示未加载/失败（${total - ready}）`;
 }
 async function refreshFixedLinePool() {
   try {
