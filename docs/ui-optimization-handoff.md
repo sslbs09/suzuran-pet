@@ -392,4 +392,11 @@
 - ✅ 减闪：回翻阈值 80→140、双向防抖 500→800 滞回，减少边界振荡翻边
 - 说明：单次翻边的窗口瞬移是条带换边机制固有（曾试动画快滑因主进程/CSS 时钟不同步形成拉锯而弃），滞回只能减频不能根除；用户评估「不是很影响」，取减频方案
 - 已部署重启日志干净；提交 032b1e5
+
+### 块 28（用户：以资深开发者视角重构①行走几何②拆main.js）
+- ✅ ① 行走几何收敛：翻边滞回/垂直钳位判定抽 `src/walk-state.js` 纯函数（edgeFlipDecision/verticalClampDecision），walkTick 仅留副作用（setPosition/setEdgeLeft/日志），行为逐条等价；10 断言单测
+- ✅ ② 拆 main.js：专注/离开状态机抽 `src/focus-watch.js`（focusTransition），startFocusWatch 仅留副作用；5 断言单测
+- 29 测试全绿；**新模块已同步进 app_legacy/src 再打包**（否则 asar require 缺模块崩溃）；重启无 Cannot find module
+- ⏸ ③自动更新/④仓库卫生（lazybag 移出工作区）记档本轮不做
+- 说明：main.js 仍大（IPC/窗口/托盘主干），本轮只抽「可纯函数化」的几何/状态判定，保证不伤行为；进一步分家需配视觉回归单开一轮
 - ⏸ ag-psd 懒加载：按用户指示不动
