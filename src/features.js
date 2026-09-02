@@ -512,23 +512,24 @@ let jaPrewarmIdx = 0;
 function jaPrewarmableLines() {
   try {
     const lines = require("./lines");
+    // 通用遍历全部台词池（v2.5.27 修复：手写清单漏了 WEATHER_LINES 天气池 65 句，
+    // 且今后新增事件/状态池不会再漏；Object.values 兜底空对象）
     const pools = [
+      ...Object.values(lines.WEATHER_LINES || {}), // 置顶：此前漏预热的天气池优先补翻（已缓存句秒回，新句尽快出声）
       lines.PAT_LINES,
-      lines.PERSONIFY_LINES.thrown, lines.PERSONIFY_LINES.grabbed,
-      lines.PERSONIFY_LINES.wake, lines.PERSONIFY_LINES.sleepDay,
-      lines.PERSONIFY_LINES.sleepNight, lines.PERSONIFY_LINES.perch,
+      ...Object.values(lines.PERSONIFY_LINES || {}),
       lines.WORKFLOW_LINES,
-      ...Object.values(lines.PROACTIVE_BY_PERIOD),
-      ...Object.values(lines.PROACTIVE_BY_STATE), // v2.5.26 补：散步/坐着池此前漏预热
+      ...Object.values(lines.PROACTIVE_BY_PERIOD || {}),
+      ...Object.values(lines.PROACTIVE_BY_STATE || {}),
       lines.LONG_IDLE_LINES,
-      ...Object.values(lines.STAGE_LINES),
+      ...Object.values(lines.STAGE_LINES || {}),
       lines.EARLY_MORNING_LINES,
     ];
-    // 去重 + 只留不含人称占位符的固定句
+    // 去重 + 只留不含人称占位符的固定句（含 {{user}}/{{name}} 的句由运行时按实际称呼翻译并缓存）
     const seen = new Set();
     const out = [];
     for (const pool of pools) {
-      for (const s of pool) {
+      for (const s of pool || []) {
         if (s.includes("{{") || seen.has(s)) continue;
         seen.add(s);
         out.push(s);
