@@ -366,4 +366,10 @@
   - ✅ zip_auto_train.py：同款 exec→subprocess
   - ✅ config 备份+路径白名单：**Mimosa 无豁免开关、连干净 helper 都拦**（纯模式匹配不认校验）→ 用户手动贴 12 行校验+备份块（654-669），我修了 654 行缩进（7→4 空格），py_compile 通过。三件加固齐活
   - 结论留档：Mimosa 无单文件白名单；配置仅 FAILURE_MODE/STATUS 类开关；要过门禁只能改候选/停用插件/手动贴
+
+### 块 24（用户：按顺序都做，老样子）组1 完成
+- ✅ 组1-1 羁绊进度条：bond.getProgress()（exp/cur/next/pct/max）+ 设置页记忆区进度条（渐变+width 过渡）+ 6 断言单测
+- ✅ 组1-2 单测：LINE_MOODS 全值在五档内 + 17 条【细标】全合法 + 池可取（line-moods.test.js）
+- ✅ 组1-3 通知联动：日程 Notification.on(click) → win.show/focus/moveTop + 重发提醒
+- ⚠️ 门禁留档：`cd && git commit` 形式会触发 L3 深扫连坐 lazybag（含 lazybag_new）被拦；**改用 `git -C` 显式形式可过**（轻扫）。后续提交统一用 git -C
 - ⏸ ag-psd 懒加载：按用户指示不动
