@@ -3304,8 +3304,9 @@ function walkTick() {
       }
       // 切边防抖：edgeLeft 切换会平移窗口 ±(width-124)，500ms 内不反向切换，避免贴边临界时左右瞬移「闪现」
       const nowE = Date.now();
-      if (walk.edgeLeft) { if (charLeft > edgeL + 80 && nowE - (walk._edgeFlipAt || 0) > 500) { walk._edgeFlipAt = nowE; setEdgeLeft(false); } }
-      else if (charLeft <= edgeL + 2 && nowE - (walk._edgeFlipAt || 0) > 500) { walk._edgeFlipAt = nowE; setEdgeLeft(true); }
+      // 左缘翻边滞回（v2.5.26 减闪）：回翻阈值 80→140、防抖 500→800，减少边界来回翻边导致的窗口瞬移闪现
+      if (walk.edgeLeft) { if (charLeft > edgeL + 140 && nowE - (walk._edgeFlipAt || 0) > 800) { walk._edgeFlipAt = nowE; setEdgeLeft(false); } }
+      else if (charLeft <= edgeL + 2 && nowE - (walk._edgeFlipAt || 0) > 800) { walk._edgeFlipAt = nowE; setEdgeLeft(true); }
     } catch { /* 忽略 */ }
   }
   // 自愈①：拖拽 mouseup 丢失导致 paused 卡死——60s 无移动事件自动解除（对话暂停/放大暂停不受此影响）
