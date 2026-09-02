@@ -104,6 +104,38 @@
 - 待用户复验：① 抛掷落地稳定后是否还陷脚（现在应自动回坐姿，无需点击）；
   ② 离线模式开关往返（显存释放/恢复、缓存台词照常播）。
 
+## 五点七、追加：光走路不前进 + 五项优化（55adfef + 9b54073，已部署）
+
+### 光走路不前进（55adfef）
+- 根因：聊天生成（busy）或拖拽暂停时主进程停止位移，但渲染层 `applyWalkState` 的
+  `if (busy) return` 短路把画面**冻结在最后一帧 Move** → 原地踏步假象。
+- 修复：applyWalkState 在 busy 短路前增加 `walkState.paused` 分支 → 切回站姿待机。
+- 顺带：无坐下动画皮肤的全部落座点统一 `enterRestPose()`（站立歇脚，seated=false），
+  并修复站立循环死锁（standLoops 到期后无 sit 动画时落入行为决策而非再入坐循环）。
+- 用户皮肤实为**有** Sit 动画（`Sitd+`，分类器命中）——此前"无 sit"判断是 skel 字符串
+  扫描过滤过严所致，已按 hasSit=true 行为验证正常（日志 `坐姿自愈 ... hasSit=true`）。
+
+### 五项优化（9b54073）
+1. **池勾选预加载**：设置页音频池卡片新增池复选框（全选/常用按钮），start IPC 透传
+   pools 数组，预加载器按池过滤；"常用"=摸头+工作流+当前时段。
+2. **TTS 结束补发 pendingAmbient**：系统语音 finish、流式末句 done、合并音频 finish
+   三处回调 250ms 后 flushPendingAmbient()——后台消息不再等聊天事件才补发。
+3. **离线模式徽标**：fixed-lines 状态返回 fixedOnly，卡片右上徽标显示"离线模式生效中"。
+4. **旧版本缓存清理**：`clearOldFingerprints()`（16 位 hex 白名单校验）+
+   `pet:fixed-lines-clear-old` IPC + 设置页按钮，换音色/语言后旧指纹目录可一键清。
+5. **lineId 直查**：sendProactive 反查 manifest 稳定 id（buildManifest 按 vars 记忆化）
+   → payload 带 lineId → 渲染层 speak 透传 → ttsCloneImpl 按 ID 直读磁盘缓存，
+   文本匹配仅作兜底；同文本不同池/情绪不会串音。
+
+### 已知观察（非本次引入）
+- 日志中 `渲染进程异常退出 reason=crashed exitCode=-1 状态=spine/走` 今天出现 5 次
+  （含部署前时段），单次即自动重载成功——项目已知偶发 GPU/WebGL 崩溃，自愈链路正常。
+
+### 验证
+- 40/40 测试通过；pack.sh 部署 app.asar 188,097,906B；新会话 5 进程、
+  ja 预热/行走正常。待用户复验：① 聊天时不再原地踏步；② 池勾选预加载；
+  ③ 离线徽标；④ 清理旧版本缓存；⑤ 缓存命中日志出现"（lineId）"。
+
 ## 六、回退方法（如新版异常）
 
 ```text
