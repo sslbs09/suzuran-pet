@@ -227,7 +227,7 @@ function sitOnTaskbar() {
     wa.y + wa.height + walk.groundGap - b.height
   );
   showWindow();
-  walk.seated = true;
+  walk.seated = skinHasSit; // 无坐下动画皮肤恢复为站立
   walk.resting = true;
   walk.perched = false;
   walk.gotoPerch = false;
@@ -2903,8 +2903,8 @@ function walkFlightTick() {
     walk.perchBarrier = { hwnd: landingBarrier.hwnd, left: landingBarrier.left, right: landingBarrier.right, top: landingBarrier.top, title: landingBarrier.title };
   } else {
     // 物理积分已经精确落在任务栏地面；不可再由坐姿定位叠加下沉量。
-    walk.seated = true;
-    walk.sunk = true;
+    walk.seated = skinHasSit;
+    walk.sunk = skinHasSit;
   }
   walkSetPosition(nx, landingFloorY, "flight-settle");
   walkBroadcast();
@@ -2985,6 +2985,15 @@ function applySeatPosition() {
   applyLayer(walk.seated || walk.active); // 接触任务栏表面时保证在任务栏之上
 }
 
+/** 进入休息姿态（相位机/落地/瞬态守卫共用）：有坐下动画皮肤→坐姿下沉；
+ *  无坐下动画皮肤→站立休息（seated=false），避免"站着发呆却按坐姿调度"的怪异观感。 */
+function enterRestPose() {
+  walk.resting = true;
+  if (skinHasSit) { walk.seated = true; }
+  else { walk.seated = false; walk.sunk = false; }
+  applySeatPosition();
+}
+
 function chooseWalkBehavior() {
   // v2.5.26：跳窗顶概率设置页可调（walkPerchPct，0=不跳，默认 8%）
   return walkCore.behaviorOf({ now: Date.now(), lastPerchEnd: walk._lastPerchEnd, weights: { idle: 0.45, walk: 0.40, perch: perchPctOf() / 100 } });
@@ -3027,12 +3036,14 @@ async function walkOnPhaseEnd() {
       walkSchedulePhase(randInt(8000, 15000));   // 刚站下先稳住两轮（避免反复起坐），到期还没动作再落座
       return;
     } else {
-      walk._standLoops = 0;                 // 站够仍无新决策 → 落座休息，避免永久站桩
-      walk.seated = true;
-      applySeatPosition();
+      walk._standLoops = 0;                 // 站够仍无新决策 → 休息（有坐姿动画坐下了，无则站立歇脚）
+      enterRestPose();
       walkBroadcast();
-      walkSchedulePhase(sitPhaseMs());
-      return;
+      if (skinHasSit) {
+        walkSchedulePhase(sitPhaseMs());
+        return;
+      }
+      // 无坐下动画皮肤：seated 不会置真，必须落到下方行为决策，否则永远在站立循环里走不出去
     }
   }
   if (walk.resting) {
@@ -3045,17 +3056,13 @@ async function walkOnPhaseEnd() {
         return;
       }
       // 屏障/图标不可用时，沿用普通待机回退。
-      walk.resting = true;
-      walk.seated = true;
-      applySeatPosition();
+      enterRestPose();
       walkBroadcast();
       walkSchedulePhase(sitPhaseMs());
       return;
     }
     if (behavior === "idle") {
-      walk.resting = true;
-      walk.seated = true;
-      applySeatPosition();
+      enterRestPose();
       walkBroadcast();
       walkSchedulePhase(sitPhaseMs());
       return;
@@ -3068,10 +3075,8 @@ async function walkOnPhaseEnd() {
     if (desktopIconMode()) listDesktopIcons(); // 预取图标缓存，供行走引导判断
     walkSchedulePhase(walkPhaseMs());
   } else {                                  // 散步结束 → 坐下休息（Sit）
-    walk.resting = true;
-    walk.seated = true;
-    applySeatPosition();                   // 坐下：腿垂进任务栏
-    logTts("walk", `自主坐下: x=${Math.round(win.getBounds().x)} y=${Math.round(win.getBounds().y)} sink=${getSeatSink()} tier=${seatSinkTier()}`); // v2.5.26 诊断：坐不到任务栏可查
+    enterRestPose();                        // 有坐姿动画坐下（腿垂进任务栏），无则站立歇脚
+    logTts("walk", `自主休息: x=${Math.round(win.getBounds().x)} y=${Math.round(win.getBounds().y)} seated=${walk.seated} sink=${effectiveSeatSink()} tier=${seatSinkTier()}`); // v2.5.26 诊断：坐不到任务栏可查
     walkBroadcast();
     walkSchedulePhase(sitPhaseMs());
   }
@@ -3377,9 +3382,7 @@ function walkAttemptPerch() {
       );
       if (!cands.length) {                           // 没有合适窗口 → 坐下休息
         logTts("walk", "无合适窗口可坐，就地休息"); // 失败可观测：避免静默长坐无从排查
-        walk.resting = true;
-        walk.seated = true;
-        applySeatPosition();
+        enterRestPose();
         walkBroadcast();
         walkSchedulePhase(sitPhaseMs());
         return;
@@ -3502,10 +3505,7 @@ function walkTick() {
       walk.returning = false;
       walk.iconTarget = false;
       walk.jump = null;
-      walk.resting = true;
-      walk.seated = true;
-      walk.sunk = false;
-      applySeatPosition();
+      enterRestPose();
       walkBroadcast();
       walkSchedulePhase(sitPhaseMs());
     }
@@ -3515,9 +3515,7 @@ function walkTick() {
   if (walk.flight && Date.now() - (walk._flightAt || 0) > 15000) {
     logTts("walk", "瞬态守卫: flight 超时15s，强制落地");
     cancelFlight();
-    walk.resting = true;
-    walk.seated = true;
-    applySeatPosition();
+    enterRestPose();
     walkBroadcast();
     walkSchedulePhase(sitPhaseMs());
   } else if (!walk.flight) walk._flightAt = 0;
@@ -3553,9 +3551,7 @@ function walkTick() {
       maybePersonify("perch", { chance: 0.2, cooldownMs: 150000 });
     } else if (walk.returning) {
       walk.returning = false;
-      walk.resting = true;
-      walk.seated = true;
-      applySeatPosition();
+      enterRestPose();
       walkBroadcast();
       walkSchedulePhase(sitPhaseMs());
     }
@@ -3662,7 +3658,7 @@ function startWalkingEngine() {
   walk.freeStand = false;
   walk.gotoPerch = false;
   walk.returning = false;
-  walk.seated = true; // 启动先坐下，片刻后起身散步
+  walk.seated = skinHasSit; // 启动先坐下（无坐下动画皮肤则站立），片刻后起身散步
   walk.face = Math.random() < 0.5 ? -1 : 1;
   try { // 已在地面线附近则直接进入下沉坐姿
     const b0 = win.getBounds();
@@ -3689,8 +3685,7 @@ function stopWalkingEngine(silent = false) {
     walk.gotoPerch = false;
     walk.returning = false;
     walk.resting = true;
-    walk.seated = true;
-    applySeatPosition();
+    enterRestPose();
   }
   applyLayer(walk.seated);
   walk.active = false;

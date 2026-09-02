@@ -779,6 +779,16 @@ function applyWalkState(s) {
     }
     return;
   }
+  // v2.5.27 修「光走路不前进」：聊天生成/拖拽会暂停位移（main 不再移动窗口），
+  // 但 busy 短路会把画面定格在最后一帧 Move——暂停态必须先切回站姿待机
+  if (walkState.paused) {
+    const idle = spineAnimForMood("idle");
+    if (idle && spineObj.state.getCurrent(0)?.animation?.name !== idle) {
+      setSpineAnim(idle, true, "paused-idle");
+      scheduleFitSpine();
+    }
+    return;
+  }
   if (busy) return;                       // 聊天表情优先，不打断
   const target = spinePhaseAnim();
   if (target && spineObj.state.getCurrent(0)?.animation?.name !== target) {
