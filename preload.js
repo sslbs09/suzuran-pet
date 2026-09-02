@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld("petAPI", {
   onSpineSkinChanged: (cb) => ipcRenderer.on("pet:spine-skin-changed", (_e, id) => cb(id)),
   onPlayAnim: (cb) => ipcRenderer.on("pet:play-anim", (_e, name) => cb(name)),
   setSleeping: (v) => ipcRenderer.send("pet:set-sleeping", !!v),
+  setHasSit: (v) => ipcRenderer.send("pet:set-has-sit", !!v), // 皮肤有无坐下动画上报（无则坐姿不下沉，防"站着脚陷进任务栏"）
   setGroundGap: (px) => ipcRenderer.send("pet:set-ground-gap", px),
   setWalking: (on) => ipcRenderer.invoke("pet:set-walking", !!on),
   walkingPause: (b, source) => ipcRenderer.send("pet:walking-pause", !!b, source || "drag"),

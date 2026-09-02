@@ -464,10 +464,26 @@ function spineFaceDir(face) {
   }
 }
 
+/** 当前皮肤的坐下动画名：精确 Sit/sit 优先，其次按名字分类器兜底（Sit01/sit_down 等）。
+ *  返回 null = 该皮肤没有可播的坐姿动画——主进程据此不做坐姿下沉（修复"站着脚陷进任务栏"）。 */
+function sitAnimName() {
+  const exact = ["Sit", "sit"].find((n) => spineHas(n));
+  if (exact) return exact;
+  const cls = ensureAnimClasses();
+  return (cls && cls.sit && cls.sit[0]) || null;
+}
+/** 皮肤加载/重建后上报是否有坐下动画（主进程 applySeatPosition 依赖此标志） */
+function reportHasSit() {
+  try { window.petAPI.setHasSit && window.petAPI.setHasSit(!!sitAnimName()); } catch { /* 忽略 */ }
+}
+
 /** 当前应播放的移动相位动画：窗顶→Sit，地面放松→待机（Relax），走动→Move */
 function spinePhaseAnim() {
   if (!walkState.active) return null;
-  if (walkState.perched && spineHas("Sit")) return "Sit";
+  if (walkState.perched) {
+    const sn = sitAnimName();
+    if (sn) return sn;
+  }
   if (walkState.paused) return spineAnimForMood("idle"); // 暂停中（单击互动/拖拽）：站立待机，不挂走路动画
   if (!walkState.resting) {
     if (spineHas("Move")) return "Move";
@@ -677,6 +693,7 @@ async function initSpine(epoch = renderModeEpoch) {
       setSpineAnim(animName, true, "init");
       scheduleFitSpine();
     }
+    reportHasSit(); // 皮肤动画集就绪后上报坐下动画可用性（主进程据此决定坐姿下沉）
 
     console.log("[Spine] 初始化完成, 可用动画:",
       spineObj.spineData.animations.map(a => a.name));
@@ -741,7 +758,7 @@ function applyWalkState(s) {
   if (Date.now() < animDemoUntil) return; // 演示中，不打断
   // 坐下（任务栏上沿/桌面图标顶/窗顶）：Sit 循环，优先级高于行走相位
   if (walkState.seated || walkState.perched) {
-    const sit = ["Sit", "sit"].find((n) => spineHas(n));
+    const sit = sitAnimName();
     const target = sit || spinePhaseAnim();
     if (target && spineObj.state.getCurrent(0)?.animation?.name !== target) {
       setSpineAnim(target, true, "seat-phase");
@@ -814,7 +831,7 @@ function setSpineMood(mood) {
   if (Date.now() < animDemoUntil) return; // 动作试演中，不被情绪切换打断
   // 坐下状态：待机回落/轮换保持坐姿，不被顶回站姿（聊天情绪仍可短暂覆盖）
   if ((walkState.seated || walkState.perched) && (mood === "idle" || mood === undefined)) {
-    const sit = ["Sit", "sit"].find((n) => spineHas(n));
+    const sit = sitAnimName();
     if (sit && spineObj.state.getCurrent(0)?.animation?.name !== sit) {
       setSpineAnim(sit, true, "sit-guard");
       scheduleFitSpine();

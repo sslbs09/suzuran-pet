@@ -2664,7 +2664,7 @@ function dragSeatUpdate(final = false) {
       seated = true;                                   // 任务栏完整坐姿磁吸
       magnet = "taskbar";
       walk.taskbarHang = false;
-      ny = waBottom + walk.groundGap - b.height + getSeatSink();
+      ny = waBottom + walk.groundGap - b.height + effectiveSeatSink();
       nx = Math.min(Math.max(b.x, walkMinX(wa)), wa.x + wa.width - b.width);
     } else if (freeDragMode && final && feet > waBottom - 40 && feet < waBottom + 20) {
       // 任务栏半挂：保留释放高度，仅有限下探，不强制塞入坐姿下沉量（原 -120/+80 → -40/+20 收窄）
@@ -2692,7 +2692,7 @@ function dragSeatUpdate(final = false) {
       if (best) {
         seated = true;                                 // 图标顶磁吸
         magnet = "icon";
-        ny = best.y + walk.groundGap - b.height + getSeatSink(); // 任务栏同款下沉：臀坐图标沿、腿垂进图标格
+        ny = best.y + walk.groundGap - b.height + effectiveSeatSink(); // 任务栏同款下沉：臀坐图标沿、腿垂进图标格（无坐下动画则不下沉）
         nx = Math.round(best.x - charCx);
       }
     } else {
@@ -2754,6 +2754,7 @@ function dragSeatUpdate(final = false) {
 /* ---------- 桌面行走 v2（仅 Spine 模式，与 GIF 表情系统完全独立）
    地面 = 任务栏上沿；水平左右走动、走走停停；偶尔跳到桌面程序窗口顶上坐下休息（Sit）。 ---------- */
 const walk = walkCore.createWalkState(); // 行走状态（walk-core 提供，纯数据）
+let skinHasSit = true; // 当前皮肤是否有可播的坐下动画（渲染层皮肤加载后上报；false 时坐姿不做下沉，修复"站着脚陷进任务栏"）
 const WALK_TICK_MS = 40;
 const WALK_SPEED = 1.2;                        // 每 tick 像素 ≈ 30px/s
 function walkSpeed() {                         // 托盘速度档位倍率（借鉴 Ark-Pets 可调移速）
@@ -2923,6 +2924,8 @@ function walkFlightTick() {
  * 其余档位（含普通大/特大）统一用标准值。设置页滑杆可按档位覆盖，存 config.walkSeatSink。 */
 function seatSinkTier() { return walkGeo.seatSinkTierOf(clampScale((config.getConfig().window || {}).scale), config.getConfig().spineSkinId); }
 function getSeatSink() { return walkGeo.seatSinkOf(clampScale((config.getConfig().window || {}).scale), config.getConfig().spineSkinId, config.getConfig().walkSeatSink); }
+/** 有效坐姿下沉：皮肤无坐下动画时为 0——否则窗口下沉但角色仍站姿，脚看起来陷进任务栏 */
+function effectiveSeatSink() { return skinHasSit ? getSeatSink() : 0; }
 
 /* ---------- 行走左边界补偿＋动作时长 ----------
  * 角色渲染在窗口右侧条带内、左侧是气泡预留区：按 charInset 放宽左边界，让角色能贴到屏幕左缘；
@@ -2976,7 +2979,7 @@ function applySeatPosition() {
   const b = win.getBounds();
   const wa = walkGeo.workAreaOf(screen, b);
   const baseY = wa.y + wa.height + walk.groundGap - b.height;   // 站立贴地
-  const targetY = walk.seated ? baseY + getSeatSink() : baseY;  // 坐姿下沉（按尺寸档位）
+  const targetY = walk.seated ? baseY + effectiveSeatSink() : baseY;  // 坐姿下沉（按尺寸档位；无坐下动画皮肤不下沉）
   walk.sunk = walk.seated;
   if (Math.abs(b.y - targetY) > 1) win.setPosition(b.x, Math.round(targetY));
   applyLayer(walk.seated || walk.active); // 接触任务栏表面时保证在任务栏之上
@@ -3457,7 +3460,7 @@ function walkTick() {
         const after = win.getBounds().y;
         if (Math.abs(after - before) > 1 && Date.now() - (walk._seatHealLog || 0) > 30000) {
           walk._seatHealLog = Date.now();
-          logTts("walk", `坐姿自愈: y=${before}→${after} sink=${getSeatSink()}`);
+          logTts("walk", `坐姿自愈: y=${before}→${after} sink=${effectiveSeatSink()} hasSit=${skinHasSit}`);
         }
       }
       // 出屏兜底：角色条带左缘越出边界 → 钳回贴边（崩溃/状态错乱后角色滑出屏幕）。
@@ -3542,7 +3545,7 @@ function walkTick() {
       walk.iconRest = onIcon && Math.random() < 0.45;
       walk.perched = true;
       walk.resting = true;
-      if (walk.perched && onIcon) walkSetPosition(j.tx, walk.perchTopY + getSeatSink(), "jump-perch-sink");
+      if (walk.perched && onIcon) walkSetPosition(j.tx, walk.perchTopY + effectiveSeatSink(), "jump-perch-sink");
       walkBroadcast();
       applyLayer();
       walkSchedulePhase(sitPhaseMs());
@@ -3817,6 +3820,13 @@ ipcMain.on("pet:set-sleeping", (_e, v) => {
   if (edge === "sleep") maybePersonify("sleep", { chance: 0.25, cooldownMs: 180000 });
   else if (edge === "wake") maybePersonify("wake", { chance: 0.35, cooldownMs: 60000 });
 }); // 睡觉时行走引擎原地待命
+ipcMain.on("pet:set-has-sit", (_e, v) => { // 渲染层皮肤加载后上报：无坐下动画的皮肤不做坐姿下沉
+  const next = !!v;
+  if (next === skinHasSit) return;
+  skinHasSit = next;
+  logTts("walk", "皮肤坐下动画: " + (next ? "有" : "无（坐姿不下沉）"));
+  if (walk.seated && !walk.perched) applySeatPosition(); // 立即校正当前坐姿窗口高度
+});
 ipcMain.on("pet:set-ground-gap", (_e, px) => {
   const v = Number(px);
   if (!Number.isFinite(v)) return;
