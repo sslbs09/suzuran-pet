@@ -59,6 +59,26 @@
 - 已知边界（见 HANDOFF-20260902-* 各文档）：pendingAmbient 缺 TTS 自然结束刷新钩子、
   旧 fingerprint 缓存无总容量上限、固定台词尚未透传 fixedLineId。
 
+## 五点五、追加修复：站着脚陷进任务栏（c797f13，已部署）
+
+- 现象：抛掷落地位置正确（y=738 脚贴任务栏），约 5s 后「坐姿自愈」把窗口拉到 y=768
+  （sink=30），但角色仍播站姿 → 脚看起来陷进任务栏。日志证据：`坐姿自愈: y=738→768 sink=30`。
+- 根因：渲染层坐姿分支只认精确动画名 `Sit/sit`；用户 winter 皮肤（build_char_298_susuro_winter_4）
+  的坐下动画名不精确匹配（分类器 /sit/i 能命中，说明存在 sit 系动画）→ 主进程按坐姿下沉窗口，
+  渲染层却回退 Relax 站姿。
+- 修复（双侧）：
+  - `renderer/pet.js`：新增 `sitAnimName()`（精确 Sit/sit → 分类器 cls.sit 兜底）与
+    `reportHasSit()`（皮肤加载完成后上报）；applyWalkState 坐姿分支、setSpineMood sit-guard、
+    spinePhaseAnim 窗顶分支全部改用 sitAnimName。
+  - `preload.js`：新增 `setHasSit` 桥。
+  - `main.js`：`skinHasSit`（默认 true，未知皮肤行为不变）+ `effectiveSeatSink()`
+    （无坐下动画时=0）；applySeatPosition、dragSeatUpdate 任务栏/图标磁吸、jump-perch-sink、
+    坐姿自愈日志全部替换；`pet:set-has-sit` IPC 值变化时立即 applySeatPosition 校正。
+- 效果：有 sit 系动画的皮肤现在真正播坐姿（下沉合理化）；完全没有的皮肤不再下沉（站姿贴沿）。
+- 验证：40/40 测试通过；重新 pack.sh 部署（app.asar 188,085,177B）；新会话 spine ok、
+  无异常日志。待用户实抛复验（若该皮肤 sit 系动画本身是"半站"姿态，观感仍偏沉，
+  可在设置页把「坐姿下沉量」滑杆调小或归零，或告诉我动画名再收紧匹配）。
+
 ## 六、回退方法（如新版异常）
 
 ```text
