@@ -588,6 +588,7 @@ function openDocs() {
 }
 // 自动更新（v2.5.26 ③）：检查→确认→下载 pending→退出时替换。手动触发、可回滚
 async function trayCheckUpdate() {
+  const lang = config.getConfig().uiLang || "zh";
   try {
     sendToRenderer("pet:toast", i18n.t(lang, "tray.checkingUpdate"));
     const plan = await updater.checkForUpdate(app.getVersion());
