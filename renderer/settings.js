@@ -34,9 +34,35 @@ async function toast(msg) {
   console.log("[设置]", msg);
 }
 
+/* ---------- 首跑引导清单（v2.5.26）：3 步实时完成状态 ---------- */
+async function renderOnboard(S) {
+  const box = document.getElementById("onboard-list");
+  if (!box) return;
+  let chatted = false;
+  try { const m = await window.petAPI.getMemory(); chatted = !!(m && m.bond && m.bond.exp > 0); } catch { /* 忽略 */ }
+  const steps = [
+    { done: !!(S.chat && S.chat.apiKey), txt: L("set.onboard1") },
+    { done: chatted, txt: L("set.onboard2") },
+    { done: !!(S.tts && S.tts.enabled), txt: L("set.onboard3") },
+  ];
+  box.innerHTML = "";
+  steps.forEach((s) => {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;align-items:center;gap:8px;font-size:13px;";
+    const ic = document.createElement("span");
+    ic.textContent = s.done ? "✅" : "⬜";
+    const t = document.createElement("span");
+    t.textContent = s.txt;
+    t.style.color = s.done ? "var(--ui-success)" : "var(--ui-muted)";
+    row.appendChild(ic); row.appendChild(t);
+    box.appendChild(row);
+  });
+}
+
 /* ---------- 初始化 ---------- */
 (async function init() {
   S = await window.petAPI.getSettings();
+  renderOnboard(S);
   // 版本号：单一来源 package.json（app.getVersion），比硬编码文本更可信（P1-5）
   const verEl = document.getElementById("version");
   if (verEl && window.petAPI.appVersion) {
