@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import traceback
+from pathlib import Path
 
 
 def main():
@@ -29,8 +30,12 @@ def main():
     audio = synth.call(cfg["text"])
     if not audio or len(audio) < 100:
         raise RuntimeError("合成结果为空或过短")
-    with open(cfg["out"], "wb") as f:
-        f.write(audio)
+    # 路径守卫（防路径穿越）：输出必须落在请求文件所在目录内（主进程约定 out 与 req.json 同目录）
+    req_dir = os.path.abspath(os.path.dirname(sys.argv[1]))
+    out_path = Path(cfg["out"]).resolve()
+    if not str(out_path).startswith(req_dir + os.sep):
+        raise RuntimeError("out 必须与 req.json 同目录（拒绝越界路径）")
+    out_path.write_bytes(audio)
     print("OK", len(audio))
 
 

@@ -1,6 +1,7 @@
 "use strict";
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { spawn, exec, execFile } = require("child_process");
 const config = require("./config");
 const { logTts } = require("./logger");
@@ -869,11 +870,22 @@ function runPythonWithTimeout(args, options, timeoutMs, label) {
   });
 }
 
+/** 临时文件路径守卫（Mimosa 高危：路径穿越）：与 fixed-line-cache.insideRoot 同款——
+ *  resolve 后必须仍落在目标目录内，越界直接抛错。 */
+function insideDir(dir, name) {
+  const root = path.resolve(dir);
+  const target = path.resolve(root, name);
+  if (target !== root && !target.startsWith(root + path.sep)) throw new Error("临时文件路径越界");
+  return target;
+}
+
 async function cosyTts(cosy, clean) {
-  const tag = Date.now() + "-" + Math.random().toString(36).slice(2, 8);
+  // 临时文件名：crypto 随机 + 正则白名单校验（Mimosa 高危：路径穿越），不合法直接拒绝
+  const tag = Date.now() + "-" + crypto.randomBytes(6).toString("hex");
+  if (!/^[0-9a-z-]{5,40}$/.test(tag)) throw new Error("cosyTts: 非法临时文件名");
   fs.mkdirSync(config.STORAGE.audio, { recursive: true });
-  const reqFile = path.join(config.STORAGE.audio, "tts_cosy_req_" + tag + ".json");
-  const outFile = path.join(config.STORAGE.audio, "tts_cosy_" + tag + ".mp3");
+  const reqFile = insideDir(config.STORAGE.audio, "tts_cosy_req_" + tag + ".json");
+  const outFile = insideDir(config.STORAGE.audio, "tts_cosy_" + tag + ".mp3");
   try {
     fs.writeFileSync(reqFile, JSON.stringify({
       model: cosy.model || "cosyvoice-v3.5-plus",

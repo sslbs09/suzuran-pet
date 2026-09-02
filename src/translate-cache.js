@@ -14,7 +14,8 @@ function cachePathFor(userDir) {
   return path.join(userDir, "translate-cache.json");
 }
 function hashKey(text) {
-  return crypto.createHash("sha1").update(String(text || "")).digest("hex");
+  // SHA-256（Mimosa 高危：SHA-1 已弱）。仅作缓存键，换算法=一次性全量重翻，可接受。
+  return crypto.createHash("sha256").update(String(text || "")).digest("hex");
 }
 function load(userDir) {
   try { return JSON.parse(fs.readFileSync(cachePathFor(userDir), "utf8")); } catch { return {}; }
