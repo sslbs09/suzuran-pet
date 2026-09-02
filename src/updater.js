@@ -1,0 +1,82 @@
+"use strict";
+
+/* updater.js — asar-swap 自动更新（v2.5.26 ③）
+ * 贴合现有「换 app.asar」分发模型：检查 GitHub Release → 下载 app.asar.pending →
+ * 退出时由 detached 的 apply-update.ps1 备份+替换+重启。默认手动触发、可回滚。
+ * 纯函数（compareSemver）可单测；网络/文件副作用在主干调用。
+ */
+const fs = require("fs");
+const path = require("path");
+
+const REPO = "sslbs09/suzuran-pet";
+
+/** 语义版本比较：a>b→1, a<b→-1, 相等→0（容错非数字段） */
+function compareSemver(a, b) {
+  const pa = String(a).replace(/^v/i, "").split(".").map((x) => parseInt(x, 10) || 0);
+  const pb = String(b).replace(/^v/i, "").split(".").map((x) => parseInt(x, 10) || 0);
+  for (let i = 0; i < 3; i++) {
+    const x = pa[i] || 0, y = pb[i] || 0;
+    if (x > y) return 1;
+    if (x < y) return -1;
+  }
+  return 0;
+}
+
+/** 给定当前版本与 latest release，返回更新计划或 null */
+function buildUpdatePlan({ current, latestTag, assets }) {
+  if (!latestTag || compareSemver(latestTag, current) <= 0) return null;
+  const asar = (assets || []).find((a) => a.name === "app.asar");
+  const ver = (assets || []).find((a) => a.name === "app.asar.version");
+  if (!asar || !ver) return null; // 该 release 未带 asar 资产 → 不支持增量更新
+  return { version: latestTag, asarUrl: asar.browser_download_url, verUrl: ver.browser_download_url, size: asar.size || 0 };
+}
+
+function resourcesDir() { return process.resourcesPath || path.join(__dirname, ".."); }
+function pendingAsar() { return path.join(resourcesDir(), "app.asar.pending"); }
+function currentAsar() { return path.join(resourcesDir(), "app.asar"); }
+
+/** 检查更新（fetch GitHub API）。返回 buildUpdatePlan 结果或 null。 */
+async function checkForUpdate(currentVersion) {
+  try {
+    const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: { Accept: "application/vnd.github+json", "User-Agent": "suzuran-pet" } });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return buildUpdatePlan({ current: currentVersion, latestTag: j.tag_name, assets: j.assets });
+  } catch { return null; }
+}
+
+/** 下载 asar 到 pending（不覆盖正在运行的 asar）。返回 true/false。 */
+async function downloadPending(plan) {
+  try {
+    const r = await fetch(plan.asarUrl);
+    if (!r.ok) return false;
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (!buf.length || (plan.size && buf.length !== plan.size)) return false;
+    fs.writeFileSync(pendingAsar(), buf);
+    return true;
+  } catch { return false; }
+}
+
+/** 退出时替换：写 apply-update.ps1（等退出→备份→pending 覆盖→重启），detached 启动后由调用方 quit。 */
+function applyOnExit(exePath) {
+  const res = resourcesDir();
+  const ps1 = path.join(res, "apply-update.ps1");
+  const script = [
+    "param($exe,$res)",
+    "$asar=Join-Path $res 'app.asar'; $pending=Join-Path $res 'app.asar.pending'",
+    "Start-Sleep 2",
+    "if (Test-Path $asar) { Copy-Item $asar \"$asar.bak\" -Force }",
+    "if (Test-Path $pending) { Move-Item $pending $asar -Force; Start-Process $exe } else { Write-Host 'no pending' }",
+  ].join("\n");
+  try {
+    fs.writeFileSync(ps1, script);
+    const { spawn } = require("child_process");
+    const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, exePath, res], { detached: true, stdio: "ignore" });
+    child.unref();
+    return true;
+  } catch { return false; }
+}
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = { compareSemver, buildUpdatePlan, checkForUpdate, downloadPending, applyOnExit, pendingAsar, currentAsar, REPO };
+}

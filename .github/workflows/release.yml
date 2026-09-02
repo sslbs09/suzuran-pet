@@ -47,6 +47,14 @@ jobs:
           Compress-Archive -Path $folder.FullName -DestinationPath $zip -Force
           Write-Host "已生成: $zip"
 
+      - name: 打包 app.asar（供增量自动更新，v2.5.26）
+        shell: pwsh
+        run: |
+          $folder = Get-ChildItem dist | Select-Object -First 1
+          npx --yes asar@3.2.0 pack "$($folder.FullName)\resources\app" app.asar
+          "${{ github.ref_name }}" | Out-File -Encoding ascii app.asar.version
+          Write-Host "已生成 app.asar + app.asar.version"
+
       - name: 生成 Release 正文（从 CHANGELOG 抽取本版本段落）
         shell: pwsh
         run: |
@@ -67,7 +75,10 @@ jobs:
         with:
           name: "苏苏洛桌宠 ${{ github.ref_name }} 正式版"
           body_path: RELEASE_NOTES.md
-          files: "SuzuranPet-${{ github.ref_name }}-win32-x64.zip"
+          files: |
+            SuzuranPet-${{ github.ref_name }}-win32-x64.zip
+            app.asar
+            app.asar.version
           generate_release_notes: false
           fail_on_unmatched_files: true
           draft: false

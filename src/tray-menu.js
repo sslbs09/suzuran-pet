@@ -18,7 +18,7 @@ function buildTrayItems(deps) {
     sendToRenderer, setPetLayer, openPsdWindow, rigSkinList, setRigSkin,
     setDimMode, sitOnTaskbar, setScale, clampScale, setWalkSpeed, setCatToy,
     setFileGuard,
-    diagClick, openDocs, openSchedule, openSettings, openMoodManager, openVoiceStudio, openTtsGuide, openQuickstart, openHelp, openAddChar,
+    diagClick, openDocs, openSchedule, openSettings, openMoodManager, openVoiceStudio, openTtsGuide, openQuickstart, openHelp, openAddChar, checkUpdate,
     reloadPersona, openConfigPath, openPersonaPath, quitApp
   } = deps;
 
@@ -155,6 +155,7 @@ function buildTrayItems(deps) {
 
   /* ---------- 🔧 高级与工具子菜单：低频操作收纳 ---------- */
   const advancedItems = [
+    { label: i18n.t(lang, "tray.checkUpdate"), click: () => checkUpdate && checkUpdate() },
     { label: i18n.t(lang, "tray.diagClick"), click: () => diagClick() },
     { label: i18n.t(lang, "tray.reloadPersona"), click: () => reloadPersona() },
     { label: i18n.t(lang, "tray.addChar"), click: () => openAddChar() },

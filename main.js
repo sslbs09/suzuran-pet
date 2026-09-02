@@ -62,6 +62,7 @@ const { randInt, easeImpact, clampScale, runPowerShell } = require("./src/utils"
 const walkGeo = require("./src/walk-geo"); // 行走几何纯函数（2026-08-27 收敛）
 const walkState = require("./src/walk-state"); // 行走几何决策纯函数（v2.5.26 收敛①）
 const focusWatch = require("./src/focus-watch"); // 专注/离开状态机纯函数（v2.5.26 收敛②）
+const updater = require("./src/updater"); // asar-swap 自动更新（v2.5.26 ③）
 const walkCore = require("./src/walk-core");
 const { createAskQueue } = require("./src/ask-queue"); // /chat 串行化并发锁（2026-08-27 提取，可单测）
 const { createDebounceBuffer } = require("./src/message-buffer"); // 消息生成防抖缓冲（2026-08-27 提取，可单测）
@@ -383,7 +384,7 @@ function refreshTrayMenu() {
     setDimMode, sitOnTaskbar, setScale, clampScale, setWalkSpeed, setCatToy,
     setFileGuard,
     openSchedule, openSettings, openMoodManager, openVoiceStudio, openTtsGuide, openQuickstart, openHelp, openAddChar,
-    openDocs, diagClick,
+    openDocs, diagClick, checkUpdate: trayCheckUpdate,
     
     reloadPersona: () => { personaCache = config.getPersonaText(); sendToRenderer("pet:toast", i18n.t(lang, "tray.personaReloaded")); },
     openConfigPath: () => shell.openPath(config.CONFIG_PATH),
@@ -585,6 +586,28 @@ function openDocs() {
   attachCrashDiag(docsWin, "docs");
   docsWin.on("closed", () => { docsWin = null; });
 }
+// 自动更新（v2.5.26 ③）：检查→确认→下载 pending→退出时替换。手动触发、可回滚
+async function trayCheckUpdate() {
+  try {
+    sendToRenderer("pet:toast", i18n.t(lang, "tray.checkingUpdate"));
+    const plan = await updater.checkForUpdate(app.getVersion());
+    if (!plan) { dialog.showMessageBox({ type: "info", title: "苏苏洛桌宠", message: i18n.t(lang, "tray.alreadyLatest") }); return; }
+    const { response } = await dialog.showMessageBox({
+      type: "question",
+      buttons: [i18n.t(lang, "tray.updateNow"), i18n.t(lang, "tray.updateLater")],
+      defaultId: 0, cancelId: 1,
+      message: `${i18n.t(lang, "tray.newVersion")} ${plan.version}`,
+    });
+    if (response !== 0) return;
+    const ok = await updater.downloadPending(plan);
+    if (!ok) { dialog.showMessageBox({ type: "error", message: i18n.t(lang, "tray.updateFail") }); return; }
+    const exe = app.getPath("exe");
+    updater.applyOnExit(exe);
+    quitting = true;
+    app.quit(); // 退出后由 apply-update.ps1 备份+替换+重启
+  } catch (e) { logTts("update", "检查更新异常: " + (e && e.message || e)); }
+}
+
 async function diagClick() { // 点击穿透诊断：在渲染层实时抓取交互相关状态写日志
   if (!win || win.isDestroyed()) return;
   try {
