@@ -126,6 +126,7 @@ async function toast(msg) {
   const f = S.features || {};
   $("feat-clipboard").checked = !!f.clipboardWatch;
   $("feat-sysmon").checked = !!f.systemMonitor;
+  $("focus-mode").checked = f.focusMode !== false;
   $("feat-memory").checked = f.longTermMemory !== false;
   $("feat-emotional").checked = f.emotionalVoice !== false;
   $("feat-desktop-icons").checked = !!f.desktopIcons;
@@ -581,6 +582,7 @@ async function doSaveOther() {
     features: {
       clipboardWatch: $("feat-clipboard").checked,
       systemMonitor: $("feat-sysmon").checked,
+      focusMode: $("focus-mode").checked,
       longTermMemory: $("feat-memory").checked,
       emotionalVoice: $("feat-emotional").checked,
       desktopIcons: $("feat-desktop-icons").checked

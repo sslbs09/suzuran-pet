@@ -6,7 +6,7 @@
  */
 "use strict";
 
-const { app, protocol, safeStorage, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, screen, dialog, Notification } = require("electron");
+const { app, protocol, safeStorage, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, screen, dialog, Notification, powerMonitor } = require("electron");
 // v2.5.22 修复（P0-2）：删除无条件 disableHardwareAcceleration——
 // 此前与下方按 softRender 配置的判断冲突，导致设置页「软件渲染」开关形同虚设。
 // 硬件加速默认开启（Spine/PIXI 性能更好）；若遇 GPU 崩溃，用户在设置开启 softRender 即回退 CPU 渲染。
@@ -1396,8 +1396,27 @@ function broadcastToRenderers(channel, payload) {
 
 /** 主动类消息网关：桌宠隐藏到托盘时保持静默待命（不说话不出声）；
  *  提醒/番茄钟等用户明确设置的任务用 force=true 照常送达 */
+// 专注/离开模式（v2.5.26）：系统空闲超阈值=离开/专注→静默；回归且离开>1min→打招呼。powerMonitor 无外部依赖
+let awaySince = 0;
+function startFocusWatch() {
+  setInterval(() => {
+    try {
+      if ((config.getConfig().features || {}).focusMode === false) { awaySince = 0; return; }
+      const idle = powerMonitor.getSystemIdleTime();
+      if (idle > 300) { if (!awaySince) awaySince = Date.now(); }
+      else {
+        if (awaySince && Date.now() - awaySince > 60000 && isWindowVisible()) {
+          sendProactive("【开心】（看你回来眼睛一亮）回来啦～刚才没打扰你，现在要聊聊吗？", "开心");
+        }
+        awaySince = 0;
+      }
+    } catch { /* 忽略 */ }
+  }, 15000);
+}
+
 function sendProactive(text, emotion, { force = false } = {}) {
   if (!force && !isWindowVisible()) return;
+  if (!force && awaySince) return; // 专注/离开模式：静默不打扰（v2.5.26）
   let t = String(text || "");
   let emo = emotion;
   // 台词级情绪细标（v2.5.26）：行首【撒娇/傲娇/惊讶/开心/温柔】覆盖池默认，标记不进气泡/朗读
@@ -4051,6 +4070,7 @@ if (!gotLock) {
     // 日语翻译预热（v2.5.20）：speakJa 模式下空闲批量翻译固定台词进磁盘缓存，
     // 翻译 API 挂了也能说出日语（"说不出来"根治）
     features.startJaPrewarm();
+    startFocusWatch(); // 专注/离开模式（v2.5.26）
 
     // 感知工作区活动（v2.5.3，默认关）：她会在你改代码时小声嘀咕（只读监听）
     if (_cfg.features && _cfg.features.workspaceWatch && _cfg.features.workspaceWatch.enabled) {
