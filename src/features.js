@@ -525,12 +525,18 @@ function jaPrewarmableLines() {
       ...Object.values(lines.STAGE_LINES || {}),
       lines.EARLY_MORNING_LINES,
     ];
-    // 去重 + 只留不含人称占位符的固定句（含 {{user}}/{{name}} 的句由运行时按实际称呼翻译并缓存）
+    // 去重 + 按当前称呼展开占位符（v2.5.27：台词库统一 {{user}} 后，若仍跳过占位符句，
+    // 预热池会被清空——必须展开成与运行时念白一致的文本再翻译，缓存键才能命中）
+    const petName = (config.getConfig().pet || {}).name || "苏苏洛";
+    const userName = (config.getConfig().chat || {}).userName || "博士";
     const seen = new Set();
     const out = [];
     for (const pool of pools) {
-      for (const s of pool || []) {
-        if (s.includes("{{") || seen.has(s)) continue;
+      for (const raw of pool || []) {
+        const s = String(raw || "")
+          .replace(/\{\{\s*name\s*\}\}/gi, petName)
+          .replace(/\{\{\s*user\s*\}\}/gi, userName);
+        if (!s || seen.has(s)) continue;
         seen.add(s);
         out.push(s);
       }

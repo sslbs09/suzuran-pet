@@ -258,14 +258,17 @@ function addSpineAnim(name, loop) {
 let spineFitTimers = [];
 let spineFitGeneration = 0;
 let spineFitStableHits = 0;
-function scheduleFitSpine() {
+function scheduleFitSpine(opts = {}) {
   spineFitGeneration += 1;
   spineFitStableHits = 0;
   // spineAutoScaled / spineFitKeepScale 跨动画保持（只在换皮肤 initSpine 时重置）：
   // 每次动画切换都重置会让适配无限累乘放大（迷迭香实测每次相位切换 ×1.59，几次后角色暴涨出画布消失）
   spineFitTimers.forEach(clearTimeout);
   const generation = spineFitGeneration;
-  spineFitTimers = [150, 500, 1000, 1800, 2800, 4200].map((ms) => setTimeout(() => fitSpinePose(generation), ms));
+  // 坐姿相位：动画切换有 ~250ms 交叉混合（defaultMix），150ms 首采样会量到"站→坐过渡中间态"
+  // 包围盒导致定位偏上（偶发"悬空坐着"）——坐姿时跳过过渡期，从 400ms 起测
+  const timers = opts.seatPhase ? [400, 700, 1200, 2000, 3000, 4200] : [150, 500, 1000, 1800, 2800, 4200];
+  spineFitTimers = timers.map((ms) => setTimeout(() => fitSpinePose(generation), ms));
 }
 let spineBoost = 1; // >1 表示该模型包围盒远大于可见内容（空白/特效区），fit 校准需跳过缩小保护
 let spineXoff = 0;  // 可见主体偏在包围盒一侧时的水平居中修正（占包围盒宽度比例，face=-1 时自动镜像）
@@ -768,7 +771,8 @@ function applyWalkState(s) {
     const target = sit || spinePhaseAnim();
     if (target && spineObj.state.getCurrent(0)?.animation?.name !== target) {
       setSpineAnim(target, true, "seat-phase");
-      scheduleFitSpine();
+      try { window.petAPI.playback && window.petAPI.playback("[fit] seat-phase anim=" + target); } catch { /* 忽略 */ }
+      scheduleFitSpine({ seatPhase: true });
     }
     return;
   }
@@ -850,7 +854,7 @@ function setSpineMood(mood) {
     const sit = sitAnimName();
     if (sit && spineObj.state.getCurrent(0)?.animation?.name !== sit) {
       setSpineAnim(sit, true, "sit-guard");
-      scheduleFitSpine();
+      scheduleFitSpine({ seatPhase: true });
     }
     return;
   }
