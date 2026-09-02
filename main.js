@@ -3328,6 +3328,8 @@ function walkTick() {
         if (ck.overdue) {
           win.setPosition(Math.round(edgeL - inset), eb.y);
           charLeft = edgeL;
+          // v2.5.26 修「左缘光走路不前进」：钳回贴边后强制折返向右，避免一直向左推被钳=原地踏步
+          if (walk.dir < 0) { walk.dir = 1; walkUpdateFace(walk.dir); }
         }
       }
       // 左缘翻边滞回（v2.5.26 收敛①）：判定抽到 walk-state 纯函数，setEdgeLeft 副作用留主干
