@@ -70,3 +70,12 @@
 - 改文档（使用说明/API 指南/开箱必读/语音部署）→ `bash deploy/sync-pages.sh` 同步官网 + 同步正式版目录。
 - 加情绪音色 → 素材入 `voice-ref/` + 改 `voice-refs.json` + 设置页「情绪音色试听」可直接试。
 - 备份 → 放 `_backups/` 并更新本节记录。
+
+## 7. 天气源接口（v2.5.26，供他人接自己的天气 API）
+
+`src/weather.js` 暴露可插拔天气源，默认 Open-Meteo（免 key）。接入方式：
+
+- **配置层**：设置页「🌤 天气」选 provider（open-meteo / openweathermap）+ 填 key；存 `config.weather = {enabled, city, provider, key}`。城市支持内置城市表名或「纬度,经度」。
+- **代码层（开发者）**：`require("./src/weather").registerProvider(name, fn)`，`fn(loc, {key}) => Promise<{temp, humidity, wind, code}>`，`code` 用 **WMO 天气码**（0 晴 / 1-2 多云 / 3 阴 / 45-48 雾 / 51-67,80-82 雨 / 71-77,85-86 雪 / 95-99 雷雨；非 WMO 源自行映射，参考内置 `owmToWmo`）。注册后把 `config.weather.provider` 设为该 name 即生效。
+- **返回契约**：fetchWeather 统一返回 `{temp, humidity, wind, desc, cat, provider}`，`cat∈{sunny,cloudy,overcast,fog,rain,snow,thunder}`，`moodCat` 再叠加 hot/cold/windy 用于选台词池。
+- 缓存 30 分钟、按「城市+源」键；半小时轮询一次，免 key 源一个月零成本。

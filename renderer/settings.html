@@ -576,6 +576,17 @@
         <span data-i18n="set.weatherCity">城市（内置：北京/上海/广州/深圳/成都/杭州等；或直接填 纬度,经度）</span>
         <input id="weather-city" type="text" placeholder="上海" />
       </label>
+      <label class="col">
+        <span data-i18n="set.weatherProvider">天气源（open-meteo 免 key；openweathermap 需 key；开发者可注册自定义源）</span>
+        <select id="weather-provider">
+          <option value="open-meteo">Open-Meteo（免 key·推荐）</option>
+          <option value="openweathermap">OpenWeatherMap（需 key）</option>
+        </select>
+      </label>
+      <label class="col">
+        <span data-i18n="set.weatherKey">天气源 API Key（open-meteo 留空）</span>
+        <input id="weather-key" type="password" autocomplete="off" placeholder="留空" />
+      </label>
       <span id="weather-now" class="result" style="align-self:center;"></span>
     </div>
   </section>

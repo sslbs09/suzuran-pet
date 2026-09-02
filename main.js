@@ -1448,7 +1448,7 @@ function startWeatherWatch() {
     try {
       const w = config.getConfig().weather || {};
       if (w.enabled === false || !w.city) return;
-      const data = await weather.fetchWeather(w.city);
+      const data = await weather.fetchWeather(w.city, w); // w={provider,key} 可插拔天气源
       if (!data) return;
       const changed = !lastWeather || lastWeather.desc !== data.desc || lastWeather.temp !== data.temp;
       lastWeather = data;
@@ -1464,12 +1464,18 @@ function startWeatherWatch() {
   setInterval(tick, 30 * 60 * 1000); // 半小时一次
 }
 ipcMain.handle("pet:get-weather", () => lastWeather);
-ipcMain.handle("pet:get-weather-cfg", () => { const w = config.getConfig().weather || {}; return { enabled: w.enabled !== false, city: w.city || "" }; });
+ipcMain.handle("pet:get-weather-cfg", () => { const w = config.getConfig().weather || {}; return { enabled: w.enabled !== false, city: w.city || "", provider: w.provider || "open-meteo", key: w.key || "" }; });
 ipcMain.handle("pet:set-weather", (_e, patch) => {
   patch = patch || {};
   const cur = config.getConfig().weather || {};
-  config.saveConfig({ weather: { enabled: patch.enabled !== false, city: String(patch.city != null ? patch.city : cur.city || "") } });
-  return { enabled: patch.enabled !== false, city: String(patch.city != null ? patch.city : cur.city || "") };
+  const next = {
+    enabled: patch.enabled !== false,
+    city: String(patch.city != null ? patch.city : cur.city || ""),
+    provider: String(patch.provider != null ? patch.provider : cur.provider || "open-meteo"),
+    key: String(patch.key != null ? patch.key : cur.key || ""),
+  };
+  config.saveConfig({ weather: next });
+  return next;
 });
 
 function sendProactive(text, emotion, { force = false } = {}) {

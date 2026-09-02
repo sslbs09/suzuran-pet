@@ -435,4 +435,11 @@
 - main.js：startWeatherWatch(30min)+主动天气播报(4h 同类不重复、尊重离开/专注)+IPC get/set-weather；设置页「🌤 天气」开关+城市+当前天气；信息版天气行；三语 i18n
 - 新手教程/快速开始.md 加「看天气」小节
 - 31 测试全绿；已部署重启
+
+### 块 34（用户：天气台词丰富到每类 5-6、常见更多；给接口否则他人接不了）
+- ✅ WEATHER_LINES 扩充：sunny/rain/hot/cold 各 8 句、cloudy/snow/thunder/windy 6 句、overcast/fog 5 句（共 65 句），带情绪细标
+- ✅ 可插拔天气源接口：weather.js PROVIDERS（open-meteo 免key 默认 / openweathermap 需key）+ registerProvider(name,fn) + owmToWmo 映射；fetchWeather(city,{provider,key}) 按源分发、缓存键含源
+- ✅ 设置页天气源下拉+key 输入；config.weather 扩展 provider/key；IPC get/set-weather-cfg 同步；三语 i18n
+- ✅ 接口文档：PROJECT-STRUCTURE §7「天气源接口」（fn 契约 loc,{key}→{temp,humidity,wind,code(WMO)}，他人 registerProvider 即可接自己的源）
+- weather 单测扩到 18（含 owmToWmo/registerProvider/自定义源取数）；31 全绿；已部署重启
 - ⏸ ag-psd 懒加载：按用户指示不动

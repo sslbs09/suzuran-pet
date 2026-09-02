@@ -35,29 +35,57 @@ function codeInfo(code) {
   return { desc: "多云", cat: "cloudy" };
 }
 
-/** 拉取当前天气。返回 {temp,humidity,wind,desc,cat} 或 null。30 分钟缓存 */
-let _cache = { t: 0, key: "", data: null };
-async function fetchWeather(city) {
-  const loc = resolveLoc(city);
-  if (!loc) return null;
-  const key = loc.lat + "," + loc.lon;
-  const now = Date.now();
-  if (_cache.data && _cache.key === key && now - _cache.t < 30 * 60 * 1000) return _cache.data;
-  try {
+/** WMO 码转换：OpenWeatherMap 条件码 → WMO 近似码 */
+function owmToWmo(id) {
+  id = Number(id) || 0;
+  if (id >= 200 && id < 300) return 95;   // 雷雨
+  if (id >= 300 && id < 600) return 61;   // 雨
+  if (id >= 600 && id < 700) return 71;   // 雪
+  if (id >= 700 && id < 800) return 45;   // 雾/沙尘
+  if (id === 800) return 0;               // 晴
+  return 2;                               // 多云
+}
+
+/** 天气源注册表（v2.5.26 可插拔）：默认 open-meteo（免 key）；
+ *  他人可 registerProvider(name, fn) 或配置 provider 接自己的接口。
+ *  fn(loc,{key}) → Promise<{temp,humidity,wind,code}> 或 null */
+const PROVIDERS = {
+  "open-meteo": async (loc) => {
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}` +
       `&current=temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m&timezone=auto`;
     const r = await fetch(url, { headers: { "User-Agent": "suzuran-pet" } });
     if (!r.ok) return null;
     const j = await r.json();
-    const cur = j.current || {};
-    const info = codeInfo(cur.weather_code);
-    const data = {
-      temp: Math.round(cur.temperature_2m),
-      humidity: Math.round(cur.relative_humidity_2m),
-      wind: Math.round(cur.wind_speed_10m),
-      desc: info.desc, cat: info.cat,
-    };
-    _cache = { t: now, key, data };
+    const c = j.current || {};
+    return { temp: c.temperature_2m, humidity: c.relative_humidity_2m, wind: c.wind_speed_10m, code: c.weather_code };
+  },
+  "openweathermap": async (loc, key) => {
+    if (!key) return null;
+    const url = `https://api.openweathermap.org/data/2.5/weather?lat=${loc.lat}&lon=${loc.lon}&appid=${encodeURIComponent(key)}&units=metric&lang=zh_cn`;
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    const j = await r.json();
+    return { temp: j.main && j.main.temp, humidity: j.main && j.main.humidity, wind: j.wind && j.wind.speed, code: owmToWmo(j.weather && j.weather[0] && j.weather[0].id) };
+  },
+};
+function registerProvider(name, fn) { if (name && typeof fn === "function") PROVIDERS[name] = fn; }
+
+/** 拉取当前天气。opts={provider,key}。返回 {temp,humidity,wind,desc,cat,provider} 或 null。30 分钟缓存 */
+let _cache = { t: 0, key: "", data: null };
+async function fetchWeather(city, opts = {}) {
+  const loc = resolveLoc(city);
+  if (!loc) return null;
+  const prov = opts.provider && PROVIDERS[opts.provider] ? opts.provider : "open-meteo";
+  const ck = loc.lat + "," + loc.lon + "," + prov;
+  const now = Date.now();
+  if (_cache.data && _cache.key === ck && now - _cache.t < 30 * 60 * 1000) return _cache.data;
+  try {
+    const fn = PROVIDERS[prov];
+    const raw = await fn(loc, opts.key || "");
+    if (!raw || raw.temp == null) return null;
+    const info = codeInfo(raw.code);
+    const data = { temp: Math.round(raw.temp), humidity: Math.round(raw.humidity), wind: Math.round(raw.wind), desc: info.desc, cat: info.cat, provider: prov };
+    _cache = { t: now, key: ck, data };
     return data;
   } catch { return null; }
 }
@@ -72,5 +100,5 @@ function moodCat(w) {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { CITY_TABLE, resolveLoc, codeInfo, fetchWeather, moodCat };
+  module.exports = { CITY_TABLE, resolveLoc, codeInfo, fetchWeather, moodCat, PROVIDERS, registerProvider, owmToWmo };
 }

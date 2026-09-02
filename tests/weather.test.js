@@ -1,6 +1,6 @@
-/** weather 纯函数单测（node）——城市解析/天气码/分类（v2.5.26 天气） */
+/** weather 纯函数单测（node）——城市解析/天气码/分类/可插拔源（v2.5.26 天气） */
 "use strict";
-const { resolveLoc, codeInfo, moodCat, CITY_TABLE } = require("../src/weather");
+const { resolveLoc, codeInfo, moodCat, CITY_TABLE, owmToWmo, registerProvider, PROVIDERS, fetchWeather } = require("../src/weather");
 let failed = 0;
 function assert(name, cond, extra) {
   if (!cond) { failed++; console.log("FAIL", name, extra || ""); }
@@ -24,4 +24,13 @@ assert("低温→cold", moodCat({ temp: -3, wind: 5, cat: "sunny" }) === "cold")
 assert("大风→windy", moodCat({ temp: 20, wind: 40, cat: "cloudy" }) === "windy");
 assert("普通→天气类", moodCat({ temp: 22, wind: 8, cat: "rain" }) === "rain");
 
-process.exit(failed ? 1 : 0);
+// 可插拔天气源接口
+assert("OWM 码转 WMO", owmToWmo(800) === 0 && owmToWmo(500) === 61 && owmToWmo(600) === 71 && owmToWmo(200) === 95);
+assert("默认有 open-meteo", typeof PROVIDERS["open-meteo"] === "function");
+registerProvider("mock", async () => ({ temp: 25, humidity: 50, wind: 10, code: 0 }));
+assert("registerProvider 生效", typeof PROVIDERS["mock"] === "function");
+(async () => {
+  const w = await fetchWeather("上海", { provider: "mock" });
+  assert("自定义源可取数", w && w.temp === 25 && w.cat === "sunny", JSON.stringify(w));
+  process.exit(failed ? 1 : 0);
+})();

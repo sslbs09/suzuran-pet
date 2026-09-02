@@ -564,13 +564,17 @@ $("stand-sink").addEventListener("change", async () => {
     const wc = await window.petAPI.getWeatherCfg();
     $("weather-on").checked = !!wc.enabled;
     $("weather-city").value = wc.city || "";
+    $("weather-provider").value = wc.provider || "open-meteo";
+    $("weather-key").value = wc.key || "";
     const now = await window.petAPI.getWeather();
     if (now) $("weather-now").textContent = `${now.desc} ${now.temp}°C · 湿${now.humidity}% · 风${now.wind}km/h`;
   } catch { /* 忽略 */ }
 })();
-const _saveWeather = () => window.petAPI.setWeather({ enabled: $("weather-on").checked, city: $("weather-city").value.trim() });
+const _saveWeather = () => window.petAPI.setWeather({ enabled: $("weather-on").checked, city: $("weather-city").value.trim(), provider: $("weather-provider").value, key: $("weather-key").value.trim() });
 $("weather-on").addEventListener("change", _saveWeather);
 $("weather-city").addEventListener("change", _saveWeather);
+$("weather-provider").addEventListener("change", _saveWeather);
+$("weather-key").addEventListener("change", _saveWeather);
 
 /* ---------- 聊天外观（字体/字号/气泡宽度，松手即生效） ---------- */
 function fillChatFontOptions(customFonts) { // 已导入的本地字体追加到下拉末尾
