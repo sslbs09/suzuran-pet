@@ -206,6 +206,12 @@ async function renderOnboard(S) {
   // Live2D 模型列表（v2.5.1）：点选即切换（主进程保存并广播重载）
   async function loadLive2dSkins() {
     try {
+      const capability = await window.petAPI.live2dCapability();
+      if (!capability || !capability.core) {
+        const b = $("live2d-skins-list");
+        if (b) b.textContent = "（当前安装包未包含 Live2D Core，已禁用；请安装完整资源包）";
+        return;
+      }
       const skins = await window.petAPI.live2dList();
       const box = $("live2d-skins-list");
       if (!box) return;
@@ -501,7 +507,122 @@ async function doSaveVoice() {
   };
   const r = await window.petAPI.saveSettings(patch);
   setResult($("voice-result"), r === true ? L("set.voiceSaved") : L("set.voiceSaveFail"), r === true);
+  if (r === true) await refreshFixedLinePool();
 }
+
+/* ---------- 固定台词音频池 ---------- */
+let fixedLineStatus = null;
+let fixedLineShowAll = false;
+const FIXED_LINE_STATE_LABELS = { pending: "未加载", loading: "生成中", ready: "已加载", failed: "失败", cancelled: "已暂停" };
+const FIXED_LINE_ENGINE_LABELS = { genie: "Genie", cosy: "CosyVoice", edge: "Edge TTS", system: "系统语音" };
+function formatBytes(bytes) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1024 / 1024).toFixed(1) + " MB";
+}
+function renderFixedLinePool(status = fixedLineStatus) {
+  if (!status) return;
+  const summary = status.summary || {};
+  const total = Number(summary.total) || 0;
+  const ready = Number(summary.ready) || 0;
+  const failed = Number(summary.failed) || 0;
+  const profile = status.profile || {};
+  const engine = FIXED_LINE_ENGINE_LABELS[profile.engine] || profile.engine || "未知方案";
+  const lang = profile.language === "ja" ? "日语" : "中文";
+  $("fixed-lines-profile").textContent = `当前方案：${engine} · ${lang}${profile.voice ? " · " + profile.voice : ""}${profile.referenceAudio ? " · 参考音频：" + profile.referenceAudio : ""}`;
+  $("fixed-lines-summary").textContent = `已加载 ${ready} / ${total} · 失败 ${failed} · 缓存 ${formatBytes(summary.bytes)}`;
+  const bar = $("fixed-lines-progress-bar");
+  if (bar) bar.style.width = total ? Math.round((ready / total) * 100) + "%" : "0%";
+  const state = $("fixed-lines-state");
+  const running = !!status.running || status.state === "running";
+  state.textContent = running ? "生成中" : ready === total && total ? "已全部加载" : failed ? "有失败项" : profile.engine === "system" ? "无需预加载" : "未开始";
+  state.className = "voice-pool-badge " + (running ? "loading" : failed ? "failed" : ready === total && total ? "ready" : "");
+  const list = $("fixed-lines-list");
+  list.replaceChildren();
+  const items = (status.items || []).filter((item) => fixedLineShowAll || item.state !== "ready");
+  for (const item of items) {
+    const row = document.createElement("div");
+    row.className = "fixed-line-row";
+    const text = document.createElement("div");
+    text.className = "fixed-line-text";
+    text.textContent = item.text;
+    const meta = document.createElement("div");
+    meta.className = "fixed-line-meta";
+    meta.textContent = item.pool + " · " + item.id;
+    text.appendChild(meta);
+    const badge = document.createElement("span");
+    badge.className = "fixed-line-state " + (item.state || "pending");
+    badge.textContent = FIXED_LINE_STATE_LABELS[item.state] || item.state || "未加载";
+    if (item.errorCode) badge.title = item.errorCode;
+    row.append(text, badge);
+    list.appendChild(row);
+  }
+  $("fixed-lines-toggle").textContent = fixedLineShowAll ? "只显示未加载/失败" : `显示未加载/失败（${total - ready}）`;
+}
+async function refreshFixedLinePool() {
+  try {
+    fixedLineStatus = await window.petAPI.getFixedLineAudioStatus();
+    renderFixedLinePool();
+  } catch (e) {
+    setResult($("fixed-lines-result"), "读取固定台词缓存失败：" + String(e.message || e), false);
+  }
+}
+function setFixedLineButtons(running) {
+  $("btn-fixed-lines-start").disabled = running;
+  $("btn-fixed-lines-retry").disabled = running;
+  $("btn-fixed-lines-cancel").disabled = !running;
+}
+$("btn-fixed-lines-start").addEventListener("click", async () => {
+  setFixedLineButtons(true);
+  setResult($("fixed-lines-result"), "正在按当前音色逐条生成；已完成项会保留…");
+  try {
+      const r = await window.petAPI.startFixedLineAudioPreload({ retryFailed: false });
+      setResult($("fixed-lines-result"), r && r.ok ? (r.state === "completed" ? "固定台词已全部生成 ✅" : r.state === "completed_with_errors" ? "已完成，但有失败项" : "已暂停，可稍后继续") : (r && r.message) || "预加载未启动", !!(r && r.ok));
+  } catch (e) { setResult($("fixed-lines-result"), String(e.message || e), false); }
+  await refreshFixedLinePool();
+  setFixedLineButtons(false);
+});
+$("btn-fixed-lines-retry").addEventListener("click", async () => {
+  setFixedLineButtons(true);
+  setResult($("fixed-lines-result"), "正在重试失败项…");
+  try { await window.petAPI.startFixedLineAudioPreload({ retryFailed: true }); }
+  catch (e) { setResult($("fixed-lines-result"), String(e.message || e), false); }
+  await refreshFixedLinePool();
+  setFixedLineButtons(false);
+});
+$("btn-fixed-lines-cancel").addEventListener("click", async () => {
+  await window.petAPI.cancelFixedLineAudioPreload();
+  setResult($("fixed-lines-result"), "已请求暂停；当前音频完成后停止。", true);
+  setFixedLineButtons(false);
+});
+$("btn-fixed-lines-clear").addEventListener("click", async () => {
+  if (!confirm("只清除当前语音方案的固定台词音频缓存，不会删除聊天记录或记忆。继续吗？")) return;
+  const r = await window.petAPI.clearFixedLineAudioCache();
+  setResult($("fixed-lines-result"), r && r.ok ? "当前缓存已清除" : (r && r.message) || "清除失败", !!(r && r.ok));
+  await refreshFixedLinePool();
+});
+$("btn-fixed-lines-toggle").addEventListener("click", () => {
+  fixedLineShowAll = !fixedLineShowAll;
+  $("fixed-lines-list").hidden = false;
+  renderFixedLinePool();
+});
+if (window.petAPI.onFixedLineAudioProgress) {
+  window.petAPI.onFixedLineAudioProgress((progress) => {
+    if (fixedLineStatus) {
+      fixedLineStatus.running = progress.state === "running" || progress.state === "loading";
+      fixedLineStatus.state = progress.state;
+      fixedLineStatus.summary = progress.summary || fixedLineStatus.summary;
+      fixedLineStatus.items = fixedLineStatus.items || [];
+      if (progress.current) {
+        fixedLineStatus.items = fixedLineStatus.items.map((item) => item.id === progress.current.id ? { ...item, state: progress.state === "loading" ? "loading" : item.state } : item);
+      }
+      renderFixedLinePool();
+    }
+  });
+}
+refreshFixedLinePool();
+
 
 $("btn-open-guide").addEventListener("click", () => window.petAPI.openTtsGuide());
 
@@ -723,13 +844,11 @@ function renderAgentClients(clients) {
     const { online, granted, seen } = AGENT_CLIENT_LABEL(c);
     info.textContent = (online ? "🟢 " : "⚪ ") + c.name + "　授权于 " + granted + "　最近 " + seen;
     info.title = "Token 只在本机使用";
-    const tok = document.createElement("button");
-    tok.textContent = "👁";
-    tok.title = "查看 Token";
-    tok.style.cssText = "border:none;background:transparent;cursor:pointer;color:#7d939a;font-size:13px;padding:0 4px;";
-    tok.addEventListener("click", () => {
-      window.alert(c.name + " 的接入 Token（仅本机 127.0.0.1 使用）：\n\n" + c.token + "\n\n请复制给该接入方。");
-    });
+    const tok = document.createElement("span");
+    tok.textContent = c.hasToken ? "🔐" : "⚠️";
+    tok.title = c.hasToken ? "Token 已安全保存；创建时的明文不会再次显示" : "该接入方没有有效 Token";
+    tok.setAttribute("aria-label", tok.title);
+    tok.style.cssText = "font-size:13px;padding:0 4px;";
     const del = document.createElement("button");
     del.textContent = "断开";
     del.title = "移除该接入方，其 token 立即失效";

@@ -12,6 +12,7 @@ const path = require("path");
 
 const storage = require("./storage");
 const secrets = require("./secrets");
+const { sanitizeClients } = require("./agent-auth");
 const APP_DIR = storage.APP_DIR; // 只读程序资源目录
 const STORAGE = storage.initializeStorage();
 const CONFIG_PATH = STORAGE.config;
@@ -255,7 +256,14 @@ function buildSettingsView() {
     zcodeCli: cfg.zcodeCli,
     agreed: !!cfg.agreed,
     scale: cfg.window.scale || 1.0,
-    agentApi: { ...cfg.agentApi, bearerToken: undefined }, // clients 含本机接入 token（仅本地 127.0.0.1 接口使用）
+    agentApi: {
+      ...cfg.agentApi,
+      bearerToken: undefined,
+      clients: sanitizeClients(cfg.agentApi && cfg.agentApi.clients).map(({ tokenHash, ...client }) => ({
+        ...client,
+        hasToken: !!tokenHash
+      }))
+    }, // 不向 renderer 回传接入方 token 原值或 hash
     secretStatus: secrets.status(),
     security: cfg.security || { externalCredNoticeSeen: false },
     hotkey: cfg.hotkey,
@@ -297,6 +305,7 @@ function saveConfig(patch) {
   delete clean.chat.apiKey;
   delete clean.ttsCosy.apiKey;
   delete clean.agentApi.bearerToken;
+  clean.agentApi.clients = sanitizeClients(clean.agentApi.clients);
   if (!patch?.zcodeCli && !loadPetConfig()?.zcodeCli) clean.zcodeCli = "";
   storage.atomicWrite(CONFIG_PATH, JSON.stringify(clean, null, 2));
   cache = null;

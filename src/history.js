@@ -54,11 +54,22 @@ function trim(c) {
 function append(entry) {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
+    const c = ensureLoaded(); // 必须先建缓存再写盘：否则首条 append 会把刚写入的行读进来又 push 一次（双计）
     fs.appendFileSync(HISTORY_FILE, JSON.stringify(entry) + "\n", "utf8");
-    const c = ensureLoaded();
     c.rows.push(entry);
     trim(c);
   } catch { /* 持久化失败不影响使用 */ }
+}
+
+/** 清空会话历史：同步清内存滚动窗口与磁盘文件，后续读取从空开始。
+ *  （v2.5.27 修复：此前设置页只清文件，常驻缓存仍会让 recent() 返回旧对话） */
+function clear() {
+  ensureLoaded().rows = [];
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(HISTORY_FILE, "", "utf8");
+    return true;
+  } catch { return false; }
 }
 
 /** 取最近 N 轮的对话（按 mode 过滤，内存过滤替代全量读盘） */
@@ -92,4 +103,4 @@ function updateLast(mode, role, fn) {
   return null;
 }
 
-module.exports = { load, append, recent, count, updateLast };
+module.exports = { load, append, clear, recent, count, updateLast };

@@ -18,6 +18,7 @@ const fs = require("fs");
 // v2.5.22 供应链加固（P3）：xlsx 改用 vendor 本地副本（xlsx.js CommonJS，API 覆盖日程导入全部用法）——
 // 不再依赖 CDN tarball（无完整性校验风险），node_modules 减 7.8MB。
 const XLSX = require("./vendor/xlsx.js");
+const { safeFetch } = require("./src/safe-url");
 
 // 产品名升级迁移（v2.5.18）：productName 从「苏苏洛桌宠 1.1 正式版」改为「苏苏洛桌宠 2.5 正式版」。
 // Electron 的 userData 路径由 productName 决定，不改名则老用户数据"凭空消失"。
@@ -55,7 +56,9 @@ const features = require("./src/features");
 const { logTts } = require("./src/logger");
 const { buildTrayItems } = require("./src/tray-menu");
 const fileGuard = require("./src/file-guard");
-const lines = require("./src/lines");
+const fixedLineCache = require("./src/fixed-line-cache");
+const fixedLinePreloader = require("./src/fixed-line-preloader");
+const fixedLines = require("./src/fixed-lines");
 const memory = require("./src/memory");
 const bond = require("./src/bond");
 const { randInt, easeImpact, clampScale, runPowerShell } = require("./src/utils");
@@ -65,7 +68,10 @@ const focusWatch = require("./src/focus-watch"); // 专注/离开状态机纯函
 const updater = require("./src/updater"); // asar-swap 自动更新（v2.5.26 ③）
 const weather = require("./src/weather"); // 免费天气 Open-Meteo（v2.5.26）
 const walkCore = require("./src/walk-core");
-const { createAskQueue } = require("./src/ask-queue"); // /chat 串行化并发锁（2026-08-27 提取，可单测）
+const { createTaskQueue } = require("./src/task-queue");
+const { createLineGate } = require("./src/line-gate");
+const { transitionSleep, createWorkflowSignalState, recordWorkflowSignal, consumeWorkflowSignal, requeueWorkflowSignal } = require("./src/dialogue-state");
+const { hashToken, safeTokenEqual, tokenMatches, sanitizeClients } = require("./src/agent-auth");
 const { createDebounceBuffer } = require("./src/message-buffer"); // 消息生成防抖缓冲（2026-08-27 提取，可单测）
 const renderModeMod = require("./src/render-mode"); // 渲染模式归一化 + 切换贴地坐标（2026-08-27 提取，可单测）
 const { planRigDelete } = require("./src/rig-delete"); // 2.5D 皮肤删除计划（2026-08-27 提取，可单测）
@@ -112,10 +118,18 @@ let moodWin = null; // 表情管理窗口
 let termsWin = null; // 使用条款确认窗口
 let scheduleWin = null; // 日程管理窗口
 let psdWin = null;      // PSD 角色工具窗口（v2.1）
-let agentApiAbort = null; // Agent 接口当前请求的中止控制器
+let agentApiAbort = null; // 兼容旧状态读取；新 Agent 请求由 agentTaskQueue 按 task id 管理
 let agentLastSeenFlushAt = 0; // Agent lastSeen 落盘节流（P2-3：60s 内最多写一次 config.json）
 let agentTaskStatus = { state: "idle", text: "", since: 0 }; // 反幻觉任务状态：仅真实信息（zcode 任务），供气泡展示与 /status 接口
-let agentAskQueue = createAskQueue(3);   // /chat 串行化并发锁（v2.6：防双发双倍 API 费 + 历史乱序；队列满 429 兜底）
+const agentTaskQueue = createTaskQueue(3);
+let agentServer = null;
+let agentServerPort = 0;
+let agentServerState = "disabled";
+const lineGate = createLineGate();
+const workflowSignal = createWorkflowSignalState();
+let workflowFlushTimer = null;
+let workflowPendingText = "";
+let workflowPendingEmotion = "idle";
 let activeReq = null; // { id, sender, abort }
 const askBuffer = createDebounceBuffer(); // 消息生成防抖（v2.6）：生成/合成中来的消息只留最新一条，回合结束补发
 let pendingAskTimer = null;               // 合并窗口定时器（每次新消息重置）
@@ -673,6 +687,11 @@ ipcMain.handle("pet:live2d-list", () => {
     (dir, mf) => "pet-user://live2d/" + encodeURIComponent(dir) + "/" + encodeURIComponent(mf));
   return out;
 });
+// Live2D Core 与内置模型属于可选发行资源；缺失时返回空列表，设置页应明确提示而不是进入空白模式。
+ipcMain.handle("pet:live2d-capability", () => ({
+  core: fs.existsSync(path.join(config.APP_DIR, "renderer", "live2dcubismcore.min.js")),
+  builtinModels: fs.existsSync(path.join(config.APP_DIR, "renderer", "live2d", "models"))
+}));
 let rendererReloadAt = 0;
 ipcMain.on("pet:set-live2d-scale", (_e, v) => { // Live2D 角色大小（实时生效）
   const s = Math.max(0.3, Math.min(1.5, Number(v) || 1));
@@ -1096,11 +1115,6 @@ ipcMain.handle("pet:set-seat-sink", (_e, v) => {
 });
 
 /* ---------- 本地 Agent 调用接口（仅 127.0.0.1；可选 Bearer token） ---------- */
-function safeTokenEqual(actual, expected) {
-  const a = Buffer.from(String(actual || ""));
-  const b = Buffer.from(String(expected || ""));
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
 async function readAgentJson(req, maxBytes) {
   const declared = Number(req.headers["content-length"] || 0);
   if (declared > maxBytes) return { error: 413 };
@@ -1116,9 +1130,20 @@ async function readAgentJson(req, maxBytes) {
     return body && typeof body === "object" && !Array.isArray(body) ? { body } : { error: 400 };
   } catch { return { error: 400 }; }
 }
+function stopAgentApi() {
+  const server = agentServer;
+  agentServer = null;
+  agentServerPort = 0;
+  agentServerState = "disabled";
+  agentTaskQueue.cancelAll();
+  if (!server) return Promise.resolve();
+  return new Promise((resolve) => server.close(() => resolve()));
+}
+
 function startAgentApi() {
+  if (agentServer) return;
   const a = config.getConfig().agentApi || {};
-  if (!a.enabled) return;
+  if (!a.enabled) { agentServerState = "disabled"; return; }
   // v2.5.22 优化（P2-3）：Agent lastSeen 落盘节流状态（60s 内最多写一次 config）
   agentLastSeenFlushAt = 0;
   // v2.5.22 安全加固（P1-4）：master token 与 clients 都为空时自动生成随机 token——
@@ -1134,6 +1159,8 @@ function startAgentApi() {
     }
   }
   const port = Math.max(1, Math.min(65535, parseInt(a.port, 10) || 8765));
+  agentServerPort = port;
+  agentServerState = "starting";
   const server = http.createServer(async (req, res) => {
     let sent = false;
     const send = (code, obj, headers = {}) => {
@@ -1155,14 +1182,15 @@ function startAgentApi() {
       const am = authHdr.match(/^Bearer ([^\s]+)$/i);
       const provided = am ? am[1] : "";
       const master = String(apiCfg.bearerToken || "");
-      const clients = Array.isArray(apiCfg.clients) ? apiCfg.clients : [];
-      const clientHit = provided ? clients.find((c) => c && c.token && safeTokenEqual(provided, c.token)) : null;
+      const rawClients = Array.isArray(apiCfg.clients) ? apiCfg.clients : [];
+      const clientIndex = provided ? rawClients.findIndex((c) => tokenMatches(provided, c)) : -1;
+      const clientHit = clientIndex >= 0 ? rawClients[clientIndex] : null;
       // 优化建议 P0：#3 写操作（/chat /stop 消耗 LLM 额度/改状态）始终要求认证——
       // 即使 master/clients 全空（如自动生成 token 失败）也不开放无认证写入；
       // /health 只读健康探测放行（供接入方探活），其余读操作维持原鉴权
       const isWrite = url.pathname === "/chat" || url.pathname === "/stop";
-      const needsAuth = url.pathname === "/health" ? false : (isWrite || !!master || clients.length > 0);
-      const authOk = provided && (safeTokenEqual(provided, master) || !!clientHit);
+      const needsAuth = url.pathname === "/health" ? false : (isWrite || !!master || sanitizeClients(rawClients).length > 0);
+      const authOk = !!provided && (safeTokenEqual(provided, master) || clientIndex >= 0);
       if (needsAuth && !authOk) { send(401, { ok: false, error: "unauthorized" }, { "WWW-Authenticate": "Bearer" }); return; }
       if (clientHit) { // 接入名单：记录该 agent 最近活跃（在线状态展示）
         clientHit.lastSeen = Date.now();
@@ -1170,7 +1198,7 @@ function startAgentApi() {
         const _now = Date.now();
         if (!agentLastSeenFlushAt || _now - agentLastSeenFlushAt >= 60000) {
           agentLastSeenFlushAt = _now;
-          config.saveConfig({ agentApi: { ...apiCfg, clients } });
+          config.saveConfig({ agentApi: { ...apiCfg, clients: rawClients } }); // saveConfig 统一归一化 clients[].token → tokenHash
         }
       }
       if (url.pathname === "/health") {
@@ -1183,6 +1211,7 @@ function startAgentApi() {
         send(200, {
           ok: true,
           enabled: apiCfg.statusEnabled !== false,
+          listener: { state: agentServerState, port: agentServerPort },
           state: apiCfg.statusEnabled === false ? "disabled" : st.state,
           text: st.text,
           since: st.since,
@@ -1192,8 +1221,9 @@ function startAgentApi() {
         return;
       }
       if (url.pathname === "/stop") {
+        const cancelled = agentTaskQueue.cancelAll();
         if (agentApiAbort) agentApiAbort.abort();
-        send(200, { ok: true });
+        send(200, { ok: true, cancelled });
         return;
       }
       if (!/^application\/json(?:\s*;|$)/i.test(String(req.headers["content-type"] || ""))) { send(415, { ok: false, error: "application/json required" }); return; }
@@ -1208,40 +1238,47 @@ function startAgentApi() {
         text = text.slice(w.length).trim();
       }
       if (!text) { send(400, { ok: false, error: "text 不能为空" }); return; }
-      const abort = new AbortController();
-      agentApiAbort = abort;
-      // 并发锁：队列深度兜底（防并发轰炸拖垮服务/双倍 API 费）
-      const enq = agentAskQueue.enqueue(() => chatClient.chat({
-        persona: buildChatPersona(),
-        history: history.recent("chat", cfg.chat.maxHistoryTurns || 10),
-        text,
-        state: petStateNote(),
-        signal: abort.signal,
-        onChunk: () => {},
-      }));
+      // 任务按 id 管理：/stop 可同时取消正在执行和排队请求
+      const enq = agentTaskQueue.enqueue(({ id, signal }) => {
+        agentApiAbort = new AbortController();
+        signal.addEventListener("abort", () => agentApiAbort.abort(), { once: true });
+        return chatClient.chat({
+          persona: buildChatPersona(),
+          history: history.recent("chat", cfg.chat.maxHistoryTurns || 10),
+          text,
+          state: petStateNote(),
+          signal: agentApiAbort.signal,
+          onChunk: () => {},
+        });
+      });
       if (enq.busy) {
-        if (agentApiAbort === abort) agentApiAbort = null; // 未入队的请求不挂 abort
         send(429, { ok: false, error: "请求繁忙（并发队列已满），请稍后重试" });
         return;
       }
       try {
-        // /chat 串行化（v2.6）：并发请求依次处理，历史不乱序、不多花 API 费；失败不断链（src/ask-queue）
         const r = await enq.done;
         history.append({ ts: Date.now(), mode: "chat", role: "user", content: text });
         history.append({ ts: Date.now(), mode: "chat", role: "assistant", content: r.text });
-        send(200, { ok: true, reply: r.text, emotion: r.emotion || "" });
+        send(200, { ok: true, taskId: enq.id, reply: r.text, emotion: r.emotion || "" });
         maybeWorkflowComment(); // 观察 AI 工作流：外部 AI/脚本通过 Agent 接口找她时偶尔嘀咕
       } catch (e) {
         send(500, { ok: false, error: String(e.message || e) });
       } finally {
-        if (agentApiAbort === abort) agentApiAbort = null;
+        agentApiAbort = null;
       }
     } catch (e) {
       send(500, { ok: false, error: String(e.message || e) });
     }
   });
-  server.on("error", (e) => console.error("[SuzuranPet] Agent 接口启动失败:", e.message));
-  server.listen(port, "127.0.0.1", () => console.log("[SuzuranPet] Agent 接口已启动 http://127.0.0.1:" + port));
+  agentServer = server;
+  server.on("error", (e) => {
+    agentServerState = "error";
+    console.error("[SuzuranPet] Agent 接口启动失败:", e.message);
+  });
+  server.listen(port, "127.0.0.1", () => {
+    agentServerState = "running";
+    console.log("[SuzuranPet] Agent 接口已启动 http://127.0.0.1:" + port);
+  });
   // Slowloris/慢速连接防御：请求头/体超时收紧 + 连接数上限（此前挂起连接可占住资源导致正常请求超时）
   try {
     server.requestTimeout = 10000;   // 完整请求超时 10s
@@ -1319,12 +1356,14 @@ ipcMain.handle("pet:apply-voice", async (_e, { audioPath, text }) => {
     const up = await tts.ensureGenieServer(g);
     if (!up) return { ok: false, message: "Genie 服务器不可用，请查看服务器日志" };
     const base = String(g.server || "http://127.0.0.1:9881").replace(/\/+$/, "");
-    const resp = await fetch(base + "/set_reference", {
+    const endpoint = (() => { try { const u = new URL(base); return { base, loopback: /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(u.hostname) }; } catch { return null; } })();
+    if (!endpoint) return { ok: false, message: "语音服务器地址无效" };
+    const resp = await safeFetch(base + "/set_reference", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ref_audio: audioPath, ref_text: cleanText }),
       signal: AbortSignal.timeout(30000)
-    });
+    }, { allowLoopback: endpoint.loopback });
     if (!resp.ok) {
       const t = (await resp.text()).slice(0, 200);
       return { ok: false, message: "服务器返回 " + resp.status + ": " + t };
@@ -1354,14 +1393,16 @@ ipcMain.handle("pet:tts-preview", async (_e, { text, refAudio, refText }) => {
     const up = await tts.ensureGenieServer(g);
     if (!up) return { ok: false, message: "Genie 服务器不可用" };
     const base = String(g.server || "http://127.0.0.1:9881").replace(/\/+$/, "");
+    const endpoint = (() => { try { const u = new URL(base); return { loopback: /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(u.hostname) }; } catch { return null; } })();
+    if (!endpoint) return { ok: false, message: "语音服务器地址无效" };
     const clean = String(text || "").trim().slice(0, 120);
     if (!clean) return { ok: false, message: "试听内容为空" };
-    const resp = await fetch(base + "/tts", {
+    const resp = await safeFetch(base + "/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: clean, ref_audio: refAudio || "", ref_text: refText || "" }),
       signal: AbortSignal.timeout(120000)
-    });
+    }, { allowLoopback: endpoint.loopback });
     if (!resp.ok) {
       const t = (await resp.text()).slice(0, 200);
       return { ok: false, message: "HTTP " + resp.status + ": " + t };
@@ -1479,14 +1520,21 @@ ipcMain.handle("pet:set-weather", (_e, patch) => {
 });
 
 function sendProactive(text, emotion, { force = false } = {}) {
-  if (!force && !isWindowVisible()) return;
-  if (!force && awaySince) return; // 专注/离开模式：静默不打扰（v2.5.26）
+  if (!force && !isWindowVisible()) return false;
+  if (!force && awaySince) return false; // 专注/离开模式：静默不打扰（v2.5.26）
   let t = String(text || "");
   let emo = emotion;
   // 台词级情绪细标（v2.5.26）：行首【撒娇/傲娇/惊讶/开心/温柔】覆盖池默认，标记不进气泡/朗读
   const m = t.match(/^【(撒娇|傲娇|惊讶|开心|温柔)】/);
   if (m) { emo = m[1]; t = t.slice(m[0].length); }
-  sendToRenderer("pet:proactive", { text: t, emotion: emo });
+  // 全局台词闸门（v2.5.27）：跨来源 30s 冷却 + 最近 5 条规范化去重；force 提醒可越冷却但仍去重
+  const gate = lineGate.admit(t, { force });
+  if (!gate.accepted) {
+    logTts("lines", "跳过台词: " + gate.reason);
+    return false;
+  }
+  sendToRenderer("pet:proactive", { text: t, emotion: emo, force });
+  return true;
 }
 
 function sendScheduleDue(item) {
@@ -1569,13 +1617,45 @@ function maybePersonify(event, { chance = 0.3, cooldownMs = 60000 } = {}) {
   if (Math.random() > chance) return;
   const last = personifyCooldowns[event] || 0;
   if (Date.now() - last < cooldownMs) return;
-  const pool = lines.PERSONIFY_LINES[event];
-  if (!pool || !pool.length) return;
+  // 入睡台词按时段（白天=午休口吻，晚上=晚安），sleep 没有独立池
+  const line = event === "sleep"
+    ? lines.pickSleepLine(chatVars())
+    : lines.PERSONIFY_LINES[event]
+      ? lines.pickTpl(lines.PERSONIFY_LINES[event], chatVars())
+      : "";
+  if (!line) return;
   personifyCooldowns[event] = Date.now();
-  // 入睡台词按时段（白天=午休口吻，晚上=晚安），见 lines.pickSleepLine
-  const line = event === "sleep" ? lines.pickSleepLine(chatVars()) : lines.pickTpl(pool, chatVars());
   sendProactive(line, lines.LINE_MOODS[event] || "happy"); // 场景情绪→音色分档（v2.5.26）：被抛=惊讶/被逮=傲娇/睡醒=温柔
 }
+function emitWorkflowSignal(source) {
+  workflowPendingText = lines.pickTpl(lines.WORKFLOW_LINES, chatVars());
+  workflowPendingEmotion = lines.LINE_MOODS.workflow || "idle"; // 温柔档（v2.5.26 场景情绪）
+  recordWorkflowSignal(workflowSignal, source);
+  if (workflowFlushTimer) return;
+  workflowFlushTimer = setTimeout(() => {
+    workflowFlushTimer = null;
+    consumeWorkflowSignalNow();
+  }, 1500);
+}
+function consumeWorkflowSignalNow() {
+  const result = consumeWorkflowSignal(workflowSignal, Date.now(), {
+    busy: !!activeReq || agentTaskQueue.isBusy(),
+    sleeping: !!walk.sleeping
+  });
+  if (!result.accepted) {
+    if (result.reason === "busy" || result.reason === "sleeping") {
+      if (!workflowFlushTimer) workflowFlushTimer = setTimeout(() => { workflowFlushTimer = null; consumeWorkflowSignalNow(); }, 5000);
+    }
+    return false;
+  }
+  const sent = sendProactive(workflowPendingText, workflowPendingEmotion);
+  if (!sent) {
+    requeueWorkflowSignal(workflowSignal, result.sources);
+    if (!workflowFlushTimer) workflowFlushTimer = setTimeout(() => { workflowFlushTimer = null; consumeWorkflowSignalNow(); }, 5000);
+  }
+  return sent;
+}
+
 /** 观察 AI 工作流（v2.3）：Agent 接口被外部 AI/脚本调用时，偶尔小声嘀咕 */
 const workflowCalls = [];
 const workflowCommentThrottle = lines.throttled(8 * 60 * 1000); // 8 分钟只嘀咕一次
@@ -1585,7 +1665,7 @@ function maybeWorkflowComment() {
   workflowCalls.push(now);
   if (!workflowCommentThrottle()) return;
   if (Math.random() > 0.25) return;
-  sendProactive(lines.pickTpl(lines.WORKFLOW_LINES, chatVars()), lines.LINE_MOODS.workflow); // 温柔档（v2.5.26）
+  emitWorkflowSignal("agent");
 }
 
 /* ---------- 感知工作区活动（v2.5.3）：她会在你改代码时小声嘀咕 ----------
@@ -1612,15 +1692,13 @@ function wsWatchable(p) {
 function wsDebounceFire() {
   wsPending = false;
   if (wsWatchThrottle()) {
-    const line = lines.pickTpl(lines.WORKFLOW_LINES, chatVars());
-    sendProactive(line, lines.LINE_MOODS.workflow); // 温柔档音色（v2.5.26）
-    logTts("watch", "工作区活动 → " + line);
+    emitWorkflowSignal("workspace"); // v2.5.27：统一经 workflow 信号聚合，忙/睡时延后消费
   }
 }
 function startWorkspaceWatch(cfg0) {
   stopWorkspaceWatch();
   const w = (cfg0 && cfg0.features && cfg0.features.workspaceWatch) || {};
-  const cooldownMs = Math.max(60, Number(w.cooldownMin) || 5) * 60 * 1000;
+  const cooldownMs = Math.max(1, Number(w.cooldownMin) || 5) * 60 * 1000;
   wsWatchThrottle = lines.throttled(cooldownMs);
   // fs.watch 递归监听（Windows 支持 recursive）：事件驱动，替代 5s 全树轮询
   for (const d of wsWatchDirs()) {
@@ -1646,11 +1724,7 @@ function startWorkspaceWatch(cfg0) {
         const sig = wsScanSignature();
         if (sig !== wsWatchSig) {
           wsWatchSig = sig;
-          if (wsWatchThrottle()) {
-            const line = lines.pickTpl(lines.WORKFLOW_LINES, chatVars());
-            sendProactive(line, lines.LINE_MOODS.workflow); // 温柔档音色（v2.5.26）
-            logTts("watch", "工作区活动 → " + line);
-          }
+          if (wsWatchThrottle()) emitWorkflowSignal("workspace");
         }
       }
     } catch { /* 忽略 */ }
@@ -1956,7 +2030,7 @@ ipcMain.handle("pet:add-agent-client", (_e, name) => {
     const clients = Array.isArray(cfg.agentApi.clients) ? cfg.agentApi.clients.slice() : [];
     if (clients.some((c) => c.name === n)) return { ok: false, message: "该名称已存在，请换一个" };
     const token = crypto.randomBytes(24).toString("base64url");
-    clients.push({ name: n, token, grantedAt: Date.now(), lastSeen: 0 });
+    clients.push({ name: n, tokenHash: hashToken(token), grantedAt: Date.now(), lastSeen: 0 });
     config.saveConfig({ agentApi: { ...(cfg.agentApi || {}), clients } });
     return { ok: true, name: n, token };
   } catch (e) { return { ok: false, message: String(e && e.message || e) }; }
@@ -1996,7 +2070,12 @@ ipcMain.handle("pet:save-settings", (_e, patch) => {
     }
     if (Object.keys(secrets).length) config.replaceSecrets(secrets);
     const before = config.getConfig();
+    const oldAgent = before.agentApi || {};
+    const nextAgent = safePatch.agentApi ? { ...oldAgent, ...safePatch.agentApi } : oldAgent;
     config.saveConfig(safePatch);
+    if (safePatch.agentApi && (oldAgent.enabled !== nextAgent.enabled || Number(oldAgent.port) !== Number(nextAgent.port))) {
+      stopAgentApi().then(() => startAgentApi()).catch((e) => logTts("agent", "重绑失败: " + (e && e.message || e)));
+    }
     refreshTrayMenu();
     const after = config.getConfig();
     if ((after.pet && after.pet.name) !== (before.pet && before.pet.name)) refreshPetName();
@@ -2107,13 +2186,36 @@ ipcMain.handle("pet:list-models", async (_e, o = {}) => {
     return { ok: false, message: String(e.message || e) };
   }
 });
-ipcMain.handle("pet:open-tts-guide", (_e, fileName) => { openTtsGuide(fileName); return true; });
+ipcMain.handle("pet:fixed-lines-status", () => fixedLinePreloader.status(config.getConfig(), chatVars()));
+ipcMain.handle("pet:fixed-lines-start", async (event, options = {}) => {
+  const result = await fixedLinePreloader.start({
+    config: config.getConfig(),
+    vars: chatVars(),
+    retryFailed: !!options.retryFailed,
+    onProgress: (progress) => {
+      if (win && !win.isDestroyed()) win.webContents.send("pet:fixed-lines-progress", progress);
+      if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send("pet:fixed-lines-progress", progress);
+    }
+  });
+  return result;
+});
+ipcMain.handle("pet:fixed-lines-cancel", () => ({ ok: fixedLinePreloader.cancel() }));
+ipcMain.handle("pet:fixed-lines-clear", () => {
+  try {
+    const profile = fixedLineCache.profileFromConfig(config.getConfig());
+    fixedLineCache.clear(profile);
+    return { ok: true };
+  } catch (e) { return { ok: false, message: String(e.message || e) }; }
+});
+
+
 ipcMain.handle("pet:clear-history", () => {
   try {
-    fs.mkdirSync(path.dirname(config.STORAGE.history), { recursive: true });
-    fs.writeFileSync(config.STORAGE.history, "", "utf8");
-    return true;
-  } catch { return false; }
+    return history.clear();
+  } catch (e) {
+    logTts("history", "清除历史失败: " + String(e && (e.message || e) || e));
+    return false;
+  }
 });
 
 /* ---------- 新功能 IPC ---------- */
@@ -2318,7 +2420,8 @@ ipcMain.on("pet:pat", () => {
   sendProactive(lines.pickTpl(lines.PAT_LINES, chatVars()), patMood, { force: true });
 });
 // 主动搭话 / 人格化开关（v2.3，设置页单独开启）
-function proactiveMin() { return (config.getConfig().features && config.getConfig().features.proactiveMin) || 8; }
+const { PROACTIVE_DEFAULTS } = features;
+function proactiveMin() { return (config.getConfig().features && config.getConfig().features.proactiveMin) || PROACTIVE_DEFAULTS.intervalMin; }
 // 记忆管理（v2.5.2）：设置页查看/删除/清空
 ipcMain.handle("pet:get-memory", () => {
   try {
@@ -3695,12 +3798,9 @@ ipcMain.on("pet:throw", (_e, vx, vy) => {
   }
 });
 ipcMain.on("pet:set-sleeping", (_e, v) => {
+  const wasSleeping = walk.sleeping;
   walk.sleeping = !!v;
   if (walk.sleeping) { cancelFlight(); cancelWalkJump(); }
-  // v2.5.22c 修复：睡觉**不动窗口**（lift 默认 0）。
-  // 此前上抬窗口导致角色（贴画布底）跟着上浮 → 睡觉悬浮；站立贴地位置本就正确，
-  // 躺下动画在画布内自然变矮，脚落在窗口底=任务栏上沿。
-  // 特殊皮肤如确需微调：config.json 的 walk.sleepLift（0=不抬 0.3=抬 30%）。
   if (win && !win.isDestroyed() && config.getConfig().renderMode === "spine") {
     const b = win.getBounds();
     const wa = walkGeo.workAreaOf(screen, b);
@@ -3711,9 +3811,10 @@ ipcMain.on("pet:set-sleeping", (_e, v) => {
     const targetY = v ? sleepY : standY;
     if (Math.abs(b.y - targetY) > 1) win.setPosition(b.x, Math.round(targetY));
   }
-  // 人格化：入睡/睡醒时偶尔嘀咕
-  if (v) maybePersonify("sleep", { chance: 0.25, cooldownMs: 180000 });
-  else maybePersonify("wake", { chance: 0.35, cooldownMs: 60000 });
+  // 人格化：入睡/睡醒时偶尔嘀咕——v2.5.27 只在真实状态边沿触发（防止重复 setSleeping 连发 wake 台词）
+  const edge = transitionSleep(wasSleeping, walk.sleeping);
+  if (edge === "sleep") maybePersonify("sleep", { chance: 0.25, cooldownMs: 180000 });
+  else if (edge === "wake") maybePersonify("wake", { chance: 0.35, cooldownMs: 60000 });
 }); // 睡觉时行走引擎原地待命
 ipcMain.on("pet:set-ground-gap", (_e, px) => {
   const v = Number(px);
@@ -4144,10 +4245,10 @@ if (!gotLock) {
 
     // 主动搭话（v2.3 增强）：闲置后 35% 概率开口；设置页 proactiveChat 可单独关闭
     features.setProactiveEnabled(_cfg.proactiveChat !== false);
-    const _proactiveMin = (_cfg.features && _cfg.features.proactiveMin) || 8;
+    const _proactiveMin = (_cfg.features && _cfg.features.proactiveMin) || PROACTIVE_DEFAULTS.intervalMin;
     features.startProactive((msg, mood) => {
       sendProactive(msg, mood || "idle"); // 台词池情绪→音色分档（v2.5.26）；隐藏到托盘时静默待命，不主动搭话
-    }, _proactiveMin, proactiveStateFn);
+    }, _proactiveMin, PROACTIVE_DEFAULTS.chance, proactiveStateFn);
 
     // 日语翻译预热（v2.5.20）：speakJa 模式下空闲批量翻译固定台词进磁盘缓存，
     // 翻译 API 挂了也能说出日语（"说不出来"根治）
@@ -4221,6 +4322,7 @@ app.on("before-quit", (e) => {
   // 退出时阻塞清理语音引擎（Genie/GSV 是 detached 独立进程）：等待 taskkill 完成 + 按端口兜底，
   // 确保"退出 = 彻底退出"——否则残留 python 进程占端口/显存，重启后连到旧引擎（换引擎文件不生效的根因）
   (async () => {
+    try { await stopAgentApi(); } catch (e) { logTts("agent", "关闭接口失败: " + (e && e.message || e)); }
     try { await tts.shutdownGenieServer(); } catch { /* 忽略 */ }
     try { await tts.killGsvProcesses(config.getConfig().ttsGsv || {}); } catch { /* 忽略 */ }
     try { await tts.killPortListener(9881); } catch { /* 忽略 */ } // 兜底：按端口清残留

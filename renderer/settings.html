@@ -403,6 +403,27 @@
     <div class="row">
       <label class="col"><input id="feat-emotional" type="checkbox" checked /><span data-i18n="set.featEmotional">🎭 情绪语音（根据情绪调整语速音调）</span></label>
     </div>
+    <div id="fixed-lines-preload" class="fixed-lines-preload" aria-live="polite">
+      <div class="fixed-lines-head">
+        <div>
+          <b>🔊 固定台词音频池</b>
+          <div id="fixed-lines-profile" class="hint">读取当前语音方案…</div>
+        </div>
+        <span id="fixed-lines-state" class="voice-pool-badge">未检查</span>
+      </div>
+      <div id="fixed-lines-summary" class="fixed-lines-summary">已加载 0 / 0 · 失败 0 · 缓存 0 B</div>
+      <div class="fixed-lines-progress"><span id="fixed-lines-progress-bar"></span></div>
+      <p class="hint">只生成当前语音方案，缓存保留 30 天；云端语音可能产生 API 费用。系统语音无需预加载。</p>
+      <div class="actions">
+        <button id="btn-fixed-lines-start" type="button" class="primary">▶ 开始/继续预加载</button>
+        <button id="btn-fixed-lines-retry" type="button">↻ 重试失败</button>
+        <button id="btn-fixed-lines-cancel" type="button">暂停</button>
+        <button id="btn-fixed-lines-clear" type="button" class="danger">清空当前缓存</button>
+        <button id="btn-fixed-lines-toggle" type="button">显示未加载/失败</button>
+        <span id="fixed-lines-result" class="result"></span>
+      </div>
+      <div id="fixed-lines-list" class="fixed-lines-list" hidden></div>
+    </div>
   </section>
 
   <!-- ============ 4. 系统与高级（原「④ 其他」，v2.5.18 改名明义） ============ -->

@@ -2,6 +2,7 @@
 const config = require("./config");
 const { logTts } = require("./logger");
 const { normalizeOpenAIBase, normalizeAnthropicBase } = require("./chat-client");
+const { safeFetch, isLoopbackHost } = require("./safe-url");
 
 // 翻译缓存（简单 LRU）：相同文本不重复调 API——减少上游限流(429)压力，也加快重复句响应。
 // TTL 按结果分档：成功译文 10min 复用（cost-cut）；失败进「失败池」只做短暂冷却（FAIL_COOLDOWN），
@@ -97,12 +98,12 @@ async function translateToJa(text) {
             max_tokens: 640, // 推理模型（如 deepseek-v4-flash）先消耗思考 token，太小会截断到 content 为空
             stream: false
           });
-      const resp = await fetch(url, {
+      const resp = await safeFetch(url, {
         method: "POST",
         headers,
         body,
         signal: AbortSignal.timeout(45000)
-      });
+      }, { allowLoopback: isLoopbackHost(new URL(url).hostname) });
       if (!resp.ok) {
         const raw = await resp.text();
         const t = raw.slice(0, 120);

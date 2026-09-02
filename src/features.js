@@ -53,7 +53,7 @@ async function speechToText(audioPath, lang = "ja") {
 let proactiveTimer = null;
 let lastChatTs = Date.now();
 let proactiveEnabled = true; // 设置页「主动搭话」开关（pet:set-proactive-chat）
-let proactiveCfg = { sendFn: null, intervalMin: 8 };
+let proactiveCfg = { sendFn: null, intervalMin: 12, chance: 0.18, stateFn: null };
 let recentRawSent = []; // 主动搭话跨轮禁选窗口（最近 8 句原文，v2.5.26 重复感修复）
 let lastMilestoneSaid = 0; // 陪伴里程碑已说过的天数（v2.5.25 去重：每个里程碑值只开口一次，避免停在里程碑日反复刷屏）
 
@@ -65,22 +65,24 @@ function touchChat() {
 function setProactiveEnabled(on) {
   proactiveEnabled = !!on;
   if (on) {
-    if (proactiveCfg.sendFn) startProactive(proactiveCfg.sendFn, proactiveCfg.intervalMin, proactiveCfg.stateFn);
+    if (proactiveCfg.sendFn) startProactive(proactiveCfg.sendFn, proactiveCfg.intervalMin, proactiveCfg.chance, proactiveCfg.stateFn);
   } else {
     stopProactive();
   }
 }
 
-function startProactive(sendFn, intervalMin = 8, stateFn = null) {
-  proactiveCfg = { sendFn, intervalMin, stateFn };
+const PROACTIVE_DEFAULTS = Object.freeze({ intervalMin: 12, chance: 0.18 });
+
+function startProactive(sendFn, intervalMin = PROACTIVE_DEFAULTS.intervalMin, chance = PROACTIVE_DEFAULTS.chance, stateFn = null) {
+  proactiveCfg = { sendFn, intervalMin, chance, stateFn };
   stopProactive();
   const intervalMs = intervalMin * 60 * 1000;
   proactiveTimer = setInterval(() => {
     if (!proactiveEnabled || !proactiveCfg.sendFn) return;
     const idle = Date.now() - lastChatTs;
     if (idle < intervalMs) return;
-    // 35% 概率触发（避免太频繁）
-    if (Math.random() > 0.35) return;
+    // 18% 概率触发：达到闲置阈值后仍保持低频，避免持续打扰
+    if (Math.random() > proactiveCfg.chance) return;
     const lines = require("./lines");
     let prompt;
     let proactiveMood = "温柔"; // 台词情绪→GSV 音色分档默认温柔（v2.5.26，随由头分支覆盖）
@@ -580,6 +582,7 @@ function logJaPrewarm(msg) {
  * 导出
  * ============================================================ */
 module.exports = {
+  PROACTIVE_DEFAULTS,
   // 语音输入
   speechToText,
 

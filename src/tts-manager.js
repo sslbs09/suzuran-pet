@@ -4,6 +4,8 @@ const path = require("path");
 const { spawn, exec, execFile } = require("child_process");
 const config = require("./config");
 const { logTts } = require("./logger");
+const { safeFetch } = require("./safe-url");
+const fixedLineCache = require("./fixed-line-cache");
 const { translateToJa } = require("./ja-translate");
 const { runPowerShell, stripStage } = require("./utils");
 
@@ -103,6 +105,17 @@ async function ttsCloneImpl(text, opts, jobId) {
   if (ahit && Date.now() - ahit.t < AUDIO_CACHE_TTL) {
     logTts("route", "音频缓存命中: " + String(text || "").slice(0, 24));
     return ahit.b64;
+  }
+  if (!(opts && opts.fixedLinePreload)) {
+    const profile = fixedLineCache.profileFromConfig(config.getConfig());
+    const diskHit = fixedLineCache.findCachedAudio(profile, text, opts && (opts.emotion || opts.emo), {
+      name: (config.getConfig().pet || {}).name,
+      user: (config.getConfig().chat || {}).userName
+    });
+    if (diskHit && diskHit.length) {
+      logTts("route", "固定台词磁盘缓存命中");
+      return diskHit.toString("base64");
+    }
   }
   const b64 = await ttsCloneImplInner(text, opts, jobId);
   if (b64 && !isStale()) {
@@ -323,7 +336,7 @@ async function ensureGenieServer(q) {
   const base = endpoint.base;
   const health = async () => {
     try {
-      const r = await fetch(base + "/health", { signal: AbortSignal.timeout(2000) });
+      const r = await safeFetch(base + "/health", { signal: AbortSignal.timeout(2000) }, { allowLoopback: endpoint.loopback });
       return r.ok && (await r.text()) === "ok";
     } catch { return false; }
   };
@@ -377,7 +390,9 @@ async function ensureGenieServer(q) {
 async function genieTts(q, clean) {
   const base = String(q.server || "").replace(/\/+$/, "");
   const callOnce = async () => {
-    const resp = await fetch(base + "/tts", {
+    const endpoint = resolveTtsEndpoint(q, 9881);
+    if (!endpoint) return null;
+    const resp = await safeFetch(base + "/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -386,7 +401,7 @@ async function genieTts(q, clean) {
         ref_text: q.refText || ""
       }),
       signal: AbortSignal.timeout(120000)
-    });
+    }, { allowLoopback: endpoint.loopback });
     if (!resp.ok) {
       const t = (await resp.text()).slice(0, 200);
       logTts("genie", "HTTP " + resp.status + ": " + t);
@@ -429,7 +444,7 @@ async function ensureGsvServerImpl(g) {
   const base = endpoint.base;
   const alive = async () => {
     try {
-      const r = await fetch(base + "/set_model", { signal: AbortSignal.timeout(2000) });
+      const r = await safeFetch(base + "/set_model", { signal: AbortSignal.timeout(2000) }, { allowLoopback: endpoint.loopback });
       return r.status === 400 || r.ok; // 服务器在线即返回 400/200
     } catch { return false; }
   };
@@ -529,8 +544,10 @@ async function gsvTtsJa(g, text, emoRef) {
     const d = wavDurationMs(b);
     return !(d > 0 && clean.length > 6 && d < expectMs * 0.75);
   };
+  const endpoint = resolveTtsEndpoint(g, 9880);
+  if (!endpoint) return "";
   try {
-    const resp = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(60000) });
+    const resp = await safeFetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(60000) }, { allowLoopback: endpoint.loopback });
     if (!resp.ok) {
       logTts("gsv", "HTTP " + resp.status);
       return "";
@@ -544,7 +561,7 @@ async function gsvTtsJa(g, text, emoRef) {
       const d0 = wavDurationMs(buf);
       logTts("gsv", `疑似引擎毛刺（时长${Math.round(d0)}ms << 预期${expectMs}ms）→ 第${att}/3次重试`);
       await new Promise((r) => setTimeout(r, 800 * att)); // 退避重试：引擎坏状态连发更容易连环失败
-      const resp2 = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(60000) });
+      const resp2 = await safeFetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(60000) }, { allowLoopback: endpoint.loopback });
       if (!resp2.ok) continue;
       best = Buffer.from(await resp2.arrayBuffer());
       if (best.length >= 100 && durOk(best)) return best.toString("base64");
@@ -558,7 +575,7 @@ async function gsvTtsJa(g, text, emoRef) {
       const g2 = config.getConfig().ttsGsv || {};
       const up = await restartGsvEngine(g2);
       if (up) {
-        const resp3 = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(180000) });
+        const resp3 = await safeFetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(180000) }, { allowLoopback: endpoint.loopback });
         if (resp3.ok) {
           const b3 = Buffer.from(await resp3.arrayBuffer());
           if (b3.length >= 100 && durOk(b3)) { logTts("gsv", "引擎重启后恢复正常输出"); return b3.toString("base64"); }
@@ -590,7 +607,7 @@ async function gsvTtsJa(g, text, emoRef) {
       const g2 = config.getConfig().ttsGsv || {};
       const up = await restartGsvEngine(g2);
       if (up) {
-        const resp2 = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(180000) });
+        const resp2 = await safeFetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(180000) }, { allowLoopback: endpoint.loopback });
         if (resp2.ok) {
           const b2 = Buffer.from(await resp2.arrayBuffer());
           if (b2.length >= 100 && durOk(b2)) { logTts("gsv", "引擎重启后本句恢复合成"); return b2.toString("base64"); }
@@ -673,7 +690,9 @@ function killPortListener(port, hint) {
 
 async function portAlive(base) {
   try {
-    const r = await fetch(base + "/set_model", { signal: AbortSignal.timeout(1500) });
+    const endpoint = resolveTtsEndpoint({ server: base, allowRemote: true, autoStart: false }, 9880);
+    if (!endpoint) return false;
+    const r = await safeFetch(base + "/set_model", { signal: AbortSignal.timeout(1500) }, { allowLoopback: endpoint.loopback });
     return r.status === 400 || r.ok; // 与 ensureGsvServer 相同的在线判定
   } catch { return false; }
 }

@@ -26,6 +26,19 @@ jobs:
       - name: 安装依赖
         run: npm ci
 
+      - name: 校验 tag 与 package.json 版本一致
+        shell: pwsh
+        run: |
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          if ("v$($pkg.version)" -ne "${{ github.ref_name }}") {
+            throw "tag ${{ github.ref_name }} 与 package.json 版本 v$($pkg.version) 不一致"
+          }
+
+      - name: 发布前测试与资源检查
+        run: |
+          npm test
+          npm run check:assets
+
       - name: 打包桌宠（electron-packager）
         run: npm run dist
 
@@ -55,6 +68,15 @@ jobs:
           "${{ github.ref_name }}" | Out-File -Encoding ascii app.asar.version
           Write-Host "已生成 app.asar + app.asar.version"
 
+      - name: 生成发布物 SHA-256 校验和
+        shell: pwsh
+        run: |
+          $zip = "SuzuranPet-${{ github.ref_name }}-win32-x64.zip"
+          Get-ChildItem $zip, app.asar, app.asar.version |
+            ForEach-Object { (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower() + "  " + $_.Name } |
+            Set-Content -Encoding ascii SHA256SUMS.txt
+          Write-Host "SHA256SUMS.txt 已生成"
+
       - name: 生成 Release 正文（从 CHANGELOG 抽取本版本段落）
         shell: pwsh
         run: |
@@ -79,6 +101,7 @@ jobs:
             SuzuranPet-${{ github.ref_name }}-win32-x64.zip
             app.asar
             app.asar.version
+            SHA256SUMS.txt
           generate_release_notes: false
           fail_on_unmatched_files: true
           draft: false
