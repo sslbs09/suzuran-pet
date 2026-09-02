@@ -60,6 +60,7 @@ const memory = require("./src/memory");
 const bond = require("./src/bond");
 const { randInt, easeImpact, clampScale, runPowerShell } = require("./src/utils");
 const walkGeo = require("./src/walk-geo"); // 行走几何纯函数（2026-08-27 收敛）
+const walkState = require("./src/walk-state"); // 行走几何决策纯函数（v2.5.26 收敛①）
 const walkCore = require("./src/walk-core");
 const { createAskQueue } = require("./src/ask-queue"); // /chat 串行化并发锁（2026-08-27 提取，可单测）
 const { createDebounceBuffer } = require("./src/message-buffer"); // 消息生成防抖缓冲（2026-08-27 提取，可单测）
@@ -3262,19 +3263,16 @@ function walkTick() {
       const ewa = walkGeo.workAreaOf(screen, eb);
       const edgeSpan = walkSpan(); // 全域行走（实验）：左缘=整个虚拟桌面左缘，否则=当前显示器
       const edgeL = edgeSpan ? edgeSpan.x : ewa.x;
-      // 垂直兜底：窗口底超出工作区（被拖出屏幕/掉出屏幕）→ 钳回地面线
+      // 垂直兜底（v2.5.26 收敛①）：判定抽到 walk-state 纯函数，副作用（setPosition/日志）留主干
       const groundY = walkGeo.groundLine(ewa, eb.height, walk.groundGap);
-      if (eb.y > groundY + 120) {
-        if (Date.now() - (walk._vLog || 0) > 10000) { walk._vLog = Date.now(); logTts("walk", `垂直出屏钳回: y=${eb.y}→${Math.round(groundY)}`); }
+      const _transient = walk.perched || walk.iconRest || walk.gotoPerch || walk.returning || walk.iconTarget || walk.dragPaused || walk.freeStand;
+      const vDec = walkState.verticalClampDecision({ y: eb.y, groundY, seated: walk.seated, resting: walk.resting, transient: _transient });
+      if (vDec) {
+        const logKey = vDec.type === "down" ? "_vLog" : "_vLog2";
+        const tag = vDec.type === "down" ? "垂直出屏钳回" : "悬空钳回";
+        if (Date.now() - (walk[logKey] || 0) > 10000) { walk[logKey] = Date.now(); logTts("walk", `${tag}: y=${eb.y}→${Math.round(groundY)}`); }
         win.setPosition(eb.x, Math.round(groundY));
         if (walk.seated) applySeatPosition(); // 应坐姿时再校正下沉
-      }
-      // 垂直兜底②（v2.5.26）：非瞬态却悬太高（跳/perch/拖拽残留）→ 拉回地面，防悬空压窗
-      const _transient = walk.perched || walk.iconRest || walk.gotoPerch || walk.returning || walk.iconTarget || walk.dragPaused || walk.freeStand;
-      if (!_transient && (walk.resting || walk.seated) && eb.y < groundY - 140) {
-        if (Date.now() - (walk._vLog2 || 0) > 10000) { walk._vLog2 = Date.now(); logTts("walk", `悬空钳回: y=${eb.y}→${Math.round(groundY)}`); }
-        win.setPosition(eb.x, Math.round(groundY));
-        if (walk.seated) applySeatPosition();
       }
       const inset = walk.edgeLeft ? 2 : (Number(walk.charInset) || 0);
       let charLeft = eb.x + inset;
@@ -3302,11 +3300,10 @@ function walkTick() {
           charLeft = edgeL;
         }
       }
-      // 切边防抖：edgeLeft 切换会平移窗口 ±(width-124)，500ms 内不反向切换，避免贴边临界时左右瞬移「闪现」
+      // 左缘翻边滞回（v2.5.26 收敛①）：判定抽到 walk-state 纯函数，setEdgeLeft 副作用留主干
       const nowE = Date.now();
-      // 左缘翻边滞回（v2.5.26 减闪）：回翻阈值 80→140、防抖 500→800，减少边界来回翻边导致的窗口瞬移闪现
-      if (walk.edgeLeft) { if (charLeft > edgeL + 140 && nowE - (walk._edgeFlipAt || 0) > 800) { walk._edgeFlipAt = nowE; setEdgeLeft(false); } }
-      else if (charLeft <= edgeL + 2 && nowE - (walk._edgeFlipAt || 0) > 800) { walk._edgeFlipAt = nowE; setEdgeLeft(true); }
+      const fDec = walkState.edgeFlipDecision({ edgeLeft: walk.edgeLeft, charLeft, edgeL, now: nowE, lastFlipAt: walk._edgeFlipAt || 0 });
+      if (fDec) { walk._edgeFlipAt = fDec.at; setEdgeLeft(fDec.flip); }
     } catch { /* 忽略 */ }
   }
   // 自愈①：拖拽 mouseup 丢失导致 paused 卡死——60s 无移动事件自动解除（对话暂停/放大暂停不受此影响）
