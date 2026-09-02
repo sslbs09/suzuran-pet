@@ -3269,6 +3269,13 @@ function walkTick() {
         win.setPosition(eb.x, Math.round(groundY));
         if (walk.seated) applySeatPosition(); // 应坐姿时再校正下沉
       }
+      // 垂直兜底②（v2.5.26）：非瞬态却悬太高（跳/perch/拖拽残留）→ 拉回地面，防悬空压窗
+      const _transient = walk.perched || walk.iconRest || walk.gotoPerch || walk.returning || walk.iconTarget || walk.dragPaused || walk.freeStand;
+      if (!_transient && (walk.resting || walk.seated) && eb.y < groundY - 140) {
+        if (Date.now() - (walk._vLog2 || 0) > 10000) { walk._vLog2 = Date.now(); logTts("walk", `悬空钳回: y=${eb.y}→${Math.round(groundY)}`); }
+        win.setPosition(eb.x, Math.round(groundY));
+        if (walk.seated) applySeatPosition();
+      }
       const inset = walk.edgeLeft ? 2 : (Number(walk.charInset) || 0);
       let charLeft = eb.x + inset;
       // 坐姿自愈（v2.5.26）：坐下后 Y 若漂移（皮肤 Sit 姿态/多屏匹配/瞬态残留），5s 低频拉回任务栏
