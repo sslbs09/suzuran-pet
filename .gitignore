@@ -37,3 +37,8 @@ docs/assets/
 # Live2D Cubism Core（Live2D 专有许可：应用内捆绑合规，git 仓库不再分发）
 renderer/live2dcubismcore.min.js
 tests/__visual-out__/
+
+# 自动更新产物（asar-swap，v2.5.26）
+app.asar.pending
+apply-update.ps1
+*.asar.bak

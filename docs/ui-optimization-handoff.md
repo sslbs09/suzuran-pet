@@ -399,4 +399,13 @@
 - 29 测试全绿；**新模块已同步进 app_legacy/src 再打包**（否则 asar require 缺模块崩溃）；重启无 Cannot find module
 - ⏸ ③自动更新/④仓库卫生（lazybag 移出工作区）记档本轮不做
 - 说明：main.js 仍大（IPC/窗口/托盘主干），本轮只抽「可纯函数化」的几何/状态判定，保证不伤行为；进一步分家需配视觉回归单开一轮
+
+### 块 29（用户：③④都做，问自动更新如何实现）
+- ✅ ③ 自动更新（asar-swap，贴合现有换包模型，不碰打包管线）：
+  - `src/updater.js`：compareSemver/buildUpdatePlan（纯函数+7单测）/checkForUpdate（GitHub Releases API）/downloadPending（下 app.asar.pending，校验大小）/applyOnExit（写 apply-update.ps1 detached：等退出→备份 asar.bak→pending 覆盖→重启）
+  - 托盘「⬇ 检查更新」+ 确认对话框 + 三语 i18n；默认手动触发、可回滚（备份 .bak）
+  - release.yml 新增上传 app.asar + app.asar.version 资产（供增量更新）；**首个带 asar 资产的 release 要等下一个 tag**
+- ✅ ④ 仓库卫生：.gitignore 加 app.asar.pending/apply-update.ps1/*.asar.bak；release/ 本就忽略
+  - lazybag 移出工作区属用户工作区组织，不代挪（记档）
+- 30 测试全绿；更新器已部署（菜单项存在；因当前 release 无 asar 资产，检查会返回"已最新"，下一 tag 后生效）
 - ⏸ ag-psd 懒加载：按用户指示不动
