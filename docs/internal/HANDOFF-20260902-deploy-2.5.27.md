@@ -361,3 +361,28 @@ findItemText 用例。回归 42/42。
   相位轮换正确；`[gsv] 预热完成`、`[ja] 预热✓` 正常；无未捕获异常。
 - 待用户复验：① 触发【撒娇/傲娇/开心】台词与天气台词应直接日语出声（不再系统音/不再慢）；
   ② 长时间观察移动时走路动画是否还丢（丢了 6s 内对账自愈，日志会出现「相位对账」）。
+
+## 五点十九、部署后自查轮：2 bug + 1 优化（6566170 + 749e28c + a42ba9d，已部署 12:33）
+
+对五点十八改动做自查 + 专项排查，结果：
+
+### 修复
+1. **GSV-only 日语模式预加载被拒（6566170）**：日语模式可脱离 Genie 独立运行（启动预热只看
+   speakJa），但 profileFromConfig 不认识 ttsGsv → genie.enabled=false 时判成 "system" →
+   固定台词预加载被 SYSTEM_NOT_PRELOADABLE 拒绝。仅在 genie 未启用时改判 "gsv"
+   （指纹字段取 GSV 参考音频）；genie 启用用户指纹不变、缓存不迁移。settings 标签补 GPT-SoVITS。
+2. **翻译磁盘缓存命中续期（749e28c）**：TTL 7 天且命中不刷新时间戳 → 预热批次 7 天后整批
+   过期、重新逐句调 API。命中即续期，常用品目永不过期（LRU 500 照旧淘汰冷句）。
+3. **相位对账情绪豁免窗口（a42ba9d）**：moodAnimUntil 6.5s——setSpineMood 播非相位动画后
+   对账不抢（onDone 2.6s 自行回落 idle；过期由对账回收，错误后的 cry 不再无限循环）。
+
+### 排查后确认非 bug
+- 聊天出错 busy 卡死疑点：showError 内部已有 busy=false + updateControls，不成立。
+
+### 记录在案（不动）
+- 改称呼后旧音频仍带旧称呼：TD-9 confirm 已提示，"模板+称呼占位符"缓存方案留待立项。
+- 聊天回复翻译无法预热（内容动态），超时回退系统音属日语模式既有设计。
+- TD-10 已知偶发：[ja] 翻译异常 timeout（attempt 1 失败 attempt 2 重试）、渲染进程 GPU 崩溃自愈。
+
+验证：42/42；tar → 停进程 → pack.sh（188,225,138B）→ 重启；5 进程、walk-phase/seat-phase
+轮换正确、预热正常、无异常。
