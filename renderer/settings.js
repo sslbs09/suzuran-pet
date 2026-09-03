@@ -516,21 +516,19 @@ let fixedLineStatus = null;
 let fixedLineShowAll = false;
 const fixedLinePoolsSel = new Set(); // 勾选的预加载池（空=全部）
 let fixedLinePoolsRendered = false;
-const FIXED_LINE_STATE_LABELS = { pending: "未加载", loading: "生成中", ready: "已加载", failed: "失败", cancelled: "已暂停" };
-const FIXED_LINE_ENGINE_LABELS = { genie: "Genie", cosy: "CosyVoice", edge: "Edge TTS", system: "系统语音" };
-const POOL_LABELS = {
-  pat: "摸头", workflow: "工作流", "long-idle": "长闲置", "early-morning": "清晨",
-  "personify.thrown": "抛掷", "personify.grabbed": "拖拽", "personify.wake": "睡醒",
-  "personify.sleepDay": "白天入睡", "personify.sleepNight": "夜间入睡", "personify.perch": "坐高处",
-  "proactive.morning": "早间", "proactive.noon": "午间", "proactive.afternoon": "午后",
-  "proactive.evening": "傍晚", "proactive.night": "深夜",
-  "state.walking": "散步", "state.seated": "坐着",
-  "stage.fd": "熟悉", "stage.xl": "信赖", "stage.sy": "誓约"
-};
+// TD-8：文案全部走 i18n 字典（set.* 键），池名映射表三语化
+const FIXED_LINE_STATE_KEYS = { pending: "set.fixedState.pending", loading: "set.fixedState.loading", ready: "set.fixedState.ready", failed: "set.fixedState.failed", cancelled: "set.fixedState.cancelled" };
+function stateLabel(state) {
+  const k = FIXED_LINE_STATE_KEYS[state];
+  return k ? L(k) : (state || L("set.fixedState.pending"));
+}
+function engineLabel(engine) {
+  const BRAND = { genie: "Genie", cosy: "CosyVoice", edge: "Edge TTS" }; // 品牌名不翻译
+  return BRAND[engine] || (engine === "system" ? L("set.engineSystem") : (engine || L("set.engineUnknown")));
+}
 function poolLabel(p) {
-  if (POOL_LABELS[p]) return POOL_LABELS[p];
-  if (p.startsWith("weather.")) return "天气·" + p.slice(8);
-  return p;
+  if (p.startsWith("weather.")) return L("set.poolWeatherPrefix") + p.slice(8);
+  return L("set.pool." + p);
 }
 function commonPools() {
   const h = new Date().getHours();
@@ -580,15 +578,15 @@ function renderFixedLinePool(status = fixedLineStatus) {
   const ready = Number(summary.ready) || 0;
   const failed = Number(summary.failed) || 0;
   const profile = status.profile || {};
-  const engine = FIXED_LINE_ENGINE_LABELS[profile.engine] || profile.engine || "未知方案";
-  const lang = profile.language === "ja" ? "日语" : "中文";
-  $("fixed-lines-profile").textContent = `当前方案：${engine} · ${lang}${profile.voice ? " · " + profile.voice : ""}${profile.referenceAudio ? " · 参考音频：" + profile.referenceAudio : ""}`;
-  $("fixed-lines-summary").textContent = `已加载 ${ready} / ${total} · 失败 ${failed} · 缓存 ${formatBytes(summary.bytes)}`;
+  const engine = engineLabel(profile.engine);
+  const lang = profile.language === "ja" ? L("set.langJa") : L("set.langZh");
+  $("fixed-lines-profile").textContent = `${L("set.fixedProfilePrefix")}${engine} · ${lang}${profile.voice ? " · " + profile.voice : ""}${profile.referenceAudio ? L("set.fixedRefAudio") + profile.referenceAudio : ""}`;
+  $("fixed-lines-summary").textContent = `${L("set.fixedSummaryReady")} ${ready} / ${total} · ${L("set.fixedSummaryFailed")} ${failed} · ${L("set.fixedSummaryCache")} ${formatBytes(summary.bytes)}`;
   const bar = $("fixed-lines-progress-bar");
   if (bar) bar.style.width = total ? Math.round((ready / total) * 100) + "%" : "0%";
   const state = $("fixed-lines-state");
   const running = !!status.running || status.state === "running";
-  state.textContent = status.fixedOnly ? "离线模式生效中" : running ? "生成中" : ready === total && total ? "已全部加载" : failed ? "有失败项" : profile.engine === "system" ? "无需预加载" : "未开始";
+  state.textContent = status.fixedOnly ? L("set.fixedOfflineActive") : running ? L("set.fixedState.loading") : ready === total && total ? L("set.fixedAllLoaded") : failed ? L("set.fixedHasFailed") : profile.engine === "system" ? L("set.fixedNoPreload") : L("set.fixedNotStarted");
   state.className = "voice-pool-badge " + (status.fixedOnly ? "offline" : running ? "loading" : failed ? "failed" : ready === total && total ? "ready" : "");
   renderFixedLinePools(status.items);
   const list = $("fixed-lines-list");
@@ -602,23 +600,23 @@ function renderFixedLinePool(status = fixedLineStatus) {
     text.textContent = item.text;
     const meta = document.createElement("div");
     meta.className = "fixed-line-meta";
-    meta.textContent = item.pool + " · " + item.id;
+    meta.textContent = poolLabel(item.pool) + " · " + item.id;
     text.appendChild(meta);
     const badge = document.createElement("span");
     badge.className = "fixed-line-state " + (item.state || "pending");
-    badge.textContent = FIXED_LINE_STATE_LABELS[item.state] || item.state || "未加载";
+    badge.textContent = stateLabel(item.state);
     if (item.errorCode) badge.title = item.errorCode;
     row.append(text, badge);
     list.appendChild(row);
   }
-  $("btn-fixed-lines-toggle").textContent = fixedLineShowAll ? "只显示未加载/失败" : `显示未加载/失败（${total - ready}）`;
+  $("btn-fixed-lines-toggle").textContent = fixedLineShowAll ? L("set.fixedShowUnloaded") : `${L("set.fixedShowUnloadedN")}（${total - ready}）`;
 }
 async function refreshFixedLinePool() {
   try {
     fixedLineStatus = await window.petAPI.getFixedLineAudioStatus();
     renderFixedLinePool();
   } catch (e) {
-    setResult($("fixed-lines-result"), "读取固定台词缓存失败：" + String(e.message || e), false);
+    setResult($("fixed-lines-result"), L("set.fixedReadFail") + String(e.message || e), false);
   }
 }
 function setFixedLineButtons(running) {
@@ -628,19 +626,19 @@ function setFixedLineButtons(running) {
 }
 $("btn-fixed-lines-start").addEventListener("click", async () => {
   const pools = selectedPools();
-  if (pools && !pools.length) { setResult($("fixed-lines-result"), "请至少勾选一个台词池", false); return; }
+  if (pools && !pools.length) { setResult($("fixed-lines-result"), L("set.fixedNeedPool"), false); return; }
   setFixedLineButtons(true);
-  setResult($("fixed-lines-result"), "正在按当前音色逐条生成；已完成项会保留…");
+  setResult($("fixed-lines-result"), L("set.fixedStarting"));
   try {
       const r = await window.petAPI.startFixedLineAudioPreload({ retryFailed: false, pools });
-      setResult($("fixed-lines-result"), r && r.ok ? (r.state === "completed" ? "固定台词已全部生成 ✅" : r.state === "completed_with_errors" ? "已完成，但有失败项" : "已暂停，可稍后继续") : (r && r.message) || "预加载未启动", !!(r && r.ok));
+      setResult($("fixed-lines-result"), r && r.ok ? (r.state === "completed" ? L("set.fixedDone") : r.state === "completed_with_errors" ? L("set.fixedDoneErrors") : L("set.fixedPausedCont")) : (r && r.message) || L("set.fixedNotStartedRun"), !!(r && r.ok));
   } catch (e) { setResult($("fixed-lines-result"), String(e.message || e), false); }
   await refreshFixedLinePool();
   setFixedLineButtons(false);
 });
 $("btn-fixed-lines-retry").addEventListener("click", async () => {
   setFixedLineButtons(true);
-  setResult($("fixed-lines-result"), "正在重试失败项…");
+  setResult($("fixed-lines-result"), L("set.fixedRetrying"));
   try { await window.petAPI.startFixedLineAudioPreload({ retryFailed: true }); }
   catch (e) { setResult($("fixed-lines-result"), String(e.message || e), false); }
   await refreshFixedLinePool();
@@ -648,13 +646,13 @@ $("btn-fixed-lines-retry").addEventListener("click", async () => {
 });
 $("btn-fixed-lines-cancel").addEventListener("click", async () => {
   await window.petAPI.cancelFixedLineAudioPreload();
-  setResult($("fixed-lines-result"), "已请求暂停；当前音频完成后停止。", true);
+  setResult($("fixed-lines-result"), L("set.fixedCancelRequested"), true);
   setFixedLineButtons(false);
 });
 $("btn-fixed-lines-clear").addEventListener("click", async () => {
-  if (!confirm("只清除当前语音方案的固定台词音频缓存，不会删除聊天记录或记忆。继续吗？")) return;
+  if (!confirm(L("set.fixedClearConfirm"))) return;
   const r = await window.petAPI.clearFixedLineAudioCache();
-  setResult($("fixed-lines-result"), r && r.ok ? "当前缓存已清除" : (r && r.message) || "清除失败", !!(r && r.ok));
+  setResult($("fixed-lines-result"), r && r.ok ? L("set.fixedCleared") : (r && r.message) || L("set.fixedClearFail"), !!(r && r.ok));
   await refreshFixedLinePool();
 });
 $("btn-fixed-lines-toggle").addEventListener("click", () => {
@@ -670,9 +668,9 @@ $("btn-fixed-lines-pools-common").addEventListener("click", () => {
   document.querySelectorAll("#fixed-lines-pools-box input").forEach((cb) => { cb.checked = want.has(cb.value); });
 });
 $("btn-fixed-lines-clear-old").addEventListener("click", async () => {
-  if (!confirm("清理非当前语音方案的旧版本台词缓存（换过音色/语言后留下的），当前方案缓存保留。继续吗？")) return;
+  if (!confirm(L("set.fixedClearOldConfirm"))) return;
   const r = await window.petAPI.clearOldFixedLineCaches();
-  setResult($("fixed-lines-result"), r && r.ok ? `已清理 ${r.removed} 个旧版本缓存` : (r && r.message) || "清理失败", !!(r && r.ok));
+  setResult($("fixed-lines-result"), r && r.ok ? L("set.fixedClearedOldPre") + r.removed + L("set.fixedClearedOldSuf") : (r && r.message) || L("set.fixedClearOldFail"), !!(r && r.ok));
   await refreshFixedLinePool();
 });
 if (window.petAPI.onFixedLineAudioProgress) {
@@ -699,12 +697,12 @@ $("btn-open-studio").addEventListener("click", () => window.petAPI.openVoiceStud
 /* ---------- 固定台词离线模式（省显存开关） ---------- */
 $("tts-fixed-only").addEventListener("change", async () => {
   const on = $("tts-fixed-only").checked;
-  setResult($("voice-result"), on ? "正在停止语音引擎、释放显存…" : "正在重新拉起语音引擎…");
+  setResult($("voice-result"), on ? L("set.fixedOnlyStopping") : L("set.fixedOnlyStarting"));
   let r;
   try { r = await window.petAPI.setFixedOnly(on); }
   catch (e) { r = { ok: false, message: String(e && e.message || e) }; }
   setResult($("voice-result"),
-    r && r.ok ? (on ? "离线模式已开启：只播已缓存的固定台词" : "离线模式已关闭：引擎恢复工作") : "切换失败：" + (r && r.message || ""),
+    r && r.ok ? (on ? L("set.fixedOnlyOn") : L("set.fixedOnlyOff")) : L("set.fixedOnlyFail") + (r && r.message || ""),
     !!(r && r.ok));
   await refreshFixedLinePool();
 });
