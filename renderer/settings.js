@@ -24,6 +24,7 @@ const PRESETS = {
 
 let S = {}; // 当前配置快照
 let personaDirty = false; // 人设输入框是否有未保存改动（v2.5.18 未保存条用）
+let _loadedChatUserName = ""; // TD-9：改名检测基线（语音/翻译缓存键含称呼）
 
 function setResult(el, text, ok) {
   el.textContent = text || "";
@@ -81,6 +82,7 @@ async function renderOnboard(S) {
     ck && ck.saved ? "密钥已安全保存；输入新值可替换" : "sk-…（Ollama 本地可留空）";
   $("pet-name").value = (S.pet && S.pet.name) || "苏苏洛";
   $("user-name").value = S.chat.userName || "主人";
+  _loadedChatUserName = $("user-name").value; // TD-9：改名检测基线
   $("temperature").value = S.chat.temperature ?? 0.85;
   const smp0 = (S.chat && S.chat.sampling) || {};
   $("smp-topp").value = smp0.topP ?? 0.9;
@@ -413,8 +415,14 @@ $("btn-save-api").addEventListener("click", async () => { await doSaveApi(); });
 /* 提取为具名函数（v2.5.18）：顶部「保存全部」需要按顺序复用各分区保存逻辑 */
 async function doSaveApi() {
   const patch = readChat();
+  // TD-9（轻量版）：改名提示——翻译/语音缓存键含展开后的称呼，改名会触发相关句子重新生成
+  const newName = patch.chat.userName;
+  if (newName !== (_loadedChatUserName || "主人") && !confirm(L("set.renameCacheWarn"))) {
+    $("user-name").value = _loadedChatUserName || "主人"; // 取消则还原输入框
+    return;
+  }
   const r = await window.petAPI.saveSettings(patch);
-  if (r === true) { setResult($("test-result"), L("set.apiSaved"), true); }
+  if (r === true) { _loadedChatUserName = newName; setResult($("test-result"), L("set.apiSaved"), true); }
   else { setResult($("test-result"), L("set.saveFailed") + (r && r.message || L("set.unknown")), false); }
 }
 

@@ -332,7 +332,8 @@ const DICT = {
     "set.pool.stage.fd": "熟悉",
     "set.pool.stage.xl": "信赖",
     "set.pool.stage.sy": "誓约",
-    "set.poolWeatherPrefix": "天气·"
+    "set.poolWeatherPrefix": "天气·",
+    "set.renameCacheWarn": "称呼已修改：固定台词语音按称呼缓存，改名后相关句子将重新生成（耗时与 API 费用视语音方案而定）。继续保存吗？"
   },
 
   en: {
@@ -660,7 +661,8 @@ const DICT = {
     "set.pool.stage.fd": "Familiar",
     "set.pool.stage.xl": "Trusting",
     "set.pool.stage.sy": "Oath-bond",
-    "set.poolWeatherPrefix": "Weather·"
+    "set.poolWeatherPrefix": "Weather·",
+    "set.renameCacheWarn": "User name changed: fixed-line voices are cached per name, so affected lines will be regenerated (time and API cost depend on the voice profile). Save anyway?"
   },
 
   ja: {
@@ -988,7 +990,8 @@ const DICT = {
     "set.pool.stage.fd": "親しい",
     "set.pool.stage.xl": "信頼",
     "set.pool.stage.sy": "誓約",
-    "set.poolWeatherPrefix": "天気·"
+    "set.poolWeatherPrefix": "天気·",
+    "set.renameCacheWarn": "呼び名が変更されました：固定セリフの音声は呼び名ごとにキャッシュされ、変更後のセリフは再生成されます（時間と API 費用は音声プロファイルによります）。保存しますか？"
   }
 };
 
