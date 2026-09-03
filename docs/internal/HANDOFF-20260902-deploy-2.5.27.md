@@ -314,3 +314,50 @@
 3. rm app.asar; mv app.asar.old app.asar   （回到上一版 v2.5.27+探针；更早的已知良好版为 app.asar.bak-good-2526）
 4. 重启 exe
 ```
+
+## 五点十八、用户报告双修：日语"加载成功却系统音/不完整" + 移动丢走路动画（6cfcf60 + 35757bf，已部署 2026-09-03 11:57）
+
+### 问题一：日语加载成功但播系统音/不能完全播出来（6cfcf60）
+
+日志实证三个独立缺口（tts.log：9 次「speakClone 返回空→回退系统语音」全为翻译 timeout；
+「疑似引擎毛刺 1900ms<<预期2610ms」重试 3 次+引擎重启后跳句）：
+
+1. **lineId 反查情绪不匹配（60/358 句）**：sendProactive 反查 lineId 用「文本+情绪」严格匹配，
+   但调用方情绪（LINE_MOODS 事件映射 pat=开心、wake=温柔、天气池整体"温柔"等）常与台词池
+   默认情绪（happy/idle/sleep）不一致 → lineId=null → 已预加载音频命中不了 → 现场合成
+   （慢/毛刺/失败）。修复：`fixed-lines.findItemText` 文本兜底（manifest 同文本已去重不串条目）。
+2. **翻译缓存键不一致（情绪语气词）**：渲染层 emotionizeText 给情绪台词追加句尾语气词
+   （呀！/哼！/嘛～），运行时翻译键 ≠ 预热键（stripStage(展开台词)）→ 这些句每次播放都现场
+   调翻译 API，超时即整句静音 → 系统音。修复：ttsCloneImpl 先剥已知语气词
+   （`stripSpeechTail`）按规范键 `lookupCachedJa` 直查缓存（零 API），未命中再按原文现场翻译。
+3. **GSV 质量门误杀**：时长阈值 0.75×预期会拦下语速偏快的完整句（0.73 实例），三连重试+
+   引擎重启后跳句 → 整段缺一句 =「不能完全播出来」。修复：阈值 0.75→0.5（碎片实测 ≤0.4
+   仍拦截）；终败时交付最优尝试而非跳句（宁短勿缺）。
+
+新增 tests/voice-ja-key.test.js（剥尾缀/lookupCachedJa 磁盘直查）；fixed-lines.test.js 补
+findItemText 用例。回归 42/42。
+
+### 问题二：移动时丢失走路动画（35757bf）
+
+根因：applyWalkState 纯事件驱动，聊天情绪/暂停站姿/试演动画占住 track0 后行走相位不再恢复
+（错过一次广播错到下个相位）；82d7597 的 6s 看门狗只修「轨道为空」，不修「挂着错误循环动画」
+→ 角色滑行却播站姿/坐姿/试演动画，可持续整个相位（最长 walkMaxSec 上限 120s）。
+
+- 看门狗升级为**相位对账**：轨道为空 或「循环动画 ≠ spinePhaseAnim() 相位目标」都按相位补回；
+  豁免 busy/睡眠/试演/一次性动画（Interact 播片自续，cur.loop===false 不抢）。
+  目标链 `spinePhaseAnim() || spineAnimForMood("idle")`——**不再回退 sitAnimName()**（防行走
+  引擎关闭时把站姿角色按成坐姿，原版遗留隐患）。
+- setSpineMood walk-mood 守卫写死 `spineHas("Move")`，动画名非精确 "Move" 的皮肤（cls.move
+  归类）漏恢复 → 改用 spinePhaseAnim() 同源，并补 paused 豁免。
+- 补 walk-phase/paused-idle/stop-idle 相位切换诊断日志（`[anim] ...`，10s 同键节流）——坐姿
+  分支早有日志而这三个分支没有，本次问题无法从日志定位；对账触发也记
+  `[anim] 相位对账: X → Y`。
+
+### 部署与冒烟（11:57）
+
+- 42/42 测试全绿（新增 voice-ja-key）；tar 同步 → 停 7 进程 → pack.sh
+  （app.asar=188,219,638B，旧件 app.asar.old）→ 重启。
+- 冒烟：5 进程；`[anim] walk-phase anim=Move` → `自主休息 seated=true` → 再次 walk-phase
+  相位轮换正确；`[gsv] 预热完成`、`[ja] 预热✓` 正常；无未捕获异常。
+- 待用户复验：① 触发【撒娇/傲娇/开心】台词与天气台词应直接日语出声（不再系统音/不再慢）；
+  ② 长时间观察移动时走路动画是否还丢（丢了 6s 内对账自愈，日志会出现「相位对账」）。
