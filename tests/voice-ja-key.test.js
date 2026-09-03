@@ -33,5 +33,15 @@ ok("规范键磁盘命中", lookupCachedJa("补充维生素时间到") === "ビ�
 ok("未命中返回空串（不抛错）", lookupCachedJa("没预热过的台词") === "");
 ok("空串安全", lookupCachedJa("") === "");
 
+// 命中续期：磁盘 TTL 7 天且原本命中不刷新时间戳 → 固定台词整批过期后重新调 API。
+// lookupCachedJa 命中后应把条目时间戳刷新为当前（读盘验证）
+const fresh = TC.load(dir);
+ok("命中已续期", TC.get(fresh, "补充维生素时间到") === "ビタミン補給の時間だよ～");
+const raw = JSON.parse(fs.readFileSync(require("../src/translate-cache").cachePathFor(dir), "utf8"));
+const entry = raw[require("../src/translate-cache").hashKey("补充维生素时间到")];
+ok("续期时间戳为当前", Number.isFinite(entry.t) && Date.now() - entry.t < 60000);
+// 续期后 TTL 内必然再命中（第二次直查）
+ok("续期后再查仍命中", lookupCachedJa("补充维生素时间到") === "ビタミン補給の時間だよ～");
+
 console.log(failed ? "\n" + failed + " 项失败" : "\nvoice-ja-key 全部通过 ✅");
 process.exit(failed ? 1 : 0);
