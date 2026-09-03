@@ -70,6 +70,7 @@ const updater = require("./src/updater"); // asar-swap 自动更新（v2.5.26 �
 const weather = require("./src/weather"); // 免费天气 Open-Meteo（v2.5.26）
 const walkCore = require("./src/walk-core");
 const { createTaskQueue } = require("./src/task-queue");
+const { createConversationService, classifyError } = require("./src/conversation-service"); // TD-4：会话单写者（统一任务ID/取消/错误码）
 const { createLineGate } = require("./src/line-gate");
 const { transitionSleep, createWorkflowSignalState, recordWorkflowSignal, consumeWorkflowSignal, requeueWorkflowSignal } = require("./src/dialogue-state");
 const { hashToken, safeTokenEqual, tokenMatches, sanitizeClients } = require("./src/agent-auth");
@@ -131,7 +132,7 @@ const workflowSignal = createWorkflowSignalState();
 let workflowFlushTimer = null;
 let workflowPendingText = "";
 let workflowPendingEmotion = "idle";
-let activeReq = null; // { id, sender, abort }
+const conversation = createConversationService(); // TD-4：聊天/重新生成共用单写者；sender 经任务 meta 携带
 const askBuffer = createDebounceBuffer(); // 消息生成防抖（v2.6）：生成/合成中来的消息只留最新一条，回合结束补发
 let pendingAskTimer = null;               // 合并窗口定时器（每次新消息重置）
 const ASK_COALESCE_MS = 300;              // 连续快速发送的合并窗口：窗口内多条只留最后一条
@@ -766,16 +767,21 @@ ipcMain.handle("pet:regenerate", async () => { // Swipes：重新生成最后一
   const hist = rows.slice(0, -1); // 上下文去掉旧回复
   const text = (() => { for (let i = hist.length - 1; i >= 0; i--) if (hist[i].role === "user") return hist[i].content; return ""; })();
   if (!text) return null;
+  // TD-4：重生成也走单写者——此前游离在任务管理之外，可与正在进行的聊天并发（历史写入竞态）
+  const task = conversation.start({ kind: "regenerate" });
+  if (!task.ok) { logTts("chat", "regenerate 跳过: " + task.code); return null; }
   sendToRenderer("pet:thinking", { mode: "chat" });
   try {
     const r = await chatClient.chat({
       persona: personaCache || config.getPersonaText(), history: hist, text,
       state: petStateNote(),
-      onChunk: (d) => sendToRenderer("pet:chunk", { mode: "chat", text: d })
+      signal: task.signal,
+      onChunk: (d) => { if (task.isCurrent()) sendToRenderer("pet:chunk", { mode: "chat", text: d }); }
     });
     let newFull = r.text || "";
     const mi = newFull.indexOf("【情绪");
     if (mi >= 0) newFull = newFull.slice(0, mi);
+    if (!task.isCurrent()) return null; // 生成期间被取消：丢弃结果不写历史
     const entry = history.updateLast("chat", "assistant", (x) => {
       x.swipes = Array.isArray(x.swipes) && x.swipes.length ? x.swipes : [x.content];
       x.swipes.push(newFull);
@@ -788,6 +794,7 @@ ipcMain.handle("pet:regenerate", async () => { // Swipes：重新生成最后一
       swipes: entry.swipes, swipeIndex: entry.swipeIndex });
     return { full: newFull };
   } catch (e) { logTts("chat", "regenerate 失败: " + (e && e.message || e)); sendToRenderer("pet:done", { mode: "chat", full: "", emotion: "" }); return null; }
+  finally { conversation.finish(task.id); }
 });
 ipcMain.handle("pet:set-theme", (_e, theme) => {
   const v = ["auto", "light", "dark", "system"].includes(theme) ? theme : "auto";
@@ -1667,7 +1674,7 @@ const personifyCooldowns = {}; // event → 上次发言时间
 const appBootTs = Date.now(); // 启动 15s 内不触发「睡醒」等开场台词（避免与开场白重复）
 function maybePersonify(event, { chance = 0.3, cooldownMs = 60000 } = {}) {
   if (config.getConfig().personify === false) return; // 设置页开关
-  if (activeReq) return; // 对话中不插话
+  if (conversation.isBusy()) return; // 对话中不插话（TD-4 单写者）
   if (Date.now() - appBootTs < 15000 && event === "wake") return; // 启动开场白窗口
   if (Math.random() > chance) return;
   const last = personifyCooldowns[event] || 0;
@@ -1694,7 +1701,7 @@ function emitWorkflowSignal(source) {
 }
 function consumeWorkflowSignalNow() {
   const result = consumeWorkflowSignal(workflowSignal, Date.now(), {
-    busy: !!activeReq || agentTaskQueue.isBusy(),
+    busy: conversation.isBusy() || agentTaskQueue.isBusy(),
     sleeping: !!walk.sleeping
   });
   if (!result.accepted) {
@@ -1840,7 +1847,7 @@ async function handleAskInner(sender, { id, text }) {
     sender.send("pet:error", { id, message: "请先阅读并同意《使用条款与隐私政策》后使用" });
     return;
   }
-  if (activeReq) {
+  if (conversation.isBusy()) {
     // v2.6 消息生成防抖：上一句还在生成/合成时再来消息，不再直接报错——
     // 只缓冲最新一条（连续快速发送只留最后一条），当前回合结束后自动补发（src/message-buffer）
     askBuffer.push({ sender, payload: { id, text } });
@@ -1903,9 +1910,13 @@ async function handleAskInner(sender, { id, text }) {
   if (mode === "zcode" && !config.getConfig().zcodeEnabled) mode = "chat"; // 任务模式未启用 → 走聊天
   const taskText = mode === "zcode" ? router.route(clean).task : clean;
 
-  const abort = new AbortController();
-  activeReq = { id, sender, abort, cancelled: false };
-  const isCurrent = () => activeReq && activeReq.id === id && !activeReq.cancelled;
+  const task = conversation.start({ kind: mode, meta: { sender } });
+  if (!task.ok) { // 极小竞态：busy 检查后、启动前又有任务进来 → 走生成防抖缓冲
+    askBuffer.push({ sender, payload: { id, text } });
+    logTts("chat", "生成防抖: 单写者竞态缓冲");
+    return;
+  }
+  const isCurrent = () => task.isCurrent();
   history.append({ ts: Date.now(), mode, role: "user", content: clean });
   // 长期记忆（v2.5）：规则式提取事实（称谓/喜好/生日/健康/近期安排），仅本机存储
   if (config.getConfig().features && config.getConfig().features.longTermMemory) {
@@ -1949,7 +1960,7 @@ async function handleAskInner(sender, { id, text }) {
         full = await zcodeClient.runZcodeTask({
           prompt: taskText,
           persona: personaCache,
-          signal: abort.signal,
+          signal: task.signal,
           onChunk: (d) => { if (isCurrent()) sender.send("pet:chunk", { id, mode, text: d }); }
         });
       } finally {
@@ -1965,7 +1976,7 @@ async function handleAskInner(sender, { id, text }) {
         history: history.recent("chat", config.getConfig().chat.maxHistoryTurns || 20),
         text: clean,
         state: petStateNote(), // v2.3 此刻状态注：时段/位置，驱动情绪与台词一致
-        signal: abort.signal,
+        signal: task.signal,
         onChunk: (d) => { if (isCurrent()) sender.send("pet:chunk", { id, mode, text: d }); }
       });
       full = r.text;
@@ -1995,10 +2006,11 @@ async function handleAskInner(sender, { id, text }) {
     }
   } catch (err) {
     if (err.name !== "AbortError" && isCurrent()) {
-      sender.send("pet:error", { id, message: String(err.message || err) });
+      // TD-4：pet:error 携带统一错误码（CANCELLED/HTTP_ERROR/TIMEOUT/INTERNAL），渲染层不必解析文本
+      sender.send("pet:error", { id, code: classifyError(err), message: String(err.message || err) });
     }
   } finally {
-    if (activeReq && activeReq.id === id) activeReq = null;
+    conversation.finish(id);
   }
 }
 
@@ -2008,12 +2020,12 @@ ipcMain.on("pet:stop", () => {
   // 主动停止：同时丢弃生成防抖缓冲（用户要的是静默，不是补发）
   if (pendingAskTimer) { clearTimeout(pendingAskTimer); pendingAskTimer = null; }
   askBuffer.clear();
-  if (activeReq) {
-    activeReq.cancelled = true;
-    const s = activeReq.sender;
-    activeReq.abort.abort();
+  const cur = conversation.snapshot();
+  if (cur) {
+    conversation.cancelCurrent(); // TD-4：统一取消（聊天/重新生成均经由单写者）
     // 通知渲染层复位 busy（中止路径不再发 done/error，仅靠主进程兜底会卡住输入/停止按钮）
-    try { if (s && !s.isDestroyed()) s.send("pet:stopped", { id: activeReq.id }); } catch { /* 窗口已销毁忽略 */ }
+    const s = cur.meta && cur.meta.sender;
+    try { if (s && !s.isDestroyed()) s.send("pet:stopped", { id: cur.id }); } catch { /* 窗口已销毁忽略 */ }
   }
 });
 ipcMain.handle("pet:get-state", () => {
