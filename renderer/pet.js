@@ -788,6 +788,18 @@ async function setRenderMode(mode) {
 
 /** 主进程广播行走状态：切 Move/Relax/Sit 动画并同步朝向 */
 let animDemoUntil = 0; // 动作试演期间不被行走相位打断
+// 相位切换诊断（2026-09-03 补）：坐姿分支早有日志，走/停/暂停三支没有——"移动丢走路动画"
+// 曾无法从日志定位。同键 10s 节流 + 全局 2s 节流，防连点刷屏。
+let _phaseLogAt = 0, _phaseLogKey = "";
+function logPhaseSwitch(label, animName) {
+  const now = Date.now();
+  const key = label + "|" + animName;
+  if (key === _phaseLogKey ? now - _phaseLogAt < 10000 : now - _phaseLogAt < 2000) return;
+  _phaseLogAt = now; _phaseLogKey = key;
+  try { window.petAPI.playback && window.petAPI.playback("[anim] " + label + " anim=" + animName +
+    " (active=" + walkState.active + " resting=" + walkState.resting + " seated=" + walkState.seated +
+    " perched=" + walkState.perched + " paused=" + walkState.paused + ")"); } catch { /* 忽略 */ }
+}
 function applyWalkState(s) {
   const wasActive = walkState.active;
   walkState = s || walkState;
@@ -818,6 +830,7 @@ function applyWalkState(s) {
       const idle = spineAnimForMood("idle");
       if (idle && spineObj.state.getCurrent(0)?.animation?.name !== idle) {
         setSpineAnim(idle, true, "stop-idle");
+        logPhaseSwitch("stop-idle", idle);
         scheduleFitSpine();
       }
     }
@@ -829,6 +842,7 @@ function applyWalkState(s) {
     const idle = spineAnimForMood("idle");
     if (idle && spineObj.state.getCurrent(0)?.animation?.name !== idle) {
       setSpineAnim(idle, true, "paused-idle");
+      logPhaseSwitch("paused-idle", idle);
       scheduleFitSpine();
     }
     return;
@@ -837,6 +851,7 @@ function applyWalkState(s) {
   const target = spinePhaseAnim();
   if (target && spineObj.state.getCurrent(0)?.animation?.name !== target) {
     setSpineAnim(target, true, "walk-phase");
+    logPhaseSwitch("walk-phase", target);
     scheduleFitSpine();
   }
 }
@@ -894,11 +909,15 @@ function setSpineMood(mood) {
     }
     return;
   }
-  // 行走相位中回落待机 → 保持走路动画不中断（非 idle 情绪照常显示）
-  if (walkState.active && !walkState.resting && !busy && mood === "idle" && spineHas("Move")) {
-    spineFaceDir(walkState.face);
-    if (spineObj.state.getCurrent(0)?.animation?.name !== "Move") {
-      setSpineAnim("Move", true, "walk-mood");
+  // 行走相位中回落待机 → 保持走路动画不中断（非 idle 情绪照常显示）。
+  // 2026-09-03 修「移动丢失走路动画」②：原实现写死 spineHas("Move")，动画名不是精确
+  // "Move" 的皮肤（未知模型走 cls.move 归类）会漏恢复 → 站姿滑行；改用 spinePhaseAnim()
+  // 与相位机同一来源。paused 时站姿才是正确相位，交给下方常规分支。
+  if (walkState.active && !walkState.resting && !walkState.paused && !busy && mood === "idle") {
+    const move = spinePhaseAnim();
+    if (move && spineObj.state.getCurrent(0)?.animation?.name !== move) {
+      spineFaceDir(walkState.face);
+      setSpineAnim(move, true, "walk-mood");
       scheduleFitSpine();
     }
     return;
@@ -2170,17 +2189,33 @@ setInterval(() => {
   if (spineApp.ticker.maxFPS !== target) spineApp.ticker.maxFPS = target;
 }, 4000);
 
-/* ---------- 动画轨道看门狗（v2.5.27）：一次性动画播完没接上循环 → track0 空 → 定格 ----------
- * 6s 低频巡检：非聊天/非睡眠/非试演时若轨道无正在播放的动画，按当前相位补回循环动画。
- * 自愈所有"站着没有动画"的冻结路径（试演结束、poke 竞态、clearTrack 后无续播等）。 */
+/* ---------- 动画轨道看门狗（v2.5.27 建立，2026-09-03 升级为相位对账）----------
+ * 6s 低频巡检。原版只修「轨道为空」的定格；但还存在「轨道挂着错误循环动画」的滑行态：
+ * 聊天情绪/暂停站姿/试演动画占住 track0 后，行走相位不会再来恢复（applyWalkState 是
+ * 事件驱动，错过一次广播就错到下个相位）——表现为"角色在移动却没有走路动画"。
+ * 升级：轨道为空，或「循环播放中的动画 ≠ 当前相位应有动画」时，都按相位补回。
+ * 豁免：busy（聊天表情优先）、睡眠、试演中；一次性动画（loop=false，Interact 等）播完
+ * 会自续/变空，不动它。 */
 setInterval(() => {
   if (!spineObj || renderMode !== "spine" || busy || isSleeping) return;
   if (Date.now() < animDemoUntil) return;
   let cur = null;
   try { cur = spineObj.state.getCurrent(0); } catch { return; }
-  if (cur && cur.animation) return; // 轨道有动画在播（含循环）
-  const next = spinePhaseAnim() || sitAnimName() || spineAnimForMood("idle");
-  if (next) { setSpineAnim(next, true); scheduleFitSpine(); }
+  // 相位目标：spinePhaseAnim 唯一来源（坐姿/暂停/走路/待机都在里面）；引擎关闭（null）→ 站姿待机。
+  // 不再回退 sitAnimName——那会在行走引擎关闭时把站着的角色按成坐姿。
+  const target = spinePhaseAnim() || spineAnimForMood("idle");
+  if (!target) return;
+  if (!cur || !cur.animation) { setSpineAnim(target, true); scheduleFitSpine(); return; } // 空轨道：定格自愈（原行为）
+  if (cur.loop === false) return; // 一次性动画播片中：等它播完自续，不抢
+  const name = cur.animation.name;
+  if (name !== target) {
+    const seat = walkState.seated || walkState.perched;
+    setSpineAnim(target, true, "reconcile");
+    scheduleFitSpine(seat ? { seatPhase: true } : {});
+    try { window.petAPI.playback && window.petAPI.playback("[anim] 相位对账: " + name + " → " + target +
+      " (active=" + walkState.active + " resting=" + walkState.resting + " seated=" + walkState.seated +
+      " perched=" + walkState.perched + " paused=" + walkState.paused + ")"); } catch { /* 忽略 */ }
+  }
 }, 6000);
 
 // 条款未同意：提示气泡并保持不可用
