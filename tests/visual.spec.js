@@ -6,13 +6,17 @@ const path = require("path");
 
 const settingsUrl = "file:///" + path.resolve(__dirname, "../renderer/settings.html").replace(/\\/g, "/");
 
-test("设置页：11 分区导航齐全（含 Agent 接口/感知与监控）", async ({ page }) => {
+test("设置页：12 分区导航齐全（含 Agent 接口/感知与监控/天气/密钥与凭据）", async ({ page }) => {
   await page.goto(settingsUrl);
   const links = await page.locator(".set-nav nav a").allTextContents();
-  expect(links.length).toBe(11);
+  // 2026-09-03：v2.5.26 加了「天气」分区后此断言停留在 11，CI 视觉回归红了两天没人对账——
+  // 分区增减时必须同步更新此计数（本测试目的就是防分区被误删）。
+  expect(links.length).toBe(12);
   expect(links.join("|")).toContain("Agent 接口");
   expect(links.join("|")).toContain("感知与监控");
   expect(links.join("|")).toContain("系统与界面");
+  expect(links.join("|")).toContain("天气");
+  expect(links.join("|")).toContain("密钥与凭据");
 });
 
 test("设置页：标题颜色统一（h2 无首字变色伪元素）", async ({ page }) => {
