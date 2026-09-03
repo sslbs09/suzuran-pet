@@ -55,12 +55,26 @@ function currentAsar() { return path.join(resourcesDir(), "app.asar"); }
 
 /** 检查更新（fetch GitHub API）。返回 buildUpdatePlan 结果或 null。 */
 async function checkForUpdate(currentVersion) {
+  const d = await checkForUpdateDetailed(currentVersion);
+  return d.ok ? d.plan : null;
+}
+
+/** 检查更新（详细版，2026-09-03 审计）：区分「网络失败」与「已是最新」——
+ *  此前 checkForUpdate 把两者都折叠成 null，托盘/设置页会把"连不上 GitHub"
+ *  误报成"已是最新版本"，他人网络不通时永远以为没有新版本。15s 超时防挂死。 */
+const CHECK_TIMEOUT_MS = 15000;
+async function checkForUpdateDetailed(currentVersion) {
   try {
-    const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: { Accept: "application/vnd.github+json", "User-Agent": "suzuran-pet" } });
-    if (!r.ok) return null;
+    const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
+      headers: { Accept: "application/vnd.github+json", "User-Agent": "suzuran-pet" },
+      signal: AbortSignal.timeout(CHECK_TIMEOUT_MS)
+    });
+    if (!r.ok) return { ok: false, plan: null, error: "GitHub API HTTP " + r.status };
     const j = await r.json();
-    return buildUpdatePlan({ current: currentVersion, latestTag: j.tag_name, assets: j.assets });
-  } catch { return null; }
+    return { ok: true, plan: buildUpdatePlan({ current: currentVersion, latestTag: j.tag_name, assets: j.assets }), error: "" };
+  } catch (e) {
+    return { ok: false, plan: null, error: String((e && e.message) || e) };
+  }
 }
 
 /** SHA-256 校验（TD-6）：优先 plan.sumsDigest（GitHub 资产 digest 字段），回退下载 SHA256SUMS.txt */
@@ -165,5 +179,5 @@ function applyOnExit(exePath) {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { compareSemver, buildUpdatePlan, extractAsarSha256, checkForUpdate, downloadPending, downloadPendingProgress, applyOnExit, pendingAsar, currentAsar, REPO };
+  module.exports = { compareSemver, buildUpdatePlan, extractAsarSha256, checkForUpdate, checkForUpdateDetailed, downloadPending, downloadPendingProgress, applyOnExit, pendingAsar, currentAsar, REPO };
 }

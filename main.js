@@ -638,40 +638,96 @@ async function runUpdateFlow(plan) {
   }
   logTts("update", "更新包校验通过，退出后自动替换重启（健康检查回滚已挂）");
   sendToRenderer("pet:toast", i18n.t(lang, "tray.updateRestarting"));
-  updater.applyOnExit(app.getPath("exe"));
+  // 2026-09-03 审计：applyOnExit 失败（安装目录不可写，写 ps1 被拒）此前被静默吞掉——
+  // 用户以为更新成功，退出后什么都没发生。失败必须明确告知。
+  if (!updater.applyOnExit(app.getPath("exe"))) {
+    logTts("update", "applyOnExit 失败：安装目录不可写");
+    dialog.showMessageBox({ type: "error", message: i18n.t(lang, "tray.updateApplyFail") });
+    return { accepted: true, downloaded: true, applied: false };
+  }
   quitting = true;
   setTimeout(() => app.quit(), 800); // 留一拍让 toast 发出去
-  return { accepted: true, downloaded: true };
+  return { accepted: true, downloaded: true, applied: true };
 }
 async function trayCheckUpdate() {
   const lang = config.getConfig().uiLang || "zh";
   try {
     sendToRenderer("pet:toast", i18n.t(lang, "tray.checkingUpdate"));
-    const plan = await updater.checkForUpdate(app.getVersion());
+    const d = await updater.checkForUpdateDetailed(app.getVersion());
     noteUpdateChecked();
-    if (!plan) { dialog.showMessageBox({ type: "info", title: "苏苏洛桌宠", message: i18n.t(lang, "tray.alreadyLatest") }); return; }
-    await runUpdateFlow(plan);
+    if (!d.ok) { // 2026-09-03 审计：网络失败不再误报"已是最新"
+      logTts("update", "检查更新失败: " + d.error);
+      dialog.showMessageBox({ type: "error", message: i18n.t(lang, "tray.updateCheckFail") + d.error + "）" });
+      return;
+    }
+    if (!d.plan) { dialog.showMessageBox({ type: "info", title: "苏苏洛桌宠", message: i18n.t(lang, "tray.alreadyLatest") }); return; }
+    await runUpdateFlow(d.plan);
   } catch (e) { logTts("update", "检查更新异常: " + (e && e.message || e)); }
 }
 /** 启动静默检查（≥24h 一次，静默记 marker）：发现新版才弹确认框帮用户走完更新 */
 async function startupUpdateCheck() {
   try {
     if (Date.now() - lastUpdateCheckAt() < UPDATE_CHECK_INTERVAL_MS) return;
-    const plan = await updater.checkForUpdate(app.getVersion());
+    const d = await updater.checkForUpdateDetailed(app.getVersion());
     noteUpdateChecked();
-    if (plan) { logTts("update", "启动检查发现新版本 " + plan.version + "，弹确认框"); await runUpdateFlow(plan); }
+    if (!d.ok) { logTts("update", "启动检查失败（网络不可达?）: " + d.error); return; } // 静默检查不打扰
+    if (d.plan) { logTts("update", "启动检查发现新版本 " + d.plan.version + "，弹确认框"); await runUpdateFlow(d.plan); }
     else logTts("update", "启动检查：已是最新 " + app.getVersion());
   } catch (e) { logTts("update", "启动检查更新异常: " + (e && e.message || e)); }
 }
 ipcMain.handle("pet:check-update", async () => { // 设置页「检查更新」入口
   try {
-    const plan = await updater.checkForUpdate(app.getVersion());
+    const d = await updater.checkForUpdateDetailed(app.getVersion());
     noteUpdateChecked();
-    if (!plan) return { ok: true, updateAvailable: false, current: app.getVersion() };
-    const r = await runUpdateFlow(plan);
-    return { ok: true, updateAvailable: true, current: app.getVersion(), latest: plan.version, ...r };
+    if (!d.ok) return { ok: false, message: i18n.t(config.getConfig().uiLang || "zh", "tray.updateCheckFail") + d.error + "）" };
+    if (!d.plan) return { ok: true, updateAvailable: false, current: app.getVersion() };
+    const r = await runUpdateFlow(d.plan);
+    return { ok: true, updateAvailable: true, current: app.getVersion(), latest: d.plan.version, ...r };
   } catch (e) { return { ok: false, message: String(e && e.message || e) }; }
 });
+
+/** zip 覆盖解压升级兜底（2026-09-03 审计）：发布包用 --asar=false 打包，最终用户首次安装运行
+ *  resources/app 散目录；第一次自动更新后 resources/app.asar 出现，Electron 的加载顺序是
+ *  {app.asar, app, default_app.asar}（node_bindings.cc）——asar 永远压过散目录。此后若再用
+ *  新版 zip 覆盖解压（散目录=新版、旧 asar 仍在），应用会继续跑旧 asar →"装了新版还是旧的"。
+ *  启动时发现散目录版本比运行版本新 → 判定旧 asar 已过时：退出后删除它并重启，加载散目录新版。
+ *  marker（userData/stale-asar-handoff.json）防循环：上次交接后仍从 asar 启动（删除失败?）
+ *  就不再反复重启；版本追平后自动清 marker。 */
+let staleAsarHandoffDone = false;
+function relaunchIfAppDirNewer() {
+  try {
+    if (!app.isPackaged || staleAsarHandoffDone) return;
+    const res = process.resourcesPath;
+    const appDir = path.join(res, "app");
+    const asarPath = path.join(res, "app.asar");
+    const marker = path.join(config.STORAGE.userDir, "stale-asar-handoff.json");
+    if (!fs.existsSync(appDir)) return;
+    if (!fs.existsSync(asarPath)) { try { fs.rmSync(marker, { force: true }); } catch { /* 忽略 */ } return; }
+    const dirVer = String((JSON.parse(fs.readFileSync(path.join(appDir, "package.json"), "utf8")) || {}).version || "");
+    if (!dirVer) return;
+    const cmp = updater.compareSemver(dirVer, app.getVersion());
+    if (cmp === 0) { try { fs.rmSync(marker, { force: true }); } catch { /* 忽略 */ } return; }
+    if (cmp < 0) return; // 散目录比当前旧：正常（asar 已更新），遗留散目录不动
+    if (fs.existsSync(marker)) { logTts("update", "散目录仍是新版但上次交接未生效（旧 asar 删除失败?），跳过自动交接"); return; }
+    fs.writeFileSync(marker, JSON.stringify({ dirVer, wasRunning: app.getVersion(), at: Date.now() }));
+    logTts("update", `散目录 v${dirVer} 比运行中的 v${app.getVersion()} 新：退出后移除旧 app.asar 并重启加载新版`);
+    const ps1 = path.join(res, "drop-stale-asar.ps1");
+    const script = [
+      "param($exe,$res)",
+      "Start-Sleep 2",
+      "Remove-Item -Path (Join-Path $res 'app.asar') -Force -ErrorAction SilentlyContinue",
+      "Start-Process $exe"
+    ].join("\n");
+    fs.writeFileSync(ps1, script);
+    const { spawn } = require("child_process");
+    spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, app.getPath("exe"), res], { detached: true, stdio: "ignore" }).unref();
+    staleAsarHandoffDone = true;
+    quitting = true;
+    setTimeout(() => app.exit(0), 500);
+  } catch (e) {
+    try { logTts("update", "散目录版本检查失败: " + (e && e.message || e)); } catch { /* 忽略 */ }
+  }
+}
 
 async function diagClick() { // 点击穿透诊断：在渲染层实时抓取交互相关状态写日志
   if (!win || win.isDestroyed()) return;
@@ -2053,7 +2109,10 @@ ipcMain.handle("pet:get-state", () => {
     emotionalVoice: !!(cfg.features && cfg.features.emotionalVoice !== false), // 情绪语音开关（语速/音调/语气词）
     emotionVoice: cfg.emotionVoice || {}, // 情绪音色分档开关（v2.6）：{撒娇:true,…}，缺省=启用
     firstRunAt: cfg.firstRunAt || 0, // 首次启动时间戳（陪伴时间）
-    ttsCloud: { enabled: !!(cfg.ttsCloud?.enabled || cfg.ttsCosy?.enabled || cfg.ttsGenie?.enabled) },
+    // 渲染层用它决定"是否调用 speakClone 克隆链路"（false = 直接系统语音）。
+    // 2026-09-03 补 GSV-only 日语模式：genie/cosy/cloud 全关但 speakJa+GSV 开着的用户
+    // 此前被判成 false → 渲染层从不调 speakClone → 日语引擎再正常也永远系统音。
+    ttsCloud: { enabled: !!(cfg.ttsCloud?.enabled || cfg.ttsCosy?.enabled || cfg.ttsGenie?.enabled || (cfg.ttsGsv?.enabled && cfg.ttsGenie?.speakJa)) },
     winSize: { width: cfg.window.width || 260, height: cfg.window.height || 200 },
     hasUserSprite: fs.existsSync(path.join(config.STORAGE.spritesUser, "sprite.png")),
     renderMode: renderModeMod.renderModeOf(cfg.renderMode),
@@ -3245,9 +3304,16 @@ function winRectToDip(rect) {
     bottom: Math.round(origin.y + (rect.bottom - origin.y * scale) / scale)
   };
 }
+let _lastBarrierCount = -1;
 function refreshWinBarriers() {
   const api = initBarrierApi();
   if (!api || !win || win.isDestroyed()) { winBarriers = []; return []; }
+  // 2026-09-03 收窄：屏障数据只服务行走系统（站上其他窗口/防遮挡）。行走引擎关闭或窗口
+  // 隐藏到托盘时不再每 3s 枚举全机窗口（此前无条件常驻轮询）；行走恢复后下个周期自动重建。
+  if (!walk.active || !win.isVisible()) {
+    if (winBarriers.length) { winBarriers = []; _lastBarrierCount = -1; invalidatePerchIfNeeded(); }
+    return winBarriers;
+  }
   try {
     const next = [];
     const cb = (hwnd) => {
@@ -3270,7 +3336,11 @@ function refreshWinBarriers() {
     api.enumWindows(cb, 0);
     winBarriers = next;
     invalidatePerchIfNeeded();
-    logTts("walk", "窗口屏障刷新: " + next.length + " 个");
+    // 日志只在数量变化时记（此前每 3s 固定一条，tts.log 绝大多数是重复行）
+    if (next.length !== _lastBarrierCount) {
+      _lastBarrierCount = next.length;
+      logTts("walk", "窗口屏障刷新: " + next.length + " 个");
+    }
   } catch (e) {
     winBarriers = [];
     logTts("walk", "窗口屏障刷新失败: " + (e && e.message || e));
@@ -4276,6 +4346,7 @@ if (!gotLock) {
   });
 
   app.whenReady().then(() => {
+    relaunchIfAppDirNewer(); // zip 覆盖解压升级兜底：散目录比 asar 新时让位重启（须在其他初始化前）
     try {
       // 崩溃收集：minidump 存到 userData/crashes（不自动上传），便于排查渲染层 crashed
       const { crashReporter } = require("electron");
