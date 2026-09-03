@@ -788,6 +788,7 @@ async function setRenderMode(mode) {
 
 /** 主进程广播行走状态：切 Move/Relax/Sit 动画并同步朝向 */
 let animDemoUntil = 0; // 动作试演期间不被行走相位打断
+let moodAnimUntil = 0; // 情绪动画豁免窗口：setSpineMood 播非相位动画（happy/cry/think 等）后短暂时间内，相位对账不抢（onDone 2.6s 会自行回落 idle；过期后对账兜底回收）
 // 相位切换诊断（2026-09-03 补）：坐姿分支早有日志，走/停/暂停三支没有——"移动丢走路动画"
 // 曾无法从日志定位。同键 10s 节流 + 全局 2s 节流，防连点刷屏。
 let _phaseLogAt = 0, _phaseLogKey = "";
@@ -925,6 +926,7 @@ function setSpineMood(mood) {
   const animName = spineAnimForMood(mood === "idle" ? "idle" : mood);
   if (animName && spineObj.state.getCurrent(0)?.animation?.name !== animName) {
     setSpineAnim(animName, true, "mood:" + mood);
+    moodAnimUntil = Date.now() + 6500; // 情绪动画展示窗口：期间相位对账不抢，过期由对账兜底回收
     scheduleFitSpine();
   }
 }
@@ -2198,7 +2200,7 @@ setInterval(() => {
  * 会自续/变空，不动它。 */
 setInterval(() => {
   if (!spineObj || renderMode !== "spine" || busy || isSleeping) return;
-  if (Date.now() < animDemoUntil) return;
+  if (Date.now() < animDemoUntil || Date.now() < moodAnimUntil) return;
   let cur = null;
   try { cur = spineObj.state.getCurrent(0); } catch { return; }
   // 相位目标：spinePhaseAnim 唯一来源（坐姿/暂停/走路/待机都在里面）；引擎关闭（null）→ 站姿待机。
