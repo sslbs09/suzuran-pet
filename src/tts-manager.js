@@ -7,7 +7,7 @@ const config = require("./config");
 const { logTts } = require("./logger");
 const { safeFetch } = require("./safe-url");
 const fixedLineCache = require("./fixed-line-cache");
-const { translateToJa } = require("./ja-translate");
+const { translateToJa, lookupCachedJa } = require("./ja-translate");
 const { runPowerShell, stripStage } = require("./utils");
 
 /**
@@ -153,12 +153,21 @@ async function ttsCloneImplInner(text, opts, jobId) {
     let ttsText = cleanZh;
     let jaText = "";
     if (q.speakJa) {
-      const ja = await translateToJa(clean);
-      if (ja) { jaText = ja; ttsText = ja; logTts("ja", "翻译: " + clean + " → " + ja); }
+      // 2026-09-03 修「日语预热✓却系统音/逐句跳过」②：渲染层会给情绪台词追加句尾语气词
+      // （EMOTION_SPEECH：呀！/哼！/嘛～等），翻译键与预热键（stripStage(展开台词)）不一致 →
+      // 每次播放都现场调翻译 API，超时即整句静音回退系统音。先剥已知语气词按规范键直查缓存
+      // （零 API），未命中再按原文（含语气词）现场翻译，保持既有语气朗读行为不变。
+      const canon = stripSpeechTail(clean);
+      let ja = (canon && canon !== clean) ? lookupCachedJa(canon) : "";
+      if (ja) { jaText = ja; ttsText = ja; logTts("ja", "翻译(预热缓存): " + clean.slice(0, 18) + " → " + ja.slice(0, 18)); }
       else {
-        logTts("ja", "翻译失败，静音（日语模式不退回中文引擎）");
-        if (jaFallbackCb) { const _cb = jaFallbackCb; jaFallbackCb = null; try { _cb(); } catch { /* 通知失败不影响合成 */ } }
-        return ""; // v2.5.17：日语模式任何失败一律静音，不消耗中文/云引擎（省内存）
+        ja = await translateToJa(clean);
+        if (ja) { jaText = ja; ttsText = ja; logTts("ja", "翻译: " + clean + " → " + ja); }
+        else {
+          logTts("ja", "翻译失败，静音（日语模式不退回中文引擎）");
+          if (jaFallbackCb) { const _cb = jaFallbackCb; jaFallbackCb = null; try { _cb(); } catch { /* 通知失败不影响合成 */ } }
+          return ""; // v2.5.17：日语模式任何失败一律静音，不消耗中文/云引擎（省内存）
+        }
       }
     }
     if (jaText) {
@@ -545,12 +554,13 @@ async function gsvTtsJa(g, text, emoRef) {
   }
   // 质量门：只查时长碎片（引擎偶发输出 1s 碎片）。
   // 注：不做高频频谱质检——日语摩擦音天然高频，误判率过高（曾导致大量跳句）。
-  // 阈值 0.75：实测正常输出时长恒为预期的 1.5 倍以上，毛刺碎片 ≤0.4，
-  // 0.5~0.75 区间的「半残音频」（说到一半截断）同样需要重试兜底。
+  // 阈值 0.5（2026-09-03 修「播放不完整」③）：原 0.75 会误杀语速偏快的正常句
+  // （实测 1900ms<<预期2610ms=0.73 的完整句被重试 3 次+引擎重启后跳句 → 整段缺一句）；
+  // 毛刺碎片实测 ≤0.4，0.5 仍能拦截。重试后仍不过门 → 交付最优尝试而非跳句（宁短勿缺）。
   const expectMs = Math.max(400, clean.length * 90);
   const durOk = (b) => {
     const d = wavDurationMs(b);
-    return !(d > 0 && clean.length > 6 && d < expectMs * 0.75);
+    return !(d > 0 && clean.length > 6 && d < expectMs * 0.5);
   };
   const endpoint = resolveTtsEndpoint(g, 9880);
   if (!endpoint) return "";
@@ -593,6 +603,12 @@ async function gsvTtsJa(g, text, emoRef) {
       logTts("gsv", "自动重启失败: " + (e2 && e2.message || e2));
     } finally {
       gsvAutoRestarting = false;
+    }
+    // 终败兜底（2026-09-03 修「播放不完整」③）：手里有可用音频就交付最优尝试，
+    // 不再跳句——跳句=整段回复缺一句，正是"不能完全播出来"的直接来源。
+    if (best && best.length >= 100) {
+      logTts("gsv", "质量门未过，交付最优尝试（dur=" + Math.round(wavDurationMs(best)) + "ms/预期" + expectMs + "ms）: " + clean.slice(0, 24));
+      return best.toString("base64");
     }
     logTts("gsv", "跳过该句: " + clean.slice(0, 24));
     return "";
@@ -759,6 +775,13 @@ function sanitizeJaText(t) {
     .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/gu, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/** 剥渲染层 emotionizeText 注入的句尾情绪语气词（renderer EMOTION_SPEECH 值集合）——
+ *  剥后才能与日语预热键对齐命中磁盘翻译缓存。只剥句尾一处，正文里的同形字不动。 */
+const SPEECH_TAIL_RE = /(呀！|哇！|哼！|呜…|嗯…|嘛～)\s*$/;
+function stripSpeechTail(t) {
+  return String(t || "").replace(SPEECH_TAIL_RE, "").trim();
 }
 
 function splitJaSentences(text) {
@@ -1053,5 +1076,5 @@ module.exports = {
   setPartSender, setJaFallbackCb,
   ttsCloneImpl, queueTts, ensureGenieServer, ensureGsvServer, restartGsvEngine,
   shutdownGenieServer, genieTts, gsvTtsJa, warmupGsv, resetGenieServer, killGsvProcesses, portAlive, killPortListener,
-  emotionAudition, missingEnginePath
+  emotionAudition, missingEnginePath, stripSpeechTail
 };

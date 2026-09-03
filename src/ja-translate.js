@@ -142,4 +142,20 @@ async function translateToJa(text) {
   return "";
 }
 
-module.exports = { translateToJa, clearTrDisk };
+/** 仅查缓存不调 API（2026-09-03 语音键对齐）：内存 → 磁盘，未命中返回 ""。
+ *  用于运行时念白键与预热键不一致（渲染层句尾情绪语气词）时先零成本命中已预热译文。 */
+function lookupCachedJa(text) {
+  const key = String(text || "");
+  if (!key) return "";
+  const hit = cache.get(key);
+  if (hit && !hit.fail && Date.now() - hit.t <= CACHE_TTL) {
+    cache.delete(key); cache.set(key, hit); // LRU 移到队尾
+    return hit.ja;
+  }
+  const tc = require("./translate-cache");
+  const d = ensureTrDisk();
+  const dja = tc.get(d.map, key);
+  return dja !== undefined ? dja : "";
+}
+
+module.exports = { translateToJa, lookupCachedJa, clearTrDisk };

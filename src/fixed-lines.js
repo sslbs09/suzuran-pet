@@ -66,6 +66,15 @@ function findItem(vars, text, emotion) {
   return buildManifest(vars).find((item) => item.text === t && item.emotion === emo) || null;
 }
 
+/** 按展开文本查条目（不限情绪）：sendProactive 的 lineId 反查兜底。
+ *  调用方情绪（LINE_MOODS 事件映射等）常与台词池默认情绪不一致（实测 60/358 句），
+ *  严格匹配会让已预加载音频永远命中不了（lineId=null → 现场合成 → 慢/毛刺/失败）。
+ *  同文本多池重复已被 buildManifest 去重（normalize 后 seen），不会串到错误条目。 */
+function findItemText(vars, text) {
+  const t = String(text || "");
+  return buildManifest(vars).find((item) => item.text === t) || null;
+}
+
 function voiceFingerprint(profile = {}) {
   const stable = {
     engine: profile.engine || "system",
@@ -94,4 +103,4 @@ function summarize(items = []) {
   return summary;
 }
 
-module.exports = { POOLS, expand, normalize, buildManifest, findItem, voiceFingerprint, cacheKey, summarize };
+module.exports = { POOLS, expand, normalize, buildManifest, findItem, findItemText, voiceFingerprint, cacheKey, summarize };

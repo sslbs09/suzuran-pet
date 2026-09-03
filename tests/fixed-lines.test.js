@@ -21,4 +21,11 @@ const sample = manifest.find((i) => i.emotion === "idle");
 assert.ok(sample);
 assert.strictEqual(fixed.findItem({ name: "小苏", user: "阿明" }, sample.text, "idle").id, sample.id);
 assert.strictEqual(fixed.findItem({ name: "小苏", user: "阿明" }, "不存在的台词", "idle"), null);
+// findItemText：文本兜底反查（2026-09-03 修 lineId 情绪不匹配 60/358 句命中不了缓存）——
+// 调用方情绪（LINE_MOODS 事件映射/天气"温柔"）与池默认不一致时 findItem miss、findItemText 命中
+const anyLine = manifest.find((i) => i.emotion !== "idle");
+assert.ok(anyLine);
+assert.strictEqual(fixed.findItem({ name: "小苏", user: "阿明" }, anyLine.text, "绝不匹配的情绪"), null);
+assert.strictEqual(fixed.findItemText({ name: "小苏", user: "阿明" }, anyLine.text).id, anyLine.id);
+assert.strictEqual(fixed.findItemText({ name: "小苏", user: "阿明" }, "不存在的台词"), null);
 console.log("fixed-lines 全部通过 ✅");

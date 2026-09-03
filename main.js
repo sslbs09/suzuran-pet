@@ -1589,10 +1589,13 @@ function sendProactive(text, emotion, { force = false } = {}) {
     return false;
   }
   // lineId 透传（v2.5.27）：固定台词反查稳定 ID，渲染层 speak 带回 → TTS 按 ID 直查磁盘缓存，
-  // 不再依赖文本匹配（同文本不同池/情绪不会串音）
+  // 不再依赖文本匹配（同文本不同池/情绪不会串音）。
+  // 反查兜底（2026-09-03 修「日语加载成功却播系统音/不完整」①）：调用方情绪（LINE_MOODS 事件
+  // 映射/天气"温柔"等）与池默认情绪不一致时严格匹配必失败（实测 60/358 句）→ 已预加载音频
+  // 命中不了，退回现场合成。同文本多池重复已被 manifest 去重，文本兜底不会串条目。
   let lineId = null;
   try {
-    const it = fixedLineCache.findItem(chatVars(), t, emo);
+    const it = fixedLineCache.findItem(chatVars(), t, emo) || fixedLineCache.findItemText(chatVars(), t);
     lineId = it ? it.id : null;
   } catch { /* 反查失败走文本匹配兜底 */ }
   sendToRenderer("pet:proactive", { text: t, emotion: emo, force, lineId });
