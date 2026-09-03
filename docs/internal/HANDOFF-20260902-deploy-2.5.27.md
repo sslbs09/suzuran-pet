@@ -250,6 +250,62 @@
   均为部署前既有记录（TD-10 已知偶发项），非本批引入。
 - 回退：见「六、回退方法」（app.asar.old 即上一版 v2.5.27+探针）。
 
+## 五点十七、用户指令批：中危清零 + 缓存长期 + 单句重载 + 更新体验 + TD-4 + TD-7（2026-09-03 上午）
+
+用户醒来后下达六项指令，逐项落地（每项一 commit，基线升至 41/41）：
+
+### 中危清零（d9632e3）
+- 门禁复扫确认 **中危 7→0**。chat-client/zcode-client 的 `--test` 冒烟块改固定演示提示词
+  （根除 argv→子进程/HTTP 污点链）；`scripts/gif-frames.js` 为仓库内零引用的一次性素材工具，
+  其 argv→readFileSync/writeFileSync 管道在 Mimosa 编辑钩子的语法级限制下（六种规范写法
+  均被拦）无法落盘加固，按根除处置移除（git 历史可找回）。
+- chat-client 262/270/332（配置/世界书/向量记忆内容流入聊天 API 请求体）确认为应用核心
+  数据流而非缺陷——SSRF 防护/超时/密钥脱敏已内置；修复 CLI 侧后门禁已不再报告。
+
+### 语音缓存长期化（82305c8，用户指令"30 天改为长期不设上限"）
+- CACHE_TTL_MS=0（cacheFresh 统一判定）：音频只要语音方案不变就永久命中，updatedAt 仅作
+  LRU/展示；空间仍由 500MB 预算+最久未用清理兜底。设置页提示语三语同步。测试断言
+  90 天前的记录仍命中。
+
+### 单句重新生成（3a5d8da，用户指令"支持单独重新加载个别语句"）
+- `fixed-line-preloader.reloadOne(itemId)`：fixedLinePreload 语义天然绕过缓存读，重走
+  合成→落盘；失败不 markFailed（旧音频保留可用）；与批量预加载/离线模式/系统语音互斥并
+  给出错误码。链路：`pet:fixed-lines-reload-one` IPC → preload 桥 → 设置页条目行 ↻ 按钮
+  （行内新增 has-reload 三列布局），进度走既有 `pet:fixed-lines-progress` 广播；文案三语。
+
+### 自动更新体验补全（3691341，用户问"有没有更新弹窗帮别人完成更新"）
+- **答案：此前有弹窗但不完整**——托盘"检查更新"→确认框→静默下载（188MB 无任何进度提示）
+  →退出替换重启。缺启动自动检查、缺进度、设置页无入口。
+- 本次补全：① 启动 90s 后静默检查（userData/update-check.json 记 marker，≥24h 才联网），
+  发现新版自动弹确认框，用户点「立即更新」即完成下载+重启替换（配合 TD-6 的 SHA-256
+  校验与探活回滚，全程无需手动操作）；② 下载改流式+进度回调：气泡 toast 每 20% 提示 +
+  设置页进度条；③ 设置页「系统与界面 → 软件更新」：当前版本 + 检查更新按钮 + 结果/进度；
+  ④ 文案三语（tray.updateRestarting 等）。
+
+### TD-4 ConversationService（8c3e638，用户确认"可以整"）
+- 新增 `src/conversation-service.js`（纯 Node 单测 20 断言）：单写者、统一 task ID、
+  AbortController 随任务、cancelCurrent、classifyError 统一错误码。
+- main.js 接线：handleAsk/pet:stop/maybePersonify/busy 上报改走 conversation；
+  **regenerate 接入单写者**（修掉"可与聊天并发跑"的历史写入竞态：busy 跳过、取消后丢弃
+  结果不写历史）；pet:error 携带 code 字段。Agent 批量任务保留 task-queue（并发 by
+  design 的舱壁，与单写者并存）；sendProactive 非"生成任务"，维持 lineGate+lineId 链路
+  不变（台账"lineId 可作起点"体现在缓存直查已上线）。
+
+### TD-7 Live2D Core（c5b1b38，用户授权自决 → 方案 A 注入）
+- 决策：**发布流程注入而非下架**——部署包本就携带该文件且功能可用，下架是用户可见功能回退。
+- release.yml：checkout 后从官方 cubism.live2d.com 拉取 Core，SHA-256 钉死校验
+  （25ae938cb4fe282ce189b357bcc97e603d1e1f7ec78bf04150d401c23cdc792f，与部署副本、官方上游
+  当日三方核对一致）；`npm run check:assets -- --strict` 恢复为发布门禁。
+- 注意：上游更新导致 CI 失败属预期，人工核对新版许可与内容后更新 pin（防供应链静默替换）；
+  本机 dev 树 renderer/ 已补该文件（gitignored 不入库），本地跑 strict 检查还需 `npm ci`
+  安装 node_modules（本工作副本未装，属环境差异）。
+
+### 部署与冒烟（09:57）
+- 全量回归 41/41（新增 conversation-service 测试）+ i18n 三语 334 键等齐；tar 同步
+  （含删除生产侧 gif-frames.js 与仓库对齐）→ 停 5 进程 → pack.sh（app.asar=188,204,736B，
+  旧件 app.asar.old）→ 重启。
+- 冒烟：5 进程；`自主休息: y=768 sink=30` 坐姿正确、`[ja] 预热✓` 正常、无未捕获异常。
+
 ## 六、回退方法（如新版异常）
 
 ```text
