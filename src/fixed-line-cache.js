@@ -103,6 +103,7 @@ function saveItem(profile, item, buffer) {
     disk.items = disk.items && typeof disk.items === "object" ? disk.items : {};
     disk.items[cacheKey(item, profile)] = { state: "ready", audioFile, bytes: buffer.length, updatedAt: Date.now(), errorCode: "" };
     storage.atomicWrite(paths.manifest, JSON.stringify(disk, null, 2));
+    enforceCacheBudgetThrottled(paths.fingerprint); // TD-3：写盘后节流检查总容量预算
     return disk.items[cacheKey(item, profile)];
   } finally {
     try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch { /* 清理失败不覆盖合成结果 */ }
@@ -164,4 +165,57 @@ function clearOldFingerprints(keepFingerprint) {
   return removed;
 }
 
-module.exports = { CACHE_TTL_MS, ROOT, profileFromConfig, pathsFor, load, saveItem, markFailed, clear, readAudio, readAudioById, findCachedAudio, listFingerprints, clearOldFingerprints };
+/* ---------- TD-3：缓存总容量预算（只增不减 → 超限按目录 LRU 清理） ---------- */
+const CACHE_MAX_BYTES = 500 * 1024 * 1024; // 总上限 500MB（固定台词短音频场景实际远小于此）
+let _lastBudgetCheckAt = 0;
+
+function dirSizeBytes(dir) {
+  let total = 0;
+  try {
+    for (const name of fs.readdirSync(dir)) {
+      const p = path.join(dir, name);
+      try {
+        const st = fs.statSync(p);
+        if (st.isDirectory()) total += dirSizeBytes(p);
+        else if (st.isFile()) total += st.size;
+      } catch { /* 单项统计失败忽略 */ }
+    }
+  } catch { /* 目录不可读按 0 计 */ }
+  return total;
+}
+
+/** 把缓存总大小压回 maxBytes 内：指纹目录按 mtime LRU 从旧到新删，当前方案（keep）永不删。
+ *  目录 mtime 在每次 saveItem/markFailed 写 manifest 时刷新，天然是"最近使用"信号。 */
+function enforceCacheBudget(keepFingerprint, maxBytes = CACHE_MAX_BYTES) {
+  const keep = safeFingerprint(keepFingerprint);
+  let total = 0;
+  const entries = [];
+  for (const fp of listFingerprints()) {
+    try {
+      const dir = insideRoot(ROOT, fp);
+      const size = dirSizeBytes(dir);
+      total += size;
+      entries.push({ fp, dir, size, mtime: fs.statSync(dir).mtimeMs });
+    } catch { /* 单目录失败跳过 */ }
+  }
+  let removed = 0, freedBytes = 0;
+  for (const e of entries.sort((a, b) => a.mtime - b.mtime)) {
+    if (total <= maxBytes) break;
+    if (e.fp === keep) continue;
+    try { fs.rmSync(e.dir, { recursive: true, force: true }); } catch { continue; } // 占用中跳过
+    total -= e.size;
+    removed++;
+    freedBytes += e.size;
+  }
+  return { removed, freedBytes, totalBytes: total };
+}
+
+/** 写入后节流触发（60s 一次）：预加载批量写盘时不会每条都全树遍历 */
+function enforceCacheBudgetThrottled(keepFingerprint) {
+  const now = Date.now();
+  if (now - _lastBudgetCheckAt < 60000) return null;
+  _lastBudgetCheckAt = now;
+  try { return enforceCacheBudget(keepFingerprint); } catch { return null; }
+}
+
+module.exports = { CACHE_TTL_MS, CACHE_MAX_BYTES, ROOT, profileFromConfig, pathsFor, load, saveItem, markFailed, clear, readAudio, readAudioById, findCachedAudio, listFingerprints, clearOldFingerprints, dirSizeBytes, enforceCacheBudget, enforceCacheBudgetThrottled };

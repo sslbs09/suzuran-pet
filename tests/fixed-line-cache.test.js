@@ -34,5 +34,26 @@ status = cache.load(profile, { name: "小苏", user: "阿明" });
 assert.strictEqual(status.summary.failed, 1);
 cache.clear(profile);
 assert.strictEqual(cache.load(profile, { name: "小苏", user: "阿明" }).summary.ready, 0);
+
+// TD-3：总容量预算 + LRU 目录清理（当前方案永不删，从最旧目录开始清到预算内）
+cache.saveItem(profile, item, Buffer.alloc(1100, 7)); // 重建当前方案目录（音频+manifest 约 1.4KB）
+const keepFp = cache.pathsFor(profile).fingerprint;
+const mkFake = (fp, bytes) => {
+  fs.mkdirSync(path.join(cache.ROOT, fp), { recursive: true });
+  fs.writeFileSync(path.join(cache.ROOT, fp, "a.audio"), Buffer.alloc(bytes, 3));
+};
+mkFake("000000000000000a", 2000);
+mkFake("000000000000000b", 2000);
+const t = Date.now() / 1000;
+fs.utimesSync(path.join(cache.ROOT, "000000000000000a"), t - 1000, t - 1000); // 最旧
+fs.utimesSync(path.join(cache.ROOT, "000000000000000b"), t - 500, t - 500);
+const budget = cache.enforceCacheBudget(keepFp, 3 * 1024);
+assert.strictEqual(budget.removed, 2);
+assert.ok(!fs.existsSync(path.join(cache.ROOT, "000000000000000a")));
+assert.ok(!fs.existsSync(path.join(cache.ROOT, "000000000000000b")));
+assert.ok(fs.existsSync(path.join(cache.ROOT, keepFp))); // 当前方案永不删
+assert.ok(budget.totalBytes <= 3 * 1024);
+assert.ok(cache.dirSizeBytes(cache.ROOT) <= 3 * 1024);
+
 fs.rmSync(dir, { recursive: true, force: true });
 console.log("fixed-line-cache 全部通过 ✅");
