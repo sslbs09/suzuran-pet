@@ -2217,6 +2217,17 @@ ipcMain.handle("pet:fixed-lines-start", async (event, options = {}) => {
   return result;
 });
 ipcMain.handle("pet:fixed-lines-cancel", () => ({ ok: fixedLinePreloader.cancel() }));
+ipcMain.handle("pet:fixed-lines-reload-one", async (event, itemId) => { // 单句重新生成（设置页 ↻）
+  return fixedLinePreloader.reloadOne({
+    config: config.getConfig(),
+    vars: chatVars(),
+    itemId: String(itemId || ""),
+    onProgress: (progress) => {
+      if (win && !win.isDestroyed()) win.webContents.send("pet:fixed-lines-progress", progress);
+      if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send("pet:fixed-lines-progress", progress);
+    }
+  });
+});
 ipcMain.handle("pet:fixed-lines-clear", () => {
   try {
     const profile = fixedLineCache.profileFromConfig(config.getConfig());

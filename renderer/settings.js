@@ -614,7 +614,27 @@ function renderFixedLinePool(status = fixedLineStatus) {
     badge.className = "fixed-line-state " + (item.state || "pending");
     badge.textContent = stateLabel(item.state);
     if (item.errorCode) badge.title = item.errorCode;
-    row.append(text, badge);
+    // 单句重新生成（语音方案非系统时提供）：合成成功覆盖旧音频，失败保留旧音频
+    if (profile.engine && profile.engine !== "system") {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "mini";
+      btn.textContent = "↻";
+      btn.title = L("set.fixedReloadOne");
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        setResult($("fixed-lines-result"), L("set.fixedReloading"));
+        try {
+          const r = await window.petAPI.reloadFixedLineAudio(item.id);
+          setResult($("fixed-lines-result"), r && r.ok ? L("set.fixedReloadDone") : (r && r.message) || L("set.fixedReloadFail"), !!(r && r.ok));
+        } catch (e) { setResult($("fixed-lines-result"), String(e.message || e), false); }
+        await refreshFixedLinePool();
+      });
+      row.className += " has-reload";
+      row.append(text, btn, badge);
+    } else {
+      row.append(text, badge);
+    }
     list.appendChild(row);
   }
   $("btn-fixed-lines-toggle").textContent = fixedLineShowAll ? L("set.fixedShowUnloaded") : `${L("set.fixedShowUnloadedN")}（${total - ready}）`;

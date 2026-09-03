@@ -333,7 +333,11 @@ const DICT = {
     "set.pool.stage.xl": "信赖",
     "set.pool.stage.sy": "誓约",
     "set.poolWeatherPrefix": "天气·",
-    "set.renameCacheWarn": "称呼已修改：固定台词语音按称呼缓存，改名后相关句子将重新生成（耗时与 API 费用视语音方案而定）。继续保存吗？"
+    "set.renameCacheWarn": "称呼已修改：固定台词语音按称呼缓存，改名后相关句子将重新生成（耗时与 API 费用视语音方案而定）。继续保存吗？",
+    "set.fixedReloadOne": "重新生成该句（覆盖旧音频）",
+    "set.fixedReloading": "正在重新生成该句…",
+    "set.fixedReloadDone": "该句已重新生成 ✅",
+    "set.fixedReloadFail": "重新生成失败："
   },
 
   en: {
@@ -662,7 +666,11 @@ const DICT = {
     "set.pool.stage.xl": "Trusting",
     "set.pool.stage.sy": "Oath-bond",
     "set.poolWeatherPrefix": "Weather·",
-    "set.renameCacheWarn": "User name changed: fixed-line voices are cached per name, so affected lines will be regenerated (time and API cost depend on the voice profile). Save anyway?"
+    "set.renameCacheWarn": "User name changed: fixed-line voices are cached per name, so affected lines will be regenerated (time and API cost depend on the voice profile). Save anyway?",
+    "set.fixedReloadOne": "Regenerate this line (overwrites old audio)",
+    "set.fixedReloading": "Regenerating this line…",
+    "set.fixedReloadDone": "Line regenerated ✅",
+    "set.fixedReloadFail": "Regenerate failed: "
   },
 
   ja: {
@@ -991,7 +999,11 @@ const DICT = {
     "set.pool.stage.xl": "信頼",
     "set.pool.stage.sy": "誓約",
     "set.poolWeatherPrefix": "天気·",
-    "set.renameCacheWarn": "呼び名が変更されました：固定セリフの音声は呼び名ごとにキャッシュされ、変更後のセリフは再生成されます（時間と API 費用は音声プロファイルによります）。保存しますか？"
+    "set.renameCacheWarn": "呼び名が変更されました：固定セリフの音声は呼び名ごとにキャッシュされ、変更後のセリフは再生成されます（時間と API 費用は音声プロファイルによります）。保存しますか？",
+    "set.fixedReloadOne": "このセリフを再生成（旧音声を上書き）",
+    "set.fixedReloading": "このセリフを再生成中…",
+    "set.fixedReloadDone": "再生成しました ✅",
+    "set.fixedReloadFail": "再生成に失敗："
   }
 };
 

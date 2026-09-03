@@ -180,6 +180,7 @@ contextBridge.exposeInMainWorld("petAPI", {
   getFixedLineAudioStatus: () => ipcRenderer.invoke("pet:fixed-lines-status"),
   startFixedLineAudioPreload: (options) => ipcRenderer.invoke("pet:fixed-lines-start", options || {}),
   cancelFixedLineAudioPreload: () => ipcRenderer.invoke("pet:fixed-lines-cancel"),
+  reloadFixedLineAudio: (itemId) => ipcRenderer.invoke("pet:fixed-lines-reload-one", String(itemId || "")), // 单句重新生成
   clearFixedLineAudioCache: () => ipcRenderer.invoke("pet:fixed-lines-clear"),
   clearOldFixedLineCaches: () => ipcRenderer.invoke("pet:fixed-lines-clear-old"), // 清理旧语音方案的缓存版本
   onFixedLineAudioProgress: (cb) => ipcRenderer.on("pet:fixed-lines-progress", (_e, p) => cb(p)),

@@ -146,6 +146,7 @@ body.theme-dark .settings-page .set-dirty { border-color: #4a4030; background: #
 .settings-page .voice-pool-badge.failed { color: var(--ui-danger); border-color: var(--ui-danger); }
 .settings-page .fixed-lines-list { max-height: 260px; margin-top: 10px; overflow: auto; border-top: 1px solid var(--ui-line); }
 .settings-page .fixed-line-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 8px 2px; border-bottom: 1px dashed var(--ui-line); }
+.settings-page .fixed-line-row.has-reload { grid-template-columns: minmax(0, 1fr) auto auto; } /* 单句重载按钮（支持单独重新加载个别语句） */
 .settings-page .fixed-line-text { min-width: 0; color: var(--ui-ink); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
 .settings-page .fixed-line-meta { margin-top: 2px; color: var(--ui-subtle); font-size: 10px; }
 .settings-page .fixed-line-state { align-self: center; color: var(--ui-muted); font-size: 11px; white-space: nowrap; }
