@@ -137,7 +137,8 @@ async function runZcodeTask({ prompt, persona, onChunk = () => {}, signal }) {
 if (process.argv.includes("--test")) {
   (async () => {
     const persona = config.getPersonaText();
-    const text = process.argv[process.argv.indexOf("--test") + 1] || "用一句话介绍你自己（苏苏洛）";
+    // 固定演示提示词（Mimosa 中危：CLI 自测不再把命令行参数直接作为 prompt 数据源）
+    const text = "用一句话介绍你自己（苏苏洛）";
     console.log("→", text);
     let out = "";
     const result = await runZcodeTask({
