@@ -454,6 +454,16 @@
         </select>
       </label>
       <label class="col">
+        <span data-i18n="set.updateRow">软件更新</span>
+        <div class="update-row">
+          <span id="update-version" class="hint"></span>
+          <button id="btn-check-update" type="button" data-i18n="set.checkUpdate">检查更新</button>
+        </div>
+        <div id="update-result" class="result"></div>
+        <div class="fixed-lines-progress"><span id="update-progress-bar"></span></div>
+        <div class="hint" data-i18n="set.updateAutoCheckHint">每 24 小时自动静默检查一次新版本</div>
+      </label>
+      <label class="col">
         <span data-i18n="set.petSize">桌宠大小</span>
         <select id="pet-scale">
           <option value="0.6">60%</option>

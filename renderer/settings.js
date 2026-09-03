@@ -740,6 +740,28 @@ $("ui-lang").addEventListener("change", () => {
   window.petAPI.setUiLang($("ui-lang").value);
 });
 
+/* ---------- 软件更新（检查最新版；下载进度来自 pet:update-progress 广播） ---------- */
+$("update-version").textContent = L("set.currentVersion") + " v" + (window.petAPI.appVersion || "?");
+$("btn-check-update").addEventListener("click", async () => {
+  $("btn-check-update").disabled = true;
+  setResult($("update-result"), L("set.checkingUpdate"));
+  try {
+    const r = await window.petAPI.checkForUpdate();
+    if (!r.ok) setResult($("update-result"), L("set.updateStartFail") + (r.message || ""), false);
+    else if (!r.updateAvailable) setResult($("update-result"), L("set.upToDate") + "（v" + r.current + "）", true);
+    else if (r.downloaded) setResult($("update-result"), L("set.updateReadyRestart"), true);
+    else if (r.accepted) setResult($("update-result"), L("set.updateStartFail") + (r.reason || ""), false);
+    else setResult($("update-result"), L("set.updateDeclined"), true);
+  } catch (e) { setResult($("update-result"), String(e.message || e), false); }
+  $("btn-check-update").disabled = false;
+});
+if (window.petAPI.onUpdateProgress) {
+  window.petAPI.onUpdateProgress((pct) => {
+    const bar = $("update-progress-bar");
+    if (bar) bar.style.width = pct + "%";
+  });
+}
+
 /* ---------- 坐姿下沉量（按当前尺寸档位读写，拖动即生效） ---------- */
 function seatTierLabel(t) {
   return L("set.seatTier." + t) === "set.seatTier." + t ? t : L("set.seatTier." + t);

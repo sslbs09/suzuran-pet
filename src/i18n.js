@@ -337,7 +337,17 @@ const DICT = {
     "set.fixedReloadOne": "重新生成该句（覆盖旧音频）",
     "set.fixedReloading": "正在重新生成该句…",
     "set.fixedReloadDone": "该句已重新生成 ✅",
-    "set.fixedReloadFail": "重新生成失败："
+    "set.fixedReloadFail": "重新生成失败：",
+    "set.updateRow": "软件更新",
+    "set.currentVersion": "当前版本",
+    "set.checkUpdate": "检查更新",
+    "set.checkingUpdate": "正在检查更新…",
+    "set.upToDate": "已是最新版本 ✅",
+    "set.updateStartFail": "检查/下载失败：",
+    "set.updateReadyRestart": "更新包就绪，应用即将重启完成更新 ✅",
+    "set.updateDeclined": "已跳过本次更新（可稍后在托盘或此处再查）",
+    "set.updateAutoCheckHint": "每 24 小时自动静默检查一次新版本",
+    "tray.updateRestarting": "更新包就绪，正在重启完成更新…"
   },
 
   en: {
@@ -670,7 +680,17 @@ const DICT = {
     "set.fixedReloadOne": "Regenerate this line (overwrites old audio)",
     "set.fixedReloading": "Regenerating this line…",
     "set.fixedReloadDone": "Line regenerated ✅",
-    "set.fixedReloadFail": "Regenerate failed: "
+    "set.fixedReloadFail": "Regenerate failed: ",
+    "set.updateRow": "Software update",
+    "set.currentVersion": "Current version",
+    "set.checkUpdate": "Check for updates",
+    "set.checkingUpdate": "Checking for updates…",
+    "set.upToDate": "You are on the latest version ✅",
+    "set.updateStartFail": "Check/download failed: ",
+    "set.updateReadyRestart": "Update ready — the app will restart to finish updating ✅",
+    "set.updateDeclined": "Update skipped (you can check again anytime)",
+    "set.updateAutoCheckHint": "Checks for new versions silently every 24 hours",
+    "tray.updateRestarting": "Update ready — restarting to finish updating…"
   },
 
   ja: {
@@ -1003,7 +1023,17 @@ const DICT = {
     "set.fixedReloadOne": "このセリフを再生成（旧音声を上書き）",
     "set.fixedReloading": "このセリフを再生成中…",
     "set.fixedReloadDone": "再生成しました ✅",
-    "set.fixedReloadFail": "再生成に失敗："
+    "set.fixedReloadFail": "再生成に失敗：",
+    "set.updateRow": "ソフトウェア更新",
+    "set.currentVersion": "現在のバージョン",
+    "set.checkUpdate": "更新を確認",
+    "set.checkingUpdate": "更新を確認中…",
+    "set.upToDate": "最新バージョンです ✅",
+    "set.updateStartFail": "確認/ダウンロードに失敗：",
+    "set.updateReadyRestart": "更新の準備ができました。再起動して適用します ✅",
+    "set.updateDeclined": "今回の更新をスキップしました（いつでも再確認できます）",
+    "set.updateAutoCheckHint": "24 時間ごとに自動で新バージョンを確認します",
+    "tray.updateRestarting": "更新の準備ができました。再起動して適用します…"
   }
 };
 

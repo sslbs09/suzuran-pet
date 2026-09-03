@@ -63,24 +63,69 @@ async function checkForUpdate(currentVersion) {
   } catch { return null; }
 }
 
+/** SHA-256 校验（TD-6）：优先 plan.sumsDigest（GitHub 资产 digest 字段），回退下载 SHA256SUMS.txt */
+async function expectedSha256(plan) {
+  let expect = String(plan.sumsDigest || "").replace(/^sha256:/i, "").toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(expect) && plan.sumsUrl) {
+    try {
+      const sr = await fetch(plan.sumsUrl);
+      if (sr.ok) expect = extractAsarSha256(await sr.text());
+    } catch { /* sums 拉取失败按无校验来源处理 */ }
+  }
+  return /^[a-f0-9]{64}$/.test(expect) ? expect : "";
+}
+
 /** 下载 asar 到 pending（不覆盖正在运行的 asar）。
- *  TD-6：下载后必须做 SHA-256 完整性校验（优先 GitHub 资产 digest 字段，回退 SHA256SUMS.txt）；
- *  无任何校验来源或摘要不匹配 → 拒绝写入 pending（fail closed）。返回 {ok, reason}。 */
+ *  TD-6：下载后必须做 SHA-256 完整性校验；无任何校验来源或摘要不匹配 → 拒绝写入
+ *  pending（fail closed）。返回 {ok, reason}。 */
 async function downloadPending(plan) {
   try {
     const r = await fetch(plan.asarUrl);
     if (!r.ok) return { ok: false, reason: "download HTTP " + r.status };
     const buf = Buffer.from(await r.arrayBuffer());
     if (!buf.length || (plan.size && buf.length !== plan.size)) return { ok: false, reason: "size mismatch" };
-    let expect = String(plan.sumsDigest || "").replace(/^sha256:/i, "").toLowerCase();
-    if (!/^[a-f0-9]{64}$/.test(expect) && plan.sumsUrl) {
-      const sr = await fetch(plan.sumsUrl);
-      if (sr.ok) expect = extractAsarSha256(await sr.text());
-    }
-    if (!/^[a-f0-9]{64}$/.test(expect)) return { ok: false, reason: "no checksum available" };
+    const expect = await expectedSha256(plan);
+    if (!expect) return { ok: false, reason: "no checksum available" };
     const got = crypto.createHash("sha256").update(buf).digest("hex");
     if (got !== expect) return { ok: false, reason: "sha256 mismatch" };
     fs.writeFileSync(pendingAsar(), buf);
+    return { ok: true, reason: "" };
+  } catch (e) {
+    return { ok: false, reason: String((e && e.message) || e) };
+  }
+}
+
+/** 同 downloadPending，但流式读取并回调进度（0-100；content-length 缺失时按 50KB 粒度上报近似值）。
+ *  2026-09-03 体验补全：更新包 ~188MB，给用户可见的下载进度。 */
+async function downloadPendingProgress(plan, onProgress = () => {}) {
+  try {
+    const r = await fetch(plan.asarUrl);
+    if (!r.ok) return { ok: false, reason: "download HTTP " + r.status };
+    const total = Number(r.headers.get("content-length")) || Number(plan.size) || 0;
+    let buf;
+    if (r.body && r.body.getReader) {
+      const reader = r.body.getReader();
+      const chunks = [];
+      let got = 0, lastPct = -1;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        got += value.length;
+        const pct = total ? Math.min(99, Math.floor((got * 100) / total)) : Math.min(99, Math.floor(got / 51200));
+        if (pct > lastPct) { lastPct = pct; onProgress(pct); }
+      }
+      buf = Buffer.concat(chunks);
+    } else {
+      buf = Buffer.from(await r.arrayBuffer());
+    }
+    if (!buf.length || (plan.size && buf.length !== plan.size)) return { ok: false, reason: "size mismatch" };
+    const expect = await expectedSha256(plan);
+    if (!expect) return { ok: false, reason: "no checksum available" };
+    const got = crypto.createHash("sha256").update(buf).digest("hex");
+    if (got !== expect) return { ok: false, reason: "sha256 mismatch" };
+    fs.writeFileSync(pendingAsar(), buf);
+    onProgress(100);
     return { ok: true, reason: "" };
   } catch (e) {
     return { ok: false, reason: String((e && e.message) || e) };
@@ -120,5 +165,5 @@ function applyOnExit(exePath) {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { compareSemver, buildUpdatePlan, extractAsarSha256, checkForUpdate, downloadPending, applyOnExit, pendingAsar, currentAsar, REPO };
+  module.exports = { compareSemver, buildUpdatePlan, extractAsarSha256, checkForUpdate, downloadPending, downloadPendingProgress, applyOnExit, pendingAsar, currentAsar, REPO };
 }

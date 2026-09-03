@@ -7,6 +7,8 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("petAPI", {
   appVersion: (() => { try { return require("electron").app.getVersion(); } catch { return ""; } })(), // 应用版本号（设置页显示，单一来源=package.json）
+  checkForUpdate: () => ipcRenderer.invoke("pet:check-update"), // 设置页「检查更新」
+  onUpdateProgress: (cb) => ipcRenderer.on("pet:update-progress", (_e, pct) => cb(pct)),
   ask: (text) => ipcRenderer.invoke("pet:ask", { id: crypto.randomUUID(), text }),
   stop: () => ipcRenderer.send("pet:stop"),
   onStopped: (cb) => ipcRenderer.on("pet:stopped", (_e, d) => cb(d)), // v2.6 主动停止通知（渲染层复位 busy）

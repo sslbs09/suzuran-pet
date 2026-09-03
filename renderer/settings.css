@@ -30,6 +30,7 @@
 .settings-page .actions { display: flex; grid-column: 1 / -1; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
 .settings-page .actions button { margin: 0; }
 .settings-page .result { color: var(--ui-muted); font-size: 12px; }
+.settings-page .update-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
 .settings-page .result.ok { color: var(--ui-success); font-weight: 600; }
 .settings-page .result.err { color: var(--ui-danger); font-weight: 600; }
 .settings-page .hint { color: var(--ui-muted); }

@@ -602,32 +602,75 @@ function openDocs() {
   attachCrashDiag(docsWin, "docs");
   docsWin.on("closed", () => { docsWin = null; });
 }
-// 自动更新（v2.5.26 ③）：检查→确认→下载 pending→退出时替换。手动触发、可回滚
+// 自动更新（v2.5.26 ③）：检查→确认→下载 pending→退出时替换。手动触发、可回滚。
+// 2026-09-03 体验补全：下载进度上报 + 启动静默检查（≥24h 一次）+ 设置页「检查更新」入口。
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+function updateCheckMarkerPath() { return path.join(config.STORAGE.userDir, "update-check.json"); }
+function noteUpdateChecked() {
+  try { fs.writeFileSync(updateCheckMarkerPath(), JSON.stringify({ at: Date.now() })); } catch { /* 忽略 */ }
+}
+function lastUpdateCheckAt() {
+  try { return Number(JSON.parse(fs.readFileSync(updateCheckMarkerPath(), "utf8")).at) || 0; } catch { return 0; }
+}
+function sendUpdateProgress(pct) {
+  sendToRenderer("pet:toast", "⬇ " + pct + "%");
+  if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send("pet:update-progress", pct);
+}
+/** 更新确认框 → 带进度下载（SHA-256 校验，fail closed）→ 退出后 ps1 备份替换重启（探活失败自动回滚） */
+async function runUpdateFlow(plan) {
+  const lang = config.getConfig().uiLang || "zh";
+  const { response } = await dialog.showMessageBox({
+    type: "question",
+    buttons: [i18n.t(lang, "tray.updateNow"), i18n.t(lang, "tray.updateLater")],
+    defaultId: 0, cancelId: 1,
+    message: `${i18n.t(lang, "tray.newVersion")} ${plan.version}`,
+  });
+  if (response !== 0) return { accepted: false, downloaded: false };
+  let lastSent = -100;
+  const dl = await updater.downloadPendingProgress(plan, (pct) => {
+    if (pct >= 100 || pct - lastSent >= 20) { lastSent = pct; sendUpdateProgress(pct); }
+  });
+  if (!dl.ok) { // TD-6：含 SHA-256 校验失败（fail closed），原因进日志
+    logTts("update", "更新包下载/校验失败: " + (dl.reason || ""));
+    dialog.showMessageBox({ type: "error", message: i18n.t(lang, "tray.updateFail") });
+    return { accepted: true, downloaded: false, reason: dl.reason };
+  }
+  logTts("update", "更新包校验通过，退出后自动替换重启（健康检查回滚已挂）");
+  sendToRenderer("pet:toast", i18n.t(lang, "tray.updateRestarting"));
+  updater.applyOnExit(app.getPath("exe"));
+  quitting = true;
+  setTimeout(() => app.quit(), 800); // 留一拍让 toast 发出去
+  return { accepted: true, downloaded: true };
+}
 async function trayCheckUpdate() {
   const lang = config.getConfig().uiLang || "zh";
   try {
     sendToRenderer("pet:toast", i18n.t(lang, "tray.checkingUpdate"));
     const plan = await updater.checkForUpdate(app.getVersion());
+    noteUpdateChecked();
     if (!plan) { dialog.showMessageBox({ type: "info", title: "苏苏洛桌宠", message: i18n.t(lang, "tray.alreadyLatest") }); return; }
-    const { response } = await dialog.showMessageBox({
-      type: "question",
-      buttons: [i18n.t(lang, "tray.updateNow"), i18n.t(lang, "tray.updateLater")],
-      defaultId: 0, cancelId: 1,
-      message: `${i18n.t(lang, "tray.newVersion")} ${plan.version}`,
-    });
-    if (response !== 0) return;
-    const dl = await updater.downloadPending(plan);
-    if (!dl.ok) { // TD-6：含 SHA-256 校验失败（fail closed），原因进日志
-      logTts("update", "更新包下载/校验失败: " + (dl.reason || ""));
-      dialog.showMessageBox({ type: "error", message: i18n.t(lang, "tray.updateFail") });
-      return;
-    }
-    const exe = app.getPath("exe");
-    updater.applyOnExit(exe);
-    quitting = true;
-    app.quit(); // 退出后由 apply-update.ps1 备份+替换+重启
+    await runUpdateFlow(plan);
   } catch (e) { logTts("update", "检查更新异常: " + (e && e.message || e)); }
 }
+/** 启动静默检查（≥24h 一次，静默记 marker）：发现新版才弹确认框帮用户走完更新 */
+async function startupUpdateCheck() {
+  try {
+    if (Date.now() - lastUpdateCheckAt() < UPDATE_CHECK_INTERVAL_MS) return;
+    const plan = await updater.checkForUpdate(app.getVersion());
+    noteUpdateChecked();
+    if (plan) { logTts("update", "启动检查发现新版本 " + plan.version + "，弹确认框"); await runUpdateFlow(plan); }
+    else logTts("update", "启动检查：已是最新 " + app.getVersion());
+  } catch (e) { logTts("update", "启动检查更新异常: " + (e && e.message || e)); }
+}
+ipcMain.handle("pet:check-update", async () => { // 设置页「检查更新」入口
+  try {
+    const plan = await updater.checkForUpdate(app.getVersion());
+    noteUpdateChecked();
+    if (!plan) return { ok: true, updateAvailable: false, current: app.getVersion() };
+    const r = await runUpdateFlow(plan);
+    return { ok: true, updateAvailable: true, current: app.getVersion(), latest: plan.version, ...r };
+  } catch (e) { return { ok: false, message: String(e && e.message || e) }; }
+});
 
 async function diagClick() { // 点击穿透诊断：在渲染层实时抓取交互相关状态写日志
   if (!win || win.isDestroyed()) return;
@@ -4271,6 +4314,7 @@ if (!gotLock) {
 
     createWindow();
     createTray();
+    setTimeout(() => startupUpdateCheck(), 90000); // 启动 90s 后静默检查更新（≥24h 一次；发现新版弹确认框，不打扰）
     schedules.initialize(sendScheduleDue);
     refreshPetName();
     screen.on("display-added", () => scheduleDisplayClamp("新增显示器"));
