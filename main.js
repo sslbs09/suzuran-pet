@@ -616,8 +616,12 @@ async function trayCheckUpdate() {
       message: `${i18n.t(lang, "tray.newVersion")} ${plan.version}`,
     });
     if (response !== 0) return;
-    const ok = await updater.downloadPending(plan);
-    if (!ok) { dialog.showMessageBox({ type: "error", message: i18n.t(lang, "tray.updateFail") }); return; }
+    const dl = await updater.downloadPending(plan);
+    if (!dl.ok) { // TD-6：含 SHA-256 校验失败（fail closed），原因进日志
+      logTts("update", "更新包下载/校验失败: " + (dl.reason || ""));
+      dialog.showMessageBox({ type: "error", message: i18n.t(lang, "tray.updateFail") });
+      return;
+    }
     const exe = app.getPath("exe");
     updater.applyOnExit(exe);
     quitting = true;

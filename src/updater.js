@@ -7,6 +7,7 @@
  */
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const REPO = "sslbs09/suzuran-pet";
 
@@ -28,7 +29,24 @@ function buildUpdatePlan({ current, latestTag, assets }) {
   const asar = (assets || []).find((a) => a.name === "app.asar");
   const ver = (assets || []).find((a) => a.name === "app.asar.version");
   if (!asar || !ver) return null; // 该 release 未带 asar 资产 → 不支持增量更新
-  return { version: latestTag, asarUrl: asar.browser_download_url, verUrl: ver.browser_download_url, size: asar.size || 0 };
+  const sums = (assets || []).find((a) => a.name === "SHA256SUMS.txt");
+  return {
+    version: latestTag,
+    asarUrl: asar.browser_download_url,
+    verUrl: ver.browser_download_url,
+    size: asar.size || 0,
+    sumsUrl: sums ? sums.browser_download_url : "",
+    sumsDigest: asar.digest || "" // GitHub 资产 digest 字段（"sha256:..."），有则免下载 sums 文件
+  };
+}
+
+/** 从 SHA256SUMS.txt 文本提取 app.asar 的 sha256 摘要（sha256sum 格式："<hex>  <name>"，兼容 *二进制标记） */
+function extractAsarSha256(sumsText) {
+  for (const line of String(sumsText || "").split(/\r?\n/)) {
+    const m = line.match(/^([a-f0-9]{64})\s+\*?(.+)$/i);
+    if (m && m[2].trim() === "app.asar") return m[1].toLowerCase();
+  }
+  return "";
 }
 
 function resourcesDir() { return process.resourcesPath || path.join(__dirname, ".."); }
@@ -45,19 +63,33 @@ async function checkForUpdate(currentVersion) {
   } catch { return null; }
 }
 
-/** 下载 asar 到 pending（不覆盖正在运行的 asar）。返回 true/false。 */
+/** 下载 asar 到 pending（不覆盖正在运行的 asar）。
+ *  TD-6：下载后必须做 SHA-256 完整性校验（优先 GitHub 资产 digest 字段，回退 SHA256SUMS.txt）；
+ *  无任何校验来源或摘要不匹配 → 拒绝写入 pending（fail closed）。返回 {ok, reason}。 */
 async function downloadPending(plan) {
   try {
     const r = await fetch(plan.asarUrl);
-    if (!r.ok) return false;
+    if (!r.ok) return { ok: false, reason: "download HTTP " + r.status };
     const buf = Buffer.from(await r.arrayBuffer());
-    if (!buf.length || (plan.size && buf.length !== plan.size)) return false;
+    if (!buf.length || (plan.size && buf.length !== plan.size)) return { ok: false, reason: "size mismatch" };
+    let expect = String(plan.sumsDigest || "").replace(/^sha256:/i, "").toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(expect) && plan.sumsUrl) {
+      const sr = await fetch(plan.sumsUrl);
+      if (sr.ok) expect = extractAsarSha256(await sr.text());
+    }
+    if (!/^[a-f0-9]{64}$/.test(expect)) return { ok: false, reason: "no checksum available" };
+    const got = crypto.createHash("sha256").update(buf).digest("hex");
+    if (got !== expect) return { ok: false, reason: "sha256 mismatch" };
     fs.writeFileSync(pendingAsar(), buf);
-    return true;
-  } catch { return false; }
+    return { ok: true, reason: "" };
+  } catch (e) {
+    return { ok: false, reason: String((e && e.message) || e) };
+  }
 }
 
-/** 退出时替换：写 apply-update.ps1（等退出→备份→pending 覆盖→重启），detached 启动后由调用方 quit。 */
+/** 退出时替换：写 apply-update.ps1（等退出→备份→pending 覆盖→重启→健康检查失败自动回滚），
+ *  detached 启动后由调用方 quit。
+ *  TD-6 回滚语义：重启 25s 后进程若已不在（新 asar 启动即崩），用 .bak 恢复上一版并再拉起。 */
 function applyOnExit(exePath) {
   const res = resourcesDir();
   const ps1 = path.join(res, "apply-update.ps1");
@@ -66,7 +98,17 @@ function applyOnExit(exePath) {
     "$asar=Join-Path $res 'app.asar'; $pending=Join-Path $res 'app.asar.pending'",
     "Start-Sleep 2",
     "if (Test-Path $asar) { Copy-Item $asar \"$asar.bak\" -Force }",
-    "if (Test-Path $pending) { Move-Item $pending $asar -Force; Start-Process $exe } else { Write-Host 'no pending' }",
+    "if (Test-Path $pending) {",
+    "  Move-Item $pending $asar -Force",
+    "  Start-Process $exe",
+    "  Start-Sleep 25",
+    "  $alive=@(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe }).Count -gt 0",
+    "  if (-not $alive -and (Test-Path \"$asar.bak\")) {",
+    "    Copy-Item \"$asar.bak\" $asar -Force   # 健康检查失败：新 asar 没能存活，回滚上一版",
+    "    Start-Process $exe",
+    "    Write-Host 'update rolled back: new asar failed health check'",
+    "  }",
+    "} else { Write-Host 'no pending' }",
   ].join("\n");
   try {
     fs.writeFileSync(ps1, script);
@@ -78,5 +120,5 @@ function applyOnExit(exePath) {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { compareSemver, buildUpdatePlan, checkForUpdate, downloadPending, applyOnExit, pendingAsar, currentAsar, REPO };
+  module.exports = { compareSemver, buildUpdatePlan, extractAsarSha256, checkForUpdate, downloadPending, applyOnExit, pendingAsar, currentAsar, REPO };
 }
