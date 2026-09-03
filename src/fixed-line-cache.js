@@ -6,7 +6,11 @@ const storage = require("./storage");
 const { buildManifest, findItem, cacheKey, summarize, voiceFingerprint } = require("./fixed-lines");
 
 const ROOT = path.resolve(storage.PATHS.audio, "fixed-lines");
-const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const CACHE_TTL_MS = 0; // 0=长期保存（不设时间上限，2026-09-03 起）；空间由 CACHE_MAX_BYTES 预算+LRU 管理
+function cacheFresh(updatedAt) {
+  // CACHE_TTL_MS>0 时按 TTL 过期；0=永不过期（updatedAt 仅作 LRU/展示用途）
+  return CACHE_TTL_MS <= 0 || Date.now() - (Number(updatedAt) || 0) <= CACHE_TTL_MS;
+}
 function safeId(value) {
   const id = String(value || "");
   if (!/^[a-zA-Z0-9._-]{1,100}$/.test(id)) throw new Error("非法缓存标识");
@@ -71,7 +75,7 @@ function load(profile, vars = {}) {
     let valid = false;
     let bytes = 0;
     try {
-      if (record.state === "ready" && Date.now() - (Number(record.updatedAt) || 0) <= CACHE_TTL_MS && record.audioFile === safeId(item.id) + ".audio") {
+      if (record.state === "ready" && cacheFresh(record.updatedAt) && record.audioFile === safeId(item.id) + ".audio") {
         const file = audioPath(paths.dir, item.id);
         valid = fs.existsSync(file) && fs.statSync(file).isFile();
         if (valid) bytes = fs.statSync(file).size;
@@ -133,7 +137,7 @@ function readAudioById(profile, id) {
   const disk = readJson(paths.manifest) || {};
   const record = disk.items && disk.items[`${paths.fingerprint}:${itemId}`];
   if (!record || record.state !== "ready" || record.audioFile !== itemId + ".audio") return null;
-  if (Date.now() - (Number(record.updatedAt) || 0) > CACHE_TTL_MS) return null;
+  if (!cacheFresh(record.updatedAt)) return null;
   try { return fs.readFileSync(audioPath(paths.dir, itemId)); } catch { return null; }
 }
 
