@@ -531,7 +531,7 @@ function stateLabel(state) {
   return k ? L(k) : (state || L("set.fixedState.pending"));
 }
 function engineLabel(engine) {
-  const BRAND = { genie: "Genie", cosy: "CosyVoice", edge: "Edge TTS" }; // 品牌名不翻译
+  const BRAND = { genie: "Genie", gsv: "GPT-SoVITS", cosy: "CosyVoice", edge: "Edge TTS" }; // 品牌名不翻译
   return BRAND[engine] || (engine === "system" ? L("set.engineSystem") : (engine || L("set.engineUnknown")));
 }
 function poolLabel(p) {

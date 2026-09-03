@@ -64,5 +64,15 @@ disk.items[key0].updatedAt = Date.now() - 90 * 24 * 60 * 60 * 1000; // 90 天前
 fs.writeFileSync(pathsKeep.manifest, JSON.stringify(disk));
 assert.strictEqual(cache.readAudio(profile, item).toString(), "RIFF-old-audio"); // 旧时间戳仍命中
 
+// profileFromConfig：GSV-only 日语模式（genie 未启用 + speakJa + GSV 启用）判成 "gsv" 而非 "system"，
+// 否则固定台词预加载被 SYSTEM_NOT_PRELOADABLE 拒绝；genie 启用时指纹字段不变（缓存不迁移）
+const gsvOnly = cache.profileFromConfig({ ttsGenie: { enabled: false, speakJa: true }, ttsGsv: { enabled: true, refAudio: "E:/x/ref_ja.wav", refText: "ドクター" } });
+assert.strictEqual(gsvOnly.engine, "gsv");
+assert.strictEqual(gsvOnly.language, "ja");
+assert.strictEqual(gsvOnly.referenceAudio, "ref_ja.wav");
+const genieOn = cache.profileFromConfig({ ttsGenie: { enabled: true, speakJa: true, refAudio: "E:/x/ref.wav", refText: "ref" }, ttsGsv: { enabled: true } });
+assert.strictEqual(genieOn.engine, "genie"); // 已启用用户指纹不变
+assert.strictEqual(cache.profileFromConfig({}).engine, "system");
+
 fs.rmSync(dir, { recursive: true, force: true });
 console.log("fixed-line-cache 全部通过 ✅");

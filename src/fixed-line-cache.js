@@ -30,19 +30,24 @@ function insideRoot(root, file) {
 function profileFromConfig(cfg = {}) {
   const tts = cfg.tts || {};
   const genie = cfg.ttsGenie || {};
+  const gsv = cfg.ttsGsv || {};
   const cloud = cfg.ttsCloud || {};
   const cosy = cfg.ttsCosy || {};
   const useGenie = !!genie.enabled;
-  const useCosy = !useGenie && !!cosy.enabled;
-  const useEdge = !useGenie && !useCosy && !!cloud.enabled;
+  // 日语模式可脱离 Genie 独立运行（main 启动预热只看 speakJa，不要求 genie.enabled）：
+  // 此时合成走 GSV，若判成 "system" 固定台词预加载会被 SYSTEM_NOT_PRELOADABLE 拒绝。
+  // 仅在 genie 未启用时才改判 "gsv"——已启用用户指纹不变、已预加载缓存不迁移。
+  const useGsv = !useGenie && !!genie.speakJa && !!gsv.enabled;
+  const useCosy = !useGenie && !useGsv && !!cosy.enabled;
+  const useEdge = !useGenie && !useGsv && !useCosy && !!cloud.enabled;
   return {
-    engine: useGenie ? "genie" : useCosy ? "cosy" : useEdge ? "edge" : "system",
+    engine: useGenie ? "genie" : useGsv ? "gsv" : useCosy ? "cosy" : useEdge ? "edge" : "system",
     language: genie.speakJa ? "ja" : "zh",
-    voice: useGenie ? "" : useCosy ? cosy.voice : useEdge ? cloud.voice : tts.voice,
-    referenceAudio: useGenie ? path.basename(String(genie.refAudio || "")) : "",
-    referenceText: useGenie ? genie.refText : "",
-    rate: useGenie ? "" : useCosy ? cosy.rate : useEdge ? cloud.rate : tts.rate,
-    pitch: useGenie ? "" : useCosy ? cosy.pitch : useEdge ? cloud.pitch : tts.pitch
+    voice: (useGenie || useGsv) ? "" : useCosy ? cosy.voice : useEdge ? cloud.voice : tts.voice,
+    referenceAudio: useGenie ? path.basename(String(genie.refAudio || "")) : useGsv ? path.basename(String(gsv.refAudio || "")) : "",
+    referenceText: useGenie ? genie.refText : useGsv ? gsv.refText : "",
+    rate: (useGenie || useGsv) ? "" : useCosy ? cosy.rate : useEdge ? cloud.rate : tts.rate,
+    pitch: (useGenie || useGsv) ? "" : useCosy ? cosy.pitch : useEdge ? cloud.pitch : tts.pitch
   };
 }
 
