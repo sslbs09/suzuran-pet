@@ -15,7 +15,7 @@ function cancel() {
   return true;
 }
 
-async function start({ config, vars = {}, retryFailed = false, pools = null, onProgress = () => {} }) {
+async function start({ config, vars = {}, retryFailed = false, pools = null, onProgress = () => {}, synthesize = ttsCloneImpl }) {
   if (active) return { ok: false, code: "ALREADY_RUNNING" };
   if ((config.tts || {}).fixedOnly) return { ok: false, code: "FIXED_ONLY_ON", message: "固定台词离线模式开启中（引擎已停），请先关闭离线模式再预加载" };
   const profile = fixedCache.profileFromConfig(config || {});
@@ -23,7 +23,7 @@ async function start({ config, vars = {}, retryFailed = false, pools = null, onP
   const initial = fixedCache.load(profile, vars);
   const poolSet = Array.isArray(pools) && pools.length ? new Set(pools.map(String)) : null;
   const queue = initial.items.filter((item) =>
-    (item.state === "pending" || (retryFailed && item.state === "failed")) &&
+    (retryFailed ? item.state === "failed" : item.state === "pending") &&
     (!poolSet || poolSet.has(item.pool)));
   active = { cancelled: false, profile };
   let completed = initial.summary.ready;
@@ -34,7 +34,7 @@ async function start({ config, vars = {}, retryFailed = false, pools = null, onP
       if (active.cancelled) break;
       onProgress({ state: "loading", completed, failed, total: initial.items.length, current: item, summary: fixedCache.load(profile, vars).summary });
       try {
-        const b64 = await ttsCloneImpl(item.text, { emo: item.emotion, fixedLinePreload: true }, undefined);
+        const b64 = await synthesize(item.text, { emo: item.emotion, fixedLinePreload: true }, undefined);
         if (!b64) throw new Error("TTS_EMPTY");
         fixedCache.saveItem(profile, item, Buffer.from(b64, "base64"));
         completed++;

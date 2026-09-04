@@ -13,6 +13,7 @@ process.env.SUZURAN_TEST_USERDIR = dir;
 const TC = require("../src/translate-cache");
 const { lookupCachedJa } = require("../src/ja-translate");
 const { stripSpeechTail } = require("../src/tts-manager");
+const { FIXED_ONLY_MISS } = require("../src/tts-manager");
 
 let failed = 0;
 function ok(n, c) { if (!c) { failed++; console.log("FAIL", n); } else console.log("PASS", n); }
@@ -22,7 +23,7 @@ ok("剥 呀！", stripSpeechTail("补充维生素时间到呀！") === "补充�
 ok("剥 哼！", stripSpeechTail("真是的……可别砸到显示器呀！哼！") === "真是的……可别砸到显示器呀！");
 ok("剥 嘛～", stripSpeechTail("再来一下嘛，doctor嘛～") === "再来一下嘛，doctor");
 ok("剥 呜…/嗯…/哇！", stripSpeechTail("哇！") === "" && stripSpeechTail("呜…") === "" && stripSpeechTail("嗯…") === "");
-ok("无尾缀原样返回", stripSpeechTail("晚上好呀，doctor") === "晚上好呀，doctor");
+ok("剥 无标点语气词", stripSpeechTail("再摸摸嘛呀") === "再摸摸嘛");
 ok("正文同形字不动", stripSpeechTail("嗯…这件事呀，我得想想") === "嗯…这件事呀，我得想想");
 
 // ② lookupCachedJa：磁盘缓存直查（模拟预热落盘），不触发任何 API
@@ -42,6 +43,8 @@ const entry = raw[require("../src/translate-cache").hashKey("补充维生素时�
 ok("续期时间戳为当前", Number.isFinite(entry.t) && Date.now() - entry.t < 60000);
 // 续期后 TTL 内必然再命中（第二次直查）
 ok("续期后再查仍命中", lookupCachedJa("补充维生素时间到") === "ビタミン補給の時間だよ～");
+
+ok("离线未命中哨兵稳定", FIXED_ONLY_MISS === "__SUZURAN_FIXED_ONLY_MISS__");
 
 console.log(failed ? "\n" + failed + " 项失败" : "\nvoice-ja-key 全部通过 ✅");
 process.exit(failed ? 1 : 0);

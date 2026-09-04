@@ -7,6 +7,7 @@ const config = require("./config");
 const { logTts } = require("./logger");
 const { safeFetch } = require("./safe-url");
 const fixedLineCache = require("./fixed-line-cache");
+const FIXED_ONLY_MISS = "__SUZURAN_FIXED_ONLY_MISS__";
 const { translateToJa, lookupCachedJa } = require("./ja-translate");
 const { runPowerShell, stripStage } = require("./utils");
 
@@ -107,22 +108,47 @@ async function ttsCloneImpl(text, opts, jobId) {
     logTts("route", "音频缓存命中: " + String(text || "").slice(0, 24));
     return ahit.b64;
   }
+  let effectiveFixedLine = !!(opts && opts.fixedLine);
   if (!(opts && opts.fixedLinePreload)) {
     const profile = fixedLineCache.profileFromConfig(config.getConfig());
-    // lineId 直查优先（sendProactive 透传，零文本匹配）；无 ID 时回退文本+情绪匹配
-    const diskHit = (opts && opts.lineId)
+    const vars = {
+      name: (config.getConfig().pet || {}).name,
+      user: (config.getConfig().chat || {}).userName
+    };
+    const fixedText = String(opts && opts.fixedText || "");
+    const normalizedText = stripSpeechTail(stripStage(fixedText || text));
+    let fixedItem = null;
+    try {
+      fixedItem = fixedLineCache.findItemText(vars, fixedText) ||
+        fixedLineCache.findItemNormalized(vars, fixedText || normalizedText) ||
+        fixedLineCache.findItemNormalized(vars, normalizedText) ||
+        fixedLineCache.findItemNormalized(vars, stripStage(stripSpeechTail(text)));
+    } catch { /* 固定池反查失败仍允许动态语音继续 */ }
+    let diskHit = (opts && opts.lineId)
       ? fixedLineCache.readAudioById(profile, opts.lineId)
-      : fixedLineCache.findCachedAudio(profile, text, opts && (opts.emotion || opts.emo), {
-          name: (config.getConfig().pet || {}).name,
-          user: (config.getConfig().chat || {}).userName
-        });
+      : null;
+    if ((!diskHit || !diskHit.length) && fixedItem) {
+      diskHit = fixedLineCache.readAudioById(profile, fixedItem.id);
+    }
+    // lineId 是首选，但旧缓存/重建期间可能暂时不一致；再用展开文本+情绪兜底，避免离线模式误判为未缓存。
+    if (!diskHit || !diskHit.length) {
+      diskHit = fixedLineCache.findCachedAudio(profile, fixedText || text, opts && (opts.emotion || opts.emo), vars);
+    }
+    effectiveFixedLine = effectiveFixedLine || !!fixedItem;
+    logTts("route", "固定台词缓存检查 fp=" + fixedLineCache.pathsFor(profile).fingerprint +
+      " lineId=" + String(opts && opts.lineId || (fixedItem && fixedItem.id) || "-") + " fixed=" + effectiveFixedLine +
+      " hit=" + !!(diskHit && diskHit.length) + " text=" + String(fixedText || text || "").slice(0, 24));
     if (diskHit && diskHit.length) {
       logTts("route", "固定台词磁盘缓存命中" + (opts && opts.lineId ? "（lineId）" : ""));
       return diskHit.toString("base64");
     }
   }
   if ((config.getConfig().tts || {}).fixedOnly && !(opts && opts.fixedLinePreload)) {
-    logTts("route", "固定台词离线模式：无缓存，跳过引擎合成（省显存；渲染层回退系统语音）");
+    if (effectiveFixedLine) {
+      logTts("route", "固定台词离线模式：无缓存，跳过引擎合成（省显存；不回退系统语音）");
+      return FIXED_ONLY_MISS;
+    }
+    logTts("route", "离线模式：动态文本无固定缓存，回退系统语音");
     return "";
   }
   const b64 = await ttsCloneImplInner(text, opts, jobId);
@@ -343,6 +369,10 @@ function applyBundledVoice() {
 }
 
 async function ensureGenieServer(q) {
+  if ((config.getConfig().tts || {}).fixedOnly) {
+    logTts("genie", "固定台词离线模式：阻止 Genie 启动");
+    return false;
+  }
   applyBundledVoice();
   if (genieServerChecked) return genieServerUp;
   if (genieEnsurePromise) return genieEnsurePromise;
@@ -447,6 +477,10 @@ async function genieTts(q, clean) {
 }
 
 function ensureGsvServer(g) {
+  if ((config.getConfig().tts || {}).fixedOnly) {
+    logTts("gsv", "固定台词离线模式：阻止 GSV 启动");
+    return Promise.resolve(false);
+  }
   if (gsvEnsurePromise) return gsvEnsurePromise;
   applyBundledVoice();
   gsvEnsurePromise = ensureGsvServerImpl(config.getConfig().ttsGsv || {}).finally(() => { gsvEnsurePromise = null; });
@@ -779,7 +813,7 @@ function sanitizeJaText(t) {
 
 /** 剥渲染层 emotionizeText 注入的句尾情绪语气词（renderer EMOTION_SPEECH 值集合）——
  *  剥后才能与日语预热键对齐命中磁盘翻译缓存。只剥句尾一处，正文里的同形字不动。 */
-const SPEECH_TAIL_RE = /(呀！|哇！|哼！|呜…|嗯…|嘛～)\s*$/;
+const SPEECH_TAIL_RE = /[呀哇哼呜嗯嘛](?:[！!。．…~～\s]*)$/;
 function stripSpeechTail(t) {
   return String(t || "").replace(SPEECH_TAIL_RE, "").trim();
 }
@@ -1076,5 +1110,5 @@ module.exports = {
   setPartSender, setJaFallbackCb,
   ttsCloneImpl, queueTts, ensureGenieServer, ensureGsvServer, restartGsvEngine,
   shutdownGenieServer, genieTts, gsvTtsJa, warmupGsv, resetGenieServer, killGsvProcesses, portAlive, killPortListener,
-  emotionAudition, missingEnginePath, stripSpeechTail
+  emotionAudition, missingEnginePath, stripSpeechTail, FIXED_ONLY_MISS
 };

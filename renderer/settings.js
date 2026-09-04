@@ -667,7 +667,12 @@ $("btn-fixed-lines-start").addEventListener("click", async () => {
 $("btn-fixed-lines-retry").addEventListener("click", async () => {
   setFixedLineButtons(true);
   setResult($("fixed-lines-result"), L("set.fixedRetrying"));
-  try { await window.petAPI.startFixedLineAudioPreload({ retryFailed: true }); }
+  try {
+    const r = await window.petAPI.startFixedLineAudioPreload({ retryFailed: true });
+    setResult($("fixed-lines-result"), r && r.ok
+      ? (r.state === "completed" ? L("set.fixedRetryDone") : r.state === "completed_with_errors" ? L("set.fixedRetryErrors") : L("set.fixedPausedCont"))
+      : (r && r.message) || L("set.fixedNotStartedRun"), !!(r && r.ok && r.state === "completed"));
+  }
   catch (e) { setResult($("fixed-lines-result"), String(e.message || e), false); }
   await refreshFixedLinePool();
   setFixedLineButtons(false);

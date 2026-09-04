@@ -3,7 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const storage = require("./storage");
-const { buildManifest, findItem, cacheKey, summarize, voiceFingerprint } = require("./fixed-lines");
+const { buildManifest, findItem, findItemText, findItemNormalized, cacheKey, summarize, voiceFingerprint } = require("./fixed-lines");
 
 const ROOT = path.resolve(storage.PATHS.audio, "fixed-lines");
 const CACHE_TTL_MS = 0; // 0=长期保存（不设时间上限，2026-09-03 起）；空间由 CACHE_MAX_BYTES 预算+LRU 管理
@@ -152,7 +152,7 @@ function readAudio(profile, item) {
 }
 
 function findCachedAudio(profile, text, emotion, vars = {}) {
-  const item = findItem(vars, text, emotion);
+  const item = findItem(vars, text, emotion) || findItemText(vars, text) || findItemNormalized(vars, text);
   return item ? readAudioById(profile, item.id) : null;
 }
 
@@ -227,4 +227,4 @@ function enforceCacheBudgetThrottled(keepFingerprint) {
   try { return enforceCacheBudget(keepFingerprint); } catch { return null; }
 }
 
-module.exports = { CACHE_TTL_MS, CACHE_MAX_BYTES, ROOT, profileFromConfig, pathsFor, load, saveItem, markFailed, clear, readAudio, readAudioById, findCachedAudio, listFingerprints, clearOldFingerprints, dirSizeBytes, enforceCacheBudget, enforceCacheBudgetThrottled };
+module.exports = { CACHE_TTL_MS, CACHE_MAX_BYTES, ROOT, profileFromConfig, pathsFor, load, saveItem, markFailed, clear, readAudio, readAudioById, findCachedAudio, findItemText, listFingerprints, clearOldFingerprints, dirSizeBytes, enforceCacheBudget, enforceCacheBudgetThrottled, findItemNormalized };

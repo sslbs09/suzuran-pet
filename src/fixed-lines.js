@@ -75,6 +75,13 @@ function findItemText(vars, text) {
   return buildManifest(vars).find((item) => item.text === t) || null;
 }
 
+/** 按规范化文本反查固定台词：兼容 renderer 去掉动作/语气词后的朗读文本。 */
+function findItemNormalized(vars, text) {
+  const key = normalize(text);
+  if (!key) return null;
+  return buildManifest(vars).find((item) => normalize(item.text) === key) || null;
+}
+
 function voiceFingerprint(profile = {}) {
   const stable = {
     engine: profile.engine || "system",
@@ -103,4 +110,4 @@ function summarize(items = []) {
   return summary;
 }
 
-module.exports = { POOLS, expand, normalize, buildManifest, findItem, findItemText, voiceFingerprint, cacheKey, summarize };
+module.exports = { POOLS, expand, normalize, buildManifest, findItem, findItemText, findItemNormalized, voiceFingerprint, cacheKey, summarize };
