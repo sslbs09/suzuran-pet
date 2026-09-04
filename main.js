@@ -251,7 +251,11 @@ function clampPetToWorkArea(reason = "显示器变化") {
       win.setPosition(Math.round(x), Math.round(y));
       logTts("display", reason + "，已钳制到工作区");
     }
-    applyLayer();
+    if (walkState.seatReanchorOnResizeDecision({ seated: walk.seated, perched: walk.perched, dragPaused: walk.dragPaused, flight: walk.flight, jump: walk.jump })) {
+      applySeatPosition();
+    } else {
+      applyLayer();
+    }
   } catch (e) {
     logTts("display", reason + "，坐标钳制失败: " + (e && e.message || e));
   }
@@ -1650,11 +1654,17 @@ function sendProactive(text, emotion, { force = false } = {}) {
   // 映射/天气"温柔"等）与池默认情绪不一致时严格匹配必失败（实测 60/358 句）→ 已预加载音频
   // 命中不了，退回现场合成。同文本多池重复已被 manifest 去重，文本兜底不会串条目。
   let lineId = null;
+  let fixedLine = false;
   try {
-    const it = fixedLineCache.findItem(chatVars(), t, emo) || fixedLineCache.findItemText(chatVars(), t);
+    const it = fixedLineCache.findItem(chatVars(), t, emo) || fixedLineCache.findItemText(chatVars(), t) || fixedLines.findItemNormalized(chatVars(), t);
     lineId = it ? it.id : null;
+    fixedLine = !!it;
+    if (fixedLine) {
+      const profile = fixedLineCache.profileFromConfig(config.getConfig());
+      logTts("route", "固定台词入队 fp=" + fixedLineCache.pathsFor(profile).fingerprint + " lineId=" + lineId + " text=" + t.slice(0, 24));
+    }
   } catch { /* 反查失败走文本匹配兜底 */ }
-  sendToRenderer("pet:proactive", { text: t, emotion: emo, force, lineId });
+  sendToRenderer("pet:proactive", { text: t, emotion: emo, force, lineId, fixedLine });
   return true;
 }
 
@@ -2128,7 +2138,7 @@ ipcMain.handle("pet:get-state", () => {
     softRender: !!cfg.softRender, // 软件渲染（重启生效）
     fileGuard: !!cfg.fileGuard, // 蜜标监控（默认关）
     walking: !!cfg.walking,
-    walkState: { active: walk.active, resting: walk.resting, perched: walk.perched, seated: walk.seated, face: walk.face, paused: walk.paused },
+    walkState: { active: walk.active, resting: walk.resting, perched: walk.perched, seated: walk.seated, face: walk.face, paused: walk.paused, sleeping: walk.sleeping },
     dimMode: !!cfg.dimMode,
     hiddenAtStart: !isWindowVisible()
   };
@@ -2937,7 +2947,7 @@ function walkSetPosition(x, y, where) {
 function walkBroadcast() {
   sendToRenderer("pet:walking", {
     active: walk.active, resting: walk.resting, perched: walk.perched, seated: walk.seated, face: walk.face,
-    paused: walk.paused // 暂停也广播：渲染层据此切站立待机，不挂走路动画
+    paused: walk.paused, sleeping: walk.sleeping // 暂停/睡眠都广播：渲染层切待机/睡眠动画
   });
 }
 
@@ -3562,13 +3572,24 @@ function walkAttemptPerch() {
       const t = cands[Math.floor(Math.random() * cands.length)];
       walk.perchBarrier = { hwnd: t.hwnd, left: t.x, right: t.x + t.w, top: t.y, title: t.title };
       walk.perchTopY = t.y - b.height + walk.groundGap;
-      walk.targetX = Math.min(Math.max(t.x + t.w / 2 - b.width / 2, wa.x), wa.x + wa.width - b.width);
+      // 近窗沿落点（2026-09-04 修 gotoPerch 必超时）：原取窗口中心，真实距离 500–800px 按实测
+      // 速度（≈18px/s，标称 30px/s 的 60%）需 17–40s，必超 10s 瞬态守卫（9-3 晚 4 次尝试
+      // 4 次超时 0 成功）。改取离宠物较近的窗沿侧，平均缩短约 60% 距离；沿口内缩 EDGE
+      // 保证角色条带主体仍在窗上。charCx 与图标坐（walkAttemptIconPerch）同款公式。
+      const charCx = (walk.charInset + b.width - 2) / 2; // 角色条带中心在宠物窗口内偏移
+      const EDGE = Math.min(120, Math.max(48, Math.round(t.w * 0.15))); // 距窗沿内缩
+      const lx = t.x + EDGE - charCx;                   // 左沿落点（宠物窗口 x）
+      const rx = t.x + t.w - EDGE - charCx;             // 右沿落点
+      const near = Math.abs(lx - b.x) <= Math.abs(rx - b.x) ? lx : rx;
+      walk.targetX = Math.min(Math.max(Math.round(near), walkMinX(wa)), wa.x + wa.width - b.width);
       walk.gotoPerch = true;
       walk.resting = false;
       walk.seated = false;
       walk.sunk = false;
       walkBroadcast();
-      logTts("walk", "跳上窗口: " + JSON.stringify({ x: t.x, y: t.y, w: t.w, h: t.h, title: t.title }));
+      const _d = Math.abs(walk.targetX - b.x);
+      logTts("walk", "跳上窗口: " + JSON.stringify({ x: t.x, y: t.y, w: t.w, h: t.h, title: t.title }) +
+        " targetX=" + walk.targetX + " 距离=" + Math.round(_d) + "px 预计≈" + (_d / 18).toFixed(1) + "s(按18px/s)");
     } catch (e) {
       logTts("walk", "坐窗口失败: " + (e && e.message || e));
       walk.resting = true;
@@ -3668,11 +3689,28 @@ function walkTick() {
     logTts("walk", "拖拽暂停超时，自动恢复");
   }
   // 瞬态守卫（ottopet restore_timer 借鉴）：gotoPerch/returning 长时间未完成（屏障/状态错乱）→ 强制回地面
+  // 2026-09-04：固定 10s 对远距离正常接近是误杀（原中心落点 500–800px 需 17–40s）。
+  // 改双通道：①停滞 >10s（x 连续不变 = 真卡死/屏障错乱）立即回收；②仍在推进时按剩余距离
+  // 给预算 = 10s 基础 + dist/(标称速度×50%折减) + 350ms 跳 + 3s 余量（实测速度≈标称 60%，再留余量）。
   if ((walk.gotoPerch || walk.returning) && !walk.paused && !walk.sleeping) {
-    if (!walk._transientAt) walk._transientAt = Date.now();
-    if (Date.now() - walk._transientAt > 10000) {
+    if (!walk._transientAt) {
+      walk._transientAt = Date.now();
+      walk._transientLastX = null;
+      walk._transientMoveAt = Date.now();
+    }
+    const bx = win && !win.isDestroyed() ? win.getBounds().x : null;
+    if (bx != null && bx !== walk._transientLastX) { // x 有推进 → 刷新停滞计时
+      walk._transientLastX = bx;
+      walk._transientMoveAt = Date.now();
+    }
+    const stuckMs = Date.now() - walk._transientMoveAt;
+    const dist = walk.targetX != null && bx != null ? Math.abs(walk.targetX - bx) : 0;
+    const vPxMs = Math.max((walkSpeed() / WALK_TICK_MS) * 0.5, 0.004); // px/ms，保守取标称 50%
+    const budgetMs = 10000 + dist / vPxMs + 350 + 3000;
+    if (stuckMs > 10000 || Date.now() - walk._transientAt > budgetMs) {
       const what = walk.gotoPerch ? "gotoPerch" : "returning";
-      logTts("walk", "瞬态守卫: " + what + " 超时10s，强制回地面");
+      logTts("walk", "瞬态守卫: " + what + " 超时（停滞" + Math.round(stuckMs / 1000) +
+        "s 总" + Math.round((Date.now() - walk._transientAt) / 1000) + "s 剩余距离" + Math.round(dist) + "px），强制回地面");
       walk.gotoPerch = false;
       walk.returning = false;
       walk.iconTarget = false;
@@ -3681,7 +3719,7 @@ function walkTick() {
       walkBroadcast();
       walkSchedulePhase(sitPhaseMs());
     }
-  } else walk._transientAt = 0;
+  } else { walk._transientAt = 0; walk._transientLastX = null; walk._transientMoveAt = 0; }
   // 抛掷守卫：飞行超过 15s（物理异常）→ 强制落地
   if (walk.flight && !walk._flightAt) walk._flightAt = Date.now();
   if (walk.flight && Date.now() - (walk._flightAt || 0) > 15000) {
@@ -3981,6 +4019,7 @@ ipcMain.on("pet:set-sleeping", (_e, v) => {
     const sleepY = standY - Math.round(b.height * liftRatio);
     const targetY = v ? sleepY : standY;
     if (Math.abs(b.y - targetY) > 1) win.setPosition(b.x, Math.round(targetY));
+    walkBroadcast();
   }
   // 人格化：入睡/睡醒时偶尔嘀咕——v2.5.27 只在真实状态边沿触发（防止重复 setSleeping 连发 wake 台词）
   const edge = transitionSleep(wasSleeping, walk.sleeping);
@@ -4005,6 +4044,7 @@ ipcMain.handle("pet:set-fixed-only", async (_e, on) => {
       try { await tts.killGsvProcesses(config.getConfig().ttsGsv || {}); } catch { /* 忽略 */ }
       try { await tts.killPortListener(9881); } catch { /* 忽略 */ }
       try { await tts.killPortListener(9880); } catch { /* 忽略 */ }
+      features.stopJaPrewarm();
       logTts("voice", "固定台词离线模式开启：本地语音引擎已停止释放显存，仅播已缓存音频");
     } else if (!on && prev) {
       // 退出离线模式：按配置重新拉起/预热引擎（与启动预热同分支）
@@ -4012,8 +4052,8 @@ ipcMain.handle("pet:set-fixed-only", async (_e, on) => {
       const q = cfg.ttsGenie || {};
       const g = cfg.ttsGsv || {};
       const ttsOn = !!(cfg.tts || {}).enabled;
-      if (ttsOn && q.enabled && !q.speakJa) tts.ensureGenieServer(q).then((ok) => logTts("genie", "离线模式退出预热: " + (ok ? "已就绪" : "不可用")));
-      if (ttsOn && g.enabled && q.speakJa) tts.ensureGsvServer(g).then((up) => { if (up) tts.warmupGsv(g); });
+      if (ttsOn && q.enabled && !q.speakJa && !cfg.tts.fixedOnly) tts.ensureGenieServer(q).then((ok) => logTts("genie", "离线模式退出预热: " + (ok ? "已就绪" : "不可用")));
+      if (ttsOn && g.enabled && q.speakJa && !cfg.tts.fixedOnly) tts.ensureGsvServer(g).then((up) => { if (up) tts.warmupGsv(g); });
       logTts("voice", "固定台词离线模式关闭：引擎按配置重新拉起");
     }
     return { ok: true };
@@ -4419,9 +4459,10 @@ if (!gotLock) {
     // v2.5.17：日语模式（speakJa）只留 GSV 日语引擎，不预热/不拉起 Genie 中文引擎（省 4.7G 内存）
     const _q = config.getConfig().ttsGenie || {};
     const _ttsOn = !!(config.getConfig().tts || {}).enabled;
-    if (_q.enabled && _ttsOn && !_q.speakJa) {
+    const _fixedOnly = !!(config.getConfig().tts || {}).fixedOnly;
+    if (_q.enabled && _ttsOn && !_q.speakJa && !_fixedOnly) {
       tts.ensureGenieServer(_q).then((ok) => logTts("genie", "启动预热: " + (ok ? "已就绪" : "不可用")));
-    } else if (_ttsOn && _q.speakJa) {
+    } else if (_ttsOn && _q.speakJa && !_fixedOnly) {
       logTts("genie", "日语模式：跳过 Genie 中文引擎预热（只留 GSV）");
       tts.shutdownGenieServer(); // 保险：若残留 Genie 进程（如音色克隆窗口拉起的），立即释放
     } else {
@@ -4430,7 +4471,7 @@ if (!gotLock) {
 
     // GSV 日语引擎预启动：应用开启即后台拉起+预热，避免第一句话等几十秒冷启动
     const _gsv = config.getConfig().ttsGsv || {};
-    if (_gsv.enabled && _ttsOn && _q.speakJa) {
+    if (_gsv.enabled && _ttsOn && _q.speakJa && !_fixedOnly) {
       tts.ensureGsvServer(_gsv).then((up) => {
         if (up) return tts.warmupGsv(_gsv); // 内部自带"预热完成"日志
         logTts("gsv", "启动预热失败，首句将再尝试拉起");

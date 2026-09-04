@@ -282,6 +282,14 @@ body.enlarged #input { font-size: calc(var(--chat-fz, 11px) + 1px); }
   cursor: grab;
   z-index: 3;
 }
+.spine-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
 .pet.dragging { cursor: grabbing; }
 /* 被抛出去落地：眩晕摇头（借鉴 dsh-dafeiyu 拖拽反馈） */
 .pet.pet-dizzy { animation: pet-dizzy-shake 0.5s ease-in-out; }
