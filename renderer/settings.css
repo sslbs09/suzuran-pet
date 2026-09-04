@@ -156,3 +156,17 @@ body.theme-dark .settings-page .set-dirty { border-color: #4a4030; background: #
 @media (prefers-reduced-motion: reduce) {
   .settings-page .fixed-lines-progress span { transition: none; }
 }
+
+/* ---------- 日志诊断分区（v2.5.28） ---------- */
+.settings-page .logdiag-bar { align-items: flex-end; flex-wrap: wrap; gap: 10px; }
+.settings-page .logdiag-bar .col.inline { flex-direction: row; align-items: center; gap: 6px; }
+.settings-page .logdiag-pre {
+  margin-top: 10px; max-height: 340px; overflow: auto; padding: 10px;
+  border: 1px solid var(--ui-line); border-radius: 8px;
+  background: color-mix(in srgb, var(--ui-ink) 4%, transparent);
+  font-family: var(--ui-mono, Consolas, monospace); font-size: 11px; line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ui-ink);
+}
+.settings-page .logdiag-pre .log-error { color: var(--ui-danger); font-weight: 600; }
+.settings-page .logdiag-pre .log-warn { color: var(--ui-warn, #b26a00); }
+.settings-page .logdiag-pre .log-info { color: var(--ui-muted); }

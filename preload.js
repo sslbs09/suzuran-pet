@@ -54,6 +54,8 @@ contextBridge.exposeInMainWorld("petAPI", {
   onDropped: (cb) => ipcRenderer.on("pet:dropped", () => cb()), // 抛掷落地通知
   getWalkTiming: () => ipcRenderer.invoke("pet:get-walk-timing"),
   setWalkTiming: (patch) => ipcRenderer.invoke("pet:set-walk-timing", patch),
+  logRead: (maxLines) => ipcRenderer.invoke("pet:log-read", maxLines), // 日志诊断：脱敏尾部读取
+  logExport: (maxLines) => ipcRenderer.invoke("pet:log-export", maxLines), // 日志诊断：一键脱敏导出（保存对话框）
   getAppearance: () => ipcRenderer.invoke("pet:get-appearance"),
   setAppearance: (patch) => ipcRenderer.invoke("pet:set-appearance", patch),
   importFont: () => ipcRenderer.invoke("pet:import-font"),

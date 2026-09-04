@@ -4078,6 +4078,39 @@ ipcMain.handle("pet:get-walk-timing", () => ({
   perchPct: perchPctOf(),
   standSink: standSinkOffset()
 }));
+
+/* ---------- 日志诊断（v2.5.28 设置页「日志诊断」分区）：尾部读取 + 脱敏导出 ---------- */
+const logDiag = require("./src/log-diag");
+ipcMain.handle("pet:log-read", (_e, maxLines) => {
+  try {
+    const r = logDiag.readLogTail(config.STORAGE.logs, Number(maxLines) || 500);
+    if (!r.ok) return r;
+    // 脱敏后才出主进程：称呼取自 config（name/nickname 等），与导出同一套规则
+    return { ...r, lines: logDiag.sanitizeLines(r.lines, { userNames: logDiag.collectUserNames(config.getConfig()) }) };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e), lines: [] };
+  }
+});
+ipcMain.handle("pet:log-export", async (_e, maxLines) => {
+  try {
+    const r = logDiag.readLogTail(config.STORAGE.logs, Number(maxLines) || 2000);
+    if (!r.ok) return r;
+    let appVersion = "?";
+    try { appVersion = JSON.parse(fs.readFileSync(path.join(config.APP_DIR, "package.json"), "utf8")).version || "?"; } catch { /* 忽略 */ }
+    const payload = logDiag.buildExport(r, { appVersion, userNames: logDiag.collectUserNames(config.getConfig()) });
+    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+      title: "导出脱敏日志",
+      defaultPath: "suzuran-log-" + new Date().toISOString().slice(0, 10) + "-sanitized.txt",
+      filters: [{ name: "Text", extensions: ["txt"] }]
+    });
+    if (canceled || !filePath) return { ok: false, canceled: true };
+    fs.writeFileSync(filePath, payload.text, "utf8");
+    logTts("settings", "日志已导出（脱敏）: 行数=" + r.lines.length + " 错误=" + payload.stats.error + " 警告=" + payload.stats.warn);
+    return { ok: true, path: filePath, lines: r.lines.length, stats: payload.stats };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+});
 ipcMain.handle("pet:set-walk-timing", (_e, patch) => {
   patch = patch || {};
   if (patch.sitMaxSec != null) {

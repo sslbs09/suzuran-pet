@@ -35,6 +35,68 @@ async function toast(msg) {
   console.log("[设置]", msg);
 }
 
+/* ---------- 日志诊断分区（v2.5.28）：尾部读取 + 报错高亮 + 一键脱敏导出 ----------
+   数据已由主进程脱敏（log-diag.sanitizeLines）；此处只做高亮/过滤/统计与滚动跟随。
+   高亮分级与 src/log-diag.js 的 classifyLine 保持一致（关键字双端对齐，勿单边增删）。 */
+(function setupLogDiag() {
+  const pre = document.getElementById("logdiag-pre");
+  if (!pre) return;
+  const $id = (id) => document.getElementById(id);
+  const linesSel = $id("logdiag-lines"), autoChk = $id("logdiag-auto"), onlyBad = $id("logdiag-onlybad");
+  const resultEl = $id("logdiag-result");
+  let rawLines = [];
+  let autoTimer = null;
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  function classify(line) { // 与 log-diag.classifyLine 同关键字（渲染层无 require，本地对齐）
+    if (/error|Error|ERROR|异常|崩溃|失败|fail|Fail|回退系统语音|拦截非法|守卫|render-process-gone|未捕获|EISDIR|ENOENT|EPERM|Cannot /.test(line)) return "error";
+    if (/超时|timeout|Timeout|429|重试|跳过|坍缩|告警|警告|停帧|自愈|回滚|stale/.test(line)) return "warn";
+    return "info";
+  }
+  function render() {
+    const show = onlyBad.checked ? rawLines.filter((l) => classify(l) !== "info") : rawLines;
+    const stats = { error: 0, warn: 0 };
+    for (const l of rawLines) { const c = classify(l); if (c === "error") stats.error += 1; else if (c === "warn") stats.warn += 1; }
+    const stick = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24; // 尾部跟随
+    pre.innerHTML = show.map((l) => {
+      const c = classify(l);
+      return '<span class="log-line log-' + c + '">' + escapeHtml(l) + "</span>";
+    }).join("\n");
+    setResult(resultEl, L("set.logdiagStats").replace("{n}", String(rawLines.length)).replace("{e}", String(stats.error)).replace("{w}", String(stats.warn)), stats.error === 0);
+    if (stick || onlyBad.checked) pre.scrollTop = pre.scrollHeight;
+  }
+  async function refresh() {
+    try {
+      const r = await window.petAPI.logRead(Number(linesSel.value) || 500);
+      if (!r || !r.ok) { setResult(resultEl, (r && r.error) || L("set.logdiagReadFail"), false); return; }
+      rawLines = r.lines || [];
+      render();
+    } catch (e) { setResult(resultEl, String(e && e.message || e), false); }
+  }
+  $id("logdiag-refresh").addEventListener("click", refresh);
+  linesSel.addEventListener("change", refresh);
+  onlyBad.addEventListener("change", render);
+  autoChk.addEventListener("change", () => {
+    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+    if (autoChk.checked) autoTimer = setInterval(refresh, 10000); // 10s 轮询：日志尾部读取成本低（主进程读文件尾部）
+  });
+  $id("logdiag-export").addEventListener("click", async () => {
+    const btn = $id("logdiag-export");
+    btn.disabled = true;
+    setResult(resultEl, L("set.logdiagExporting"));
+    try {
+      const r = await window.petAPI.logExport(Number(linesSel.value) || 2000);
+      if (r && r.ok) setResult(resultEl, L("set.logdiagExportDone") + " " + (r.path || ""), true);
+      else if (r && r.canceled) setResult(resultEl, L("set.logdiagExportCancel"));
+      else setResult(resultEl, (r && r.error) || L("set.logdiagReadFail"), false);
+    } catch (e) { setResult(resultEl, String(e && e.message || e), false); }
+    btn.disabled = false;
+  });
+  window.addEventListener("beforeunload", () => { if (autoTimer) clearInterval(autoTimer); });
+})();
+
 /* ---------- 首跑引导清单（v2.5.26）：3 步实时完成状态 ---------- */
 async function renderOnboard(S) {
   const box = document.getElementById("onboard-list");

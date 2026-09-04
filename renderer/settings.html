@@ -37,6 +37,7 @@
       <a href="#sec-sense" data-i18n="set.nav.sense">👀 感知与监控</a>
       <a href="#sec-weather" data-i18n="set.nav.weather">🌤 天气</a>
       <a href="#sec-security" data-i18n="set.nav.security">🔐 密钥与凭据</a>
+      <a href="#sec-logdiag" data-i18n="set.nav.logdiag">📋 日志诊断</a>
     </nav>
   </aside>
   <div class="set-main">
@@ -681,6 +682,28 @@
       <button id="btn-import-cred" type="button" class="primary" disabled>⬇ 导入所选凭据</button>
       <span id="import-result" class="result"></span>
     </div>
+  </section>
+
+  <!-- ============ 日志诊断（v2.5.28）：只读尾部 + 报错高亮 + 一键脱敏导出 ============ -->
+  <section id="sec-logdiag">
+    <h2 data-i18n="set.logdiagTitle">📋 日志诊断</h2>
+    <p class="hint" data-i18n="set.logdiagHint">显示运行日志（tts.log）最近内容：红色=错误（需人工查看）、黄色=警告（可自愈）。一键导出会自动脱敏（密钥、URL 参数、路径中的用户名、窗口标题、精确坐标、PID、称呼），可放心发给他人或开发者。</p>
+    <div class="row actions logdiag-bar">
+      <label class="col"><span data-i18n="set.logdiagLines">行数</span>
+        <select id="logdiag-lines">
+          <option value="200">200</option>
+          <option value="500" selected>500</option>
+          <option value="1000">1000</option>
+          <option value="2000">2000</option>
+        </select>
+      </label>
+      <label class="col inline"><input type="checkbox" id="logdiag-auto" /><span data-i18n="set.logdiagAuto">自动刷新</span></label>
+      <label class="col inline"><input type="checkbox" id="logdiag-onlybad" /><span data-i18n="set.logdiagOnlyBad">只看错误/警告</span></label>
+      <button id="logdiag-refresh" type="button" data-i18n="set.logdiagRefresh">🔄 刷新</button>
+      <button id="logdiag-export" type="button" class="primary" data-i18n="set.logdiagExport">⬇ 一键导出（脱敏）</button>
+    </div>
+    <div id="logdiag-result" class="result"></div>
+    <pre id="logdiag-pre" class="logdiag-pre" tabindex="0"></pre>
   </section>
   </div><!-- /.set-main -->
   </div><!-- /.set-layout -->
