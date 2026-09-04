@@ -45,6 +45,7 @@ let spinePaths = {           // 默认内置模型；spine/user/ 有用户模型
 let spineBaseScaleX = 1;     // 初始缩放；朝向翻转时取反
 // 桌面行走状态（主进程广播驱动；明日方舟基建语义：Move=走动 Relax=放松 Sit=坐窗顶 Sleep=睡觉 Interact=点击互动）
 let walkState = { active: false, resting: true, perched: false, seated: false, face: 1 };
+let lastInputAt = 0; // 输入栏最近一次打字时间：自主坐/睡收栏时判断用户是否正在用
 
 /* ---------- PSD 2.5D 角色渲染（v2.2，完全独立于 Spine）
  * rigSkinId 非空时 2.5D 独占显示：Spine 不初始化、不参与，互不干扰。 ---------- */
@@ -846,7 +847,18 @@ function reconcileSpineAnimation(reason = "reconcile") {
 function applyWalkState(s) {
   const wasActive = walkState.active;
   const wasSleeping = walkState.sleeping;
+  const wasResting = !!(walkState.seated || walkState.perched || walkState.sleeping);
   walkState = s || walkState;
+  // 自主坐下/上窗顶/入睡的瞬间收起聊天栏：输入栏悬浮在窗口底部，坐姿正好压在栏上
+  // （视觉=坐在自己的输入条上）。单击打开会顺带聚焦输入框且焦点会一直留着，
+  // 焦点本身不代表在用，故只认 60s 内的真实打字；有草稿或生成中也不动。
+  // 直接收起而非 toggleInputBar，避免走 wake() 把刚睡着的她叫醒。
+  const resting = !!(walkState.seated || walkState.perched || walkState.sleeping);
+  if (resting && !wasResting && !inputBar.classList.contains("hidden") &&
+      Date.now() - lastInputAt > 60000 && !inputEl.value && !busy) {
+    inputBar.classList.add("hidden");
+    inputEl.blur();
+  }
   if (typeof walkState.sleeping === "boolean" && walkState.sleeping !== wasSleeping) {
     isSleeping = walkState.sleeping;
     awake = !isSleeping;
@@ -1927,6 +1939,7 @@ function updateChip() {
 btnSend.addEventListener("click", send);
 btnStop.addEventListener("click", () => { window.petAPI.stop(); });
 inputEl.addEventListener("keydown", (e) => { if (e.key === "Enter") send(); });
+inputEl.addEventListener("input", () => { lastInputAt = Date.now(); });
 modeChip.addEventListener("click", () => {
   if (!zcodeEnabled) { window.petAPI.setMode("auto"); return; } // 任务模式未启用 → 保持自动
   const next = forcedMode === "auto" ? "chat" : forcedMode === "chat" ? "zcode" : "auto";
