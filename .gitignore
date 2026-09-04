@@ -42,3 +42,9 @@ tests/__visual-out__/
 app.asar.pending
 apply-update.ps1
 *.asar.bak
+
+# Mimosa 门禁 hook 状态目录（本地审计/报告，绝不入库）
+.mimosa/
+
+# 应用运行时在开发树落的数据目录（storage-migration 产物，含用户 config/persona，绝不入库）
+SuzuranPet/
