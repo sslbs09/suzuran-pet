@@ -30,7 +30,7 @@ assertEq("groundLine", G.groundLine(wa, 200, 26), 738);
 assertEq("seatSinkTier small", G.seatSinkTierOf(0.7, ""), "small");
 assertEq("seatSinkTier winterLarge", G.seatSinkTierOf(1.3, "winter/x"), "winterLarge");
 assertEq("seatSinkTier standard", G.seatSinkTierOf(1.0, ""), "standard");
-assertEq("seatSink 默认值（0=不压任务栏图标，2026-09-05）", G.seatSinkOf(1.0, "", {}), 0);
+assertEq("seatSink 默认值（腿垂观感，用户确认勿归零）", G.seatSinkOf(1.0, "", {}), 30);
 assertEq("seatSink 滑杆覆盖", G.seatSinkOf(0.7, "", { small: 12 }), 12);
 // 5) 相位时长
 assertEq("sitPhaseMs 默认下限", G.phaseMs(randInt, { walkTiming: {} }, "sitMaxSec", 10000, 30, 15, 180), 10000);
