@@ -3,168 +3,290 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>苏苏洛桌宠 · 官网</title>
+<title>苏苏洛桌宠 · SuzuranPet — 会聊天、会散步的桌面狐狸医师</title>
+<meta name="description" content="罗德岛医疗干员苏苏洛住进你的桌面：OpenAI 兼容 API 聊天、长期记忆、本地真人音色（中/日）、任务栏散步、Spine/Live2D 渲染、深浅双主题。" />
+<meta property="og:title" content="苏苏洛桌宠 · SuzuranPet" />
+<meta property="og:description" content="陪你聊天、记住你的事、用真人音色说话、在任务栏上散步。" />
+<meta property="og:type" content="website" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%F0%9F%A9%BA%3C/text%3E%3C/svg%3E" />
 <style>
-  /* v2.5.26 品牌统一：应用同款青系；v2.5.26b 深浅切换（变量驱动，默认深色） */
   :root {
-    --page-bg: linear-gradient(165deg, #10181b 0%, #16262b 55%, #1d3a38 100%);
-    --page-ink: #e8eef0; --page-sub: #9db2b7; --page-head: #57bcb4; --page-em: #7fd0c9;
-    --page-line: rgba(87, 188, 180, .22); --page-line-soft: rgba(87, 188, 180, .12);
-    --page-chip: rgba(255, 255, 255, .05); --page-chip-hover: rgba(255, 255, 255, .09);
-    --page-accent: #2f8f87;
+    --bg: radial-gradient(1200px 600px at 78% -10%, rgba(58,168,159,.18), transparent 60%),
+          radial-gradient(900px 500px at 8% 108%, rgba(87,188,180,.12), transparent 55%),
+          linear-gradient(168deg, #0d1518 0%, #121f23 52%, #16302e 100%);
+    --ink: #eaf2f4; --sub: #9db2b7; --head: #57bcb4; --em: #7fd0c9; --accent: #2f8f87; --accent-hi: #3aa89f;
+    --line: rgba(127,208,201,.20); --line-soft: rgba(127,208,201,.10);
+    --card: rgba(255,255,255,.045); --card-hover: rgba(127,208,201,.08);
+    --shadow: 0 18px 50px rgba(0,0,0,.45);
+    --glow: 0 0 60px rgba(58,168,159,.28);
   }
   body.light {
-    --page-bg: linear-gradient(165deg, #f4f8f7 0%, #e9f3f0 60%, #e2efe9 100%);
-    --page-ink: #17313a; --page-sub: #62777d; --page-head: #23736d; --page-em: #2f8f87;
-    --page-line: rgba(47, 143, 135, .28); --page-line-soft: rgba(47, 143, 135, .15);
-    --page-chip: rgba(255, 255, 255, .75); --page-chip-hover: rgba(47, 143, 135, .08);
-    --page-accent: #2f8f87;
+    --bg: radial-gradient(1200px 600px at 78% -10%, rgba(58,168,159,.14), transparent 60%),
+          linear-gradient(168deg, #f7fbfa 0%, #eef6f3 55%, #e3f0ea 100%);
+    --ink: #17313a; --sub: #5f767c; --head: #1f7a72; --em: #24897f; --accent: #2f8f87; --accent-hi: #27988e;
+    --line: rgba(47,143,135,.25); --line-soft: rgba(47,143,135,.13);
+    --card: rgba(255,255,255,.72); --card-hover: rgba(47,143,135,.07);
+    --shadow: 0 18px 45px rgba(31,80,74,.14);
+    --glow: 0 0 60px rgba(58,168,159,.20);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body {
-    font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
-    background: var(--page-bg);
-    color: var(--page-ink);
-    min-height: 100vh;
-    line-height: 1.8;
-    transition: background .3s, color .3s;
+    font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+    background: #0d1518; color: var(--ink);
+    min-height: 100vh; line-height: 1.8; overflow-x: hidden;
   }
+  body { background: var(--bg) fixed; transition: color .3s; }
+  ::selection { background: rgba(58,168,159,.35); }
+
+  /* ---------- 顶部导航 ---------- */
+  nav {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; align-items: center; gap: 6px;
+    max-width: 1080px; margin: 0 auto; padding: 14px 22px;
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    background: color-mix(in srgb, rgba(13,21,24,.78) 100%, transparent);
+  }
+  body.light nav { background: rgba(247,251,250,.8); }
+  nav .logo { font-weight: 800; font-size: 16.5px; letter-spacing: .02em; margin-right: auto; display: flex; align-items: center; gap: 8px; color: var(--ink); text-decoration: none; }
+  nav .logo .cross { color: var(--em); }
+  nav a.item { color: var(--sub); text-decoration: none; font-size: 14px; padding: 6px 13px; border-radius: 999px; transition: color .2s, background .2s; }
+  nav a.item:hover { color: var(--ink); background: var(--card-hover); }
+  nav a.gh { display: inline-flex; align-items: center; gap: 6px; }
   #theme-toggle {
-    position: fixed; top: 14px; right: 16px; z-index: 9;
-    width: 40px; height: 40px; border-radius: 50%; font-size: 17px; cursor: pointer;
-    background: var(--page-chip); color: var(--page-ink);
-    border: 1px solid var(--page-line); transition: transform 120ms;
+    width: 36px; height: 36px; border-radius: 50%; font-size: 15px; cursor: pointer;
+    background: var(--card); color: var(--ink); border: 1px solid var(--line);
+    transition: transform 120ms; margin-left: 4px;
   }
-  #theme-toggle:hover { transform: scale(1.08); }
-  .hero { text-align: center; padding: 64px 24px 36px; }
+  #theme-toggle:hover { transform: scale(1.1); }
+
+  /* ---------- Hero ---------- */
+  .hero {
+    max-width: 1080px; margin: 0 auto; padding: 74px 24px 30px;
+    display: grid; grid-template-columns: 1.15fr .85fr; gap: 30px; align-items: center;
+  }
+  @media (max-width: 860px) { .hero { grid-template-columns: 1fr; padding-top: 46px; text-align: center; } .hero .meta { justify-content: center; } .stage { order: -1; } }
   .hero .badge {
-    display: inline-block; background: rgba(58,168,159,.16); color: var(--page-em);
-    border: 1px solid rgba(58,168,159,.5); border-radius: 999px;
-    font-size: 13px; padding: 4px 16px; letter-spacing: .12em; margin-bottom: 18px;
+    display: inline-flex; align-items: center; gap: 7px;
+    background: rgba(58,168,159,.13); color: var(--em);
+    border: 1px solid rgba(58,168,159,.45); border-radius: 999px;
+    font-size: 12.5px; padding: 5px 15px; letter-spacing: .14em; margin-bottom: 20px;
   }
-  .hero h1 { font-size: clamp(30px, 5vw, 48px); font-weight: 900; letter-spacing: .04em; }
-  .hero h1 em { font-style: normal; color: var(--page-em); }
-  .hero .sub { color: var(--page-sub); font-size: 16px; margin-top: 14px; max-width: 640px; margin-left: auto; margin-right: auto; }
-  .hero .meta { margin-top: 26px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .hero .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: #46d0b8; box-shadow: 0 0 10px #46d0b8; animation: pulse 2.2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+  .hero h1 { font-size: clamp(32px, 5.4vw, 54px); font-weight: 900; letter-spacing: .02em; line-height: 1.25; }
+  .hero h1 .grad {
+    background: linear-gradient(100deg, #57bcb4 8%, #7fd0c9 46%, #b8e6df 88%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero .sub { color: var(--sub); font-size: 16px; margin-top: 16px; max-width: 560px; }
+  .hero .meta { margin-top: 28px; display: flex; gap: 12px; flex-wrap: wrap; }
   .hero .meta a {
-    color: var(--page-ink); text-decoration: none; font-size: 14px;
-    border: 1px solid var(--page-line); border-radius: 999px; padding: 9px 22px;
-    transition: background .2s;
+    color: var(--ink); text-decoration: none; font-size: 14.5px;
+    border: 1px solid var(--line); border-radius: 12px; padding: 11px 22px;
+    transition: transform .15s, background .2s, border-color .2s, box-shadow .2s;
   }
-  .hero .meta a.primary { background: var(--page-accent); border-color: var(--page-accent); color: #fff; font-weight: 700; }
-  .hero .meta a:hover { background: var(--page-chip-hover); }
-  .demo { text-align: center; margin: 10px auto 0; max-width: 480px; }
-  .demo img { width: 100%; border-radius: 14px; border: 1px solid var(--page-line); box-shadow: 0 8px 30px rgba(0,0,0,.2); }
-  .demo figcaption { color: var(--page-sub); font-size: 12.5px; margin-top: 8px; }
-
-  .cards { max-width: 880px; margin: 26px auto 8px; padding: 0 24px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
-  .card {
-    background: var(--page-chip); border: 1px solid var(--page-line);
-    border-radius: 14px; padding: 20px 22px;
-    display: block; transition: background .2s, transform .2s;
+  .hero .meta a.primary {
+    background: linear-gradient(135deg, var(--accent), var(--accent-hi)); border-color: transparent;
+    color: #fff; font-weight: 700; box-shadow: 0 8px 24px rgba(47,143,135,.35);
   }
-  a.card { text-decoration: none; color: inherit; }
-  a.card:hover { background: var(--page-chip-hover); transform: translateY(-2px); }
-  .card h3 { font-size: 16px; color: var(--page-head); margin-bottom: 6px; }
-  .card p { color: var(--page-sub); font-size: 13.5px; }
-  .card .arrow { float: right; color: var(--page-sub); font-size: 18px; }
+  .hero .meta a.primary:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(47,143,135,.45); }
+  .hero .meta a:not(.primary):hover { background: var(--card-hover); border-color: var(--em); transform: translateY(-2px); }
 
-  section { max-width: 880px; margin: 40px auto; padding: 0 24px; }
-  section h2 { font-size: 21px; color: var(--page-head); margin-bottom: 14px; }
-  .feat { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
-  .feat div { background: var(--page-chip); border: 1px solid var(--page-line-soft); border-radius: 10px; padding: 13px 16px; font-size: 14px; }
-  .feat b { color: var(--page-head); }
+  /* 桌宠舞台 */
+  .stage { position: relative; display: grid; place-items: center; min-height: 320px; }
+  .stage::before {
+    content: ""; position: absolute; width: min(330px, 74%); aspect-ratio: 1; border-radius: 50%;
+    background: radial-gradient(circle at 50% 42%, rgba(58,168,159,.32), rgba(58,168,159,.06) 62%, transparent 72%);
+    filter: blur(6px); animation: breathe 5.5s ease-in-out infinite;
+  }
+  @keyframes breathe { 0%,100% { transform: scale(1); opacity: .9; } 50% { transform: scale(1.07); opacity: 1; } }
+  .stage img { position: relative; width: min(300px, 68%); image-rendering: auto; filter: drop-shadow(0 22px 34px rgba(0,0,0,.45)); animation: floaty 4.2s ease-in-out infinite; }
+  @keyframes floaty { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-13px); } }
+  .stage .chip {
+    position: absolute; font-size: 12.5px; color: var(--em);
+    background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 5px 13px;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    animation: floaty 4.2s ease-in-out infinite;
+  }
+  .stage .chip.c1 { top: 9%; left: 4%; animation-delay: .7s; }
+  .stage .chip.c2 { bottom: 13%; right: 2%; animation-delay: 1.4s; }
+  .stage .chip.c3 { top: 20%; right: 7%; animation-delay: 2.1s; }
 
-  .dltable { width: 100%; border-collapse: collapse; margin-top: 8px; background: var(--page-chip); border-radius: 12px; overflow: hidden; }
-  .dltable th, .dltable td { padding: 12px 16px; text-align: left; border-bottom: 1px solid var(--page-line-soft); font-size: 14px; }
-  .dltable th { background: rgba(87, 188, 180, .10); color: var(--page-head); font-size: 13px; }
-  .dltable td a { color: var(--page-head); }
+  /* ---------- 通用区块 ---------- */
+  section { max-width: 1080px; margin: 0 auto; padding: 46px 24px 8px; }
+  section > h2 { font-size: 24px; margin-bottom: 6px; }
+  section > p.lead { color: var(--sub); font-size: 14.5px; margin-bottom: 22px; }
+  .reveal { opacity: 0; transform: translateY(22px); transition: opacity .7s ease, transform .7s ease; }
+  .reveal.in { opacity: 1; transform: none; }
 
-  footer { text-align: center; color: var(--page-sub); font-size: 13px; padding: 20px 0 44px; }
-  footer a { color: var(--page-head); text-decoration: none; }
+  /* 功能卡片 */
+  .feat { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); }
+  .feat .card {
+    background: var(--card); border: 1px solid var(--line-soft); border-radius: 16px;
+    padding: 19px 21px; transition: transform .2s, background .2s, border-color .2s, box-shadow .2s;
+  }
+  .feat .card:hover { transform: translateY(-4px); background: var(--card-hover); border-color: var(--line); box-shadow: var(--shadow); }
+  .feat .card .ic { font-size: 23px; display: inline-block; margin-bottom: 9px; }
+  .feat .card b { display: block; color: var(--head); font-size: 15.5px; margin-bottom: 3px; }
+  .feat .card span { color: var(--sub); font-size: 13.5px; }
+
+  /* 下载卡片 */
+  .dls { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(258px, 1fr)); }
+  .dl {
+    position: relative; background: var(--card); border: 1px solid var(--line-soft); border-radius: 18px;
+    padding: 24px 24px 20px; display: flex; flex-direction: column; gap: 6px;
+    transition: transform .2s, border-color .2s, box-shadow .2s;
+  }
+  .dl:hover { transform: translateY(-4px); border-color: var(--line); box-shadow: var(--shadow); }
+  .dl .tag {
+    position: absolute; top: -11px; right: 16px; font-size: 11.5px; letter-spacing: .08em;
+    background: linear-gradient(135deg, var(--accent), var(--accent-hi)); color: #fff;
+    border-radius: 999px; padding: 3px 12px; font-weight: 700;
+  }
+  .dl h3 { font-size: 17px; }
+  .dl .size { color: var(--em); font-size: 13px; font-weight: 600; }
+  .dl p { color: var(--sub); font-size: 13.5px; flex: 1; }
+  .dl a.btn {
+    margin-top: 12px; text-align: center; text-decoration: none; font-size: 14px; font-weight: 700;
+    border-radius: 11px; padding: 10px 0; color: #fff;
+    background: linear-gradient(135deg, var(--accent), var(--accent-hi));
+    transition: filter .2s, transform .15s;
+  }
+  .dl a.btn.ghost { background: none; border: 1px solid var(--line); color: var(--ink); font-weight: 500; }
+  .dl a.btn:hover { filter: brightness(1.12); transform: translateY(-1px); }
+
+  /* 指南卡片 */
+  .guides { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(238px, 1fr)); }
+  .guides a.card {
+    display: block; text-decoration: none; color: inherit;
+    background: var(--card); border: 1px solid var(--line-soft); border-radius: 16px; padding: 20px 21px;
+    transition: transform .2s, background .2s, border-color .2s, box-shadow .2s;
+  }
+  .guides a.card:hover { transform: translateY(-4px); background: var(--card-hover); border-color: var(--line); box-shadow: var(--shadow); }
+  .guides .card h3 { font-size: 15.5px; color: var(--head); margin-bottom: 5px; display: flex; align-items: center; justify-content: space-between; }
+  .guides .card h3 .arrow { color: var(--sub); font-weight: 400; transition: transform .2s, color .2s; }
+  .guides a.card:hover .arrow { transform: translateX(4px); color: var(--em); }
+  .guides .card p { color: var(--sub); font-size: 13.5px; }
+
+  footer { text-align: center; color: var(--sub); font-size: 13px; padding: 34px 20px 46px; }
+  footer a { color: var(--head); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+  footer .line { border: none; border-top: 1px solid var(--line-soft); max-width: 560px; margin: 0 auto 22px; }
 </style>
 </head>
 <body>
-<button id="theme-toggle" title="切换深浅色">☀️</button>
+<nav>
+  <a class="logo" href="#"><span class="cross">🩺</span>苏苏洛桌宠</a>
+  <a class="item" href="#features">功能</a>
+  <a class="item" href="#download">下载</a>
+  <a class="item" href="#guides">指南</a>
+  <a class="item gh" href="https://github.com/sslbs09/suzuran-pet" title="GitHub 仓库">⭐ GitHub</a>
+  <button id="theme-toggle" title="切换深浅色">☀️</button>
+</nav>
+
+<header class="hero">
+  <div>
+    <span class="badge"><span class="dot"></span>罗德岛医疗干员 · 桌面陪伴中</span>
+    <h1>苏苏洛桌宠<br /><span class="grad">SuzuranPet</span></h1>
+    <p class="sub">Q 版狐狸医师从终端走出来，住进你的桌面——陪你聊天、记住你的事、用真人音色说话（中/日），还会在任务栏上散步、坐下、打盹。</p>
+    <div class="meta">
+      <a class="primary" href="https://github.com/sslbs09/suzuran-pet/releases/latest">⬇ 下载最新版</a>
+      <a href="#guides">📖 上手指南</a>
+      <a href="https://github.com/sslbs09/suzuran-pet">GitHub 仓库</a>
+    </div>
+  </div>
+  <div class="stage">
+    <span class="chip c1">💊 记得喝药哦</span>
+    <span class="chip c2">🌙 夜间护眼</span>
+    <span class="chip c3">🐾 任务栏散步中</span>
+    <img src="https://raw.githubusercontent.com/sslbs09/suzuran-pet/main/renderer/sprites/user/wave.gif" alt="苏苏洛挥手动画" />
+  </div>
+</header>
+
+<section id="features" class="reveal">
+  <h2>✨ 她能做什么</h2>
+  <p class="lead">不只是立绘——是一个真的会回应你的桌面伙伴。</p>
+  <div class="feat">
+    <div class="card"><span class="ic">💬</span><b>自由聊天</b><span>接入任意 OpenAI 兼容 API：DeepSeek、Kimi、GLM、百炼、本地 Ollama。</span></div>
+    <div class="card"><span class="ic">🧠</span><b>长期记忆</b><span>记得你说过的事，相处越久越亲密，还有羁绊系统。</span></div>
+    <div class="card"><span class="ic">🎙</span><b>克隆音色</b><span>中文 + 日语本地真人推理，苏苏洛音色开箱即说。</span></div>
+    <div class="card"><span class="ic">🐾</span><b>桌面行走</b><span>任务栏散步、坐下打盹、跳跃，拖拽抛掷有物理反馈。</span></div>
+    <div class="card"><span class="ic">🎨</span><b>四套渲染</b><span>Spine 2D / 2.5D 摆件 / Live2D / 经典 GIF，38 款皮肤可换。</span></div>
+    <div class="card"><span class="ic">🛰</span><b>Agent 接口</b><span>其他 AI 与脚本可通过 127.0.0.1 调用她，可关闭、可鉴权。</span></div>
+    <div class="card"><span class="ic">🌗</span><b>深浅双主题</b><span>全部窗口跟随主题，夜间自动护眼，也可手动固定。</span></div>
+    <div class="card"><span class="ic">🌐</span><b>三语界面</b><span>中文 / English / 日本語，一键切换。</span></div>
+  </div>
+</section>
+
+<section id="download" class="reveal">
+  <h2>📥 下载</h2>
+  <p class="lead">聊天功能三个版本完全一样，差别只在是否内置语音引擎。</p>
+  <div class="dls">
+    <div class="dl">
+      <span class="tag">推荐</span>
+      <h3>💠 轻量版</h3>
+      <span class="size">约 220 MB</span>
+      <p>不含语音引擎，聊天功能完整；语音可按指南自行部署 GenieTTS / GPT-SoVITS / edge。</p>
+      <a class="btn" href="https://github.com/sslbs09/suzuran-pet/releases/latest">GitHub Releases 下载</a>
+    </div>
+    <div class="dl">
+      <h3>🎧 完整版</h3>
+      <span class="size">约 16 GB</span>
+      <p>内置中文 + 日语双引擎，解压就能听见她说话。</p>
+      <a class="btn ghost" href="mailto:1598184627@qq.com">联系邮箱获取</a>
+    </div>
+    <div class="dl">
+      <h3>🎨 皮肤包</h3>
+      <span class="size">约 96 MB · 38 款</span>
+      <p>解压到 resources/app/renderer/sprites/ 即可补装全部皮肤。</p>
+      <a class="btn ghost" href="https://github.com/sslbs09/suzuran-pet/releases">Releases 资产下载</a>
+    </div>
+  </div>
+</section>
+
+<section id="guides" class="reveal">
+  <h2>📖 上手指南</h2>
+  <p class="lead">全部指南均支持深浅色阅读，右上角可切换。</p>
+  <div class="guides">
+    <a class="card" href="guide/开箱必读.html"><h3>⭐ 开箱必读 <span class="arrow">→</span></h3><p>从解压、启动、填 Key 到开口说话，三步搞定。</p></a>
+    <a class="card" href="guide/使用说明.html"><h3>📖 使用说明 <span class="arrow">→</span></h3><p>聊天、记忆、语音、行走、渲染模式、托盘菜单全览。</p></a>
+    <a class="card" href="guide/API接入指南.html"><h3>🔌 API 接入 <span class="arrow">→</span></h3><p>接入任意 OpenAI 兼容服务与本地 Ollama 的完整步骤。</p></a>
+    <a class="card" href="guide/语音部署总览.html"><h3>🎙 语音部署 <span class="arrow">→</span></h3><p>克隆苏苏洛音色（中/日）：GenieTTS + GPT-SoVITS 本地推理。</p></a>
+  </div>
+</section>
+
+<footer>
+  <hr class="line" />
+  <p>苏苏洛桌宠 · BUSL-1.1（源代码可得，非商业） · 完整版请联系 <a href="mailto:1598184627@qq.com">1598184627@qq.com</a></p>
+  <p style="margin-top:6px"><a href="https://github.com/sslbs09/suzuran-pet">GitHub</a> ｜ <a href="https://github.com/sslbs09/suzuran-pet/releases">Releases</a> ｜ <a href="https://sslbs09.github.io/suzuran-pet/">官网</a></p>
+</footer>
 
 <script>
   /* 深浅切换（v2.5.26b）：记忆偏好，默认深色 */
   (function () {
-    if (localStorage.getItem("sp-theme") === "light") document.body.classList.add("light");
-    const btn = document.getElementById("theme-toggle");
-    const sync = () => { btn.textContent = document.body.classList.contains("light") ? "🌙" : "☀️"; };
+    var saved = null;
+    try { saved = localStorage.getItem("sp-theme"); } catch (e) {}
+    if (saved === "light") document.body.classList.add("light");
+    var btn = document.getElementById("theme-toggle");
+    var sync = function () { btn.textContent = document.body.classList.contains("light") ? "🌙" : "☀️"; };
     sync();
     btn.addEventListener("click", function () {
       document.body.classList.toggle("light");
-      localStorage.setItem("sp-theme", document.body.classList.contains("light") ? "light" : "dark");
+      try { localStorage.setItem("sp-theme", document.body.classList.contains("light") ? "light" : "dark"); } catch (e) {}
       sync();
     });
   })();
+  /* 滚动渐入 */
+  (function () {
+    var els = document.querySelectorAll(".reveal");
+    if (!("IntersectionObserver" in window)) { els.forEach(function (e) { e.classList.add("in"); }); return; }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) { if (en.isIntersecting) { en.target.classList.add("in"); io.unobserve(en.target); } });
+    }, { threshold: .12 });
+    els.forEach(function (e) { io.observe(e); });
+  })();
 </script>
-
-<div class="hero">
-  <span class="badge">🩺 罗德岛医疗干员 · 桌面陪伴</span>
-  <h1>苏苏洛桌宠 <em>SuzuranPet</em></h1>
-  <p class="sub">Q 版狐狸医师从终端走出来，在你桌面上陪你聊天、散步、喝药茶。可配置任意 OpenAI 兼容 API、自由人设、本地语音克隆（中/日）。</p>
-  <div class="meta">
-    <a class="primary" href="https://github.com/sslbs09/suzuran-pet/releases/latest">⬇ 下载最新版</a>
-    <a href="https://github.com/sslbs09/suzuran-pet">GitHub 仓库</a>
-  </div>
-</div>
-
-<div class="demo">
-  <img src="https://raw.githubusercontent.com/sslbs09/suzuran-pet/main/renderer/sprites/user/wave.gif" alt="苏苏洛挥手动画" />
-  <figcaption>苏苏洛在桌面上的样子</figcaption>
-</div>
-
-<div class="cards">
-  <a class="card" href="guide/开箱必读.html"><span class="arrow">→</span>
-    <h3>⭐ 开箱必读（三步上手）</h3>
-    <p>从解压、启动、填 Key 到说话，三步搞定。</p>
-  </a>
-  <a class="card" href="guide/使用说明.html"><span class="arrow">→</span>
-    <h3>📖 使用说明</h3>
-    <p>功能总览：聊天、记忆、语音、行走、渲染模式、托盘菜单。</p>
-  </a>
-  <a class="card" href="guide/API接入指南.html"><span class="arrow">→</span>
-    <h3>🔌 API 接入指南</h3>
-    <p>接入任意 OpenAI 兼容服务：DeepSeek、Kimi、GLM、百炼、本地 Ollama……</p>
-  </a>
-  <a class="card" href="guide/语音部署总览.html"><span class="arrow">→</span>
-    <h3>🎙 语音部署与训练指南</h3>
-    <p>克隆苏苏洛音色（中/日）：GenieTTS + GPT-SoVITS 本地推理。</p>
-  </a>
-</div>
-
-<section>
-  <h2>✨ 她能做什么</h2>
-  <div class="feat">
-    <div><b>桌面行走</b>：任务栏散步、坐下、跳跃，拖拽抛掷有物理反馈</div>
-    <div><b>克隆音色</b>：中文 + 日语本地推理，苏苏洛音色随包</div>
-    <div><b>长期记忆</b>：记得你说过的事，相处越久越亲密（羁绊系统）</div>
-    <div><b>四套渲染</b>：Spine 2D / 2.5D 摆件 / Live2D / 经典 GIF</div>
-    <div><b>Agent 接口</b>：其他 AI/脚本可通过 127.0.0.1 调用她（可关闭、可鉴权）</div>
-    <div><b>三语界面</b>：中文 / English / 日本語 一键切换</div>
-    <div><b>深浅双主题</b>：全部窗口跟随主题，夜间护眼（v2.5.26）</div>
-  </div>
-</section>
-
-<section>
-  <h2>📥 下载</h2>
-  <table class="dltable">
-    <thead><tr><th>版本</th><th>大小</th><th>语音</th><th>获取</th></tr></thead>
-    <tbody>
-      <tr><td>轻量版</td><td>约 220 MB</td><td>不含引擎，可自行部署</td><td><a href="https://github.com/sslbs09/suzuran-pet/releases/latest">GitHub Releases</a></td></tr>
-      <tr><td>完整版</td><td>约 16 GB</td><td>中 + 日语引擎，开箱即说</td><td>联系 <a href="mailto:1598184627@qq.com">1598184627@qq.com</a></td></tr>
-      <tr><td>皮肤包</td><td>约 96 MB</td><td>38 款皮肤</td><td><a href="https://github.com/sslbs09/suzuran-pet/releases/download/v2.5.18/SuzuranPet-2.5.0-SkinPack.zip">Releases 资产</a></td></tr>
-    </tbody>
-  </table>
-</section>
-
-<footer>
-  <p>苏苏洛桌宠 · BUSL-1.1（源代码可得，非商业） · 完整版请联系 <a href="mailto:1598184627@qq.com">1598184627@qq.com</a></p>
-  <p style="margin-top:6px"><a href="https://github.com/sslbs09/suzuran-pet">GitHub</a> ｜ <a href="https://github.com/sslbs09/suzuran-pet/releases">Releases</a> ｜ <a href="https://github.com/sslbs09/suzuran-pet/issues">Issues</a></p>
-</footer>
 
 </body>
 </html>
