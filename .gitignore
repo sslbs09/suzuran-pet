@@ -1,6 +1,6 @@
 # 依赖与构建产物
 node_modules/
-dist/
+/dist/ # 锚定根目录：裸 dist/ 会误伤 vendor/dist/（xlsx 码表文件，2026-09-05 发布事故）
 
 # 运行数据
 data/
