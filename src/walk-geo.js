@@ -76,8 +76,11 @@ function groundLine(wa, winH, gap) {
   return Math.max(wa.y, wa.y + wa.height - winH) + (gap || 0);
 }
 
-/** 坐姿下沉量分档：小尺寸（≤80%）腿短、冬季大尺寸单独档，其余标准；设置页滑杆可按档位覆盖 */
-const SEAT_SINK_DEFAULTS = { small: 22, standard: 30, winterLarge: 30 };
+/** 坐姿下沉量分档：小尺寸（≤80%）腿短、冬季大尺寸单独档，其余标准；设置页滑杆可按档位覆盖。
+ *  默认 0（脚底贴任务栏/图标上沿，不压图标）：旧默认 22/30 会把鞋画进任务栏图标行——
+ *  大图标/高 DPI 任务栏图标顶几乎贴上沿，必踩（2026-09-05 用户实测截图定案）。
+ *  想要"腿垂进任务栏"观感的用户可在设置页按档位调高。 */
+const SEAT_SINK_DEFAULTS = { small: 0, standard: 0, winterLarge: 0 };
 function seatSinkTierOf(scale, spineSkinId) {
   if (/winter/i.test(String(spineSkinId || "")) && scale >= 1.2 && scale < 1.6) return "winterLarge";
   if (scale <= 0.8) return "small";
