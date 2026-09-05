@@ -4025,15 +4025,25 @@ ipcMain.on("pet:set-sleeping", (_e, v) => {
   walk.sleeping = !!v;
   if (walk.sleeping) { cancelFlight(); cancelWalkJump(); }
   if (win && !win.isDestroyed() && config.getConfig().renderMode === "spine") {
-    const b = win.getBounds();
-    const wa = walkGeo.workAreaOf(screen, b);
-    const standY = wa.y + wa.height + walk.groundGap - b.height; // 站立贴地（底边=任务栏上沿+gap）
-    const lift = Number((config.getConfig().walk || {}).sleepLift);
-    const liftRatio = Number.isFinite(lift) && lift >= 0 && lift <= 0.5 ? lift : 0; // 默认 0：不抬窗口
-    const sleepY = standY - Math.round(b.height * liftRatio);
-    const targetY = v ? sleepY : standY;
-    if (Math.abs(b.y - targetY) > 1) win.setPosition(b.x, Math.round(targetY));
-    walkBroadcast();
+    // v2.5.28 关键修复：位置分支必须按真实姿态——旧实现假设"睡着=站着"，把窗口无条件
+    // 挪到 standY/sleepY。坐姿中入睡/睡醒会被拉回站立高度 → 坐姿动画叠在悬浮位置上
+    // =「没坐在任务栏上」（walkTick 睡眠期无坐姿自愈，悬浮持续整个睡眠）。
+    if (walk.seated) {
+      applySeatPosition(); // 坐姿：保持 sink 沉底（幂等）
+      walkBroadcast();
+    } else if (!walk.perched && !walk.iconRest && !walk.gotoPerch && !walk.returning && !walk.jump) {
+      const b = win.getBounds();
+      const wa = walkGeo.workAreaOf(screen, b);
+      const standY = wa.y + wa.height + walk.groundGap - b.height; // 站立贴地（底边=任务栏上沿+gap）
+      const lift = Number((config.getConfig().walk || {}).sleepLift);
+      const liftRatio = Number.isFinite(lift) && lift >= 0 && lift <= 0.5 ? lift : 0; // 默认 0：不抬窗口
+      const sleepY = standY - Math.round(b.height * liftRatio);
+      const targetY = v ? sleepY : standY;
+      if (Math.abs(b.y - targetY) > 1) win.setPosition(b.x, Math.round(targetY));
+      walkBroadcast();
+    } else {
+      walkBroadcast(); // 窗顶/图标顶/跳跃等高位态：栖位几何不变（旧行为会把窗顶睡觉的她瞬移到地面）
+    }
   }
   // 人格化：入睡/睡醒时偶尔嘀咕——v2.5.27 只在真实状态边沿触发（防止重复 setSleeping 连发 wake 台词）
   const edge = transitionSleep(wasSleeping, walk.sleeping);
