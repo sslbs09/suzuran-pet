@@ -17,6 +17,22 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
+      - name: 注入 Live2D Cubism Core（许可文件不入库，构建时从官方源拉取并校验）
+        shell: pwsh
+        env:
+          CUBISM_CORE_SHA256: "25ae938cb4fe282ce189b357bcc97e603d1e1f7ec78bf04150d401c23cdc792f"
+        run: |
+          # TD-7：Core 属 Live2D Cubism Core License 分发物，仓库不收；构建时注入官方当前版本。
+          # 哈希钉死：上游更新导致 CI 失败属预期行为，须人工核对新版许可与内容后更新此 pin。
+          $url = "https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"
+          $dest = "renderer/live2dcubismcore.min.js"
+          Invoke-WebRequest -Uri $url -OutFile $dest -MaximumRedirection 5
+          $hash = (Get-FileHash $dest -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne "$env:CUBISM_CORE_SHA256") {
+            throw "Live2D Cubism Core SHA-256 校验失败: $hash（期望 $env:CUBISM_CORE_SHA256）。上游可能已更新，请人工复核后更新 pin"
+          }
+          Write-Host "Live2D Cubism Core 注入并通过校验: $hash"
+
       - name: 安装 Node
         uses: actions/setup-node@v4
         with:
@@ -25,6 +41,19 @@ jobs:
 
       - name: 安装依赖
         run: npm ci
+
+      - name: 校验 tag 与 package.json 版本一致
+        shell: pwsh
+        run: |
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          if ("v$($pkg.version)" -ne "${{ github.ref_name }}") {
+            throw "tag ${{ github.ref_name }} 与 package.json 版本 v$($pkg.version) 不一致"
+          }
+
+      - name: 发布前测试与资源检查
+        run: |
+          npm test
+          npm run check:assets -- --strict  # TD-7：Core 已注入，恢复严格资源检查
 
       - name: 打包桌宠（electron-packager）
         run: npm run dist
@@ -55,6 +84,15 @@ jobs:
           "${{ github.ref_name }}" | Out-File -Encoding ascii app.asar.version
           Write-Host "已生成 app.asar + app.asar.version"
 
+      - name: 生成发布物 SHA-256 校验和
+        shell: pwsh
+        run: |
+          $zip = "SuzuranPet-${{ github.ref_name }}-win32-x64.zip"
+          Get-ChildItem $zip, app.asar, app.asar.version |
+            ForEach-Object { (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower() + "  " + $_.Name } |
+            Set-Content -Encoding ascii SHA256SUMS.txt
+          Write-Host "SHA256SUMS.txt 已生成"
+
       - name: 生成 Release 正文（从 CHANGELOG 抽取本版本段落）
         shell: pwsh
         run: |
@@ -79,6 +117,7 @@ jobs:
             SuzuranPet-${{ github.ref_name }}-win32-x64.zip
             app.asar
             app.asar.version
+            SHA256SUMS.txt
           generate_release_notes: false
           fail_on_unmatched_files: true
           draft: false

@@ -106,10 +106,13 @@ body.ui-page {
 .ui-page input[type="checkbox"] { accent-color: var(--ui-accent); }
 .ui-page textarea { resize: vertical; }
 .ui-page ::selection { background: var(--ui-accent-soft); color: var(--ui-ink); }
-.ui-page ::-webkit-scrollbar { width: 9px; height: 9px; }
-.ui-page ::-webkit-scrollbar-thumb { border: 2px solid var(--ui-bg); border-radius: 8px; background: var(--ui-line-strong); }
-.ui-page ::-webkit-scrollbar-thumb:hover { background: var(--ui-accent); }
-.ui-page ::-webkit-scrollbar-track { background: transparent; }
+/* 主滚动条（body 自身）+ 子元素滚动条都显式样式化：
+   `.ui-page ::-webkit-scrollbar`（带空格）只匹配子元素，body 自己的滚动条
+   落回原生浅色样式——白色滚动条带（用户 2026-09-05 截图）根因 */
+.ui-page ::-webkit-scrollbar, body.ui-page::-webkit-scrollbar { width: 9px; height: 9px; }
+.ui-page ::-webkit-scrollbar-thumb, body.ui-page::-webkit-scrollbar-thumb { border: 2px solid var(--ui-bg); border-radius: 8px; background: var(--ui-line-strong); }
+.ui-page ::-webkit-scrollbar-thumb:hover, body.ui-page::-webkit-scrollbar-thumb:hover { background: var(--ui-accent); }
+.ui-page ::-webkit-scrollbar-track, body.ui-page::-webkit-scrollbar-track { background: transparent; }
 
 @media (max-width: 620px) {
   body.ui-page { padding: 16px 12px 24px; }
@@ -122,6 +125,10 @@ body.ui-page {
 }
 
 /* 深色主题（v2.5.1）：body.theme-dark 覆盖变量层，全部 ui-page 窗口跟随 */
+html.theme-dark {
+  color-scheme: dark; /* 根级：管辖 body 主滚动条与原生控件（body 级管不到，曾留白带） */
+  background: #1b2226; /* html 画布底色跟随，消灭滚动条带/过滚边缘的白 */
+}
 body.theme-dark {
   color-scheme: dark;
   --ui-bg: #1b2226;

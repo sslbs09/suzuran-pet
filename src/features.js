@@ -53,7 +53,7 @@ async function speechToText(audioPath, lang = "ja") {
 let proactiveTimer = null;
 let lastChatTs = Date.now();
 let proactiveEnabled = true; // 设置页「主动搭话」开关（pet:set-proactive-chat）
-let proactiveCfg = { sendFn: null, intervalMin: 8 };
+let proactiveCfg = { sendFn: null, intervalMin: 12, chance: 0.18, stateFn: null };
 let recentRawSent = []; // 主动搭话跨轮禁选窗口（最近 8 句原文，v2.5.26 重复感修复）
 let lastMilestoneSaid = 0; // 陪伴里程碑已说过的天数（v2.5.25 去重：每个里程碑值只开口一次，避免停在里程碑日反复刷屏）
 
@@ -65,22 +65,24 @@ function touchChat() {
 function setProactiveEnabled(on) {
   proactiveEnabled = !!on;
   if (on) {
-    if (proactiveCfg.sendFn) startProactive(proactiveCfg.sendFn, proactiveCfg.intervalMin, proactiveCfg.stateFn);
+    if (proactiveCfg.sendFn) startProactive(proactiveCfg.sendFn, proactiveCfg.intervalMin, proactiveCfg.chance, proactiveCfg.stateFn);
   } else {
     stopProactive();
   }
 }
 
-function startProactive(sendFn, intervalMin = 8, stateFn = null) {
-  proactiveCfg = { sendFn, intervalMin, stateFn };
+const PROACTIVE_DEFAULTS = Object.freeze({ intervalMin: 12, chance: 0.18 });
+
+function startProactive(sendFn, intervalMin = PROACTIVE_DEFAULTS.intervalMin, chance = PROACTIVE_DEFAULTS.chance, stateFn = null) {
+  proactiveCfg = { sendFn, intervalMin, chance, stateFn };
   stopProactive();
   const intervalMs = intervalMin * 60 * 1000;
   proactiveTimer = setInterval(() => {
     if (!proactiveEnabled || !proactiveCfg.sendFn) return;
     const idle = Date.now() - lastChatTs;
     if (idle < intervalMs) return;
-    // 35% 概率触发（避免太频繁）
-    if (Math.random() > 0.35) return;
+    // 18% 概率触发：达到闲置阈值后仍保持低频，避免持续打扰
+    if (Math.random() > proactiveCfg.chance) return;
     const lines = require("./lines");
     let prompt;
     let proactiveMood = "温柔"; // 台词情绪→GSV 音色分档默认温柔（v2.5.26，随由头分支覆盖）
@@ -510,24 +512,31 @@ let jaPrewarmIdx = 0;
 function jaPrewarmableLines() {
   try {
     const lines = require("./lines");
+    // 通用遍历全部台词池（v2.5.27 修复：手写清单漏了 WEATHER_LINES 天气池 65 句，
+    // 且今后新增事件/状态池不会再漏；Object.values 兜底空对象）
     const pools = [
+      ...Object.values(lines.WEATHER_LINES || {}), // 置顶：此前漏预热的天气池优先补翻（已缓存句秒回，新句尽快出声）
       lines.PAT_LINES,
-      lines.PERSONIFY_LINES.thrown, lines.PERSONIFY_LINES.grabbed,
-      lines.PERSONIFY_LINES.wake, lines.PERSONIFY_LINES.sleepDay,
-      lines.PERSONIFY_LINES.sleepNight, lines.PERSONIFY_LINES.perch,
+      ...Object.values(lines.PERSONIFY_LINES || {}),
       lines.WORKFLOW_LINES,
-      ...Object.values(lines.PROACTIVE_BY_PERIOD),
-      ...Object.values(lines.PROACTIVE_BY_STATE), // v2.5.26 补：散步/坐着池此前漏预热
+      ...Object.values(lines.PROACTIVE_BY_PERIOD || {}),
+      ...Object.values(lines.PROACTIVE_BY_STATE || {}),
       lines.LONG_IDLE_LINES,
-      ...Object.values(lines.STAGE_LINES),
+      ...Object.values(lines.STAGE_LINES || {}),
       lines.EARLY_MORNING_LINES,
     ];
-    // 去重 + 只留不含人称占位符的固定句
+    // 去重 + 按当前称呼展开占位符（v2.5.27：台词库统一 {{user}} 后，若仍跳过占位符句，
+    // 预热池会被清空——必须展开成与运行时念白一致的文本再翻译，缓存键才能命中）
+    const petName = (config.getConfig().pet || {}).name || "苏苏洛";
+    const userName = (config.getConfig().chat || {}).userName || "博士";
     const seen = new Set();
     const out = [];
     for (const pool of pools) {
-      for (const s of pool) {
-        if (s.includes("{{") || seen.has(s)) continue;
+      for (const raw of pool || []) {
+        const s = String(raw || "")
+          .replace(/\{\{\s*name\s*\}\}/gi, petName)
+          .replace(/\{\{\s*user\s*\}\}/gi, userName);
+        if (!s || seen.has(s)) continue;
         seen.add(s);
         out.push(s);
       }
@@ -542,6 +551,7 @@ function getJaPrewarmProgress() { return jaPrewarmProgress; }
 function startJaPrewarm() {
   stopJaPrewarm();
   const cfg = config.getConfig();
+  if ((cfg.tts || {}).fixedOnly) return; // 固定台词离线模式：不翻译不合成（引擎已关省显存）
   if (!(cfg.ttsGenie || {}).speakJa) return; // 非日语模式不预热
   if (!(cfg.chat || {}).apiKey) return;      // 无 key 无法翻译
   const list = jaPrewarmableLines();
@@ -580,6 +590,7 @@ function logJaPrewarm(msg) {
  * 导出
  * ============================================================ */
 module.exports = {
+  PROACTIVE_DEFAULTS,
   // 语音输入
   speechToText,
 

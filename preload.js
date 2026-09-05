@@ -7,6 +7,8 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("petAPI", {
   appVersion: (() => { try { return require("electron").app.getVersion(); } catch { return ""; } })(), // 应用版本号（设置页显示，单一来源=package.json）
+  checkForUpdate: () => ipcRenderer.invoke("pet:check-update"), // 设置页「检查更新」
+  onUpdateProgress: (cb) => ipcRenderer.on("pet:update-progress", (_e, pct) => cb(pct)),
   ask: (text) => ipcRenderer.invoke("pet:ask", { id: crypto.randomUUID(), text }),
   stop: () => ipcRenderer.send("pet:stop"),
   onStopped: (cb) => ipcRenderer.on("pet:stopped", (_e, d) => cb(d)), // v2.6 主动停止通知（渲染层复位 busy）
@@ -28,6 +30,7 @@ contextBridge.exposeInMainWorld("petAPI", {
   onSpineSkinChanged: (cb) => ipcRenderer.on("pet:spine-skin-changed", (_e, id) => cb(id)),
   onPlayAnim: (cb) => ipcRenderer.on("pet:play-anim", (_e, name) => cb(name)),
   setSleeping: (v) => ipcRenderer.send("pet:set-sleeping", !!v),
+  setHasSit: (v) => ipcRenderer.send("pet:set-has-sit", !!v), // 皮肤有无坐下动画上报（无则坐姿不下沉，防"站着脚陷进任务栏"）
   setGroundGap: (px) => ipcRenderer.send("pet:set-ground-gap", px),
   setWalking: (on) => ipcRenderer.invoke("pet:set-walking", !!on),
   walkingPause: (b, source) => ipcRenderer.send("pet:walking-pause", !!b, source || "drag"),
@@ -51,6 +54,8 @@ contextBridge.exposeInMainWorld("petAPI", {
   onDropped: (cb) => ipcRenderer.on("pet:dropped", () => cb()), // 抛掷落地通知
   getWalkTiming: () => ipcRenderer.invoke("pet:get-walk-timing"),
   setWalkTiming: (patch) => ipcRenderer.invoke("pet:set-walk-timing", patch),
+  logRead: (maxLines) => ipcRenderer.invoke("pet:log-read", maxLines), // 日志诊断：脱敏尾部读取
+  logExport: (maxLines) => ipcRenderer.invoke("pet:log-export", maxLines), // 日志诊断：一键脱敏导出（保存对话框）
   getAppearance: () => ipcRenderer.invoke("pet:get-appearance"),
   setAppearance: (patch) => ipcRenderer.invoke("pet:set-appearance", patch),
   importFont: () => ipcRenderer.invoke("pet:import-font"),
@@ -74,6 +79,7 @@ contextBridge.exposeInMainWorld("petAPI", {
   docsRead: (key) => ipcRenderer.invoke("docs:read", key),
   openDocs: () => ipcRenderer.invoke("pet:open-docs"),
   live2dList: () => ipcRenderer.invoke("pet:live2d-list"), // Live2D 模型扫描（v2.5.1）
+  live2dCapability: () => ipcRenderer.invoke("pet:live2d-capability"),
   reloadRenderer: () => ipcRenderer.invoke("pet:reload-renderer"), // 渲染层自愈
   setTheme: (theme) => ipcRenderer.invoke("pet:set-theme", theme),
   swipeMove: (dir) => ipcRenderer.invoke("pet:swipe-move", dir),
@@ -173,8 +179,16 @@ contextBridge.exposeInMainWorld("petAPI", {
   importCredential: (req) => ipcRenderer.invoke("pet:import-credential", req),
   clearSecret: (slot) => ipcRenderer.invoke("pet:clear-secret", slot),
 
-  // 音色克隆与训练
-  pickFile: () => ipcRenderer.invoke("pet:pick-file"),
+  // 固定台词音频池
+  setFixedOnly: (on) => ipcRenderer.invoke("pet:set-fixed-only", !!on), // 离线模式开关（引擎关停省显存/重新拉起）
+  getFixedLineAudioStatus: () => ipcRenderer.invoke("pet:fixed-lines-status"),
+  startFixedLineAudioPreload: (options) => ipcRenderer.invoke("pet:fixed-lines-start", options || {}),
+  cancelFixedLineAudioPreload: () => ipcRenderer.invoke("pet:fixed-lines-cancel"),
+  reloadFixedLineAudio: (itemId) => ipcRenderer.invoke("pet:fixed-lines-reload-one", String(itemId || "")), // 单句重新生成
+  clearFixedLineAudioCache: () => ipcRenderer.invoke("pet:fixed-lines-clear"),
+  clearOldFixedLineCaches: () => ipcRenderer.invoke("pet:fixed-lines-clear-old"), // 清理旧语音方案的缓存版本
+  onFixedLineAudioProgress: (cb) => ipcRenderer.on("pet:fixed-lines-progress", (_e, p) => cb(p)),
+
   voiceStatus: () => ipcRenderer.invoke("pet:voice-status"),
   applyVoice: (payload) => ipcRenderer.invoke("pet:apply-voice", payload),
   previewVoice: (payload) => ipcRenderer.invoke("pet:tts-preview", payload),

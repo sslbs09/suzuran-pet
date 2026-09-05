@@ -76,7 +76,9 @@ function groundLine(wa, winH, gap) {
   return Math.max(wa.y, wa.y + wa.height - winH) + (gap || 0);
 }
 
-/** 坐姿下沉量分档：小尺寸（≤80%）腿短、冬季大尺寸单独档，其余标准；设置页滑杆可按档位覆盖 */
+/** 坐姿下沉量分档：小尺寸（≤80%）腿短、冬季大尺寸单独档，其余标准；设置页滑杆可按档位覆盖。
+ *  默认 22/30/30 = 臀坐任务栏上沿、腿垂下来盖住图标（用户 2026-09-05 明确：人物完整优先，
+ *  腿覆盖图标是期望观感；曾试过归零导致悬空"坐不到任务栏上"，已回退，勿再动）。 */
 const SEAT_SINK_DEFAULTS = { small: 22, standard: 30, winterLarge: 30 };
 function seatSinkTierOf(scale, spineSkinId) {
   if (/winter/i.test(String(spineSkinId || "")) && scale >= 1.2 && scale < 1.6) return "winterLarge";

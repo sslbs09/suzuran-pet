@@ -12,6 +12,7 @@ const path = require("path");
 
 const storage = require("./storage");
 const secrets = require("./secrets");
+const { sanitizeClients } = require("./agent-auth");
 const APP_DIR = storage.APP_DIR; // 只读程序资源目录
 const STORAGE = storage.initializeStorage();
 const CONFIG_PATH = STORAGE.config;
@@ -97,7 +98,7 @@ const DEFAULTS = {
   walkTiming: { sitMaxSec: 30, walkMaxSec: 20 }, // 行走节奏：单次坐下/散步的最长秒数（保底随机），设置页可调
   appearance: { fontFamily: "", fontSize: 0, bubbleWidth: 0, customFonts: [] }, // 聊天外观：字体（""=默认雅黑/"custom:文件名"）、字号px(0=默认11)、气泡宽度px(0=自适应)、已导入本地字体
   firstRun: true,                           // 首次启动自动弹设置引导
-  tts: { enabled: false, voice: "", rate: 0.9, pitch: 1.1 }, // 语音总开关（默认关）；rate=语速（<1 慢 >1 快）
+  tts: { enabled: false, voice: "", rate: 0.9, pitch: 1.1, fixedOnly: false }, // 语音总开关（默认关）；rate=语速（<1 慢 >1 快）；fixedOnly=固定台词离线模式（引擎可关省显存，只播已缓存音频）
   ttsCloud: { // edge-tts 云端语音（需安装 Python + edge-tts；失败自动回退系统语音）
     enabled: false,
     voice: "zh-CN-XiaoxiaoNeural",
@@ -255,7 +256,14 @@ function buildSettingsView() {
     zcodeCli: cfg.zcodeCli,
     agreed: !!cfg.agreed,
     scale: cfg.window.scale || 1.0,
-    agentApi: { ...cfg.agentApi, bearerToken: undefined }, // clients 含本机接入 token（仅本地 127.0.0.1 接口使用）
+    agentApi: {
+      ...cfg.agentApi,
+      bearerToken: undefined,
+      clients: sanitizeClients(cfg.agentApi && cfg.agentApi.clients).map(({ tokenHash, ...client }) => ({
+        ...client,
+        hasToken: !!tokenHash
+      }))
+    }, // 不向 renderer 回传接入方 token 原值或 hash
     secretStatus: secrets.status(),
     security: cfg.security || { externalCredNoticeSeen: false },
     hotkey: cfg.hotkey,
@@ -271,6 +279,12 @@ function buildSettingsView() {
     personify: cfg.personify !== false, // 人格化（设置页单独开关）
     features: cfg.features || {}, // 功能开关快照（剪贴板/系统监控/工作区感知等）
     rpMode: cfg.rpMode !== false, // 角色扮演模式（设置页单独开关）：关=助手模式优先服从指令
+    // v2.5.28 修复：设置页回显缺字段——theme 缺失导致主题下拉每次打开都显示"自动随时间"
+    // （用户选了深色、config 也存了，仅回显丢失）；softRender/live2d* 同批补齐
+    theme: cfg.theme || "auto",
+    softRender: !!cfg.softRender,
+    live2dSkinId: cfg.live2dSkinId || "",
+    live2dScale: Number(cfg.live2dScale) > 0 ? Number(cfg.live2dScale) : 1.0,
     walking: !!cfg.walking,
     persona: getPersonaText(),
     hasPersonaDefault: fs.existsSync(PERSONA_DEFAULT_PATH),
@@ -297,6 +311,7 @@ function saveConfig(patch) {
   delete clean.chat.apiKey;
   delete clean.ttsCosy.apiKey;
   delete clean.agentApi.bearerToken;
+  clean.agentApi.clients = sanitizeClients(clean.agentApi.clients);
   if (!patch?.zcodeCli && !loadPetConfig()?.zcodeCli) clean.zcodeCli = "";
   storage.atomicWrite(CONFIG_PATH, JSON.stringify(clean, null, 2));
   cache = null;

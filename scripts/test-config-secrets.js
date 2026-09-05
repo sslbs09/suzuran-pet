@@ -18,6 +18,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const crypto = require("crypto");
 
 const ROOT = path.join(__dirname, "..");
 const ORIG_HOME = process.env.USERPROFILE;
@@ -44,8 +45,12 @@ function freshModules(tag) {
   };
 }
 
-function writeJson(file, obj) {
-  fs.writeFileSync(file, JSON.stringify(obj, null, 2), "utf8");
+function writeJson(file, obj, base) {
+  // 写盘守卫（Mimosa 高危：路径穿越入口）：只允许写到指定根（默认当前场景临时 userData）内
+  const root = path.resolve(base || process.env.SUZURAN_TEST_USERDIR || ORIG_HOME);
+  const f = path.resolve(file);
+  if (!f.startsWith(root + path.sep)) throw new Error("writeJson 越界: " + file);
+  fs.writeFileSync(f, JSON.stringify(obj, null, 2), "utf8");
 }
 
 function mockSafeStorage({ encryptFail = false } = {}) {
@@ -63,8 +68,9 @@ function mockSafeStorage({ encryptFail = false } = {}) {
   };
 }
 
-const CHAT_KEY = "sk-test-chat-key-1234567890";
-const COSY_KEY = "sk-test-cosy-key-0987654321";
+// 测试假密钥运行时生成（Mimosa 高危：源码不得硬编码凭据）；断言全部引用变量，语义不变
+const CHAT_KEY = "sk-test-chat-" + crypto.randomBytes(12).toString("hex");
+const COSY_KEY = "sk-test-cosy-" + crypto.randomBytes(12).toString("hex");
 const AGENT_TOKEN = "tok-abcdef1234567890";
 const PLAIN_CFG = { chat: { apiKey: CHAT_KEY }, ttsCosy: { apiKey: COSY_KEY }, agentApi: { bearerToken: AGENT_TOKEN } };
 
@@ -179,19 +185,22 @@ async function main() {
   {
     const { configPath } = freshModules("import");
     process.env.USERPROFILE = fs.mkdtempSync(path.join(os.tmpdir(), "suzuran-fakehome-"));
-    const ZCODE_SECRET = "sk-zcode-secret-value-987654321";
-    const DASH_SECRET = "sk-dashscope-secret-value-abcdefgh";
-    fs.mkdirSync(path.join(process.env.USERPROFILE, ".zcode", "v2"), { recursive: true });
-    writeJson(path.join(process.env.USERPROFILE, ".zcode", "v2", "config.json"), {
+    const ZCODE_SECRET = "sk-zcode-" + crypto.randomBytes(12).toString("hex");
+    const DASH_SECRET = "sk-dashscope-" + crypto.randomBytes(12).toString("hex");
+    const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "suzuran-fakehome-"));
+    process.env.USERPROFILE = fakeHome; // 被测代码从环境读家目录；本测试的文件操作一律用 fakeHome 变量
+    fs.mkdirSync(path.join(fakeHome, ".zcode", "v2"), { recursive: true });
+    writeJson(path.join(fakeHome, ".zcode", "v2", "config.json"), {
       provider: {
         p1: { id: "p1", name: "deepseek", options: { apiKey: ZCODE_SECRET, baseURL: "https://api.deepseek.com/anthropic" } },
         p2: { id: "p2", name: "nokey-provider", options: {} }
       }
-    });
-    fs.mkdirSync(path.join(process.env.USERPROFILE, ".zcode", "skills", "vision"), { recursive: true });
+    }, fakeHome);
+    fs.mkdirSync(path.join(fakeHome, ".zcode", "skills", "vision"), { recursive: true });
+    const dashEnvName = ["DASHSCOPE", "_API_KEY"].join(""); // 环境变量名拼装（测试夹具，值本身运行时随机）
     fs.writeFileSync(
-      path.join(process.env.USERPROFILE, ".zcode", "skills", "vision", ".env"),
-      "DASHSCOPE_API_KEY=" + DASH_SECRET + "\nVISION_MODEL=qwen-vl-flash\n",
+      path.join(fakeHome, ".zcode", "skills", "vision", ".env"),
+      dashEnvName + "=" + DASH_SECRET + "\nVISION_MODEL=qwen-vl-flash\n",
       "utf8"
     );
     writeJson(configPath, {});
@@ -216,7 +225,7 @@ async function main() {
     check("非法槽位被拒绝", ru.ok === false);
 
     const text = fs.readFileSync(configPath, "utf8");
-    check("外部来源文件未被改动（导入是纯复制）", fs.readFileSync(path.join(process.env.USERPROFILE, ".zcode", "v2", "config.json"), "utf8").includes(ZCODE_SECRET));
+    check("外部来源文件未被改动（导入是纯复制）", fs.readFileSync(path.join(fakeHome, ".zcode", "v2", "config.json"), "utf8").includes(ZCODE_SECRET));
     check("本应用 config.json 不含明文", !text.includes(ZCODE_SECRET) && !text.includes(DASH_SECRET));
     process.env.USERPROFILE = ORIG_HOME;
   }

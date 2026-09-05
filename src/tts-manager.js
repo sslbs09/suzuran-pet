@@ -1,10 +1,14 @@
 "use strict";
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { spawn, exec, execFile } = require("child_process");
 const config = require("./config");
 const { logTts } = require("./logger");
-const { translateToJa } = require("./ja-translate");
+const { safeFetch } = require("./safe-url");
+const fixedLineCache = require("./fixed-line-cache");
+const FIXED_ONLY_MISS = "__SUZURAN_FIXED_ONLY_MISS__";
+const { translateToJa, lookupCachedJa } = require("./ja-translate");
 const { runPowerShell, stripStage } = require("./utils");
 
 /**
@@ -104,6 +108,49 @@ async function ttsCloneImpl(text, opts, jobId) {
     logTts("route", "音频缓存命中: " + String(text || "").slice(0, 24));
     return ahit.b64;
   }
+  let effectiveFixedLine = !!(opts && opts.fixedLine);
+  if (!(opts && opts.fixedLinePreload)) {
+    const profile = fixedLineCache.profileFromConfig(config.getConfig());
+    const vars = {
+      name: (config.getConfig().pet || {}).name,
+      user: (config.getConfig().chat || {}).userName
+    };
+    const fixedText = String(opts && opts.fixedText || "");
+    const normalizedText = stripSpeechTail(stripStage(fixedText || text));
+    let fixedItem = null;
+    try {
+      fixedItem = fixedLineCache.findItemText(vars, fixedText) ||
+        fixedLineCache.findItemNormalized(vars, fixedText || normalizedText) ||
+        fixedLineCache.findItemNormalized(vars, normalizedText) ||
+        fixedLineCache.findItemNormalized(vars, stripStage(stripSpeechTail(text)));
+    } catch { /* 固定池反查失败仍允许动态语音继续 */ }
+    let diskHit = (opts && opts.lineId)
+      ? fixedLineCache.readAudioById(profile, opts.lineId)
+      : null;
+    if ((!diskHit || !diskHit.length) && fixedItem) {
+      diskHit = fixedLineCache.readAudioById(profile, fixedItem.id);
+    }
+    // lineId 是首选，但旧缓存/重建期间可能暂时不一致；再用展开文本+情绪兜底，避免离线模式误判为未缓存。
+    if (!diskHit || !diskHit.length) {
+      diskHit = fixedLineCache.findCachedAudio(profile, fixedText || text, opts && (opts.emotion || opts.emo), vars);
+    }
+    effectiveFixedLine = effectiveFixedLine || !!fixedItem;
+    logTts("route", "固定台词缓存检查 fp=" + fixedLineCache.pathsFor(profile).fingerprint +
+      " lineId=" + String(opts && opts.lineId || (fixedItem && fixedItem.id) || "-") + " fixed=" + effectiveFixedLine +
+      " hit=" + !!(diskHit && diskHit.length) + " text=" + String(fixedText || text || "").slice(0, 24));
+    if (diskHit && diskHit.length) {
+      logTts("route", "固定台词磁盘缓存命中" + (opts && opts.lineId ? "（lineId）" : ""));
+      return diskHit.toString("base64");
+    }
+  }
+  if ((config.getConfig().tts || {}).fixedOnly && !(opts && opts.fixedLinePreload)) {
+    if (effectiveFixedLine) {
+      logTts("route", "固定台词离线模式：无缓存，跳过引擎合成（省显存；不回退系统语音）");
+      return FIXED_ONLY_MISS;
+    }
+    logTts("route", "离线模式：动态文本无固定缓存，回退系统语音");
+    return "";
+  }
   const b64 = await ttsCloneImplInner(text, opts, jobId);
   if (b64 && !isStale()) {
     audioCache.set(akey, { t: Date.now(), b64 });
@@ -132,12 +179,21 @@ async function ttsCloneImplInner(text, opts, jobId) {
     let ttsText = cleanZh;
     let jaText = "";
     if (q.speakJa) {
-      const ja = await translateToJa(clean);
-      if (ja) { jaText = ja; ttsText = ja; logTts("ja", "翻译: " + clean + " → " + ja); }
+      // 2026-09-03 修「日语预热✓却系统音/逐句跳过」②：渲染层会给情绪台词追加句尾语气词
+      // （EMOTION_SPEECH：呀！/哼！/嘛～等），翻译键与预热键（stripStage(展开台词)）不一致 →
+      // 每次播放都现场调翻译 API，超时即整句静音回退系统音。先剥已知语气词按规范键直查缓存
+      // （零 API），未命中再按原文（含语气词）现场翻译，保持既有语气朗读行为不变。
+      const canon = stripSpeechTail(clean);
+      let ja = (canon && canon !== clean) ? lookupCachedJa(canon) : "";
+      if (ja) { jaText = ja; ttsText = ja; logTts("ja", "翻译(预热缓存): " + clean.slice(0, 18) + " → " + ja.slice(0, 18)); }
       else {
-        logTts("ja", "翻译失败，静音（日语模式不退回中文引擎）");
-        if (jaFallbackCb) { const _cb = jaFallbackCb; jaFallbackCb = null; try { _cb(); } catch { /* 通知失败不影响合成 */ } }
-        return ""; // v2.5.17：日语模式任何失败一律静音，不消耗中文/云引擎（省内存）
+        ja = await translateToJa(clean);
+        if (ja) { jaText = ja; ttsText = ja; logTts("ja", "翻译: " + clean + " → " + ja); }
+        else {
+          logTts("ja", "翻译失败，静音（日语模式不退回中文引擎）");
+          if (jaFallbackCb) { const _cb = jaFallbackCb; jaFallbackCb = null; try { _cb(); } catch { /* 通知失败不影响合成 */ } }
+          return ""; // v2.5.17：日语模式任何失败一律静音，不消耗中文/云引擎（省内存）
+        }
       }
     }
     if (jaText) {
@@ -313,6 +369,10 @@ function applyBundledVoice() {
 }
 
 async function ensureGenieServer(q) {
+  if ((config.getConfig().tts || {}).fixedOnly) {
+    logTts("genie", "固定台词离线模式：阻止 Genie 启动");
+    return false;
+  }
   applyBundledVoice();
   if (genieServerChecked) return genieServerUp;
   if (genieEnsurePromise) return genieEnsurePromise;
@@ -323,7 +383,7 @@ async function ensureGenieServer(q) {
   const base = endpoint.base;
   const health = async () => {
     try {
-      const r = await fetch(base + "/health", { signal: AbortSignal.timeout(2000) });
+      const r = await safeFetch(base + "/health", { signal: AbortSignal.timeout(2000) }, { allowLoopback: endpoint.loopback });
       return r.ok && (await r.text()) === "ok";
     } catch { return false; }
   };
@@ -377,7 +437,9 @@ async function ensureGenieServer(q) {
 async function genieTts(q, clean) {
   const base = String(q.server || "").replace(/\/+$/, "");
   const callOnce = async () => {
-    const resp = await fetch(base + "/tts", {
+    const endpoint = resolveTtsEndpoint(q, 9881);
+    if (!endpoint) return null;
+    const resp = await safeFetch(base + "/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -386,7 +448,7 @@ async function genieTts(q, clean) {
         ref_text: q.refText || ""
       }),
       signal: AbortSignal.timeout(120000)
-    });
+    }, { allowLoopback: endpoint.loopback });
     if (!resp.ok) {
       const t = (await resp.text()).slice(0, 200);
       logTts("genie", "HTTP " + resp.status + ": " + t);
@@ -415,6 +477,10 @@ async function genieTts(q, clean) {
 }
 
 function ensureGsvServer(g) {
+  if ((config.getConfig().tts || {}).fixedOnly) {
+    logTts("gsv", "固定台词离线模式：阻止 GSV 启动");
+    return Promise.resolve(false);
+  }
   if (gsvEnsurePromise) return gsvEnsurePromise;
   applyBundledVoice();
   gsvEnsurePromise = ensureGsvServerImpl(config.getConfig().ttsGsv || {}).finally(() => { gsvEnsurePromise = null; });
@@ -429,7 +495,7 @@ async function ensureGsvServerImpl(g) {
   const base = endpoint.base;
   const alive = async () => {
     try {
-      const r = await fetch(base + "/set_model", { signal: AbortSignal.timeout(2000) });
+      const r = await safeFetch(base + "/set_model", { signal: AbortSignal.timeout(2000) }, { allowLoopback: endpoint.loopback });
       return r.status === 400 || r.ok; // 服务器在线即返回 400/200
     } catch { return false; }
   };
@@ -522,15 +588,18 @@ async function gsvTtsJa(g, text, emoRef) {
   }
   // 质量门：只查时长碎片（引擎偶发输出 1s 碎片）。
   // 注：不做高频频谱质检——日语摩擦音天然高频，误判率过高（曾导致大量跳句）。
-  // 阈值 0.75：实测正常输出时长恒为预期的 1.5 倍以上，毛刺碎片 ≤0.4，
-  // 0.5~0.75 区间的「半残音频」（说到一半截断）同样需要重试兜底。
+  // 阈值 0.5（2026-09-03 修「播放不完整」③）：原 0.75 会误杀语速偏快的正常句
+  // （实测 1900ms<<预期2610ms=0.73 的完整句被重试 3 次+引擎重启后跳句 → 整段缺一句）；
+  // 毛刺碎片实测 ≤0.4，0.5 仍能拦截。重试后仍不过门 → 交付最优尝试而非跳句（宁短勿缺）。
   const expectMs = Math.max(400, clean.length * 90);
   const durOk = (b) => {
     const d = wavDurationMs(b);
-    return !(d > 0 && clean.length > 6 && d < expectMs * 0.75);
+    return !(d > 0 && clean.length > 6 && d < expectMs * 0.5);
   };
+  const endpoint = resolveTtsEndpoint(g, 9880);
+  if (!endpoint) return "";
   try {
-    const resp = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(60000) });
+    const resp = await safeFetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(60000) }, { allowLoopback: endpoint.loopback });
     if (!resp.ok) {
       logTts("gsv", "HTTP " + resp.status);
       return "";
@@ -544,7 +613,7 @@ async function gsvTtsJa(g, text, emoRef) {
       const d0 = wavDurationMs(buf);
       logTts("gsv", `疑似引擎毛刺（时长${Math.round(d0)}ms << 预期${expectMs}ms）→ 第${att}/3次重试`);
       await new Promise((r) => setTimeout(r, 800 * att)); // 退避重试：引擎坏状态连发更容易连环失败
-      const resp2 = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(60000) });
+      const resp2 = await safeFetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(60000) }, { allowLoopback: endpoint.loopback });
       if (!resp2.ok) continue;
       best = Buffer.from(await resp2.arrayBuffer());
       if (best.length >= 100 && durOk(best)) return best.toString("base64");
@@ -558,7 +627,7 @@ async function gsvTtsJa(g, text, emoRef) {
       const g2 = config.getConfig().ttsGsv || {};
       const up = await restartGsvEngine(g2);
       if (up) {
-        const resp3 = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(180000) });
+        const resp3 = await safeFetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(180000) }, { allowLoopback: endpoint.loopback });
         if (resp3.ok) {
           const b3 = Buffer.from(await resp3.arrayBuffer());
           if (b3.length >= 100 && durOk(b3)) { logTts("gsv", "引擎重启后恢复正常输出"); return b3.toString("base64"); }
@@ -568,6 +637,12 @@ async function gsvTtsJa(g, text, emoRef) {
       logTts("gsv", "自动重启失败: " + (e2 && e2.message || e2));
     } finally {
       gsvAutoRestarting = false;
+    }
+    // 终败兜底（2026-09-03 修「播放不完整」③）：手里有可用音频就交付最优尝试，
+    // 不再跳句——跳句=整段回复缺一句，正是"不能完全播出来"的直接来源。
+    if (best && best.length >= 100) {
+      logTts("gsv", "质量门未过，交付最优尝试（dur=" + Math.round(wavDurationMs(best)) + "ms/预期" + expectMs + "ms）: " + clean.slice(0, 24));
+      return best.toString("base64");
     }
     logTts("gsv", "跳过该句: " + clean.slice(0, 24));
     return "";
@@ -590,7 +665,7 @@ async function gsvTtsJa(g, text, emoRef) {
       const g2 = config.getConfig().ttsGsv || {};
       const up = await restartGsvEngine(g2);
       if (up) {
-        const resp2 = await fetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(180000) });
+        const resp2 = await safeFetch(base + "/?" + params.toString(), { signal: AbortSignal.timeout(180000) }, { allowLoopback: endpoint.loopback });
         if (resp2.ok) {
           const b2 = Buffer.from(await resp2.arrayBuffer());
           if (b2.length >= 100 && durOk(b2)) { logTts("gsv", "引擎重启后本句恢复合成"); return b2.toString("base64"); }
@@ -673,7 +748,9 @@ function killPortListener(port, hint) {
 
 async function portAlive(base) {
   try {
-    const r = await fetch(base + "/set_model", { signal: AbortSignal.timeout(1500) });
+    const endpoint = resolveTtsEndpoint({ server: base, allowRemote: true, autoStart: false }, 9880);
+    if (!endpoint) return false;
+    const r = await safeFetch(base + "/set_model", { signal: AbortSignal.timeout(1500) }, { allowLoopback: endpoint.loopback });
     return r.status === 400 || r.ok; // 与 ensureGsvServer 相同的在线判定
   } catch { return false; }
 }
@@ -732,6 +809,13 @@ function sanitizeJaText(t) {
     .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/gu, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/** 剥渲染层 emotionizeText 注入的句尾情绪语气词（renderer EMOTION_SPEECH 值集合）——
+ *  剥后才能与日语预热键对齐命中磁盘翻译缓存。只剥句尾一处，正文里的同形字不动。 */
+const SPEECH_TAIL_RE = /[呀哇哼呜嗯嘛](?:[！!。．…~～\s]*)$/;
+function stripSpeechTail(t) {
+  return String(t || "").replace(SPEECH_TAIL_RE, "").trim();
 }
 
 function splitJaSentences(text) {
@@ -843,11 +927,22 @@ function runPythonWithTimeout(args, options, timeoutMs, label) {
   });
 }
 
+/** 临时文件路径守卫（Mimosa 高危：路径穿越）：与 fixed-line-cache.insideRoot 同款——
+ *  resolve 后必须仍落在目标目录内，越界直接抛错。 */
+function insideDir(dir, name) {
+  const root = path.resolve(dir);
+  const target = path.resolve(root, name);
+  if (target !== root && !target.startsWith(root + path.sep)) throw new Error("临时文件路径越界");
+  return target;
+}
+
 async function cosyTts(cosy, clean) {
-  const tag = Date.now() + "-" + Math.random().toString(36).slice(2, 8);
+  // 临时文件名：crypto 随机 + 正则白名单校验（Mimosa 高危：路径穿越），不合法直接拒绝
+  const tag = Date.now() + "-" + crypto.randomBytes(6).toString("hex");
+  if (!/^[0-9a-z-]{5,40}$/.test(tag)) throw new Error("cosyTts: 非法临时文件名");
   fs.mkdirSync(config.STORAGE.audio, { recursive: true });
-  const reqFile = path.join(config.STORAGE.audio, "tts_cosy_req_" + tag + ".json");
-  const outFile = path.join(config.STORAGE.audio, "tts_cosy_" + tag + ".mp3");
+  const reqFile = insideDir(config.STORAGE.audio, "tts_cosy_req_" + tag + ".json");
+  const outFile = insideDir(config.STORAGE.audio, "tts_cosy_" + tag + ".mp3");
   try {
     fs.writeFileSync(reqFile, JSON.stringify({
       model: cosy.model || "cosyvoice-v3.5-plus",
@@ -1015,5 +1110,5 @@ module.exports = {
   setPartSender, setJaFallbackCb,
   ttsCloneImpl, queueTts, ensureGenieServer, ensureGsvServer, restartGsvEngine,
   shutdownGenieServer, genieTts, gsvTtsJa, warmupGsv, resetGenieServer, killGsvProcesses, portAlive, killPortListener,
-  emotionAudition, missingEnginePath
+  emotionAudition, missingEnginePath, stripSpeechTail, FIXED_ONLY_MISS
 };

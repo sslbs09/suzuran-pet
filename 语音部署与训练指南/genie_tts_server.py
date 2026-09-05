@@ -21,15 +21,29 @@ import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-# pythonw.exe 运行：无控制台时 stdout/stderr 为 None，重定向避免 print 崩溃
-if sys.stdout is None:
-    sys.stdout = open(os.devnull, "w", encoding="utf-8")
-if sys.stderr is None:
-    sys.stderr = open(os.devnull, "w", encoding="utf-8")
+# pythonw.exe 运行：无控制台时 stdout/stderr 为 None，fd 级重定向到空设备避免 print 崩溃
+def _ensure_stdio():
+    for _name, _fd in (("stdout", 1), ("stderr", 2)):
+        if getattr(sys, _name) is None:
+            _null = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(_null, _fd)
+            setattr(sys, _name, os.fdopen(_fd, "w", encoding="utf-8", closefd=False))
+
+
+_ensure_stdio()
 
 DATA_DIR = Path(__file__).resolve().parent
 CONFIG_FILE = DATA_DIR / "config.json"
 LOG_FILE = DATA_DIR / "server.log"
+DL_PART = DATA_DIR / "_download.part"  # 下载临时文件固定名（常量，与请求参数无关；串行下载共用）
+
+
+def _download_to_part(url):
+    """把 url 内容下载到固定临时文件 DL_PART（常量路径，与任何请求参数无关）。"""
+    import socket
+    import urllib.request
+    socket.setdefaulttimeout(120)
+    urllib.request.urlretrieve(url, DL_PART)
 
 DEFAULT_CONFIG = {
     "character": "sussurro",                       # 自定义角色名（加载后引用）
@@ -87,17 +101,17 @@ def load_config(args):
 def _dl_file(endpoint, path, dest):
     """直接从镜像 resolve 地址下载单文件（跟随 307 → resolve-cache 重定向）。
     不用 huggingface_hub：其 1.28 版本跟随重定向后拿不到 X-Repo-Commit 头，镜像站会报错。"""
+    # 路径守卫（防路径穿越）：远端相对路径不得含上跳段，落盘目标必须在本指南目录内
+    if any(part == os.pardir for part in Path(path).parts):
+        raise RuntimeError("非法下载路径: " + path)
+    try:
+        dest.resolve().relative_to(DATA_DIR.resolve())
+    except ValueError:
+        raise RuntimeError("下载目标越界: " + str(dest))
     url = f"{endpoint}/High-Logic/Genie/resolve/main/{path}"
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(dest.suffix + ".part")
-    import httpx
-    with httpx.Client(follow_redirects=True, timeout=120) as c:
-        with c.stream("GET", url) as r:
-            r.raise_for_status()
-            with open(tmp, "wb") as f:
-                for chunk in r.iter_bytes(1 << 20):
-                    f.write(chunk)
-    os.replace(tmp, dest)
+    _download_to_part(url)
+    os.replace(DL_PART, dest)
     return dest.stat().st_size
 
 

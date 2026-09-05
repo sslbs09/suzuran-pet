@@ -30,6 +30,7 @@
 .settings-page .actions { display: flex; grid-column: 1 / -1; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
 .settings-page .actions button { margin: 0; }
 .settings-page .result { color: var(--ui-muted); font-size: 12px; }
+.settings-page .update-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
 .settings-page .result.ok { color: var(--ui-success); font-weight: 600; }
 .settings-page .result.err { color: var(--ui-danger); font-weight: 600; }
 .settings-page .hint { color: var(--ui-muted); }
@@ -126,3 +127,46 @@ body.theme-dark .settings-page .set-dirty { border-color: #4a4030; background: #
 .settings-page .set-main section:nth-of-type(10) { animation-delay: 360ms; }
 .settings-page .set-main section:nth-of-type(11) { animation-delay: 360ms; }
 @keyframes sec-in { from { opacity: 0; transform: translateY(8px); } }
+
+/* ---------- 固定台词音频池 ---------- */
+.settings-page .fixed-lines-preload { margin-top: 14px; padding: 14px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-md); background: var(--ui-surface-soft); }
+.settings-page .fixed-lines-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.settings-page .fixed-lines-profile { margin-top: 4px; font-size: 11px; }
+.settings-page .fixed-lines-summary { margin: 10px 0 7px; color: var(--ui-ink); font-size: 13px; font-weight: 650; }
+.settings-page .fixed-lines-pools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 4px; }
+.settings-page .fixed-lines-pools-title { color: var(--ui-muted); font-size: 11px; }
+.settings-page .fixed-lines-pools-box { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.settings-page .fixed-lines-pools-box label { color: var(--ui-ink); font-size: 11px; display: inline-flex; align-items: center; gap: 3px; }
+.settings-page .fixed-lines-pools-box input { width: 13px; height: 13px; accent-color: var(--ui-accent); }
+.settings-page .voice-pool-badge.offline { color: #b45309; border-color: #b45309; }
+.settings-page .fixed-lines-progress { height: 6px; overflow: hidden; border-radius: 999px; background: var(--ui-line); }
+.settings-page .fixed-lines-progress span { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--ui-accent); transition: width 180ms ease; }
+.settings-page .voice-pool-badge { padding: 4px 8px; border: 1px solid var(--ui-line); border-radius: 999px; background: var(--ui-bg); color: var(--ui-muted); font-size: 11px; white-space: nowrap; }
+.settings-page .voice-pool-badge.ready { color: var(--ui-success); border-color: var(--ui-success); }
+.settings-page .voice-pool-badge.loading { color: var(--ui-accent-strong); border-color: var(--ui-accent); }
+.settings-page .voice-pool-badge.failed { color: var(--ui-danger); border-color: var(--ui-danger); }
+.settings-page .fixed-lines-list { max-height: 260px; margin-top: 10px; overflow: auto; border-top: 1px solid var(--ui-line); }
+.settings-page .fixed-line-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 8px 2px; border-bottom: 1px dashed var(--ui-line); }
+.settings-page .fixed-line-row.has-reload { grid-template-columns: minmax(0, 1fr) auto auto; } /* 单句重载按钮（支持单独重新加载个别语句） */
+.settings-page .fixed-line-text { min-width: 0; color: var(--ui-ink); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.settings-page .fixed-line-meta { margin-top: 2px; color: var(--ui-subtle); font-size: 10px; }
+.settings-page .fixed-line-state { align-self: center; color: var(--ui-muted); font-size: 11px; white-space: nowrap; }
+.settings-page .fixed-line-state.ready { color: var(--ui-success); }
+.settings-page .fixed-line-state.failed { color: var(--ui-danger); }
+@media (prefers-reduced-motion: reduce) {
+  .settings-page .fixed-lines-progress span { transition: none; }
+}
+
+/* ---------- 日志诊断分区（v2.5.28） ---------- */
+.settings-page .logdiag-bar { align-items: flex-end; flex-wrap: wrap; gap: 10px; }
+.settings-page .logdiag-bar .col.inline { flex-direction: row; align-items: center; gap: 6px; }
+.settings-page .logdiag-pre {
+  margin-top: 10px; max-height: 340px; overflow: auto; padding: 10px;
+  border: 1px solid var(--ui-line); border-radius: 8px;
+  background: color-mix(in srgb, var(--ui-ink) 4%, transparent);
+  font-family: var(--ui-mono, Consolas, monospace); font-size: 11px; line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ui-ink);
+}
+.settings-page .logdiag-pre .log-error { color: var(--ui-danger); font-weight: 600; }
+.settings-page .logdiag-pre .log-warn { color: var(--ui-warn, #b26a00); }
+.settings-page .logdiag-pre .log-info { color: var(--ui-muted); }

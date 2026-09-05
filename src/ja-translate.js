@@ -2,6 +2,7 @@
 const config = require("./config");
 const { logTts } = require("./logger");
 const { normalizeOpenAIBase, normalizeAnthropicBase } = require("./chat-client");
+const { safeFetch, isLoopbackHost } = require("./safe-url");
 
 // 翻译缓存（简单 LRU）：相同文本不重复调 API——减少上游限流(429)压力，也加快重复句响应。
 // TTL 按结果分档：成功译文 10min 复用（cost-cut）；失败进「失败池」只做短暂冷却（FAIL_COOLDOWN），
@@ -49,11 +50,18 @@ async function translateToJa(text) {
   const c = cfg.chat || {};
   // 磁盘缓存优先（v2.5.20）：跨会话复用已翻译的固定台词——API 挂了/key 缺失也能说话。
   // 必须在 apiKey 检查之前：否则 key 失效时连缓存都查不到（"说不出来"根因之一）。
+  // 命中续期（2026-09-03 自查）：TTL 7 天且命中原本不刷新时间戳 → 固定台词整批过期后
+  // 重新逐句调 API；续期后常用品目永不过期（LRU 500 上限照旧兜底淘汰冷句）。
   const tc = require("./translate-cache");
   {
     const d = ensureTrDisk();
-    const dja = tc.get(d.map, String(text || ""));
-    if (dja !== undefined) return dja;
+    const key = String(text || "");
+    const dja = tc.get(d.map, key);
+    if (dja !== undefined) {
+      tc.set(d.map, key, dja);
+      tc.save(d.userDir, d.map);
+      return dja;
+    }
   }
   if (!c.apiKey || !c.baseUrl) return "";
   const cached = cacheGet(String(text || ""));
@@ -97,12 +105,12 @@ async function translateToJa(text) {
             max_tokens: 640, // 推理模型（如 deepseek-v4-flash）先消耗思考 token，太小会截断到 content 为空
             stream: false
           });
-      const resp = await fetch(url, {
+      const resp = await safeFetch(url, {
         method: "POST",
         headers,
         body,
         signal: AbortSignal.timeout(45000)
-      });
+      }, { allowLoopback: isLoopbackHost(new URL(url).hostname) });
       if (!resp.ok) {
         const raw = await resp.text();
         const t = raw.slice(0, 120);
@@ -141,4 +149,24 @@ async function translateToJa(text) {
   return "";
 }
 
-module.exports = { translateToJa, clearTrDisk };
+/** 仅查缓存不调 API（2026-09-03 语音键对齐）：内存 → 磁盘，未命中返回 ""。
+ *  用于运行时念白键与预热键不一致（渲染层句尾情绪语气词）时先零成本命中已预热译文。
+ *  磁盘命中同样续期（与 translateToJa 一致），保证预热批次不因 7 天 TTL 整批失效。 */
+function lookupCachedJa(text) {
+  const key = String(text || "");
+  if (!key) return "";
+  const hit = cache.get(key);
+  if (hit && !hit.fail && Date.now() - hit.t <= CACHE_TTL) {
+    cache.delete(key); cache.set(key, hit); // LRU 移到队尾
+    return hit.ja;
+  }
+  const tc = require("./translate-cache");
+  const d = ensureTrDisk();
+  const dja = tc.get(d.map, key);
+  if (dja === undefined) return "";
+  tc.set(d.map, key, dja);
+  tc.save(d.userDir, d.map);
+  return dja;
+}
+
+module.exports = { translateToJa, lookupCachedJa, clearTrDisk };

@@ -24,6 +24,7 @@ const PRESETS = {
 
 let S = {}; // 当前配置快照
 let personaDirty = false; // 人设输入框是否有未保存改动（v2.5.18 未保存条用）
+let _loadedChatUserName = ""; // TD-9：改名检测基线（语音/翻译缓存键含称呼）
 
 function setResult(el, text, ok) {
   el.textContent = text || "";
@@ -33,6 +34,68 @@ function setResult(el, text, ok) {
 async function toast(msg) {
   console.log("[设置]", msg);
 }
+
+/* ---------- 日志诊断分区（v2.5.28）：尾部读取 + 报错高亮 + 一键脱敏导出 ----------
+   数据已由主进程脱敏（log-diag.sanitizeLines）；此处只做高亮/过滤/统计与滚动跟随。
+   高亮分级与 src/log-diag.js 的 classifyLine 保持一致（关键字双端对齐，勿单边增删）。 */
+(function setupLogDiag() {
+  const pre = document.getElementById("logdiag-pre");
+  if (!pre) return;
+  const $id = (id) => document.getElementById(id);
+  const linesSel = $id("logdiag-lines"), autoChk = $id("logdiag-auto"), onlyBad = $id("logdiag-onlybad");
+  const resultEl = $id("logdiag-result");
+  let rawLines = [];
+  let autoTimer = null;
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  function classify(line) { // 与 log-diag.classifyLine 同关键字（渲染层无 require，本地对齐）
+    if (/error|Error|ERROR|异常|崩溃|失败|fail|Fail|回退系统语音|拦截非法|守卫|render-process-gone|未捕获|EISDIR|ENOENT|EPERM|Cannot /.test(line)) return "error";
+    if (/超时|timeout|Timeout|429|重试|跳过|坍缩|告警|警告|停帧|自愈|回滚|stale/.test(line)) return "warn";
+    return "info";
+  }
+  function render() {
+    const show = onlyBad.checked ? rawLines.filter((l) => classify(l) !== "info") : rawLines;
+    const stats = { error: 0, warn: 0 };
+    for (const l of rawLines) { const c = classify(l); if (c === "error") stats.error += 1; else if (c === "warn") stats.warn += 1; }
+    const stick = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24; // 尾部跟随
+    pre.innerHTML = show.map((l) => {
+      const c = classify(l);
+      return '<span class="log-line log-' + c + '">' + escapeHtml(l) + "</span>";
+    }).join("\n");
+    setResult(resultEl, L("set.logdiagStats").replace("{n}", String(rawLines.length)).replace("{e}", String(stats.error)).replace("{w}", String(stats.warn)), stats.error === 0);
+    if (stick || onlyBad.checked) pre.scrollTop = pre.scrollHeight;
+  }
+  async function refresh() {
+    try {
+      const r = await window.petAPI.logRead(Number(linesSel.value) || 500);
+      if (!r || !r.ok) { setResult(resultEl, (r && r.error) || L("set.logdiagReadFail"), false); return; }
+      rawLines = r.lines || [];
+      render();
+    } catch (e) { setResult(resultEl, String(e && e.message || e), false); }
+  }
+  $id("logdiag-refresh").addEventListener("click", refresh);
+  linesSel.addEventListener("change", refresh);
+  onlyBad.addEventListener("change", render);
+  autoChk.addEventListener("change", () => {
+    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+    if (autoChk.checked) autoTimer = setInterval(refresh, 10000); // 10s 轮询：日志尾部读取成本低（主进程读文件尾部）
+  });
+  $id("logdiag-export").addEventListener("click", async () => {
+    const btn = $id("logdiag-export");
+    btn.disabled = true;
+    setResult(resultEl, L("set.logdiagExporting"));
+    try {
+      const r = await window.petAPI.logExport(Number(linesSel.value) || 2000);
+      if (r && r.ok) setResult(resultEl, L("set.logdiagExportDone") + " " + (r.path || ""), true);
+      else if (r && r.canceled) setResult(resultEl, L("set.logdiagExportCancel"));
+      else setResult(resultEl, (r && r.error) || L("set.logdiagReadFail"), false);
+    } catch (e) { setResult(resultEl, String(e && e.message || e), false); }
+    btn.disabled = false;
+  });
+  window.addEventListener("beforeunload", () => { if (autoTimer) clearInterval(autoTimer); });
+})();
 
 /* ---------- 首跑引导清单（v2.5.26）：3 步实时完成状态 ---------- */
 async function renderOnboard(S) {
@@ -81,6 +144,7 @@ async function renderOnboard(S) {
     ck && ck.saved ? "密钥已安全保存；输入新值可替换" : "sk-…（Ollama 本地可留空）";
   $("pet-name").value = (S.pet && S.pet.name) || "苏苏洛";
   $("user-name").value = S.chat.userName || "主人";
+  _loadedChatUserName = $("user-name").value; // TD-9：改名检测基线
   $("temperature").value = S.chat.temperature ?? 0.85;
   const smp0 = (S.chat && S.chat.sampling) || {};
   $("smp-topp").value = smp0.topP ?? 0.9;
@@ -101,6 +165,7 @@ async function renderOnboard(S) {
   $("genie-ref-audio").value = genie.refAudio || "";
   $("genie-ref-text").value = genie.refText || "";
   $("genie-speak-ja").checked = !!genie.speakJa;
+  $("tts-fixed-only").checked = !!(S.tts && S.tts.fixedOnly); // 固定台词离线模式（省显存）
   $("greeting-on-start").checked = S.greetingOnStart !== false;
   // 语音方案推断
   let plan = "system";
@@ -206,6 +271,12 @@ async function renderOnboard(S) {
   // Live2D 模型列表（v2.5.1）：点选即切换（主进程保存并广播重载）
   async function loadLive2dSkins() {
     try {
+      const capability = await window.petAPI.live2dCapability();
+      if (!capability || !capability.core) {
+        const b = $("live2d-skins-list");
+        if (b) b.textContent = "（当前安装包未包含 Live2D Core，已禁用；请安装完整资源包）";
+        return;
+      }
       const skins = await window.petAPI.live2dList();
       const box = $("live2d-skins-list");
       if (!box) return;
@@ -406,8 +477,14 @@ $("btn-save-api").addEventListener("click", async () => { await doSaveApi(); });
 /* 提取为具名函数（v2.5.18）：顶部「保存全部」需要按顺序复用各分区保存逻辑 */
 async function doSaveApi() {
   const patch = readChat();
+  // TD-9（轻量版）：改名提示——翻译/语音缓存键含展开后的称呼，改名会触发相关句子重新生成
+  const newName = patch.chat.userName;
+  if (newName !== (_loadedChatUserName || "主人") && !confirm(L("set.renameCacheWarn"))) {
+    $("user-name").value = _loadedChatUserName || "主人"; // 取消则还原输入框
+    return;
+  }
   const r = await window.petAPI.saveSettings(patch);
-  if (r === true) { setResult($("test-result"), L("set.apiSaved"), true); }
+  if (r === true) { _loadedChatUserName = newName; setResult($("test-result"), L("set.apiSaved"), true); }
   else { setResult($("test-result"), L("set.saveFailed") + (r && r.message || L("set.unknown")), false); }
 }
 
@@ -501,16 +578,256 @@ async function doSaveVoice() {
   };
   const r = await window.petAPI.saveSettings(patch);
   setResult($("voice-result"), r === true ? L("set.voiceSaved") : L("set.voiceSaveFail"), r === true);
+  if (r === true) await refreshFixedLinePool();
 }
+
+/* ---------- 固定台词音频池 ---------- */
+let fixedLineStatus = null;
+let fixedLineShowAll = false;
+const fixedLinePoolsSel = new Set(); // 勾选的预加载池（空=全部）
+let fixedLinePoolsRendered = false;
+// TD-8：文案全部走 i18n 字典（set.* 键），池名映射表三语化
+const FIXED_LINE_STATE_KEYS = { pending: "set.fixedState.pending", loading: "set.fixedState.loading", ready: "set.fixedState.ready", failed: "set.fixedState.failed", cancelled: "set.fixedState.cancelled" };
+function stateLabel(state) {
+  const k = FIXED_LINE_STATE_KEYS[state];
+  return k ? L(k) : (state || L("set.fixedState.pending"));
+}
+function engineLabel(engine) {
+  const BRAND = { genie: "Genie", gsv: "GPT-SoVITS", cosy: "CosyVoice", edge: "Edge TTS" }; // 品牌名不翻译
+  return BRAND[engine] || (engine === "system" ? L("set.engineSystem") : (engine || L("set.engineUnknown")));
+}
+function poolLabel(p) {
+  if (p.startsWith("weather.")) return L("set.poolWeatherPrefix") + p.slice(8);
+  return L("set.pool." + p);
+}
+function commonPools() {
+  const h = new Date().getHours();
+  const period = h >= 5 && h < 11 ? "morning" : h >= 11 && h < 14 ? "noon" : h >= 14 && h < 18 ? "afternoon" : h >= 18 && h < 23 ? "evening" : "night";
+  return ["pat", "workflow", "proactive." + period];
+}
+function renderFixedLinePools(items) {
+  const box = $("fixed-lines-pools-box");
+  if (!box || fixedLinePoolsRendered) return;
+  const pools = [...new Set((items || []).map((i) => i.pool))];
+  if (!pools.length) return;
+  box.replaceChildren();
+  for (const p of pools) {
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.value = p;
+    cb.checked = true;
+    cb.addEventListener("change", () => {
+      if (cb.checked) fixedLinePoolsSel.delete(p); else fixedLinePoolsSel.add(p);
+      // 选中集合 = 未勾选的补集：全勾=全部（空集），全不勾=不跑（特殊标记 __none__）
+      if (!cb.checked) fixedLinePoolsSel.__none = box.querySelectorAll("input:checked").length === 0;
+    });
+    label.append(cb, document.createTextNode(poolLabel(p)));
+    box.appendChild(label);
+  }
+  fixedLinePoolsRendered = true;
+}
+function selectedPools() {
+  const box = $("fixed-lines-pools-box");
+  if (!box) return null;
+  const checked = [...box.querySelectorAll("input:checked")].map((i) => i.value);
+  const all = [...box.querySelectorAll("input")].map((i) => i.value);
+  if (checked.length === all.length) return null; // 全选=全部
+  return checked;
+}
+function formatBytes(bytes) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1024 / 1024).toFixed(1) + " MB";
+}
+function renderFixedLinePool(status = fixedLineStatus) {
+  if (!status) return;
+  const summary = status.summary || {};
+  const total = Number(summary.total) || 0;
+  const ready = Number(summary.ready) || 0;
+  const failed = Number(summary.failed) || 0;
+  const profile = status.profile || {};
+  const engine = engineLabel(profile.engine);
+  const lang = profile.language === "ja" ? L("set.langJa") : L("set.langZh");
+  $("fixed-lines-profile").textContent = `${L("set.fixedProfilePrefix")}${engine} · ${lang}${profile.voice ? " · " + profile.voice : ""}${profile.referenceAudio ? L("set.fixedRefAudio") + profile.referenceAudio : ""}`;
+  $("fixed-lines-summary").textContent = `${L("set.fixedSummaryReady")} ${ready} / ${total} · ${L("set.fixedSummaryFailed")} ${failed} · ${L("set.fixedSummaryCache")} ${formatBytes(summary.bytes)}`;
+  const bar = $("fixed-lines-progress-bar");
+  if (bar) bar.style.width = total ? Math.round((ready / total) * 100) + "%" : "0%";
+  const state = $("fixed-lines-state");
+  const running = !!status.running || status.state === "running";
+  state.textContent = status.fixedOnly ? L("set.fixedOfflineActive") : running ? L("set.fixedState.loading") : ready === total && total ? L("set.fixedAllLoaded") : failed ? L("set.fixedHasFailed") : profile.engine === "system" ? L("set.fixedNoPreload") : L("set.fixedNotStarted");
+  state.className = "voice-pool-badge " + (status.fixedOnly ? "offline" : running ? "loading" : failed ? "failed" : ready === total && total ? "ready" : "");
+  renderFixedLinePools(status.items);
+  const list = $("fixed-lines-list");
+  list.replaceChildren();
+  const items = (status.items || []).filter((item) => fixedLineShowAll || item.state !== "ready");
+  for (const item of items) {
+    const row = document.createElement("div");
+    row.className = "fixed-line-row";
+    const text = document.createElement("div");
+    text.className = "fixed-line-text";
+    text.textContent = item.text;
+    const meta = document.createElement("div");
+    meta.className = "fixed-line-meta";
+    meta.textContent = poolLabel(item.pool) + " · " + item.id;
+    text.appendChild(meta);
+    const badge = document.createElement("span");
+    badge.className = "fixed-line-state " + (item.state || "pending");
+    badge.textContent = stateLabel(item.state);
+    if (item.errorCode) badge.title = item.errorCode;
+    // 单句重新生成（语音方案非系统时提供）：合成成功覆盖旧音频，失败保留旧音频
+    if (profile.engine && profile.engine !== "system") {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "mini";
+      btn.textContent = "↻";
+      btn.title = L("set.fixedReloadOne");
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        setResult($("fixed-lines-result"), L("set.fixedReloading"));
+        try {
+          const r = await window.petAPI.reloadFixedLineAudio(item.id);
+          setResult($("fixed-lines-result"), r && r.ok ? L("set.fixedReloadDone") : (r && r.message) || L("set.fixedReloadFail"), !!(r && r.ok));
+        } catch (e) { setResult($("fixed-lines-result"), String(e.message || e), false); }
+        await refreshFixedLinePool();
+      });
+      row.className += " has-reload";
+      row.append(text, btn, badge);
+    } else {
+      row.append(text, badge);
+    }
+    list.appendChild(row);
+  }
+  $("btn-fixed-lines-toggle").textContent = fixedLineShowAll ? L("set.fixedShowUnloaded") : `${L("set.fixedShowUnloadedN")}（${total - ready}）`;
+}
+async function refreshFixedLinePool() {
+  try {
+    fixedLineStatus = await window.petAPI.getFixedLineAudioStatus();
+    renderFixedLinePool();
+  } catch (e) {
+    setResult($("fixed-lines-result"), L("set.fixedReadFail") + String(e.message || e), false);
+  }
+}
+function setFixedLineButtons(running) {
+  $("btn-fixed-lines-start").disabled = running;
+  $("btn-fixed-lines-retry").disabled = running;
+  $("btn-fixed-lines-cancel").disabled = !running;
+}
+$("btn-fixed-lines-start").addEventListener("click", async () => {
+  const pools = selectedPools();
+  if (pools && !pools.length) { setResult($("fixed-lines-result"), L("set.fixedNeedPool"), false); return; }
+  setFixedLineButtons(true);
+  setResult($("fixed-lines-result"), L("set.fixedStarting"));
+  try {
+      const r = await window.petAPI.startFixedLineAudioPreload({ retryFailed: false, pools });
+      setResult($("fixed-lines-result"), r && r.ok ? (r.state === "completed" ? L("set.fixedDone") : r.state === "completed_with_errors" ? L("set.fixedDoneErrors") : L("set.fixedPausedCont")) : (r && r.message) || L("set.fixedNotStartedRun"), !!(r && r.ok));
+  } catch (e) { setResult($("fixed-lines-result"), String(e.message || e), false); }
+  await refreshFixedLinePool();
+  setFixedLineButtons(false);
+});
+$("btn-fixed-lines-retry").addEventListener("click", async () => {
+  setFixedLineButtons(true);
+  setResult($("fixed-lines-result"), L("set.fixedRetrying"));
+  try {
+    const r = await window.petAPI.startFixedLineAudioPreload({ retryFailed: true });
+    setResult($("fixed-lines-result"), r && r.ok
+      ? (r.state === "completed" ? L("set.fixedRetryDone") : r.state === "completed_with_errors" ? L("set.fixedRetryErrors") : L("set.fixedPausedCont"))
+      : (r && r.message) || L("set.fixedNotStartedRun"), !!(r && r.ok && r.state === "completed"));
+  }
+  catch (e) { setResult($("fixed-lines-result"), String(e.message || e), false); }
+  await refreshFixedLinePool();
+  setFixedLineButtons(false);
+});
+$("btn-fixed-lines-cancel").addEventListener("click", async () => {
+  await window.petAPI.cancelFixedLineAudioPreload();
+  setResult($("fixed-lines-result"), L("set.fixedCancelRequested"), true);
+  setFixedLineButtons(false);
+});
+$("btn-fixed-lines-clear").addEventListener("click", async () => {
+  if (!confirm(L("set.fixedClearConfirm"))) return;
+  const r = await window.petAPI.clearFixedLineAudioCache();
+  setResult($("fixed-lines-result"), r && r.ok ? L("set.fixedCleared") : (r && r.message) || L("set.fixedClearFail"), !!(r && r.ok));
+  await refreshFixedLinePool();
+});
+$("btn-fixed-lines-toggle").addEventListener("click", () => {
+  fixedLineShowAll = !fixedLineShowAll;
+  $("fixed-lines-list").hidden = false;
+  renderFixedLinePool();
+});
+$("btn-fixed-lines-pools-all").addEventListener("click", () => {
+  document.querySelectorAll("#fixed-lines-pools-box input").forEach((cb) => { cb.checked = true; });
+});
+$("btn-fixed-lines-pools-common").addEventListener("click", () => {
+  const want = new Set(commonPools());
+  document.querySelectorAll("#fixed-lines-pools-box input").forEach((cb) => { cb.checked = want.has(cb.value); });
+});
+$("btn-fixed-lines-clear-old").addEventListener("click", async () => {
+  if (!confirm(L("set.fixedClearOldConfirm"))) return;
+  const r = await window.petAPI.clearOldFixedLineCaches();
+  setResult($("fixed-lines-result"), r && r.ok ? L("set.fixedClearedOldPre") + r.removed + L("set.fixedClearedOldSuf") : (r && r.message) || L("set.fixedClearOldFail"), !!(r && r.ok));
+  await refreshFixedLinePool();
+});
+if (window.petAPI.onFixedLineAudioProgress) {
+  window.petAPI.onFixedLineAudioProgress((progress) => {
+    if (fixedLineStatus) {
+      fixedLineStatus.running = progress.state === "running" || progress.state === "loading";
+      fixedLineStatus.state = progress.state;
+      fixedLineStatus.summary = progress.summary || fixedLineStatus.summary;
+      fixedLineStatus.items = fixedLineStatus.items || [];
+      if (progress.current) {
+        fixedLineStatus.items = fixedLineStatus.items.map((item) => item.id === progress.current.id ? { ...item, state: progress.state === "loading" ? "loading" : item.state } : item);
+      }
+      renderFixedLinePool();
+    }
+  });
+}
+refreshFixedLinePool();
+
 
 $("btn-open-guide").addEventListener("click", () => window.petAPI.openTtsGuide());
 
 $("btn-open-studio").addEventListener("click", () => window.petAPI.openVoiceStudio());
 
+/* ---------- 固定台词离线模式（省显存开关） ---------- */
+$("tts-fixed-only").addEventListener("change", async () => {
+  const on = $("tts-fixed-only").checked;
+  setResult($("voice-result"), on ? L("set.fixedOnlyStopping") : L("set.fixedOnlyStarting"));
+  let r;
+  try { r = await window.petAPI.setFixedOnly(on); }
+  catch (e) { r = { ok: false, message: String(e && e.message || e) }; }
+  setResult($("voice-result"),
+    r && r.ok ? (on ? L("set.fixedOnlyOn") : L("set.fixedOnlyOff")) : L("set.fixedOnlyFail") + (r && r.message || ""),
+    !!(r && r.ok));
+  await refreshFixedLinePool();
+});
+
 /* ---------- 界面语言（即时切换） ---------- */
 $("ui-lang").addEventListener("change", () => {
   window.petAPI.setUiLang($("ui-lang").value);
 });
+
+/* ---------- 软件更新（检查最新版；下载进度来自 pet:update-progress 广播） ---------- */
+$("update-version").textContent = L("set.currentVersion") + " v" + (window.petAPI.appVersion || "?");
+$("btn-check-update").addEventListener("click", async () => {
+  $("btn-check-update").disabled = true;
+  setResult($("update-result"), L("set.checkingUpdate"));
+  try {
+    const r = await window.petAPI.checkForUpdate();
+    if (!r.ok) setResult($("update-result"), L("set.updateStartFail") + (r.message || ""), false);
+    else if (!r.updateAvailable) setResult($("update-result"), L("set.upToDate") + "（v" + r.current + "）", true);
+    else if (r.downloaded) setResult($("update-result"), L("set.updateReadyRestart"), true);
+    else if (r.accepted) setResult($("update-result"), L("set.updateStartFail") + (r.reason || ""), false);
+    else setResult($("update-result"), L("set.updateDeclined"), true);
+  } catch (e) { setResult($("update-result"), String(e.message || e), false); }
+  $("btn-check-update").disabled = false;
+});
+if (window.petAPI.onUpdateProgress) {
+  window.petAPI.onUpdateProgress((pct) => {
+    const bar = $("update-progress-bar");
+    if (bar) bar.style.width = pct + "%";
+  });
+}
 
 /* ---------- 坐姿下沉量（按当前尺寸档位读写，拖动即生效） ---------- */
 function seatTierLabel(t) {
@@ -723,13 +1040,11 @@ function renderAgentClients(clients) {
     const { online, granted, seen } = AGENT_CLIENT_LABEL(c);
     info.textContent = (online ? "🟢 " : "⚪ ") + c.name + "　授权于 " + granted + "　最近 " + seen;
     info.title = "Token 只在本机使用";
-    const tok = document.createElement("button");
-    tok.textContent = "👁";
-    tok.title = "查看 Token";
-    tok.style.cssText = "border:none;background:transparent;cursor:pointer;color:#7d939a;font-size:13px;padding:0 4px;";
-    tok.addEventListener("click", () => {
-      window.alert(c.name + " 的接入 Token（仅本机 127.0.0.1 使用）：\n\n" + c.token + "\n\n请复制给该接入方。");
-    });
+    const tok = document.createElement("span");
+    tok.textContent = c.hasToken ? "🔐" : "⚠️";
+    tok.title = c.hasToken ? "Token 已安全保存；创建时的明文不会再次显示" : "该接入方没有有效 Token";
+    tok.setAttribute("aria-label", tok.title);
+    tok.style.cssText = "font-size:13px;padding:0 4px;";
     const del = document.createElement("button");
     del.textContent = "断开";
     del.title = "移除该接入方，其 token 立即失效";

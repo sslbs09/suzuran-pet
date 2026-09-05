@@ -37,6 +37,7 @@
       <a href="#sec-sense" data-i18n="set.nav.sense">👀 感知与监控</a>
       <a href="#sec-weather" data-i18n="set.nav.weather">🌤 天气</a>
       <a href="#sec-security" data-i18n="set.nav.security">🔐 密钥与凭据</a>
+      <a href="#sec-logdiag" data-i18n="set.nav.logdiag">📋 日志诊断</a>
     </nav>
   </aside>
   <div class="set-main">
@@ -403,6 +404,40 @@
     <div class="row">
       <label class="col"><input id="feat-emotional" type="checkbox" checked /><span data-i18n="set.featEmotional">🎭 情绪语音（根据情绪调整语速音调）</span></label>
     </div>
+    <div class="row">
+      <div class="col switch-row">
+        <span data-i18n="set.fixedOnlyHint">🔋 固定台词离线模式：本地语音引擎关停释放显存，已缓存的固定台词照常播；未缓存的话不现场合成（回退系统语音）</span>
+        <label class="switch"><input type="checkbox" id="tts-fixed-only" /><span class="slider"></span></label>
+      </div>
+    </div>
+    <div id="fixed-lines-preload" class="fixed-lines-preload" aria-live="polite">
+      <div class="fixed-lines-head">
+        <div>
+          <b data-i18n="set.fixedPoolTitle">🔊 固定台词音频池</b>
+          <div id="fixed-lines-profile" class="hint" data-i18n="set.fixedProfileLoading">读取当前语音方案…</div>
+        </div>
+        <span id="fixed-lines-state" class="voice-pool-badge" data-i18n="set.fixedStateUnchecked">未检查</span>
+      </div>
+      <div id="fixed-lines-summary" class="fixed-lines-summary">已加载 0 / 0 · 失败 0 · 缓存 0 B</div>
+      <div class="fixed-lines-progress"><span id="fixed-lines-progress-bar"></span></div>
+      <div class="fixed-lines-pools" id="fixed-lines-pools">
+        <span class="fixed-lines-pools-title" data-i18n="set.fixedPoolsTitle">预加载范围：</span>
+        <span id="fixed-lines-pools-box" class="fixed-lines-pools-box"></span>
+        <button id="btn-fixed-lines-pools-all" type="button" class="mini" data-i18n="set.fixedPoolsAll">全选</button>
+        <button id="btn-fixed-lines-pools-common" type="button" class="mini" data-i18n="set.fixedPoolsCommon">常用</button>
+      </div>
+      <p class="hint" data-i18n="set.fixedPoolHint">只生成当前语音方案，缓存长期有效（空间超限自动按最久未用清理）；云端语音可能产生 API 费用。系统语音无需预加载。</p>
+      <div class="actions">
+        <button id="btn-fixed-lines-start" type="button" class="primary" data-i18n="set.fixedBtnStart">▶ 开始/继续预加载</button>
+        <button id="btn-fixed-lines-retry" type="button" data-i18n="set.fixedBtnRetry">↻ 重试失败</button>
+        <button id="btn-fixed-lines-cancel" type="button" data-i18n="set.fixedBtnCancel">暂停</button>
+        <button id="btn-fixed-lines-clear" type="button" class="danger" data-i18n="set.fixedBtnClear">清空当前缓存</button>
+        <button id="btn-fixed-lines-clear-old" type="button" data-i18n="set.fixedBtnClearOld">清理旧版本缓存</button>
+        <button id="btn-fixed-lines-toggle" type="button" data-i18n="set.fixedBtnToggle">显示未加载/失败</button>
+        <span id="fixed-lines-result" class="result"></span>
+      </div>
+      <div id="fixed-lines-list" class="fixed-lines-list" hidden></div>
+    </div>
   </section>
 
   <!-- ============ 4. 系统与高级（原「④ 其他」，v2.5.18 改名明义） ============ -->
@@ -420,6 +455,16 @@
         </select>
       </label>
       <label class="col">
+        <span data-i18n="set.updateRow">软件更新</span>
+        <div class="update-row">
+          <span id="update-version" class="hint"></span>
+          <button id="btn-check-update" type="button" data-i18n="set.checkUpdate">检查更新</button>
+        </div>
+        <div id="update-result" class="result"></div>
+        <div class="fixed-lines-progress"><span id="update-progress-bar"></span></div>
+        <div class="hint" data-i18n="set.updateAutoCheckHint">每 24 小时自动静默检查一次新版本</div>
+      </label>
+      <label class="col">
         <span data-i18n="set.petSize">桌宠大小</span>
         <select id="pet-scale">
           <option value="0.6">60%</option>
@@ -433,7 +478,7 @@
         </select>
       </label>
       <label class="col">
-        <span data-i18n="set.seatSink">坐姿下沉量（坐下时腿垂进任务栏的深度）</span>
+        <span data-i18n="set.seatSink">坐姿下沉量（坐姿时腿垂进任务栏多少）</span>
         <input id="seat-sink" type="range" min="0" max="80" step="2" />
         <span id="seat-sink-val" style="font-weight:600;">30 px</span>
       </label>
@@ -638,12 +683,35 @@
       <span id="import-result" class="result"></span>
     </div>
   </section>
+
+  <!-- ============ 日志诊断（v2.5.28）：只读尾部 + 报错高亮 + 一键脱敏导出 ============ -->
+  <section id="sec-logdiag">
+    <h2 data-i18n="set.logdiagTitle">📋 日志诊断</h2>
+    <p class="hint" data-i18n="set.logdiagHint">显示运行日志（tts.log）最近内容：红色=错误（需人工查看）、黄色=警告（可自愈）。一键导出会自动脱敏（密钥、URL 参数、路径中的用户名、窗口标题、精确坐标、PID、称呼），可放心发给他人或开发者。</p>
+    <div class="row actions logdiag-bar">
+      <label class="col"><span data-i18n="set.logdiagLines">行数</span>
+        <select id="logdiag-lines">
+          <option value="200">200</option>
+          <option value="500" selected>500</option>
+          <option value="1000">1000</option>
+          <option value="2000">2000</option>
+        </select>
+      </label>
+      <label class="col inline"><input type="checkbox" id="logdiag-auto" /><span data-i18n="set.logdiagAuto">自动刷新</span></label>
+      <label class="col inline"><input type="checkbox" id="logdiag-onlybad" /><span data-i18n="set.logdiagOnlyBad">只看错误/警告</span></label>
+      <button id="logdiag-refresh" type="button" data-i18n="set.logdiagRefresh">🔄 刷新</button>
+      <button id="logdiag-export" type="button" class="primary" data-i18n="set.logdiagExport">⬇ 一键导出（脱敏）</button>
+    </div>
+    <div id="logdiag-result" class="result"></div>
+    <pre id="logdiag-pre" class="logdiag-pre" tabindex="0"></pre>
+  </section>
   </div><!-- /.set-main -->
   </div><!-- /.set-layout -->
   </div>
 
   <script src="i18n.js"></script>
   <script src="theme.js"></script>
+  <script src="theme-init.js"></script>
   <script src="settings.js"></script>
 </body>
 </html>

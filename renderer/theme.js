@@ -13,14 +13,20 @@
     const h = (now || new Date()).getHours();
     return h >= 19 || h < 6; // auto：19 点-6 点
   }
-  /** 挂/摘 body.theme-dark */
+  /** 挂/摘 body.theme-dark；v2.5.28 同步挂到 html 根——根级 color-scheme 才能管辖
+   *  body 主滚动条与画布底色（body 级对滚动条不生效，曾留白色滚动条带，用户实测截图） */
   function apply(theme) {
-    document.body.classList.toggle("theme-dark", isDark(theme));
+    var dark = isDark(theme);
+    document.body.classList.toggle("theme-dark", dark);
+    if (document.documentElement) document.documentElement.classList.toggle("theme-dark", dark);
   }
-  /** 辅助窗口引导：打开时读配置 + 订阅主题变更（主进程 v2.5.26 起全窗广播） */
-  function init() {
+  /** 辅助窗口引导：打开时读配置 + 订阅主题变更（主进程 v2.5.26 起全窗广播）。
+   *  override：主进程 loadFile 经 query 传入的主题（首帧同步应用，消除浅色闪屏）；缺省走 getState。 */
+  function init(override) {
     try {
-      if (window.petAPI && window.petAPI.getState) {
+      if (override === "dark" || override === "light" || override === "auto" || override === "system") {
+        apply(override);
+      } else if (window.petAPI && window.petAPI.getState) {
         window.petAPI.getState().then(function (st) { apply(st && st.theme); }).catch(function () { /* 忽略 */ });
       }
       if (window.petAPI && window.petAPI.onThemeChanged) window.petAPI.onThemeChanged(function (th) { apply(th); });

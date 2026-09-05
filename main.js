@@ -6,7 +6,7 @@
  */
 "use strict";
 
-const { app, protocol, safeStorage, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, screen, dialog, Notification, powerMonitor } = require("electron");
+const { app, protocol, safeStorage, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, screen, dialog, Notification, powerMonitor, nativeTheme } = require("electron");
 // v2.5.22 修复（P0-2）：删除无条件 disableHardwareAcceleration——
 // 此前与下方按 softRender 配置的判断冲突，导致设置页「软件渲染」开关形同虚设。
 // 硬件加速默认开启（Spine/PIXI 性能更好）；若遇 GPU 崩溃，用户在设置开启 softRender 即回退 CPU 渲染。
@@ -18,6 +18,7 @@ const fs = require("fs");
 // v2.5.22 供应链加固（P3）：xlsx 改用 vendor 本地副本（xlsx.js CommonJS，API 覆盖日程导入全部用法）——
 // 不再依赖 CDN tarball（无完整性校验风险），node_modules 减 7.8MB。
 const XLSX = require("./vendor/xlsx.js");
+const { safeFetch } = require("./src/safe-url");
 
 // 产品名升级迁移（v2.5.18）：productName 从「苏苏洛桌宠 1.1 正式版」改为「苏苏洛桌宠 2.5 正式版」。
 // Electron 的 userData 路径由 productName 决定，不改名则老用户数据"凭空消失"。
@@ -56,6 +57,9 @@ const { logTts } = require("./src/logger");
 const { buildTrayItems } = require("./src/tray-menu");
 const fileGuard = require("./src/file-guard");
 const lines = require("./src/lines");
+const fixedLineCache = require("./src/fixed-line-cache");
+const fixedLinePreloader = require("./src/fixed-line-preloader");
+const fixedLines = require("./src/fixed-lines");
 const memory = require("./src/memory");
 const bond = require("./src/bond");
 const { randInt, easeImpact, clampScale, runPowerShell } = require("./src/utils");
@@ -65,7 +69,11 @@ const focusWatch = require("./src/focus-watch"); // 专注/离开状态机纯函
 const updater = require("./src/updater"); // asar-swap 自动更新（v2.5.26 ③）
 const weather = require("./src/weather"); // 免费天气 Open-Meteo（v2.5.26）
 const walkCore = require("./src/walk-core");
-const { createAskQueue } = require("./src/ask-queue"); // /chat 串行化并发锁（2026-08-27 提取，可单测）
+const { createTaskQueue } = require("./src/task-queue");
+const { createConversationService, classifyError } = require("./src/conversation-service"); // TD-4：会话单写者（统一任务ID/取消/错误码）
+const { createLineGate } = require("./src/line-gate");
+const { transitionSleep, createWorkflowSignalState, recordWorkflowSignal, consumeWorkflowSignal, requeueWorkflowSignal } = require("./src/dialogue-state");
+const { hashToken, safeTokenEqual, tokenMatches, sanitizeClients } = require("./src/agent-auth");
 const { createDebounceBuffer } = require("./src/message-buffer"); // 消息生成防抖缓冲（2026-08-27 提取，可单测）
 const renderModeMod = require("./src/render-mode"); // 渲染模式归一化 + 切换贴地坐标（2026-08-27 提取，可单测）
 const { planRigDelete } = require("./src/rig-delete"); // 2.5D 皮肤删除计划（2026-08-27 提取，可单测）
@@ -112,11 +120,19 @@ let moodWin = null; // 表情管理窗口
 let termsWin = null; // 使用条款确认窗口
 let scheduleWin = null; // 日程管理窗口
 let psdWin = null;      // PSD 角色工具窗口（v2.1）
-let agentApiAbort = null; // Agent 接口当前请求的中止控制器
+let agentApiAbort = null; // 兼容旧状态读取；新 Agent 请求由 agentTaskQueue 按 task id 管理
 let agentLastSeenFlushAt = 0; // Agent lastSeen 落盘节流（P2-3：60s 内最多写一次 config.json）
 let agentTaskStatus = { state: "idle", text: "", since: 0 }; // 反幻觉任务状态：仅真实信息（zcode 任务），供气泡展示与 /status 接口
-let agentAskQueue = createAskQueue(3);   // /chat 串行化并发锁（v2.6：防双发双倍 API 费 + 历史乱序；队列满 429 兜底）
-let activeReq = null; // { id, sender, abort }
+const agentTaskQueue = createTaskQueue(3);
+let agentServer = null;
+let agentServerPort = 0;
+let agentServerState = "disabled";
+const lineGate = createLineGate();
+const workflowSignal = createWorkflowSignalState();
+let workflowFlushTimer = null;
+let workflowPendingText = "";
+let workflowPendingEmotion = "idle";
+const conversation = createConversationService(); // TD-4：聊天/重新生成共用单写者；sender 经任务 meta 携带
 const askBuffer = createDebounceBuffer(); // 消息生成防抖（v2.6）：生成/合成中来的消息只留最新一条，回合结束补发
 let pendingAskTimer = null;               // 合并窗口定时器（每次新消息重置）
 const ASK_COALESCE_MS = 300;              // 连续快速发送的合并窗口：窗口内多条只留最后一条
@@ -212,7 +228,7 @@ function sitOnTaskbar() {
     wa.y + wa.height + walk.groundGap - b.height
   );
   showWindow();
-  walk.seated = true;
+  walk.seated = skinHasSit; // 无坐下动画皮肤恢复为站立
   walk.resting = true;
   walk.perched = false;
   walk.gotoPerch = false;
@@ -235,7 +251,11 @@ function clampPetToWorkArea(reason = "显示器变化") {
       win.setPosition(Math.round(x), Math.round(y));
       logTts("display", reason + "，已钳制到工作区");
     }
-    applyLayer();
+    if (walkState.seatReanchorOnResizeDecision({ seated: walk.seated, perched: walk.perched, dragPaused: walk.dragPaused, flight: walk.flight, jump: walk.jump })) {
+      applySeatPosition();
+    } else {
+      applyLayer();
+    }
   } catch (e) {
     logTts("display", reason + "，坐标钳制失败: " + (e && e.message || e));
   }
@@ -519,10 +539,13 @@ function openSettings() {
     resizable: true,
     title: "苏苏洛 · 设置",
     autoHideMenuBar: true,
+    backgroundColor: "#1b2226", // 深色底：消除打开瞬间白闪（v2.5.28）
     webPreferences: winChild.childWebPrefs(config.APP_DIR)
   });
   settingsWin.setMenuBarVisibility(false);
-  settingsWin.loadFile(path.join(config.APP_DIR, "renderer", "settings.html"));
+  settingsWin.loadFile(path.join(config.APP_DIR, "renderer", "settings.html"), {
+    query: { theme: config.getConfig().theme || "auto" } // 首帧同步应用主题（theme-init 读参数，不等 IPC）
+  });
 attachCrashDiag(settingsWin, "settings");
     settingsWin.show();
     settingsWin.focus();
@@ -587,27 +610,130 @@ function openDocs() {
   attachCrashDiag(docsWin, "docs");
   docsWin.on("closed", () => { docsWin = null; });
 }
-// 自动更新（v2.5.26 ③）：检查→确认→下载 pending→退出时替换。手动触发、可回滚
+// 自动更新（v2.5.26 ③）：检查→确认→下载 pending→退出时替换。手动触发、可回滚。
+// 2026-09-03 体验补全：下载进度上报 + 启动静默检查（≥24h 一次）+ 设置页「检查更新」入口。
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+function updateCheckMarkerPath() { return path.join(config.STORAGE.userDir, "update-check.json"); }
+function noteUpdateChecked() {
+  try { fs.writeFileSync(updateCheckMarkerPath(), JSON.stringify({ at: Date.now() })); } catch { /* 忽略 */ }
+}
+function lastUpdateCheckAt() {
+  try { return Number(JSON.parse(fs.readFileSync(updateCheckMarkerPath(), "utf8")).at) || 0; } catch { return 0; }
+}
+function sendUpdateProgress(pct) {
+  sendToRenderer("pet:toast", "⬇ " + pct + "%");
+  if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send("pet:update-progress", pct);
+}
+/** 更新确认框 → 带进度下载（SHA-256 校验，fail closed）→ 退出后 ps1 备份替换重启（探活失败自动回滚） */
+async function runUpdateFlow(plan) {
+  const lang = config.getConfig().uiLang || "zh";
+  const { response } = await dialog.showMessageBox({
+    type: "question",
+    buttons: [i18n.t(lang, "tray.updateNow"), i18n.t(lang, "tray.updateLater")],
+    defaultId: 0, cancelId: 1,
+    message: `${i18n.t(lang, "tray.newVersion")} ${plan.version}`,
+  });
+  if (response !== 0) return { accepted: false, downloaded: false };
+  let lastSent = -100;
+  const dl = await updater.downloadPendingProgress(plan, (pct) => {
+    if (pct >= 100 || pct - lastSent >= 20) { lastSent = pct; sendUpdateProgress(pct); }
+  });
+  if (!dl.ok) { // TD-6：含 SHA-256 校验失败（fail closed），原因进日志
+    logTts("update", "更新包下载/校验失败: " + (dl.reason || ""));
+    dialog.showMessageBox({ type: "error", message: i18n.t(lang, "tray.updateFail") });
+    return { accepted: true, downloaded: false, reason: dl.reason };
+  }
+  logTts("update", "更新包校验通过，退出后自动替换重启（健康检查回滚已挂）");
+  sendToRenderer("pet:toast", i18n.t(lang, "tray.updateRestarting"));
+  // 2026-09-03 审计：applyOnExit 失败（安装目录不可写，写 ps1 被拒）此前被静默吞掉——
+  // 用户以为更新成功，退出后什么都没发生。失败必须明确告知。
+  if (!updater.applyOnExit(app.getPath("exe"))) {
+    logTts("update", "applyOnExit 失败：安装目录不可写");
+    dialog.showMessageBox({ type: "error", message: i18n.t(lang, "tray.updateApplyFail") });
+    return { accepted: true, downloaded: true, applied: false };
+  }
+  quitting = true;
+  setTimeout(() => app.quit(), 800); // 留一拍让 toast 发出去
+  return { accepted: true, downloaded: true, applied: true };
+}
 async function trayCheckUpdate() {
   const lang = config.getConfig().uiLang || "zh";
   try {
     sendToRenderer("pet:toast", i18n.t(lang, "tray.checkingUpdate"));
-    const plan = await updater.checkForUpdate(app.getVersion());
-    if (!plan) { dialog.showMessageBox({ type: "info", title: "苏苏洛桌宠", message: i18n.t(lang, "tray.alreadyLatest") }); return; }
-    const { response } = await dialog.showMessageBox({
-      type: "question",
-      buttons: [i18n.t(lang, "tray.updateNow"), i18n.t(lang, "tray.updateLater")],
-      defaultId: 0, cancelId: 1,
-      message: `${i18n.t(lang, "tray.newVersion")} ${plan.version}`,
-    });
-    if (response !== 0) return;
-    const ok = await updater.downloadPending(plan);
-    if (!ok) { dialog.showMessageBox({ type: "error", message: i18n.t(lang, "tray.updateFail") }); return; }
-    const exe = app.getPath("exe");
-    updater.applyOnExit(exe);
-    quitting = true;
-    app.quit(); // 退出后由 apply-update.ps1 备份+替换+重启
+    const d = await updater.checkForUpdateDetailed(app.getVersion());
+    noteUpdateChecked();
+    if (!d.ok) { // 2026-09-03 审计：网络失败不再误报"已是最新"
+      logTts("update", "检查更新失败: " + d.error);
+      dialog.showMessageBox({ type: "error", message: i18n.t(lang, "tray.updateCheckFail") + d.error + "）" });
+      return;
+    }
+    if (!d.plan) { dialog.showMessageBox({ type: "info", title: "苏苏洛桌宠", message: i18n.t(lang, "tray.alreadyLatest") }); return; }
+    await runUpdateFlow(d.plan);
   } catch (e) { logTts("update", "检查更新异常: " + (e && e.message || e)); }
+}
+/** 启动静默检查（≥24h 一次，静默记 marker）：发现新版才弹确认框帮用户走完更新 */
+async function startupUpdateCheck() {
+  try {
+    if (Date.now() - lastUpdateCheckAt() < UPDATE_CHECK_INTERVAL_MS) return;
+    const d = await updater.checkForUpdateDetailed(app.getVersion());
+    noteUpdateChecked();
+    if (!d.ok) { logTts("update", "启动检查失败（网络不可达?）: " + d.error); return; } // 静默检查不打扰
+    if (d.plan) { logTts("update", "启动检查发现新版本 " + d.plan.version + "，弹确认框"); await runUpdateFlow(d.plan); }
+    else logTts("update", "启动检查：已是最新 " + app.getVersion());
+  } catch (e) { logTts("update", "启动检查更新异常: " + (e && e.message || e)); }
+}
+ipcMain.handle("pet:check-update", async () => { // 设置页「检查更新」入口
+  try {
+    const d = await updater.checkForUpdateDetailed(app.getVersion());
+    noteUpdateChecked();
+    if (!d.ok) return { ok: false, message: i18n.t(config.getConfig().uiLang || "zh", "tray.updateCheckFail") + d.error + "）" };
+    if (!d.plan) return { ok: true, updateAvailable: false, current: app.getVersion() };
+    const r = await runUpdateFlow(d.plan);
+    return { ok: true, updateAvailable: true, current: app.getVersion(), latest: d.plan.version, ...r };
+  } catch (e) { return { ok: false, message: String(e && e.message || e) }; }
+});
+
+/** zip 覆盖解压升级兜底（2026-09-03 审计）：发布包用 --asar=false 打包，最终用户首次安装运行
+ *  resources/app 散目录；第一次自动更新后 resources/app.asar 出现，Electron 的加载顺序是
+ *  {app.asar, app, default_app.asar}（node_bindings.cc）——asar 永远压过散目录。此后若再用
+ *  新版 zip 覆盖解压（散目录=新版、旧 asar 仍在），应用会继续跑旧 asar →"装了新版还是旧的"。
+ *  启动时发现散目录版本比运行版本新 → 判定旧 asar 已过时：退出后删除它并重启，加载散目录新版。
+ *  marker（userData/stale-asar-handoff.json）防循环：上次交接后仍从 asar 启动（删除失败?）
+ *  就不再反复重启；版本追平后自动清 marker。 */
+let staleAsarHandoffDone = false;
+function relaunchIfAppDirNewer() {
+  try {
+    if (!app.isPackaged || staleAsarHandoffDone) return;
+    const res = process.resourcesPath;
+    const appDir = path.join(res, "app");
+    const asarPath = path.join(res, "app.asar");
+    const marker = path.join(config.STORAGE.userDir, "stale-asar-handoff.json");
+    if (!fs.existsSync(appDir)) return;
+    if (!fs.existsSync(asarPath)) { try { fs.rmSync(marker, { force: true }); } catch { /* 忽略 */ } return; }
+    const dirVer = String((JSON.parse(fs.readFileSync(path.join(appDir, "package.json"), "utf8")) || {}).version || "");
+    if (!dirVer) return;
+    const cmp = updater.compareSemver(dirVer, app.getVersion());
+    if (cmp === 0) { try { fs.rmSync(marker, { force: true }); } catch { /* 忽略 */ } return; }
+    if (cmp < 0) return; // 散目录比当前旧：正常（asar 已更新），遗留散目录不动
+    if (fs.existsSync(marker)) { logTts("update", "散目录仍是新版但上次交接未生效（旧 asar 删除失败?），跳过自动交接"); return; }
+    fs.writeFileSync(marker, JSON.stringify({ dirVer, wasRunning: app.getVersion(), at: Date.now() }));
+    logTts("update", `散目录 v${dirVer} 比运行中的 v${app.getVersion()} 新：退出后移除旧 app.asar 并重启加载新版`);
+    const ps1 = path.join(res, "drop-stale-asar.ps1");
+    const script = [
+      "param($exe,$res)",
+      "Start-Sleep 2",
+      "Remove-Item -Path (Join-Path $res 'app.asar') -Force -ErrorAction SilentlyContinue",
+      "Start-Process $exe"
+    ].join("\n");
+    fs.writeFileSync(ps1, script);
+    const { spawn } = require("child_process");
+    spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, app.getPath("exe"), res], { detached: true, stdio: "ignore" }).unref();
+    staleAsarHandoffDone = true;
+    quitting = true;
+    setTimeout(() => app.exit(0), 500);
+  } catch (e) {
+    try { logTts("update", "散目录版本检查失败: " + (e && e.message || e)); } catch { /* 忽略 */ }
+  }
 }
 
 async function diagClick() { // 点击穿透诊断：在渲染层实时抓取交互相关状态写日志
@@ -673,6 +799,11 @@ ipcMain.handle("pet:live2d-list", () => {
     (dir, mf) => "pet-user://live2d/" + encodeURIComponent(dir) + "/" + encodeURIComponent(mf));
   return out;
 });
+// Live2D Core 与内置模型属于可选发行资源；缺失时返回空列表，设置页应明确提示而不是进入空白模式。
+ipcMain.handle("pet:live2d-capability", () => ({
+  core: fs.existsSync(path.join(config.APP_DIR, "renderer", "live2dcubismcore.min.js")),
+  builtinModels: fs.existsSync(path.join(config.APP_DIR, "renderer", "live2d", "models"))
+}));
 let rendererReloadAt = 0;
 ipcMain.on("pet:set-live2d-scale", (_e, v) => { // Live2D 角色大小（实时生效）
   const s = Math.max(0.3, Math.min(1.5, Number(v) || 1));
@@ -699,16 +830,21 @@ ipcMain.handle("pet:regenerate", async () => { // Swipes：重新生成最后一
   const hist = rows.slice(0, -1); // 上下文去掉旧回复
   const text = (() => { for (let i = hist.length - 1; i >= 0; i--) if (hist[i].role === "user") return hist[i].content; return ""; })();
   if (!text) return null;
+  // TD-4：重生成也走单写者——此前游离在任务管理之外，可与正在进行的聊天并发（历史写入竞态）
+  const task = conversation.start({ kind: "regenerate" });
+  if (!task.ok) { logTts("chat", "regenerate 跳过: " + task.code); return null; }
   sendToRenderer("pet:thinking", { mode: "chat" });
   try {
     const r = await chatClient.chat({
       persona: personaCache || config.getPersonaText(), history: hist, text,
       state: petStateNote(),
-      onChunk: (d) => sendToRenderer("pet:chunk", { mode: "chat", text: d })
+      signal: task.signal,
+      onChunk: (d) => { if (task.isCurrent()) sendToRenderer("pet:chunk", { mode: "chat", text: d }); }
     });
     let newFull = r.text || "";
     const mi = newFull.indexOf("【情绪");
     if (mi >= 0) newFull = newFull.slice(0, mi);
+    if (!task.isCurrent()) return null; // 生成期间被取消：丢弃结果不写历史
     const entry = history.updateLast("chat", "assistant", (x) => {
       x.swipes = Array.isArray(x.swipes) && x.swipes.length ? x.swipes : [x.content];
       x.swipes.push(newFull);
@@ -721,10 +857,22 @@ ipcMain.handle("pet:regenerate", async () => { // Swipes：重新生成最后一
       swipes: entry.swipes, swipeIndex: entry.swipeIndex });
     return { full: newFull };
   } catch (e) { logTts("chat", "regenerate 失败: " + (e && e.message || e)); sendToRenderer("pet:done", { mode: "chat", full: "", emotion: "" }); return null; }
+  finally { conversation.finish(task.id); }
 });
+/** 原生窗口外观同步（v2.5.28）：把用户主题映射到 nativeTheme.themeSource——
+ *  Windows 下所有 BrowserWindow 的原生标题栏/滚动条随深浅色变化，设置页深色 UI
+ *  不再顶着白色标题栏（用户反馈"上页面和滚轮与设置 UI 一体"）。auto 沿用 19-6 点规则。 */
+function syncNativeTheme() {
+  try {
+    const t = config.getConfig().theme || "auto";
+    if (t === "dark" || t === "light" || t === "system") nativeTheme.themeSource = t;
+    else { const h = new Date().getHours(); nativeTheme.themeSource = (h >= 19 || h < 6) ? "dark" : "light"; }
+  } catch { /* 忽略 */ }
+}
 ipcMain.handle("pet:set-theme", (_e, theme) => {
   const v = ["auto", "light", "dark", "system"].includes(theme) ? theme : "auto";
   config.saveConfig({ theme: v });
+  syncNativeTheme(); // 原生标题栏/滚动条同步（设置页与 UI 一体）
   broadcastToRenderers("pet:theme-changed", v); // v2.5.26：全窗实时跟随
   return true;
 });
@@ -1096,11 +1244,6 @@ ipcMain.handle("pet:set-seat-sink", (_e, v) => {
 });
 
 /* ---------- 本地 Agent 调用接口（仅 127.0.0.1；可选 Bearer token） ---------- */
-function safeTokenEqual(actual, expected) {
-  const a = Buffer.from(String(actual || ""));
-  const b = Buffer.from(String(expected || ""));
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
 async function readAgentJson(req, maxBytes) {
   const declared = Number(req.headers["content-length"] || 0);
   if (declared > maxBytes) return { error: 413 };
@@ -1116,9 +1259,20 @@ async function readAgentJson(req, maxBytes) {
     return body && typeof body === "object" && !Array.isArray(body) ? { body } : { error: 400 };
   } catch { return { error: 400 }; }
 }
+function stopAgentApi() {
+  const server = agentServer;
+  agentServer = null;
+  agentServerPort = 0;
+  agentServerState = "disabled";
+  agentTaskQueue.cancelAll();
+  if (!server) return Promise.resolve();
+  return new Promise((resolve) => server.close(() => resolve()));
+}
+
 function startAgentApi() {
+  if (agentServer) return;
   const a = config.getConfig().agentApi || {};
-  if (!a.enabled) return;
+  if (!a.enabled) { agentServerState = "disabled"; return; }
   // v2.5.22 优化（P2-3）：Agent lastSeen 落盘节流状态（60s 内最多写一次 config）
   agentLastSeenFlushAt = 0;
   // v2.5.22 安全加固（P1-4）：master token 与 clients 都为空时自动生成随机 token——
@@ -1134,6 +1288,8 @@ function startAgentApi() {
     }
   }
   const port = Math.max(1, Math.min(65535, parseInt(a.port, 10) || 8765));
+  agentServerPort = port;
+  agentServerState = "starting";
   const server = http.createServer(async (req, res) => {
     let sent = false;
     const send = (code, obj, headers = {}) => {
@@ -1155,14 +1311,15 @@ function startAgentApi() {
       const am = authHdr.match(/^Bearer ([^\s]+)$/i);
       const provided = am ? am[1] : "";
       const master = String(apiCfg.bearerToken || "");
-      const clients = Array.isArray(apiCfg.clients) ? apiCfg.clients : [];
-      const clientHit = provided ? clients.find((c) => c && c.token && safeTokenEqual(provided, c.token)) : null;
+      const rawClients = Array.isArray(apiCfg.clients) ? apiCfg.clients : [];
+      const clientIndex = provided ? rawClients.findIndex((c) => tokenMatches(provided, c)) : -1;
+      const clientHit = clientIndex >= 0 ? rawClients[clientIndex] : null;
       // 优化建议 P0：#3 写操作（/chat /stop 消耗 LLM 额度/改状态）始终要求认证——
       // 即使 master/clients 全空（如自动生成 token 失败）也不开放无认证写入；
       // /health 只读健康探测放行（供接入方探活），其余读操作维持原鉴权
       const isWrite = url.pathname === "/chat" || url.pathname === "/stop";
-      const needsAuth = url.pathname === "/health" ? false : (isWrite || !!master || clients.length > 0);
-      const authOk = provided && (safeTokenEqual(provided, master) || !!clientHit);
+      const needsAuth = url.pathname === "/health" ? false : (isWrite || !!master || sanitizeClients(rawClients).length > 0);
+      const authOk = !!provided && (safeTokenEqual(provided, master) || clientIndex >= 0);
       if (needsAuth && !authOk) { send(401, { ok: false, error: "unauthorized" }, { "WWW-Authenticate": "Bearer" }); return; }
       if (clientHit) { // 接入名单：记录该 agent 最近活跃（在线状态展示）
         clientHit.lastSeen = Date.now();
@@ -1170,7 +1327,7 @@ function startAgentApi() {
         const _now = Date.now();
         if (!agentLastSeenFlushAt || _now - agentLastSeenFlushAt >= 60000) {
           agentLastSeenFlushAt = _now;
-          config.saveConfig({ agentApi: { ...apiCfg, clients } });
+          config.saveConfig({ agentApi: { ...apiCfg, clients: rawClients } }); // saveConfig 统一归一化 clients[].token → tokenHash
         }
       }
       if (url.pathname === "/health") {
@@ -1183,6 +1340,7 @@ function startAgentApi() {
         send(200, {
           ok: true,
           enabled: apiCfg.statusEnabled !== false,
+          listener: { state: agentServerState, port: agentServerPort },
           state: apiCfg.statusEnabled === false ? "disabled" : st.state,
           text: st.text,
           since: st.since,
@@ -1192,8 +1350,9 @@ function startAgentApi() {
         return;
       }
       if (url.pathname === "/stop") {
+        const cancelled = agentTaskQueue.cancelAll();
         if (agentApiAbort) agentApiAbort.abort();
-        send(200, { ok: true });
+        send(200, { ok: true, cancelled });
         return;
       }
       if (!/^application\/json(?:\s*;|$)/i.test(String(req.headers["content-type"] || ""))) { send(415, { ok: false, error: "application/json required" }); return; }
@@ -1208,40 +1367,47 @@ function startAgentApi() {
         text = text.slice(w.length).trim();
       }
       if (!text) { send(400, { ok: false, error: "text 不能为空" }); return; }
-      const abort = new AbortController();
-      agentApiAbort = abort;
-      // 并发锁：队列深度兜底（防并发轰炸拖垮服务/双倍 API 费）
-      const enq = agentAskQueue.enqueue(() => chatClient.chat({
-        persona: buildChatPersona(),
-        history: history.recent("chat", cfg.chat.maxHistoryTurns || 10),
-        text,
-        state: petStateNote(),
-        signal: abort.signal,
-        onChunk: () => {},
-      }));
+      // 任务按 id 管理：/stop 可同时取消正在执行和排队请求
+      const enq = agentTaskQueue.enqueue(({ id, signal }) => {
+        agentApiAbort = new AbortController();
+        signal.addEventListener("abort", () => agentApiAbort.abort(), { once: true });
+        return chatClient.chat({
+          persona: buildChatPersona(),
+          history: history.recent("chat", cfg.chat.maxHistoryTurns || 10),
+          text,
+          state: petStateNote(),
+          signal: agentApiAbort.signal,
+          onChunk: () => {},
+        });
+      });
       if (enq.busy) {
-        if (agentApiAbort === abort) agentApiAbort = null; // 未入队的请求不挂 abort
         send(429, { ok: false, error: "请求繁忙（并发队列已满），请稍后重试" });
         return;
       }
       try {
-        // /chat 串行化（v2.6）：并发请求依次处理，历史不乱序、不多花 API 费；失败不断链（src/ask-queue）
         const r = await enq.done;
         history.append({ ts: Date.now(), mode: "chat", role: "user", content: text });
         history.append({ ts: Date.now(), mode: "chat", role: "assistant", content: r.text });
-        send(200, { ok: true, reply: r.text, emotion: r.emotion || "" });
+        send(200, { ok: true, taskId: enq.id, reply: r.text, emotion: r.emotion || "" });
         maybeWorkflowComment(); // 观察 AI 工作流：外部 AI/脚本通过 Agent 接口找她时偶尔嘀咕
       } catch (e) {
         send(500, { ok: false, error: String(e.message || e) });
       } finally {
-        if (agentApiAbort === abort) agentApiAbort = null;
+        agentApiAbort = null;
       }
     } catch (e) {
       send(500, { ok: false, error: String(e.message || e) });
     }
   });
-  server.on("error", (e) => console.error("[SuzuranPet] Agent 接口启动失败:", e.message));
-  server.listen(port, "127.0.0.1", () => console.log("[SuzuranPet] Agent 接口已启动 http://127.0.0.1:" + port));
+  agentServer = server;
+  server.on("error", (e) => {
+    agentServerState = "error";
+    console.error("[SuzuranPet] Agent 接口启动失败:", e.message);
+  });
+  server.listen(port, "127.0.0.1", () => {
+    agentServerState = "running";
+    console.log("[SuzuranPet] Agent 接口已启动 http://127.0.0.1:" + port);
+  });
   // Slowloris/慢速连接防御：请求头/体超时收紧 + 连接数上限（此前挂起连接可占住资源导致正常请求超时）
   try {
     server.requestTimeout = 10000;   // 完整请求超时 10s
@@ -1319,12 +1485,14 @@ ipcMain.handle("pet:apply-voice", async (_e, { audioPath, text }) => {
     const up = await tts.ensureGenieServer(g);
     if (!up) return { ok: false, message: "Genie 服务器不可用，请查看服务器日志" };
     const base = String(g.server || "http://127.0.0.1:9881").replace(/\/+$/, "");
-    const resp = await fetch(base + "/set_reference", {
+    const endpoint = (() => { try { const u = new URL(base); return { base, loopback: /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(u.hostname) }; } catch { return null; } })();
+    if (!endpoint) return { ok: false, message: "语音服务器地址无效" };
+    const resp = await safeFetch(base + "/set_reference", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ref_audio: audioPath, ref_text: cleanText }),
       signal: AbortSignal.timeout(30000)
-    });
+    }, { allowLoopback: endpoint.loopback });
     if (!resp.ok) {
       const t = (await resp.text()).slice(0, 200);
       return { ok: false, message: "服务器返回 " + resp.status + ": " + t };
@@ -1354,14 +1522,16 @@ ipcMain.handle("pet:tts-preview", async (_e, { text, refAudio, refText }) => {
     const up = await tts.ensureGenieServer(g);
     if (!up) return { ok: false, message: "Genie 服务器不可用" };
     const base = String(g.server || "http://127.0.0.1:9881").replace(/\/+$/, "");
+    const endpoint = (() => { try { const u = new URL(base); return { loopback: /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(u.hostname) }; } catch { return null; } })();
+    if (!endpoint) return { ok: false, message: "语音服务器地址无效" };
     const clean = String(text || "").trim().slice(0, 120);
     if (!clean) return { ok: false, message: "试听内容为空" };
-    const resp = await fetch(base + "/tts", {
+    const resp = await safeFetch(base + "/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: clean, ref_audio: refAudio || "", ref_text: refText || "" }),
       signal: AbortSignal.timeout(120000)
-    });
+    }, { allowLoopback: endpoint.loopback });
     if (!resp.ok) {
       const t = (await resp.text()).slice(0, 200);
       return { ok: false, message: "HTTP " + resp.status + ": " + t };
@@ -1479,14 +1649,37 @@ ipcMain.handle("pet:set-weather", (_e, patch) => {
 });
 
 function sendProactive(text, emotion, { force = false } = {}) {
-  if (!force && !isWindowVisible()) return;
-  if (!force && awaySince) return; // 专注/离开模式：静默不打扰（v2.5.26）
+  if (!force && !isWindowVisible()) return false;
+  if (!force && awaySince) return false; // 专注/离开模式：静默不打扰（v2.5.26）
   let t = String(text || "");
   let emo = emotion;
   // 台词级情绪细标（v2.5.26）：行首【撒娇/傲娇/惊讶/开心/温柔】覆盖池默认，标记不进气泡/朗读
   const m = t.match(/^【(撒娇|傲娇|惊讶|开心|温柔)】/);
   if (m) { emo = m[1]; t = t.slice(m[0].length); }
-  sendToRenderer("pet:proactive", { text: t, emotion: emo });
+  // 全局台词闸门（v2.5.27）：跨来源 30s 冷却 + 最近 5 条规范化去重；force 提醒可越冷却但仍去重
+  const gate = lineGate.admit(t, { force });
+  if (!gate.accepted) {
+    logTts("lines", "跳过台词: " + gate.reason);
+    return false;
+  }
+  // lineId 透传（v2.5.27）：固定台词反查稳定 ID，渲染层 speak 带回 → TTS 按 ID 直查磁盘缓存，
+  // 不再依赖文本匹配（同文本不同池/情绪不会串音）。
+  // 反查兜底（2026-09-03 修「日语加载成功却播系统音/不完整」①）：调用方情绪（LINE_MOODS 事件
+  // 映射/天气"温柔"等）与池默认情绪不一致时严格匹配必失败（实测 60/358 句）→ 已预加载音频
+  // 命中不了，退回现场合成。同文本多池重复已被 manifest 去重，文本兜底不会串条目。
+  let lineId = null;
+  let fixedLine = false;
+  try {
+    const it = fixedLineCache.findItem(chatVars(), t, emo) || fixedLineCache.findItemText(chatVars(), t) || fixedLines.findItemNormalized(chatVars(), t);
+    lineId = it ? it.id : null;
+    fixedLine = !!it;
+    if (fixedLine) {
+      const profile = fixedLineCache.profileFromConfig(config.getConfig());
+      logTts("route", "固定台词入队 fp=" + fixedLineCache.pathsFor(profile).fingerprint + " lineId=" + lineId + " text=" + t.slice(0, 24));
+    }
+  } catch { /* 反查失败走文本匹配兜底 */ }
+  sendToRenderer("pet:proactive", { text: t, emotion: emo, force, lineId, fixedLine });
+  return true;
 }
 
 function sendScheduleDue(item) {
@@ -1564,18 +1757,50 @@ const personifyCooldowns = {}; // event → 上次发言时间
 const appBootTs = Date.now(); // 启动 15s 内不触发「睡醒」等开场台词（避免与开场白重复）
 function maybePersonify(event, { chance = 0.3, cooldownMs = 60000 } = {}) {
   if (config.getConfig().personify === false) return; // 设置页开关
-  if (activeReq) return; // 对话中不插话
+  if (conversation.isBusy()) return; // 对话中不插话（TD-4 单写者）
   if (Date.now() - appBootTs < 15000 && event === "wake") return; // 启动开场白窗口
   if (Math.random() > chance) return;
   const last = personifyCooldowns[event] || 0;
   if (Date.now() - last < cooldownMs) return;
-  const pool = lines.PERSONIFY_LINES[event];
-  if (!pool || !pool.length) return;
+  // 入睡台词按时段（白天=午休口吻，晚上=晚安），sleep 没有独立池
+  const line = event === "sleep"
+    ? lines.pickSleepLine(chatVars())
+    : lines.PERSONIFY_LINES[event]
+      ? lines.pickTpl(lines.PERSONIFY_LINES[event], chatVars())
+      : "";
+  if (!line) return;
   personifyCooldowns[event] = Date.now();
-  // 入睡台词按时段（白天=午休口吻，晚上=晚安），见 lines.pickSleepLine
-  const line = event === "sleep" ? lines.pickSleepLine(chatVars()) : lines.pickTpl(pool, chatVars());
   sendProactive(line, lines.LINE_MOODS[event] || "happy"); // 场景情绪→音色分档（v2.5.26）：被抛=惊讶/被逮=傲娇/睡醒=温柔
 }
+function emitWorkflowSignal(source) {
+  workflowPendingText = lines.pickTpl(lines.WORKFLOW_LINES, chatVars());
+  workflowPendingEmotion = lines.LINE_MOODS.workflow || "idle"; // 温柔档（v2.5.26 场景情绪）
+  recordWorkflowSignal(workflowSignal, source);
+  if (workflowFlushTimer) return;
+  workflowFlushTimer = setTimeout(() => {
+    workflowFlushTimer = null;
+    consumeWorkflowSignalNow();
+  }, 1500);
+}
+function consumeWorkflowSignalNow() {
+  const result = consumeWorkflowSignal(workflowSignal, Date.now(), {
+    busy: conversation.isBusy() || agentTaskQueue.isBusy(),
+    sleeping: !!walk.sleeping
+  });
+  if (!result.accepted) {
+    if (result.reason === "busy" || result.reason === "sleeping") {
+      if (!workflowFlushTimer) workflowFlushTimer = setTimeout(() => { workflowFlushTimer = null; consumeWorkflowSignalNow(); }, 5000);
+    }
+    return false;
+  }
+  const sent = sendProactive(workflowPendingText, workflowPendingEmotion);
+  if (!sent) {
+    requeueWorkflowSignal(workflowSignal, result.sources);
+    if (!workflowFlushTimer) workflowFlushTimer = setTimeout(() => { workflowFlushTimer = null; consumeWorkflowSignalNow(); }, 5000);
+  }
+  return sent;
+}
+
 /** 观察 AI 工作流（v2.3）：Agent 接口被外部 AI/脚本调用时，偶尔小声嘀咕 */
 const workflowCalls = [];
 const workflowCommentThrottle = lines.throttled(8 * 60 * 1000); // 8 分钟只嘀咕一次
@@ -1585,7 +1810,7 @@ function maybeWorkflowComment() {
   workflowCalls.push(now);
   if (!workflowCommentThrottle()) return;
   if (Math.random() > 0.25) return;
-  sendProactive(lines.pickTpl(lines.WORKFLOW_LINES, chatVars()), lines.LINE_MOODS.workflow); // 温柔档（v2.5.26）
+  emitWorkflowSignal("agent");
 }
 
 /* ---------- 感知工作区活动（v2.5.3）：她会在你改代码时小声嘀咕 ----------
@@ -1612,15 +1837,13 @@ function wsWatchable(p) {
 function wsDebounceFire() {
   wsPending = false;
   if (wsWatchThrottle()) {
-    const line = lines.pickTpl(lines.WORKFLOW_LINES, chatVars());
-    sendProactive(line, lines.LINE_MOODS.workflow); // 温柔档音色（v2.5.26）
-    logTts("watch", "工作区活动 → " + line);
+    emitWorkflowSignal("workspace"); // v2.5.27：统一经 workflow 信号聚合，忙/睡时延后消费
   }
 }
 function startWorkspaceWatch(cfg0) {
   stopWorkspaceWatch();
   const w = (cfg0 && cfg0.features && cfg0.features.workspaceWatch) || {};
-  const cooldownMs = Math.max(60, Number(w.cooldownMin) || 5) * 60 * 1000;
+  const cooldownMs = Math.max(1, Number(w.cooldownMin) || 5) * 60 * 1000;
   wsWatchThrottle = lines.throttled(cooldownMs);
   // fs.watch 递归监听（Windows 支持 recursive）：事件驱动，替代 5s 全树轮询
   for (const d of wsWatchDirs()) {
@@ -1646,11 +1869,7 @@ function startWorkspaceWatch(cfg0) {
         const sig = wsScanSignature();
         if (sig !== wsWatchSig) {
           wsWatchSig = sig;
-          if (wsWatchThrottle()) {
-            const line = lines.pickTpl(lines.WORKFLOW_LINES, chatVars());
-            sendProactive(line, lines.LINE_MOODS.workflow); // 温柔档音色（v2.5.26）
-            logTts("watch", "工作区活动 → " + line);
-          }
+          if (wsWatchThrottle()) emitWorkflowSignal("workspace");
         }
       }
     } catch { /* 忽略 */ }
@@ -1711,7 +1930,7 @@ async function handleAskInner(sender, { id, text }) {
     sender.send("pet:error", { id, message: "请先阅读并同意《使用条款与隐私政策》后使用" });
     return;
   }
-  if (activeReq) {
+  if (conversation.isBusy()) {
     // v2.6 消息生成防抖：上一句还在生成/合成时再来消息，不再直接报错——
     // 只缓冲最新一条（连续快速发送只留最后一条），当前回合结束后自动补发（src/message-buffer）
     askBuffer.push({ sender, payload: { id, text } });
@@ -1774,9 +1993,13 @@ async function handleAskInner(sender, { id, text }) {
   if (mode === "zcode" && !config.getConfig().zcodeEnabled) mode = "chat"; // 任务模式未启用 → 走聊天
   const taskText = mode === "zcode" ? router.route(clean).task : clean;
 
-  const abort = new AbortController();
-  activeReq = { id, sender, abort, cancelled: false };
-  const isCurrent = () => activeReq && activeReq.id === id && !activeReq.cancelled;
+  const task = conversation.start({ kind: mode, meta: { sender } });
+  if (!task.ok) { // 极小竞态：busy 检查后、启动前又有任务进来 → 走生成防抖缓冲
+    askBuffer.push({ sender, payload: { id, text } });
+    logTts("chat", "生成防抖: 单写者竞态缓冲");
+    return;
+  }
+  const isCurrent = () => task.isCurrent();
   history.append({ ts: Date.now(), mode, role: "user", content: clean });
   // 长期记忆（v2.5）：规则式提取事实（称谓/喜好/生日/健康/近期安排），仅本机存储
   if (config.getConfig().features && config.getConfig().features.longTermMemory) {
@@ -1820,7 +2043,7 @@ async function handleAskInner(sender, { id, text }) {
         full = await zcodeClient.runZcodeTask({
           prompt: taskText,
           persona: personaCache,
-          signal: abort.signal,
+          signal: task.signal,
           onChunk: (d) => { if (isCurrent()) sender.send("pet:chunk", { id, mode, text: d }); }
         });
       } finally {
@@ -1836,7 +2059,7 @@ async function handleAskInner(sender, { id, text }) {
         history: history.recent("chat", config.getConfig().chat.maxHistoryTurns || 20),
         text: clean,
         state: petStateNote(), // v2.3 此刻状态注：时段/位置，驱动情绪与台词一致
-        signal: abort.signal,
+        signal: task.signal,
         onChunk: (d) => { if (isCurrent()) sender.send("pet:chunk", { id, mode, text: d }); }
       });
       full = r.text;
@@ -1866,10 +2089,11 @@ async function handleAskInner(sender, { id, text }) {
     }
   } catch (err) {
     if (err.name !== "AbortError" && isCurrent()) {
-      sender.send("pet:error", { id, message: String(err.message || err) });
+      // TD-4：pet:error 携带统一错误码（CANCELLED/HTTP_ERROR/TIMEOUT/INTERNAL），渲染层不必解析文本
+      sender.send("pet:error", { id, code: classifyError(err), message: String(err.message || err) });
     }
   } finally {
-    if (activeReq && activeReq.id === id) activeReq = null;
+    conversation.finish(id);
   }
 }
 
@@ -1879,12 +2103,12 @@ ipcMain.on("pet:stop", () => {
   // 主动停止：同时丢弃生成防抖缓冲（用户要的是静默，不是补发）
   if (pendingAskTimer) { clearTimeout(pendingAskTimer); pendingAskTimer = null; }
   askBuffer.clear();
-  if (activeReq) {
-    activeReq.cancelled = true;
-    const s = activeReq.sender;
-    activeReq.abort.abort();
+  const cur = conversation.snapshot();
+  if (cur) {
+    conversation.cancelCurrent(); // TD-4：统一取消（聊天/重新生成均经由单写者）
     // 通知渲染层复位 busy（中止路径不再发 done/error，仅靠主进程兜底会卡住输入/停止按钮）
-    try { if (s && !s.isDestroyed()) s.send("pet:stopped", { id: activeReq.id }); } catch { /* 窗口已销毁忽略 */ }
+    const s = cur.meta && cur.meta.sender;
+    try { if (s && !s.isDestroyed()) s.send("pet:stopped", { id: cur.id }); } catch { /* 窗口已销毁忽略 */ }
   }
 });
 ipcMain.handle("pet:get-state", () => {
@@ -1909,7 +2133,10 @@ ipcMain.handle("pet:get-state", () => {
     emotionalVoice: !!(cfg.features && cfg.features.emotionalVoice !== false), // 情绪语音开关（语速/音调/语气词）
     emotionVoice: cfg.emotionVoice || {}, // 情绪音色分档开关（v2.6）：{撒娇:true,…}，缺省=启用
     firstRunAt: cfg.firstRunAt || 0, // 首次启动时间戳（陪伴时间）
-    ttsCloud: { enabled: !!(cfg.ttsCloud?.enabled || cfg.ttsCosy?.enabled || cfg.ttsGenie?.enabled) },
+    // 渲染层用它决定"是否调用 speakClone 克隆链路"（false = 直接系统语音）。
+    // 2026-09-03 补 GSV-only 日语模式：genie/cosy/cloud 全关但 speakJa+GSV 开着的用户
+    // 此前被判成 false → 渲染层从不调 speakClone → 日语引擎再正常也永远系统音。
+    ttsCloud: { enabled: !!(cfg.ttsCloud?.enabled || cfg.ttsCosy?.enabled || cfg.ttsGenie?.enabled || (cfg.ttsGsv?.enabled && cfg.ttsGenie?.speakJa)) },
     winSize: { width: cfg.window.width || 260, height: cfg.window.height || 200 },
     hasUserSprite: fs.existsSync(path.join(config.STORAGE.spritesUser, "sprite.png")),
     renderMode: renderModeMod.renderModeOf(cfg.renderMode),
@@ -1925,7 +2152,7 @@ ipcMain.handle("pet:get-state", () => {
     softRender: !!cfg.softRender, // 软件渲染（重启生效）
     fileGuard: !!cfg.fileGuard, // 蜜标监控（默认关）
     walking: !!cfg.walking,
-    walkState: { active: walk.active, resting: walk.resting, perched: walk.perched, seated: walk.seated, face: walk.face, paused: walk.paused },
+    walkState: { active: walk.active, resting: walk.resting, perched: walk.perched, seated: walk.seated, face: walk.face, paused: walk.paused, sleeping: walk.sleeping },
     dimMode: !!cfg.dimMode,
     hiddenAtStart: !isWindowVisible()
   };
@@ -1956,7 +2183,7 @@ ipcMain.handle("pet:add-agent-client", (_e, name) => {
     const clients = Array.isArray(cfg.agentApi.clients) ? cfg.agentApi.clients.slice() : [];
     if (clients.some((c) => c.name === n)) return { ok: false, message: "该名称已存在，请换一个" };
     const token = crypto.randomBytes(24).toString("base64url");
-    clients.push({ name: n, token, grantedAt: Date.now(), lastSeen: 0 });
+    clients.push({ name: n, tokenHash: hashToken(token), grantedAt: Date.now(), lastSeen: 0 });
     config.saveConfig({ agentApi: { ...(cfg.agentApi || {}), clients } });
     return { ok: true, name: n, token };
   } catch (e) { return { ok: false, message: String(e && e.message || e) }; }
@@ -1996,7 +2223,12 @@ ipcMain.handle("pet:save-settings", (_e, patch) => {
     }
     if (Object.keys(secrets).length) config.replaceSecrets(secrets);
     const before = config.getConfig();
+    const oldAgent = before.agentApi || {};
+    const nextAgent = safePatch.agentApi ? { ...oldAgent, ...safePatch.agentApi } : oldAgent;
     config.saveConfig(safePatch);
+    if (safePatch.agentApi && (oldAgent.enabled !== nextAgent.enabled || Number(oldAgent.port) !== Number(nextAgent.port))) {
+      stopAgentApi().then(() => startAgentApi()).catch((e) => logTts("agent", "重绑失败: " + (e && e.message || e)));
+    }
     refreshTrayMenu();
     const after = config.getConfig();
     if ((after.pet && after.pet.name) !== (before.pet && before.pet.name)) refreshPetName();
@@ -2107,13 +2339,59 @@ ipcMain.handle("pet:list-models", async (_e, o = {}) => {
     return { ok: false, message: String(e.message || e) };
   }
 });
-ipcMain.handle("pet:open-tts-guide", (_e, fileName) => { openTtsGuide(fileName); return true; });
+ipcMain.handle("pet:fixed-lines-status", () => {
+  const st = fixedLinePreloader.status(config.getConfig(), chatVars());
+  st.fixedOnly = !!(config.getConfig().tts || {}).fixedOnly; // 离线模式徽标（设置页展示）
+  return st;
+});
+ipcMain.handle("pet:fixed-lines-start", async (event, options = {}) => {
+  const result = await fixedLinePreloader.start({
+    config: config.getConfig(),
+    vars: chatVars(),
+    retryFailed: !!options.retryFailed,
+    pools: Array.isArray(options.pools) && options.pools.length ? options.pools : null, // 按池勾选预加载
+    onProgress: (progress) => {
+      if (win && !win.isDestroyed()) win.webContents.send("pet:fixed-lines-progress", progress);
+      if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send("pet:fixed-lines-progress", progress);
+    }
+  });
+  return result;
+});
+ipcMain.handle("pet:fixed-lines-cancel", () => ({ ok: fixedLinePreloader.cancel() }));
+ipcMain.handle("pet:fixed-lines-reload-one", async (event, itemId) => { // 单句重新生成（设置页 ↻）
+  return fixedLinePreloader.reloadOne({
+    config: config.getConfig(),
+    vars: chatVars(),
+    itemId: String(itemId || ""),
+    onProgress: (progress) => {
+      if (win && !win.isDestroyed()) win.webContents.send("pet:fixed-lines-progress", progress);
+      if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send("pet:fixed-lines-progress", progress);
+    }
+  });
+});
+ipcMain.handle("pet:fixed-lines-clear", () => {
+  try {
+    const profile = fixedLineCache.profileFromConfig(config.getConfig());
+    fixedLineCache.clear(profile);
+    return { ok: true };
+  } catch (e) { return { ok: false, message: String(e.message || e) }; }
+});
+ipcMain.handle("pet:fixed-lines-clear-old", () => {
+  try {
+    const profile = fixedLineCache.profileFromConfig(config.getConfig());
+    const removed = fixedLineCache.clearOldFingerprints(fixedLineCache.pathsFor(profile).fingerprint);
+    return { ok: true, removed };
+  } catch (e) { return { ok: false, message: String(e.message || e) }; }
+});
+
+
 ipcMain.handle("pet:clear-history", () => {
   try {
-    fs.mkdirSync(path.dirname(config.STORAGE.history), { recursive: true });
-    fs.writeFileSync(config.STORAGE.history, "", "utf8");
-    return true;
-  } catch { return false; }
+    return history.clear();
+  } catch (e) {
+    logTts("history", "清除历史失败: " + String(e && (e.message || e) || e));
+    return false;
+  }
 });
 
 /* ---------- 新功能 IPC ---------- */
@@ -2318,7 +2596,8 @@ ipcMain.on("pet:pat", () => {
   sendProactive(lines.pickTpl(lines.PAT_LINES, chatVars()), patMood, { force: true });
 });
 // 主动搭话 / 人格化开关（v2.3，设置页单独开启）
-function proactiveMin() { return (config.getConfig().features && config.getConfig().features.proactiveMin) || 8; }
+const { PROACTIVE_DEFAULTS } = features;
+function proactiveMin() { return (config.getConfig().features && config.getConfig().features.proactiveMin) || PROACTIVE_DEFAULTS.intervalMin; }
 // 记忆管理（v2.5.2）：设置页查看/删除/清空
 ipcMain.handle("pet:get-memory", () => {
   try {
@@ -2560,7 +2839,7 @@ function dragSeatUpdate(final = false) {
       seated = true;                                   // 任务栏完整坐姿磁吸
       magnet = "taskbar";
       walk.taskbarHang = false;
-      ny = waBottom + walk.groundGap - b.height + getSeatSink();
+      ny = waBottom + walk.groundGap - b.height + effectiveSeatSink();
       nx = Math.min(Math.max(b.x, walkMinX(wa)), wa.x + wa.width - b.width);
     } else if (freeDragMode && final && feet > waBottom - 40 && feet < waBottom + 20) {
       // 任务栏半挂：保留释放高度，仅有限下探，不强制塞入坐姿下沉量（原 -120/+80 → -40/+20 收窄）
@@ -2588,7 +2867,7 @@ function dragSeatUpdate(final = false) {
       if (best) {
         seated = true;                                 // 图标顶磁吸
         magnet = "icon";
-        ny = best.y + walk.groundGap - b.height + getSeatSink(); // 任务栏同款下沉：臀坐图标沿、腿垂进图标格
+        ny = best.y + walk.groundGap - b.height + effectiveSeatSink(); // 任务栏同款下沉：臀坐图标沿、腿垂进图标格（无坐下动画则不下沉）
         nx = Math.round(best.x - charCx);
       }
     } else {
@@ -2650,6 +2929,7 @@ function dragSeatUpdate(final = false) {
 /* ---------- 桌面行走 v2（仅 Spine 模式，与 GIF 表情系统完全独立）
    地面 = 任务栏上沿；水平左右走动、走走停停；偶尔跳到桌面程序窗口顶上坐下休息（Sit）。 ---------- */
 const walk = walkCore.createWalkState(); // 行走状态（walk-core 提供，纯数据）
+let skinHasSit = true; // 当前皮肤是否有可播的坐下动画（渲染层皮肤加载后上报；false 时坐姿不做下沉，修复"站着脚陷进任务栏"）
 const WALK_TICK_MS = 40;
 const WALK_SPEED = 1.2;                        // 每 tick 像素 ≈ 30px/s
 function walkSpeed() {                         // 托盘速度档位倍率（借鉴 Ark-Pets 可调移速）
@@ -2681,7 +2961,7 @@ function walkSetPosition(x, y, where) {
 function walkBroadcast() {
   sendToRenderer("pet:walking", {
     active: walk.active, resting: walk.resting, perched: walk.perched, seated: walk.seated, face: walk.face,
-    paused: walk.paused // 暂停也广播：渲染层据此切站立待机，不挂走路动画
+    paused: walk.paused, sleeping: walk.sleeping // 暂停/睡眠都广播：渲染层切待机/睡眠动画
   });
 }
 
@@ -2798,8 +3078,8 @@ function walkFlightTick() {
     walk.perchBarrier = { hwnd: landingBarrier.hwnd, left: landingBarrier.left, right: landingBarrier.right, top: landingBarrier.top, title: landingBarrier.title };
   } else {
     // 物理积分已经精确落在任务栏地面；不可再由坐姿定位叠加下沉量。
-    walk.seated = true;
-    walk.sunk = true;
+    walk.seated = skinHasSit;
+    walk.sunk = skinHasSit;
   }
   walkSetPosition(nx, landingFloorY, "flight-settle");
   walkBroadcast();
@@ -2819,6 +3099,8 @@ function walkFlightTick() {
  * 其余档位（含普通大/特大）统一用标准值。设置页滑杆可按档位覆盖，存 config.walkSeatSink。 */
 function seatSinkTier() { return walkGeo.seatSinkTierOf(clampScale((config.getConfig().window || {}).scale), config.getConfig().spineSkinId); }
 function getSeatSink() { return walkGeo.seatSinkOf(clampScale((config.getConfig().window || {}).scale), config.getConfig().spineSkinId, config.getConfig().walkSeatSink); }
+/** 有效坐姿下沉：皮肤无坐下动画时为 0——否则窗口下沉但角色仍站姿，脚看起来陷进任务栏 */
+function effectiveSeatSink() { return skinHasSit ? getSeatSink() : 0; }
 
 /* ---------- 行走左边界补偿＋动作时长 ----------
  * 角色渲染在窗口右侧条带内、左侧是气泡预留区：按 charInset 放宽左边界，让角色能贴到屏幕左缘；
@@ -2872,10 +3154,29 @@ function applySeatPosition() {
   const b = win.getBounds();
   const wa = walkGeo.workAreaOf(screen, b);
   const baseY = wa.y + wa.height + walk.groundGap - b.height;   // 站立贴地
-  const targetY = walk.seated ? baseY + getSeatSink() : baseY;  // 坐姿下沉（按尺寸档位）
+  const targetY = walk.seated ? baseY + effectiveSeatSink() : baseY;  // 坐姿下沉（按尺寸档位；无坐下动画皮肤不下沉）
   walk.sunk = walk.seated;
   if (Math.abs(b.y - targetY) > 1) win.setPosition(b.x, Math.round(targetY));
   applyLayer(walk.seated || walk.active); // 接触任务栏表面时保证在任务栏之上
+}
+
+/** 进入休息姿态（相位机/落地/瞬态守卫共用）：有坐下动画皮肤→坐姿下沉；
+ *  无坐下动画皮肤→站立休息（seated=false），避免"站着发呆却按坐姿调度"的怪异观感。 */
+function enterRestPose() {
+  walk.resting = true;
+  if (skinHasSit) { walk.seated = true; }
+  else { walk.seated = false; walk.sunk = false; }
+  applySeatPosition();
+}
+
+/** 坐姿窗口尺寸变化重锚（TD-1 winter 悬空坐）：气泡开/关走 pet:set-size 改变窗口高度，
+ *  窗口顶不动、底边随动，clamp 后坐姿脚底偏离任务栏沿口；且放大暂停（zoomPaused）期间
+ *  walkTick 的 5s 坐姿自愈不跑——悬空一直持续到气泡关闭/起身。凡坐姿中的尺寸变化都立即重锚。
+ *  判定抽到 walk-state 纯函数（v2.5.26 收敛①惯例），副作用留主干。 */
+function reseatAfterWindowSizeChange() {
+  if (!win || win.isDestroyed() || config.getConfig().renderMode !== "spine") return;
+  if (!walkState.seatReanchorOnResizeDecision({ seated: walk.seated, perched: walk.perched, dragPaused: walk.dragPaused, flight: walk.flight, jump: walk.jump })) return;
+  applySeatPosition();
 }
 
 function chooseWalkBehavior() {
@@ -2920,12 +3221,14 @@ async function walkOnPhaseEnd() {
       walkSchedulePhase(randInt(8000, 15000));   // 刚站下先稳住两轮（避免反复起坐），到期还没动作再落座
       return;
     } else {
-      walk._standLoops = 0;                 // 站够仍无新决策 → 落座休息，避免永久站桩
-      walk.seated = true;
-      applySeatPosition();
+      walk._standLoops = 0;                 // 站够仍无新决策 → 休息（有坐姿动画坐下了，无则站立歇脚）
+      enterRestPose();
       walkBroadcast();
-      walkSchedulePhase(sitPhaseMs());
-      return;
+      if (skinHasSit) {
+        walkSchedulePhase(sitPhaseMs());
+        return;
+      }
+      // 无坐下动画皮肤：seated 不会置真，必须落到下方行为决策，否则永远在站立循环里走不出去
     }
   }
   if (walk.resting) {
@@ -2938,17 +3241,13 @@ async function walkOnPhaseEnd() {
         return;
       }
       // 屏障/图标不可用时，沿用普通待机回退。
-      walk.resting = true;
-      walk.seated = true;
-      applySeatPosition();
+      enterRestPose();
       walkBroadcast();
       walkSchedulePhase(sitPhaseMs());
       return;
     }
     if (behavior === "idle") {
-      walk.resting = true;
-      walk.seated = true;
-      applySeatPosition();
+      enterRestPose();
       walkBroadcast();
       walkSchedulePhase(sitPhaseMs());
       return;
@@ -2961,10 +3260,8 @@ async function walkOnPhaseEnd() {
     if (desktopIconMode()) listDesktopIcons(); // 预取图标缓存，供行走引导判断
     walkSchedulePhase(walkPhaseMs());
   } else {                                  // 散步结束 → 坐下休息（Sit）
-    walk.resting = true;
-    walk.seated = true;
-    applySeatPosition();                   // 坐下：腿垂进任务栏
-    logTts("walk", `自主坐下: x=${Math.round(win.getBounds().x)} y=${Math.round(win.getBounds().y)} sink=${getSeatSink()} tier=${seatSinkTier()}`); // v2.5.26 诊断：坐不到任务栏可查
+    enterRestPose();                        // 有坐姿动画坐下（腿垂进任务栏），无则站立歇脚
+    logTts("walk", `自主休息: x=${Math.round(win.getBounds().x)} y=${Math.round(win.getBounds().y)} h=${Math.round(win.getBounds().height)} seated=${walk.seated} sink=${effectiveSeatSink()} gap=${walk.groundGap} tier=${seatSinkTier()}`); // v2.5.27 诊断：坐不到任务栏可查（含窗口高/贴地间隙）
     walkBroadcast();
     walkSchedulePhase(sitPhaseMs());
   }
@@ -3031,9 +3328,16 @@ function winRectToDip(rect) {
     bottom: Math.round(origin.y + (rect.bottom - origin.y * scale) / scale)
   };
 }
+let _lastBarrierCount = -1;
 function refreshWinBarriers() {
   const api = initBarrierApi();
   if (!api || !win || win.isDestroyed()) { winBarriers = []; return []; }
+  // 2026-09-03 收窄：屏障数据只服务行走系统（站上其他窗口/防遮挡）。行走引擎关闭或窗口
+  // 隐藏到托盘时不再每 3s 枚举全机窗口（此前无条件常驻轮询）；行走恢复后下个周期自动重建。
+  if (!walk.active || !win.isVisible()) {
+    if (winBarriers.length) { winBarriers = []; _lastBarrierCount = -1; invalidatePerchIfNeeded(); }
+    return winBarriers;
+  }
   try {
     const next = [];
     const cb = (hwnd) => {
@@ -3056,7 +3360,11 @@ function refreshWinBarriers() {
     api.enumWindows(cb, 0);
     winBarriers = next;
     invalidatePerchIfNeeded();
-    logTts("walk", "窗口屏障刷新: " + next.length + " 个");
+    // 日志只在数量变化时记（此前每 3s 固定一条，tts.log 绝大多数是重复行）
+    if (next.length !== _lastBarrierCount) {
+      _lastBarrierCount = next.length;
+      logTts("walk", "窗口屏障刷新: " + next.length + " 个");
+    }
   } catch (e) {
     winBarriers = [];
     logTts("walk", "窗口屏障刷新失败: " + (e && e.message || e));
@@ -3270,9 +3578,7 @@ function walkAttemptPerch() {
       );
       if (!cands.length) {                           // 没有合适窗口 → 坐下休息
         logTts("walk", "无合适窗口可坐，就地休息"); // 失败可观测：避免静默长坐无从排查
-        walk.resting = true;
-        walk.seated = true;
-        applySeatPosition();
+        enterRestPose();
         walkBroadcast();
         walkSchedulePhase(sitPhaseMs());
         return;
@@ -3280,13 +3586,24 @@ function walkAttemptPerch() {
       const t = cands[Math.floor(Math.random() * cands.length)];
       walk.perchBarrier = { hwnd: t.hwnd, left: t.x, right: t.x + t.w, top: t.y, title: t.title };
       walk.perchTopY = t.y - b.height + walk.groundGap;
-      walk.targetX = Math.min(Math.max(t.x + t.w / 2 - b.width / 2, wa.x), wa.x + wa.width - b.width);
+      // 近窗沿落点（2026-09-04 修 gotoPerch 必超时）：原取窗口中心，真实距离 500–800px 按实测
+      // 速度（≈18px/s，标称 30px/s 的 60%）需 17–40s，必超 10s 瞬态守卫（9-3 晚 4 次尝试
+      // 4 次超时 0 成功）。改取离宠物较近的窗沿侧，平均缩短约 60% 距离；沿口内缩 EDGE
+      // 保证角色条带主体仍在窗上。charCx 与图标坐（walkAttemptIconPerch）同款公式。
+      const charCx = (walk.charInset + b.width - 2) / 2; // 角色条带中心在宠物窗口内偏移
+      const EDGE = Math.min(120, Math.max(48, Math.round(t.w * 0.15))); // 距窗沿内缩
+      const lx = t.x + EDGE - charCx;                   // 左沿落点（宠物窗口 x）
+      const rx = t.x + t.w - EDGE - charCx;             // 右沿落点
+      const near = Math.abs(lx - b.x) <= Math.abs(rx - b.x) ? lx : rx;
+      walk.targetX = Math.min(Math.max(Math.round(near), walkMinX(wa)), wa.x + wa.width - b.width);
       walk.gotoPerch = true;
       walk.resting = false;
       walk.seated = false;
       walk.sunk = false;
       walkBroadcast();
-      logTts("walk", "跳上窗口: " + JSON.stringify({ x: t.x, y: t.y, w: t.w, h: t.h, title: t.title }));
+      const _d = Math.abs(walk.targetX - b.x);
+      logTts("walk", "跳上窗口: " + JSON.stringify({ x: t.x, y: t.y, w: t.w, h: t.h, title: t.title }) +
+        " targetX=" + walk.targetX + " 距离=" + Math.round(_d) + "px 预计≈" + (_d / 18).toFixed(1) + "s(按18px/s)");
     } catch (e) {
       logTts("walk", "坐窗口失败: " + (e && e.message || e));
       walk.resting = true;
@@ -3353,7 +3670,7 @@ function walkTick() {
         const after = win.getBounds().y;
         if (Math.abs(after - before) > 1 && Date.now() - (walk._seatHealLog || 0) > 30000) {
           walk._seatHealLog = Date.now();
-          logTts("walk", `坐姿自愈: y=${before}→${after} sink=${getSeatSink()}`);
+          logTts("walk", `坐姿自愈: y=${before}→${after} sink=${effectiveSeatSink()} hasSit=${skinHasSit}`);
         }
       }
       // 出屏兜底：角色条带左缘越出边界 → 钳回贴边（崩溃/状态错乱后角色滑出屏幕）。
@@ -3386,31 +3703,43 @@ function walkTick() {
     logTts("walk", "拖拽暂停超时，自动恢复");
   }
   // 瞬态守卫（ottopet restore_timer 借鉴）：gotoPerch/returning 长时间未完成（屏障/状态错乱）→ 强制回地面
+  // 2026-09-04：固定 10s 对远距离正常接近是误杀（原中心落点 500–800px 需 17–40s）。
+  // 改双通道：①停滞 >10s（x 连续不变 = 真卡死/屏障错乱）立即回收；②仍在推进时按剩余距离
+  // 给预算 = 10s 基础 + dist/(标称速度×50%折减) + 350ms 跳 + 3s 余量（实测速度≈标称 60%，再留余量）。
   if ((walk.gotoPerch || walk.returning) && !walk.paused && !walk.sleeping) {
-    if (!walk._transientAt) walk._transientAt = Date.now();
-    if (Date.now() - walk._transientAt > 10000) {
+    if (!walk._transientAt) {
+      walk._transientAt = Date.now();
+      walk._transientLastX = null;
+      walk._transientMoveAt = Date.now();
+    }
+    const bx = win && !win.isDestroyed() ? win.getBounds().x : null;
+    if (bx != null && bx !== walk._transientLastX) { // x 有推进 → 刷新停滞计时
+      walk._transientLastX = bx;
+      walk._transientMoveAt = Date.now();
+    }
+    const stuckMs = Date.now() - walk._transientMoveAt;
+    const dist = walk.targetX != null && bx != null ? Math.abs(walk.targetX - bx) : 0;
+    const vPxMs = Math.max((walkSpeed() / WALK_TICK_MS) * 0.5, 0.004); // px/ms，保守取标称 50%
+    const budgetMs = 10000 + dist / vPxMs + 350 + 3000;
+    if (stuckMs > 10000 || Date.now() - walk._transientAt > budgetMs) {
       const what = walk.gotoPerch ? "gotoPerch" : "returning";
-      logTts("walk", "瞬态守卫: " + what + " 超时10s，强制回地面");
+      logTts("walk", "瞬态守卫: " + what + " 超时（停滞" + Math.round(stuckMs / 1000) +
+        "s 总" + Math.round((Date.now() - walk._transientAt) / 1000) + "s 剩余距离" + Math.round(dist) + "px），强制回地面");
       walk.gotoPerch = false;
       walk.returning = false;
       walk.iconTarget = false;
       walk.jump = null;
-      walk.resting = true;
-      walk.seated = true;
-      walk.sunk = false;
-      applySeatPosition();
+      enterRestPose();
       walkBroadcast();
       walkSchedulePhase(sitPhaseMs());
     }
-  } else walk._transientAt = 0;
+  } else { walk._transientAt = 0; walk._transientLastX = null; walk._transientMoveAt = 0; }
   // 抛掷守卫：飞行超过 15s（物理异常）→ 强制落地
   if (walk.flight && !walk._flightAt) walk._flightAt = Date.now();
   if (walk.flight && Date.now() - (walk._flightAt || 0) > 15000) {
     logTts("walk", "瞬态守卫: flight 超时15s，强制落地");
     cancelFlight();
-    walk.resting = true;
-    walk.seated = true;
-    applySeatPosition();
+    enterRestPose();
     walkBroadcast();
     walkSchedulePhase(sitPhaseMs());
   } else if (!walk.flight) walk._flightAt = 0;
@@ -3438,7 +3767,7 @@ function walkTick() {
       walk.iconRest = onIcon && Math.random() < 0.45;
       walk.perched = true;
       walk.resting = true;
-      if (walk.perched && onIcon) walkSetPosition(j.tx, walk.perchTopY + getSeatSink(), "jump-perch-sink");
+      if (walk.perched && onIcon) walkSetPosition(j.tx, walk.perchTopY + effectiveSeatSink(), "jump-perch-sink");
       walkBroadcast();
       applyLayer();
       walkSchedulePhase(sitPhaseMs());
@@ -3446,9 +3775,7 @@ function walkTick() {
       maybePersonify("perch", { chance: 0.2, cooldownMs: 150000 });
     } else if (walk.returning) {
       walk.returning = false;
-      walk.resting = true;
-      walk.seated = true;
-      applySeatPosition();
+      enterRestPose();
       walkBroadcast();
       walkSchedulePhase(sitPhaseMs());
     }
@@ -3555,7 +3882,7 @@ function startWalkingEngine() {
   walk.freeStand = false;
   walk.gotoPerch = false;
   walk.returning = false;
-  walk.seated = true; // 启动先坐下，片刻后起身散步
+  walk.seated = skinHasSit; // 启动先坐下（无坐下动画皮肤则站立），片刻后起身散步
   walk.face = Math.random() < 0.5 ? -1 : 1;
   try { // 已在地面线附近则直接进入下沉坐姿
     const b0 = win.getBounds();
@@ -3582,8 +3909,7 @@ function stopWalkingEngine(silent = false) {
     walk.gotoPerch = false;
     walk.returning = false;
     walk.resting = true;
-    walk.seated = true;
-    applySeatPosition();
+    enterRestPose();
   }
   applyLayer(walk.seated);
   walk.active = false;
@@ -3695,26 +4021,73 @@ ipcMain.on("pet:throw", (_e, vx, vy) => {
   }
 });
 ipcMain.on("pet:set-sleeping", (_e, v) => {
+  const wasSleeping = walk.sleeping;
   walk.sleeping = !!v;
-  if (walk.sleeping) { cancelFlight(); cancelWalkJump(); }
-  // v2.5.22c 修复：睡觉**不动窗口**（lift 默认 0）。
-  // 此前上抬窗口导致角色（贴画布底）跟着上浮 → 睡觉悬浮；站立贴地位置本就正确，
-  // 躺下动画在画布内自然变矮，脚落在窗口底=任务栏上沿。
-  // 特殊皮肤如确需微调：config.json 的 walk.sleepLift（0=不抬 0.3=抬 30%）。
-  if (win && !win.isDestroyed() && config.getConfig().renderMode === "spine") {
-    const b = win.getBounds();
-    const wa = walkGeo.workAreaOf(screen, b);
-    const standY = wa.y + wa.height + walk.groundGap - b.height; // 站立贴地（底边=任务栏上沿+gap）
-    const lift = Number((config.getConfig().walk || {}).sleepLift);
-    const liftRatio = Number.isFinite(lift) && lift >= 0 && lift <= 0.5 ? lift : 0; // 默认 0：不抬窗口
-    const sleepY = standY - Math.round(b.height * liftRatio);
-    const targetY = v ? sleepY : standY;
-    if (Math.abs(b.y - targetY) > 1) win.setPosition(b.x, Math.round(targetY));
+  if (walk.sleeping) {
+    cancelFlight(); cancelWalkJump();
+    // 睡觉=站着睡（Sleepd 站姿循环，用户 2026-09-05 指示"不要坐着睡"）：坐姿入睡先起身
+    // 回地面线。坐姿 sink/悬浮问题随之消失——睡眠位置永远在地面线。
+    if (walk.seated) { walk.seated = false; walk.resting = false; walk.sunk = false; walk.freeStand = false; }
   }
-  // 人格化：入睡/睡醒时偶尔嘀咕
-  if (v) maybePersonify("sleep", { chance: 0.25, cooldownMs: 180000 });
-  else maybePersonify("wake", { chance: 0.35, cooldownMs: 60000 });
+  if (win && !win.isDestroyed() && config.getConfig().renderMode === "spine") {
+    // v2.5.28 关键修复：位置分支必须按真实姿态——旧实现假设"睡着=站着"，把窗口无条件
+    // 挪到 standY/sleepY。坐姿中入睡/睡醒会被拉回站立高度 → 坐姿动画叠在悬浮位置上
+    // =「没坐在任务栏上」（walkTick 睡眠期无坐姿自愈，悬浮持续整个睡眠）。
+    if (walk.seated) {
+      applySeatPosition(); // 坐姿：保持 sink 沉底（幂等）
+      walkBroadcast();
+    } else if (!walk.perched && !walk.iconRest && !walk.gotoPerch && !walk.returning && !walk.jump) {
+      const b = win.getBounds();
+      const wa = walkGeo.workAreaOf(screen, b);
+      const standY = wa.y + wa.height + walk.groundGap - b.height; // 站立贴地（底边=任务栏上沿+gap）
+      const lift = Number((config.getConfig().walk || {}).sleepLift);
+      const liftRatio = Number.isFinite(lift) && lift >= 0 && lift <= 0.5 ? lift : 0; // 默认 0：不抬窗口
+      const sleepY = standY - Math.round(b.height * liftRatio);
+      const targetY = v ? sleepY : standY;
+      if (Math.abs(b.y - targetY) > 1) win.setPosition(b.x, Math.round(targetY));
+      walkBroadcast();
+    } else {
+      walkBroadcast(); // 窗顶/图标顶/跳跃等高位态：栖位几何不变（旧行为会把窗顶睡觉的她瞬移到地面）
+    }
+  }
+  // 人格化：入睡/睡醒时偶尔嘀咕——v2.5.27 只在真实状态边沿触发（防止重复 setSleeping 连发 wake 台词）
+  const edge = transitionSleep(wasSleeping, walk.sleeping);
+  if (edge === "sleep") maybePersonify("sleep", { chance: 0.25, cooldownMs: 180000 });
+  else if (edge === "wake") maybePersonify("wake", { chance: 0.35, cooldownMs: 60000 });
 }); // 睡觉时行走引擎原地待命
+ipcMain.on("pet:set-has-sit", (_e, v) => { // 渲染层皮肤加载后上报：无坐下动画的皮肤不做坐姿下沉
+  const next = !!v;
+  if (next === skinHasSit) return;
+  skinHasSit = next;
+  logTts("walk", "皮肤坐下动画: " + (next ? "有" : "无（坐姿不下沉）"));
+  if (walk.seated && !walk.perched) applySeatPosition(); // 立即校正当前坐姿窗口高度
+});
+/* ---------- 固定台词离线模式（省显存）：引擎可关，只播已缓存固定台词 ---------- */
+ipcMain.handle("pet:set-fixed-only", async (_e, on) => {
+  try {
+    const prev = !!(config.getConfig().tts || {}).fixedOnly;
+    config.saveConfig({ tts: { ...(config.getConfig().tts || {}), fixedOnly: !!on } });
+    if (on && !prev) {
+      // 释放显存：停本地 Genie/GSV 引擎（与退出清理同链路）
+      try { await tts.shutdownGenieServer(); } catch { /* 忽略 */ }
+      try { await tts.killGsvProcesses(config.getConfig().ttsGsv || {}); } catch { /* 忽略 */ }
+      try { await tts.killPortListener(9881); } catch { /* 忽略 */ }
+      try { await tts.killPortListener(9880); } catch { /* 忽略 */ }
+      features.stopJaPrewarm();
+      logTts("voice", "固定台词离线模式开启：本地语音引擎已停止释放显存，仅播已缓存音频");
+    } else if (!on && prev) {
+      // 退出离线模式：按配置重新拉起/预热引擎（与启动预热同分支）
+      const cfg = config.getConfig();
+      const q = cfg.ttsGenie || {};
+      const g = cfg.ttsGsv || {};
+      const ttsOn = !!(cfg.tts || {}).enabled;
+      if (ttsOn && q.enabled && !q.speakJa && !cfg.tts.fixedOnly) tts.ensureGenieServer(q).then((ok) => logTts("genie", "离线模式退出预热: " + (ok ? "已就绪" : "不可用")));
+      if (ttsOn && g.enabled && q.speakJa && !cfg.tts.fixedOnly) tts.ensureGsvServer(g).then((up) => { if (up) tts.warmupGsv(g); });
+      logTts("voice", "固定台词离线模式关闭：引擎按配置重新拉起");
+    }
+    return { ok: true };
+  } catch (e) { return { ok: false, message: String(e && (e.message || e)) }; }
+});
 ipcMain.on("pet:set-ground-gap", (_e, px) => {
   const v = Number(px);
   if (!Number.isFinite(v)) return;
@@ -3734,6 +4107,39 @@ ipcMain.handle("pet:get-walk-timing", () => ({
   perchPct: perchPctOf(),
   standSink: standSinkOffset()
 }));
+
+/* ---------- 日志诊断（v2.5.28 设置页「日志诊断」分区）：尾部读取 + 脱敏导出 ---------- */
+const logDiag = require("./src/log-diag");
+ipcMain.handle("pet:log-read", (_e, maxLines) => {
+  try {
+    const r = logDiag.readLogTail(config.STORAGE.logs, Number(maxLines) || 500);
+    if (!r.ok) return r;
+    // 脱敏后才出主进程：称呼取自 config（name/nickname 等），与导出同一套规则
+    return { ...r, lines: logDiag.sanitizeLines(r.lines, { userNames: logDiag.collectUserNames(config.getConfig()) }) };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e), lines: [] };
+  }
+});
+ipcMain.handle("pet:log-export", async (_e, maxLines) => {
+  try {
+    const r = logDiag.readLogTail(config.STORAGE.logs, Number(maxLines) || 2000);
+    if (!r.ok) return r;
+    let appVersion = "?";
+    try { appVersion = JSON.parse(fs.readFileSync(path.join(config.APP_DIR, "package.json"), "utf8")).version || "?"; } catch { /* 忽略 */ }
+    const payload = logDiag.buildExport(r, { appVersion, userNames: logDiag.collectUserNames(config.getConfig()) });
+    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+      title: "导出脱敏日志",
+      defaultPath: "suzuran-log-" + new Date().toISOString().slice(0, 10) + "-sanitized.txt",
+      filters: [{ name: "Text", extensions: ["txt"] }]
+    });
+    if (canceled || !filePath) return { ok: false, canceled: true };
+    fs.writeFileSync(filePath, payload.text, "utf8");
+    logTts("settings", "日志已导出（脱敏）: 行数=" + r.lines.length + " 错误=" + payload.stats.error + " 警告=" + payload.stats.warn);
+    return { ok: true, path: filePath, lines: r.lines.length, stats: payload.stats };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+});
 ipcMain.handle("pet:set-walk-timing", (_e, patch) => {
   patch = patch || {};
   if (patch.sitMaxSec != null) {
@@ -3942,9 +4348,11 @@ ipcMain.on("pet:set-size", (_e, w, h) => {
   // resizable:false 时 setSize 缩小会被忽略（放大接近原值看不出），先临时允许缩放
   try { if (!win.isResizable()) win.setResizable(true); } catch { /* 忽略 */ }
   win.setSize(ws, hs);
+  reseatAfterWindowSizeChange(); // TD-1：气泡开/关改窗口高后窗口底随动，坐姿立即重锚回任务栏沿口
   setTimeout(() => {
     try { win.setResizable(false); } catch { /* 忽略 */ }
     clampPetToWorkArea("窗口尺寸");
+    reseatAfterWindowSizeChange(); // clamp 可能又挪了 y，补一次重锚
   }, 150);
 });
 ipcMain.handle("pet:tts-clone", (_e, text, opts) => {
@@ -4040,6 +4448,8 @@ if (!gotLock) {
   });
 
   app.whenReady().then(() => {
+    syncNativeTheme(); // 原生标题栏/滚动条随用户主题（须在首个窗口创建前）
+    relaunchIfAppDirNewer(); // zip 覆盖解压升级兜底：散目录比 asar 新时让位重启（须在其他初始化前）
     try {
       // 崩溃收集：minidump 存到 userData/crashes（不自动上传），便于排查渲染层 crashed
       const { crashReporter } = require("electron");
@@ -4093,6 +4503,7 @@ if (!gotLock) {
 
     createWindow();
     createTray();
+    setTimeout(() => startupUpdateCheck(), 90000); // 启动 90s 后静默检查更新（≥24h 一次；发现新版弹确认框，不打扰）
     schedules.initialize(sendScheduleDue);
     refreshPetName();
     screen.on("display-added", () => scheduleDisplayClamp("新增显示器"));
@@ -4111,9 +4522,10 @@ if (!gotLock) {
     // v2.5.17：日语模式（speakJa）只留 GSV 日语引擎，不预热/不拉起 Genie 中文引擎（省 4.7G 内存）
     const _q = config.getConfig().ttsGenie || {};
     const _ttsOn = !!(config.getConfig().tts || {}).enabled;
-    if (_q.enabled && _ttsOn && !_q.speakJa) {
+    const _fixedOnly = !!(config.getConfig().tts || {}).fixedOnly;
+    if (_q.enabled && _ttsOn && !_q.speakJa && !_fixedOnly) {
       tts.ensureGenieServer(_q).then((ok) => logTts("genie", "启动预热: " + (ok ? "已就绪" : "不可用")));
-    } else if (_ttsOn && _q.speakJa) {
+    } else if (_ttsOn && _q.speakJa && !_fixedOnly) {
       logTts("genie", "日语模式：跳过 Genie 中文引擎预热（只留 GSV）");
       tts.shutdownGenieServer(); // 保险：若残留 Genie 进程（如音色克隆窗口拉起的），立即释放
     } else {
@@ -4122,7 +4534,7 @@ if (!gotLock) {
 
     // GSV 日语引擎预启动：应用开启即后台拉起+预热，避免第一句话等几十秒冷启动
     const _gsv = config.getConfig().ttsGsv || {};
-    if (_gsv.enabled && _ttsOn && _q.speakJa) {
+    if (_gsv.enabled && _ttsOn && _q.speakJa && !_fixedOnly) {
       tts.ensureGsvServer(_gsv).then((up) => {
         if (up) return tts.warmupGsv(_gsv); // 内部自带"预热完成"日志
         logTts("gsv", "启动预热失败，首句将再尝试拉起");
@@ -4144,10 +4556,10 @@ if (!gotLock) {
 
     // 主动搭话（v2.3 增强）：闲置后 35% 概率开口；设置页 proactiveChat 可单独关闭
     features.setProactiveEnabled(_cfg.proactiveChat !== false);
-    const _proactiveMin = (_cfg.features && _cfg.features.proactiveMin) || 8;
+    const _proactiveMin = (_cfg.features && _cfg.features.proactiveMin) || PROACTIVE_DEFAULTS.intervalMin;
     features.startProactive((msg, mood) => {
       sendProactive(msg, mood || "idle"); // 台词池情绪→音色分档（v2.5.26）；隐藏到托盘时静默待命，不主动搭话
-    }, _proactiveMin, proactiveStateFn);
+    }, _proactiveMin, PROACTIVE_DEFAULTS.chance, proactiveStateFn);
 
     // 日语翻译预热（v2.5.20）：speakJa 模式下空闲批量翻译固定台词进磁盘缓存，
     // 翻译 API 挂了也能说出日语（"说不出来"根治）
@@ -4221,6 +4633,7 @@ app.on("before-quit", (e) => {
   // 退出时阻塞清理语音引擎（Genie/GSV 是 detached 独立进程）：等待 taskkill 完成 + 按端口兜底，
   // 确保"退出 = 彻底退出"——否则残留 python 进程占端口/显存，重启后连到旧引擎（换引擎文件不生效的根因）
   (async () => {
+    try { await stopAgentApi(); } catch (e) { logTts("agent", "关闭接口失败: " + (e && e.message || e)); }
     try { await tts.shutdownGenieServer(); } catch { /* 忽略 */ }
     try { await tts.killGsvProcesses(config.getConfig().ttsGsv || {}); } catch { /* 忽略 */ }
     try { await tts.killPortListener(9881); } catch { /* 忽略 */ } // 兜底：按端口清残留

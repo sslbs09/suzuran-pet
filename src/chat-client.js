@@ -10,6 +10,7 @@
 const config = require("./config");
 const { activeWorldInfos } = require("./world-info"); // 世界书：按用户消息关键词激活情境块（§14 追加 102）
 const vectorMemory = require("./vector-memory"); // 向量记忆：语义片段回引（§14 追加 102）
+const { safeFetch, isLoopbackHost } = require("./safe-url");
 
 function buildPetRules() {
   const cfg = config.getConfig();
@@ -95,12 +96,7 @@ function normalizeAnthropicBase(base) {
 }
 
 function isLocalUrl(url) {
-  try {
-    const h = new URL(url).hostname;
-    return /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])$/i.test(h);
-  } catch {
-    return false;
-  }
+  try { return isLoopbackHost(new URL(url).hostname); } catch { return false; }
 }
 
 /** SSRF 防护（优化建议 P0）：baseUrl 目标主机校验——
@@ -127,14 +123,22 @@ function validateApiBase(base, allowPrivate) {
 }
 
 /** 解析 SSE 流，逐段回调 content 增量；返回完整文本。
- *  OpenAI 兼容 error 帧（data: {"error": ...}）会向上抛出（v2.5.24 优化建议 P1） */
-async function readSSE(resp, onChunk, extractor) {
+ *  OpenAI 兼容 error 帧（data: {"error": ...}）会向上抛出（v2.5.24 优化建议 P1）；
+ *  流空闲 30s 超时与 signal 取消检查（v2.5.27）。 */
+async function readSSE(resp, onChunk, extractor, signal) {
+  if (!resp.body) throw new Error("API 未返回可读取的流");
   const reader = resp.body.getReader();
   const decoder = new TextDecoder("utf-8");
   let buf = "";
   let full = "";
+  const idleMs = 30000;
   while (true) {
-    const { done, value } = await reader.read();
+    if (signal?.aborted) throw new Error("请求已取消");
+    const readResult = await Promise.race([
+      reader.read(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("SSE 流空闲超时")), idleMs))
+    ]);
+    const { done, value } = readResult;
     if (done) break;
     buf += decoder.decode(value, { stream: true });
     const lines = buf.split("\n");
@@ -184,7 +188,7 @@ async function chatOpenAI(cfg, messages, opts) {
     if (Number(smp.minP) > 0 && Number(smp.minP) < 1) body0.min_p = Number(smp.minP);
     if (Number(smp.repeatPenalty) > 0) body0.repeat_penalty = Number(smp.repeatPenalty);
   }
-  const resp = await fetch(url, {
+  const resp = await safeFetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -192,12 +196,12 @@ async function chatOpenAI(cfg, messages, opts) {
     },
     body: JSON.stringify(body0),
     signal: opts.signal
-  });
+  }, { allowLoopback: isLocalUrl(url) });
   if (!resp.ok) {
     const errBody = await resp.text().catch(() => "");
     throw new Error(`API ${resp.status}: ${errBody.slice(0, 300)}`);
   }
-  return readSSE(resp, opts.onChunk, (j) => j?.choices?.[0]?.delta?.content);
+  return readSSE(resp, opts.onChunk, (j) => j?.choices?.[0]?.delta?.content, opts.signal);
 }
 
 async function chatAnthropic(cfg, system, history, opts) {
@@ -214,7 +218,7 @@ async function chatAnthropic(cfg, system, history, opts) {
     max_tokens: cfg.chat.maxTokens
   };
   if (Number(smpA.topP) > 0 && Number(smpA.topP) < 1) bodyA.top_p = Number(smpA.topP);
-  const resp = await fetch(url, {
+  const resp = await safeFetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -233,7 +237,7 @@ async function chatAnthropic(cfg, system, history, opts) {
       return j.delta.text;
     }
     return "";
-  });
+  }, opts.signal);
 }
 
 /**
@@ -313,7 +317,7 @@ async function testConnection(overrides = {}) {
       if (!o.apiKey) throw new Error("未填写 API Key");
       const url = normalizeAnthropicBase(o.baseUrl) + "/messages";
       validateApiBase(url, !!cfg.chat.allowPrivateBaseUrl); // SSRF 防护（优化建议 P0）
-      const resp = await fetch(url, {
+      const resp = await safeFetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": o.apiKey, "anthropic-version": "2023-06-01" },
         body: JSON.stringify({ model: o.model, max_tokens: 8, messages: [{ role: "user", content: "ping" }] }),
@@ -325,18 +329,18 @@ async function testConnection(overrides = {}) {
     if (!o.apiKey && !isLocalUrl(normalizeOpenAIBase(o.baseUrl))) throw new Error("未填写 API Key");
     const url = normalizeOpenAIBase(o.baseUrl) + "/chat/completions";
     validateApiBase(url, !!cfg.chat.allowPrivateBaseUrl); // SSRF 防护（优化建议 P0）
-    const resp = await fetch(url, {
+    const resp = await safeFetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(o.apiKey ? { Authorization: `Bearer ${o.apiKey}` } : {})
+        ...(o.apiKey ? { Authorization: "Bearer " + o.apiKey } : {})
       },
       body: JSON.stringify({
         model: o.model, messages: [{ role: "user", content: "ping" }],
         stream: false, temperature: o.temperature, max_tokens: 8
       }),
       signal: AbortSignal.timeout(30000)
-    });
+    }, { allowLoopback: isLocalUrl(url) });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
     return "ok";
   })();
@@ -354,7 +358,8 @@ module.exports = { chat, testConnection, buildSystemMessage, parseEmotion, isLoc
 if (process.argv.includes("--test")) {
   (async () => {
     const persona = config.getPersonaText();
-    const text = process.argv[process.argv.indexOf("--test") + 1] || "打个招呼吧";
+    // 固定演示提示词（Mimosa 中危：CLI 自测不再把命令行参数直接作为 prompt 数据源）
+    const text = "打个招呼吧";
     let out = "";
     const r = await chat({
       persona,

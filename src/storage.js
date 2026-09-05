@@ -2,12 +2,16 @@
 
 const fs = require("fs");
 const path = require("path");
-const { app } = require("electron");
+let app = null;
+try { ({ app } = require("electron")); } catch { /* 纯 Node 单测/工具运行时没有 Electron */ }
 
 const APP_DIR = path.dirname(__dirname);
-// SUZURAN_TEST_USERDIR：仅供自动化测试重定向 userData；正常运行永远走 Electron userData
-const USER_DIR = process.env.SUZURAN_TEST_USERDIR ||
-  (app ? app.getPath("userData") : path.join(process.env.APPDATA || APP_DIR, "SuzuranPet"));
+// SUZURAN_TEST_USERDIR：仅供自动化测试重定向 userData；必须为绝对路径（相对/.. 一律拒绝，
+// Mimosa 高危：环境变量流入文件系统操作需收敛），正常运行永远走 Electron userData
+const _envUserDir = process.env.SUZURAN_TEST_USERDIR;
+const _envUserDirSafe = _envUserDir && path.isAbsolute(_envUserDir) ? path.resolve(_envUserDir) : null;
+const USER_DIR = _envUserDirSafe ||
+  (app && typeof app.getPath === "function" ? app.getPath("userData") : path.join(process.env.APPDATA || APP_DIR, "SuzuranPet"));
 const PATHS = {
   userDir: USER_DIR,
   config: path.join(USER_DIR, "config.json"),
@@ -50,21 +54,33 @@ function copyIfMissing(from, to, migrated) {
   migrated.push(path.relative(APP_DIR, from));
 }
 
-function healFileAsDir(target, source) {
+function healFileAsDir() {
   // 自愈：某路径本应是文件却成了空目录（b40874e 回归遗留的受害用户），删除后从安装目录补回。
   // 只对"空目录"生效，绝不碰有内容的路径。
-  try {
-    if (fs.existsSync(target) && fs.statSync(target).isDirectory() && fs.readdirSync(target).length === 0) {
-      fs.rmdirSync(target);
-      if (source) copyIfMissing(source, target, []);
-    }
-  } catch { /* 自愈失败不阻塞启动 */ }
+  // 路径表硬编码、无参（Mimosa 高危：path-traversal 入口）——不接收任意路径，
+  // 目标限定 userData 内、来源限定安装目录内，rmdir+复制绝不可能越出这两个根。
+  const userRoot = path.resolve(PATHS.userDir) + path.sep;
+  const appRoot = path.resolve(APP_DIR) + path.sep;
+  const items = [
+    ["config.json", PATHS.config, path.join(APP_DIR, "config.json")],
+    ["persona.md", PATHS.persona, path.join(APP_DIR, "persona.md")]
+  ];
+  for (const [, target, source] of items) {
+    try {
+      const t = path.resolve(target);
+      const s = path.resolve(source);
+      if (!t.startsWith(userRoot) || !s.startsWith(appRoot)) continue;
+      if (fs.existsSync(t) && fs.statSync(t).isDirectory() && fs.readdirSync(t).length === 0) {
+        fs.rmdirSync(t);
+        copyIfMissing(s, t, []);
+      }
+    } catch { /* 单项自愈失败不阻塞启动 */ }
+  }
 }
 
 function initializeStorage() {
   fs.mkdirSync(PATHS.userDir, { recursive: true });
-  healFileAsDir(PATHS.config, path.join(APP_DIR, "config.json"));
-  healFileAsDir(PATHS.persona, path.join(APP_DIR, "persona.md"));
+  healFileAsDir();
   if (fs.existsSync(PATHS.marker)) return PATHS;
   const migrated = [], failed = [];
   const pairs = [
@@ -100,9 +116,14 @@ function initializeStorage() {
 
 function atomicWrite(file, content) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = file + ".tmp";
-  fs.writeFileSync(tmp, content, "utf8");
-  fs.renameSync(tmp, file);
+  const tmp = file + ".tmp-" + process.pid + "-" + Date.now().toString(36);
+  try {
+    fs.writeFileSync(tmp, content, "utf8");
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch { /* 清理失败不覆盖原始错误 */ }
+    throw e;
+  }
 }
 
 module.exports = { APP_DIR, PATHS, initializeStorage, atomicWrite };

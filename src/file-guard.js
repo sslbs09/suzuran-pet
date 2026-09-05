@@ -35,13 +35,26 @@ function statTimes(p) {
   try { const s = fs.statSync(p); return { at: s.atimeMs, mt: s.mtimeMs }; } catch { return null; }
 }
 
+/** userData 内路径守卫（Mimosa 高危：路径穿越）：fs.watch 回调的 fileName 不可信，
+ *  可携带 .. / 绝对路径 / 盘符，拼接后必须仍落在 userData 内才允许触碰文件系统。 */
+function safeUserPath(name) {
+  try {
+    const root = path.resolve(storage.PATHS.userDir);
+    const p = path.resolve(root, String(name));
+    return p === root || p.startsWith(root + path.sep) ? p : null;
+  } catch { return null; }
+}
+
 function ensureHoneyFiles() {
   try {
+    // 假凭据运行时随机生成（Mimosa 高危：源码硬编码凭据）：蜜标只需"看起来像密钥"，
+    // 告警依据是文件被访问而非内容，随机值反而更像真实泄露物
+    const rnd = () => "hk-" + crypto.randomBytes(12).toString("hex");
     for (const name of HONEY_FILES) {
       const p = path.join(storage.PATHS.userDir, name);
       if (!fs.existsSync(p)) {
         const fake = name.includes("credentials")
-          ? { version: 1, chatApiKey: "honeytoken-dummy-key-do-not-use", ttsCosyApiKey: "hk-cosy-dummy", agentBearerToken: "hk-agent-dummy" }
+          ? { version: 1, chatApiKey: "sk-" + crypto.randomBytes(16).toString("hex"), ttsCosyApiKey: rnd(), agentBearerToken: rnd() }
           : { chat: { baseUrl: "https://example.invalid/v1", model: "dummy" }, note: "honeytoken" };
         fs.writeFileSync(p, JSON.stringify(fake, null, 2));
       }
@@ -106,7 +119,8 @@ function onDirEvent(dir, event, fileName) {
   if (!enabled || !fileName) return;
   // 符号链接/目录联接检测（重定向攻击：junction/symlink 无需管理员即可创建）
   try {
-    const full = path.join(storage.PATHS.userDir, String(fileName));
+    const full = safeUserPath(fileName);
+    if (!full) return; // 越出 userData 的名字不碰
     const st = fs.lstatSync(full);
     if (st.isSymbolicLink()) {
       alert("worm", String(fileName), "发现可疑符号链接/目录联接（可能为重定向攻击）");
@@ -121,7 +135,8 @@ function onDirEvent(dir, event, fileName) {
   const base = path.basename(String(fileName));
   if (WATCH_JSON.includes(base) && dir === "") {
     // config 走哈希校验；secrets/schedules 走 mtime 基线
-    const p = path.join(storage.PATHS.userDir, base);
+    const p = safeUserPath(base);
+    if (!p) return;
     const mt = statTimes(p);
     const prev = fileMtime[base];
     if (prev && mt && mt.mt > prev.mt + 800) {
