@@ -6,6 +6,16 @@
  */
 "use strict";
 
+/* 启动/退出诊断（v2.5.28）：death-log.txt 记录 boot/锁/启动日志/退出码——更新换包后
+ * 新实例静默死亡的排查用（2026-09-05 CI 构建死亡实验）。每次启动 3-5 行，保留。 */
+try {
+  const __dlp = require("path").join(process.resourcesPath, "death-log.txt");
+  const __dl = (m) => { try { require("fs").appendFileSync(__dlp, new Date().toISOString() + " " + m + "\n"); } catch { /* 忽略 */ } };
+  __dl("boot main.js");
+  process.on("exit", (c) => __dl("EXIT code=" + c + " quitting=" + (typeof quitting !== "undefined" ? quitting : "?")));
+  process.on("uncaughtException", (e) => { __dl("UNCAUGHT: " + (e && e.stack || e)); throw e; });
+} catch { /* 忽略 */ }
+
 const { app, protocol, safeStorage, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, screen, dialog, Notification, powerMonitor, nativeTheme } = require("electron");
 // v2.5.22 修复（P0-2）：删除无条件 disableHardwareAcceleration——
 // 此前与下方按 softRender 配置的判断冲突，导致设置页「软件渲染」开关形同虚设。
