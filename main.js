@@ -4439,8 +4439,16 @@ function openingLine(personaText) {
 }
 
 /* ---------- 生命周期 ---------- */
-const gotLock = app.requestSingleInstanceLock();
+// 单实例锁重试（v2.5.28）：更新换包后 ps1 在旧实例退出流程未结束时就会拉起新实例，
+// 锁可能短暂仍被旧进程持有——直接放弃会让"更新后应用静默消失"（2026-09-05 实测）。
+// 同步等待重试最多 ~12s（Atomics.wait 阻塞主线程，此时尚未 ready，安全）。
+let gotLock = app.requestSingleInstanceLock();
+for (let lockRetry = 0; !gotLock && lockRetry < 24; lockRetry++) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+  gotLock = app.requestSingleInstanceLock();
+}
 if (!gotLock) {
+  try { logTts("update", "单实例锁被占（重试 12s 后放弃），退出"); } catch { /* 忽略 */ }
   app.quit();
 } else {
   app.on("second-instance", () => {
