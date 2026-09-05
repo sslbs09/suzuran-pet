@@ -8,6 +8,7 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { spawn } = require("child_process"); // v2.5.28：此 require 自功能上线起就缺失——applyOnExit 每次 spawn 抛 "spawn is not defined" 被 catch 吞掉，应用内更新从未真正生效（用户所见=「安装目录不可写」误导弹窗）
 
 const REPO = "sslbs09/suzuran-pet";
 
