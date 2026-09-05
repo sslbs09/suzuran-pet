@@ -965,19 +965,21 @@ function playSpineInteract() {
 function setSpineMood(mood) {
   if (!spineObj || renderMode !== "spine") return;
   if (Date.now() < animDemoUntil) return; // 动作试演中，不被情绪切换打断
-  // 坐下/窗顶状态：一切情绪（含 sleep）一律以坐姿呈现。
-  // 旧逻辑只护 idle——5 动画基建皮肤（Sit/Move/Relax/Interact/Sleep）没有坐姿情绪变体，
-  // 聊天情绪 happy/wave 全映射到 Relax/Interact（站姿类）：说话瞬间"坐着突然站起来"，
-  // 窗口仍沉在任务栏里 → 脚陷进任务栏/观感悬空，且 busy 期间看门狗不纠（2026-09-05 用户报告）。
-  // sleep 同批纳入：Sleep 动画是站姿类，坐在任务栏上入睡后"变成站在任务栏里"
-  // （11:09 用户目击），改为保持坐姿入睡。
+  // 坐下/窗顶状态：一切情绪以坐姿呈现。
+  // 5 动画基建皮肤（Sitd/Sleepd/Move/Relax/Interact）没有坐姿情绪变体，聊天情绪
+  // happy/wave 全映射到 Relax/Interact（站姿类）：说话瞬间"坐着突然站起来"，窗口仍沉在
+  // 任务栏里 → 脚陷进任务栏/观感悬空，且 busy 期间看门狗不纠（2026-09-05 用户报告）。
+  // 入睡（实验 B）：Sleepd=基建趴桌打盹循环，比睁眼坐姿 Sitd 生动；姿态由 fit-probe
+  // 实测（[fit-probe] Sleepd），若站姿类不适配沉底窗口则回退 sitAnimName()。
   if (walkState.seated || walkState.perched) {
     const sit = sitAnimName();
-    const want = (mood === "idle" || mood === undefined || mood === "sleep") ? null : spineAnimForMood(mood);
-    const target = (want && isSitClassAnim(want)) ? want : sit; // 情绪动画本身是坐姿类才允许替换
+    const want = (mood === "idle" || mood === undefined) ? null : spineAnimForMood(mood);
+    const target = (mood === "sleep" && spineHas("Sleepd")) ? "Sleepd"
+                 : (want && isSitClassAnim(want)) ? want : sit;
     if (target && spineObj.state.getCurrent(0)?.animation?.name !== target) {
       setSpineAnim(target, true, "seat-guard");
       scheduleFitSpine({ seatPhase: true });
+      probeSeatGeometry(target); // 姿态实测：Sleepd 是否适配沉底坐窗（回退判据）
     }
     return;
   }
@@ -1037,11 +1039,12 @@ function setMood(mood, { preserveSleep = false } = {}) {
 
   // 睡觉/醒来同步行走引擎（睡着后不再移动）；程序消息不应隐式唤醒
   if (mood === "sleep") {
-    if (!isSleeping) { isSleeping = true; awake = false; window.petAPI.setSleeping(true); }
+    if (!isSleeping) { isSleeping = true; awake = false; window.petAPI.setSleeping(true); armSleepAutoWake(); }
   } else if (!preserveSleep && isSleeping) {
     isSleeping = false;
     awake = true;
     window.petAPI.setSleeping(false);
+    disarmSleepAutoWake();
   }
 
   // PSD 2.5D 角色（v2.2）：情绪 → 表情预设（独立于 Spine）
@@ -1107,6 +1110,7 @@ function wake() {
     isSleeping = false;
     awake = true;
     window.petAPI.setSleeping(false);
+    disarmSleepAutoWake();
     if (!busy) setMood("surprised"); // 被叫醒
   }
   resetSleepTimer();
@@ -1114,6 +1118,28 @@ function wake() {
 function resetSleepTimer() {
   if (sleepTimer) clearTimeout(sleepTimer);
   sleepTimer = setTimeout(() => { if (!busy) setMood("sleep"); }, 5 * 60 * 1000);
+}
+
+/* ---------- 睡眠自动唤醒上限（v2.5.28）：睡满 25 分钟自己醒来散步/说话，闲了再睡 ----------
+ *  此前入睡无上限，用户离开电脑后她一睡一下午：相位机冻结、闲话消失、观感"消失"。
+ *  放渲染层而非主进程：wake() 自带 IPC+情绪+5min 计时器重启，醒后"闲了再睡"循环完整；
+ *  主进程侧做只能清 walk.sleeping，渲染层入睡计时器不会被重启，会变成"醒一次就再也不睡"。 */
+const SLEEP_AUTO_WAKE_MS = 25 * 60 * 1000;
+let sleepAutoWakeTimer = null;
+function armSleepAutoWake() {
+  if (sleepAutoWakeTimer) clearTimeout(sleepAutoWakeTimer);
+  sleepAutoWakeTimer = setTimeout(() => {
+    sleepAutoWakeTimer = null;
+    if (isSleeping && !busy) {
+      try { window.petAPI.playback && window.petAPI.playback("[anim] 睡眠自动唤醒（25min 上限）"); } catch { /* 忽略 */ }
+      wake(); // 主进程 walk 边沿自带 35% 概率 wake 台词；醒后相位机恢复，闲 5 分钟再睡
+    } else {
+      resetSleepTimer(); // 已被唤醒/忙碌中：重启闲时入睡循环
+    }
+  }, SLEEP_AUTO_WAKE_MS);
+}
+function disarmSleepAutoWake() {
+  if (sleepAutoWakeTimer) { clearTimeout(sleepAutoWakeTimer); sleepAutoWakeTimer = null; }
 }
 
 /* ---------- 气泡 ---------- */
