@@ -583,7 +583,7 @@ function spineAnimForMood(mood) {
     idle: ["Relax", "Idle", "idle", "animation", "stand"],
     happy: ["happy", "Happy", "Relax"],
     think: ["think", "Think", "Sit", "Relax"],
-    sleep: ["Sleep", "sleep", "Sit", "Relax"],
+    sleep: ["Sleep", "Sleepd", "sleep", "Sit", "Relax"], // Sleepd：明日方舟 d 后缀循环惯例（winter 皮肤无 "Sleep"，缺此候选会兜底 Relax 站姿入睡）
     wave: ["wave", "Wave", "Interact"],
     angry: ["angry", "Angry", "Relax"],
     surprised: ["surprise", "Surprised", "Interact"],
@@ -940,6 +940,9 @@ function pokeFeedback() { // 点击反馈（v2.5.1）：缩放脉冲 + 原声切
 function playSpineInteract() {
   try { window.petAPI.playback("[ui] interact入口 spineObj=" + !!spineObj + " mode=" + renderMode + " busy=" + busy); } catch { /* 忽略 */ }
   if (!spineObj || renderMode !== "spine" || busy) return;
+  // 睡觉中不互动：否则 Interact→排队恢复 spinePhaseAnim()=Move，主进程 sleeping=true 不位移
+  // →「Move 动画播放但不移动」冻结（2026-09-05 用户目击，鼠标靠近感应也会触发本函数）
+  if (isSleeping || walkState.sleeping) return;
   const inter = ["Interact", "interact"].find((n) => spineHas(n));
   if (!inter) {
     // 模型没有 Interact 动作：播站立/放松类动作作辅助（主反馈是 pokeFeedback 的脉冲+原声）
@@ -2481,6 +2484,7 @@ window.addEventListener("mouseup", () => {
         if (!inputBar.classList.contains("hidden")) toggleInputBar();
         patSeq.barOpenedByFirst = false;
       }
+      wake(); // 被摸会醒：否则主进程 sleeping=true 不位移，摸头互动排队恢复的 Move 变成原地空走
       playSpineInteract();
       if (rigSkinId && rigRuntime) rigRuntime.preset("smile"); // 2.5D：微笑回应
       showPatFeedback();
