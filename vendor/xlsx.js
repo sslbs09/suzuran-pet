@@ -4443,7 +4443,11 @@ function encode_range_xls(r, opts) {
 }
 if(typeof cptable !== 'undefined') set_cptable(cptable);
 else if(typeof module !== "undefined" && typeof require !== 'undefined') {
-	set_cptable(require('./dist/cpexcel.js'));
+	/* 守卫式加载（本仓库改动）：cpexcel.js 提供旧码页表，仅影响 legacy 编码的 Excel；
+	   发行包/CI 构建不携带该文件（曾因 .gitignore 裸 dist/ 规则从未入库），缺失时
+	   跳过码表注册——日程 Excel 导入导出使用现代格式，功能不受影响。
+	   硬 require 会让整个主进程启动崩溃（2026-09-05 v2.5.28 发布实验实测）。 */
+	try { set_cptable(require('./dist/cpexcel.js')); } catch(e) {}
 }
 function decode_row(rowstr) { return parseInt(unfix_row(rowstr),10) - 1; }
 function encode_row(row) { return "" + (row + 1); }

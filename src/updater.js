@@ -146,36 +146,55 @@ async function downloadPendingProgress(plan, onProgress = () => {}) {
   }
 }
 
-/** 退出时替换：写 apply-update.ps1（等退出→备份→pending 覆盖→重启→健康检查失败自动回滚），
- *  detached 启动后由调用方 quit。
- *  TD-6 回滚语义：重启 25s 后进程若已不在（新 asar 启动即崩），用 .bak 恢复上一版并再拉起。 */
+/** 退出时替换：写 apply-update.ps1（等退出→备份→pending 覆盖→重启）+ health-check.ps1
+ *  （25s 后探活，失败用 .bak 回滚再拉起），cmd start 解耦生命周期后由调用方 quit。
+ *  v2.5.28 发布实验实测两个静默失效点，已修：
+ *  ① ps1 含中文注释（UTF-8 无 BOM 被 PS5.1 按 ANSI 解析）可致整脚本解析失败——现 ASCII-only；
+ *  ② spawn detached 从垂死 Electron 直接启动 powershell 可能静默不存在——现经 cmd start
+ *     解耦进程树，且每步写 apply-update.log、spawn error 也落盘，失败不再不可见。 */
 function applyOnExit(exePath) {
   const res = resourcesDir();
   const ps1 = path.join(res, "apply-update.ps1");
-  const script = [
+  const hc = path.join(res, "health-check.ps1");
+  const log = path.join(res, "apply-update.log");
+  const ps1Script = [
     "param($exe,$res)",
-    "$asar=Join-Path $res 'app.asar'; $pending=Join-Path $res 'app.asar.pending'",
+    "$log = Join-Path $res 'apply-update.log'",
+    "function Log($m) { Add-Content -Path $log -Value ((Get-Date -Format s) + ' ' + $m) }",
+    "Log 'start'",
+    "$asar = Join-Path $res 'app.asar'",
+    "$pending = Join-Path $res 'app.asar.pending'",
     "Start-Sleep 2",
-    "if (Test-Path $asar) { Copy-Item $asar \"$asar.bak\" -Force }",
+    "if (Test-Path $asar) { Copy-Item $asar ($asar + '.bak') -Force; Log 'backup ok' }",
     "if (Test-Path $pending) {",
     "  Move-Item $pending $asar -Force",
+    "  Log 'asar swapped'",
     "  Start-Process $exe",
-    "  Start-Sleep 25",
-    "  $alive=@(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe }).Count -gt 0",
-    "  if (-not $alive -and (Test-Path \"$asar.bak\")) {",
-    "    Copy-Item \"$asar.bak\" $asar -Force   # 健康检查失败：新 asar 没能存活，回滚上一版",
-    "    Start-Process $exe",
-    "    Write-Host 'update rolled back: new asar failed health check'",
-    "  }",
-    "} else { Write-Host 'no pending' }",
+    "  Log 'app started'",
+    "  Start-Process powershell.exe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $res 'health-check.ps1'),$exe,$res) -WindowStyle Hidden",
+    "  Log 'health check armed'",
+    "} else { Log 'no pending' }",
+  ].join("\n");
+  const hcScript = [
+    "param($exe,$res)",
+    "$log = Join-Path $res 'apply-update.log'",
+    "Start-Sleep 25",
+    "$alive = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe }).Count -gt 0",
+    "if ($alive) { Add-Content -Path $log -Value 'health check ok'; exit }",
+    "$bak = Join-Path $res 'app.asar.bak'",
+    "Add-Content -Path $log -Value 'health check failed'",
+    "if (Test-Path $bak) { Copy-Item $bak (Join-Path $res 'app.asar') -Force; Start-Process $exe; Add-Content -Path $log -Value 'rolled back to previous version' }",
   ].join("\n");
   try {
-    fs.writeFileSync(ps1, script);
+    fs.writeFileSync(ps1, ps1Script, "utf8");   // ASCII-only：编码安全
+    fs.writeFileSync(hc, hcScript, "utf8");
     const { spawn } = require("child_process");
-    const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, exePath, res], { detached: true, stdio: "ignore" });
+    // cmd start 解耦：powershell 不再是垂死 Electron 的直接子进程
+    const child = spawn("cmd.exe", ["/s", "/c", "start", "\"\"", "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, exePath, res], { detached: true, windowsVerbatimArguments: true, stdio: "ignore" });
+    child.on("error", (e) => { try { fs.appendFileSync(log, new Date().toISOString() + " spawn error: " + (e && e.message || e) + "\n"); } catch { /* 忽略 */ } });
     child.unref();
     return true;
-  } catch { return false; }
+  } catch (e) { try { fs.appendFileSync(log, "applyOnExit throw: " + (e && e.message || e) + "\n"); } catch { /* 忽略 */ } return false; }
 }
 
 if (typeof module !== "undefined" && module.exports) {
