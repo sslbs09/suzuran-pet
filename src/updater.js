@@ -156,12 +156,21 @@ async function downloadPendingProgress(plan, onProgress = () => {}) {
 function applyOnExit(exePath) {
   const res = resourcesDir();
   const ps1 = path.join(res, "apply-update.ps1");
-  const hc = path.join(res, "health-check.ps1");
   const log = path.join(res, "apply-update.log");
+  // v2.5.28 发布实验迭代⑦（终版）：合并单脚本——换包→explorer 启动→等 25+10s 探活→
+  // 失败则清理+回滚+重启，全部步骤落盘日志。历史教训（四轮实验逐一定位）：
+  // ① PS5.1 Start-Process -ArgumentList 不给含空格元素加引号 → 任何运行期路径传参都会被
+  //    首空格截断（探活误判/回滚失效/日志全丢）→ 现全部烘焙为单引号字面量，零运行期参数；
+  // ② UTF-8 无 BOM 的中文被 PS5.1 按 ANSI 乱码 → 写文件带 BOM；
+  // ③ 垂死 Electron 直接 spawn powershell 不可靠 → cmd start 解耦进程树；
+  // ④ 不再拆 health-check.ps1 第二文件——其自身路径同样含空格会被截断，从未执行过。
+  const q = (s) => "'" + String(s).replace(/'/g, "''") + "'"; // PS 单引号字面量转义
   const ps1Script = [
-    "param($exe,$res)",
+    "$exe = " + q(exePath),
+    "$res = " + q(res),
     "$log = Join-Path $res 'apply-update.log'",
     "function Log($m) { Add-Content -Path $log -Value ((Get-Date -Format s) + ' ' + $m) }",
+    "function Alive() { @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe }).Count -gt 0 }",
     "Log 'start'",
     "$asar = Join-Path $res 'app.asar'",
     "$pending = Join-Path $res 'app.asar.pending'",
@@ -171,44 +180,30 @@ function applyOnExit(exePath) {
     "  Move-Item $pending $asar -Force",
     "  Log 'asar swapped'",
     "  Start-Process explorer.exe -ArgumentList ('\"' + $exe + '\"')",
-    "  Log 'app started (via explorer, clean desktop ancestry)'",
-    "  Start-Process powershell.exe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $res 'health-check.ps1')) -WindowStyle Hidden",
-    "  Log 'health check armed'",
+    "  Log 'app started (via explorer)'",
+    "  Start-Sleep 25",
+    "  if (Alive) { Log 'health check ok'; exit }",
+    "  Start-Sleep 10",
+    "  if (Alive) { Log 'health check ok (retry)'; exit }",
+    "  Log 'health check failed: new instance died, cleaning up'",
+    "  Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe } | Stop-Process -Force",
+    "  $bak = $asar + '.bak'",
+    "  if (Test-Path $bak) {",
+    "    Copy-Item $bak $asar -Force",
+    "    Add-Content -Path $log -Value 'rolled back to previous version'",
+    "    Start-Process explorer.exe -ArgumentList ('\"' + $exe + '\"')",
+    "    Add-Content -Path $log -Value 'relaunched via explorer'",
+    "  } else { Add-Content -Path $log -Value 'no backup, cannot roll back' }",
     "} else { Log 'no pending' }",
   ].join("\n");
-  // health-check 路径烘焙（v2.5.28 发布实验迭代⑤）：PS5.1 Start-Process -ArgumentList
-  // 不给含空格元素加引号 → 运行期传 $exe/$res 会被首个空格截断 → 探活永远 False →
-  // 把活着的 2.5.28 当死例杀掉回滚（12:40 目击）。烘焙为字面量后零运行期参数。
-  const psql = (s) => "'" + String(s).replace(/'/g, "''") + "'"; // PS 单引号字面量转义
-  const hcScript = [
-    "$exe = " + psql(exePath),
-    "$res = " + psql(res),
-    "$log = Join-Path $res 'apply-update.log'",
-    "function Alive() { @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe }).Count -gt 0 }",
-    "Start-Sleep 25",
-    "if (Alive) { Add-Content -Path $log -Value 'health check ok'; exit }",
-    "Start-Sleep 10",
-    "if (Alive) { Add-Content -Path $log -Value 'health check ok (retry)'; exit }",
-    "Add-Content -Path $log -Value 'health check failed: new instance died, cleaning up'",
-    "Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe } | Stop-Process -Force",
-    "$bak = Join-Path $res 'app.asar.bak'",
-    "if (Test-Path $bak) {",
-    "  Copy-Item $bak (Join-Path $res 'app.asar') -Force",
-    "  Add-Content -Path $log -Value 'rolled back to previous version'",
-    "  Start-Process explorer.exe -ArgumentList ('\"' + $exe + '\"')",
-    "  Add-Content -Path $log -Value 'relaunched via explorer'",
-    "} else { Add-Content -Path $log -Value 'no backup, cannot roll back' }",
-  ].join("\n");
   try {
-    // BOM 前缀（v2.5.28 实验迭代⑥）：hc 内嵌中文路径字面量，UTF-8 无 BOM 被 PS5.1 按
-    // ANSI 读 → 路径乱码 → 探活永远 False → 误杀活实例+回滚失效。带 BOM 后 PS5.1 正确解码。
-    fs.writeFileSync(ps1, "\ufeff" + ps1Script, "utf8");
-    fs.writeFileSync(hc, "\ufeff" + hcScript, "utf8");
+    fs.writeFileSync(ps1, "\ufeff" + ps1Script, "utf8"); // BOM：PS5.1 正确解码中文路径字面量
+    const { spawn } = require("child_process");
     // cmd start 解耦：powershell 由 cmd 拉起后即为独立进程（cmd 立即退出），不再依赖
     // 垂死 Electron 存活。不加 windowsVerbatimArguments——让 node 给含空格/中文的路径
     // 自动加引号（verbatim 拼接会在首个空格处截断路径，powershell 收到残缺参数静默退出）；
     // start 第一个 token 必须是带引号的标题：'""' 空标题（裸词会被 start 当作待启动命令）。
-    const child = spawn("cmd.exe", ["/c", "start", '""', "/min", "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, exePath, res], { detached: true, stdio: "ignore" });
+    const child = spawn("cmd.exe", ["/c", "start", '""', "/min", "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1], { detached: true, stdio: "ignore" });
     child.on("error", (e) => { try { fs.appendFileSync(log, new Date().toISOString() + " spawn error: " + (e && e.message || e) + "\n"); } catch { /* 忽略 */ } });
     child.unref();
     return true;
