@@ -171,12 +171,17 @@ function applyOnExit(exePath) {
     "  Log 'asar swapped'",
     "  Start-Process explorer.exe -ArgumentList ('\"' + $exe + '\"')",
     "  Log 'app started (via explorer, clean desktop ancestry)'",
-    "  Start-Process powershell.exe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $res 'health-check.ps1'),$exe,$res) -WindowStyle Hidden",
+    "  Start-Process powershell.exe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $res 'health-check.ps1')) -WindowStyle Hidden",
     "  Log 'health check armed'",
     "} else { Log 'no pending' }",
   ].join("\n");
+  // health-check 路径烘焙（v2.5.28 发布实验迭代⑤）：PS5.1 Start-Process -ArgumentList
+  // 不给含空格元素加引号 → 运行期传 $exe/$res 会被首个空格截断 → 探活永远 False →
+  // 把活着的 2.5.28 当死例杀掉回滚（12:40 目击）。烘焙为字面量后零运行期参数。
+  const psql = (s) => "'" + String(s).replace(/'/g, "''") + "'"; // PS 单引号字面量转义
   const hcScript = [
-    "param($exe,$res)",
+    "$exe = " + psql(exePath),
+    "$res = " + psql(res),
     "$log = Join-Path $res 'apply-update.log'",
     "function Alive() { @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe }).Count -gt 0 }",
     "Start-Sleep 25",
