@@ -962,11 +962,16 @@ function playSpineInteract() {
 function setSpineMood(mood) {
   if (!spineObj || renderMode !== "spine") return;
   if (Date.now() < animDemoUntil) return; // 动作试演中，不被情绪切换打断
-  // 坐下状态：待机回落/轮换保持坐姿，不被顶回站姿（聊天情绪仍可短暂覆盖）
-  if ((walkState.seated || walkState.perched) && (mood === "idle" || mood === undefined)) {
+  // 坐下/窗顶状态：一律保持坐姿呈现（sleep 例外，走下方通用分支维持原 Sleep 动画语义）。
+  // 旧逻辑只护 idle——5 动画基建皮肤（Sit/Move/Relax/Interact/Sleep）没有坐姿情绪变体，
+  // 聊天情绪 happy/wave 全映射到 Relax/Interact（站姿类）：说话瞬间"坐着突然站起来"，
+  // 而窗口仍沉在任务栏里 → 脚陷进任务栏/观感悬空，且 busy 期间看门狗不纠（2026-09-05 用户报告）。
+  if ((walkState.seated || walkState.perched) && mood !== "sleep") {
     const sit = sitAnimName();
-    if (sit && spineObj.state.getCurrent(0)?.animation?.name !== sit) {
-      setSpineAnim(sit, true, "sit-guard");
+    const want = (mood === "idle" || mood === undefined) ? null : spineAnimForMood(mood);
+    const target = (want && isSitClassAnim(want)) ? want : sit; // 情绪动画本身是坐姿类才允许替换
+    if (target && spineObj.state.getCurrent(0)?.animation?.name !== target) {
+      setSpineAnim(target, true, "seat-guard");
       scheduleFitSpine({ seatPhase: true });
     }
     return;
@@ -2276,7 +2281,23 @@ setInterval(() => {
  * 豁免：busy（聊天表情优先）、睡眠、试演中；一次性动画（loop=false，Interact 等）播完
  * 会自续/变空，不动它。 */
 setInterval(() => {
-  if (!spineObj || renderMode !== "spine" || busy || isSleeping) return;
+  if (!spineObj || renderMode !== "spine" || isSleeping) return;
+  // busy（聊天/生成中）也保底一项窄检查：坐姿/窗顶但轨道挂着站姿类动画 → 立即坐回。
+  // 原实现 busy 时整体 return，聊天期间一旦被切到站姿就冻结整个回复时长（2026-09-05 用户报告）。
+  if (busy) {
+    if (Date.now() < animDemoUntil) return; // 试演中不打断
+    try {
+      const cur = spineObj.state.getCurrent(0);
+      const name = cur && cur.animation ? cur.animation.name : "";
+      const sit = sitAnimName();
+      if ((walkState.seated || walkState.perched) && name && sit && name !== sit && !isSitClassAnim(name)) {
+        setSpineAnim(sit, true, "seat-guard-busy");
+        scheduleFitSpine({ seatPhase: true });
+        window.petAPI.playback && window.petAPI.playback("[anim] seat-guard-busy: " + name + " → " + sit);
+      }
+    } catch { /* 忽略 */ }
+    return;
+  }
   try {
     if (spineApp.ticker && !spineApp.ticker.started) {
       spineApp.ticker.start();
