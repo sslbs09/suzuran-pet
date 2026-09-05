@@ -199,8 +199,10 @@ function applyOnExit(exePath) {
     "} else { Add-Content -Path $log -Value 'no backup, cannot roll back' }",
   ].join("\n");
   try {
-    fs.writeFileSync(ps1, ps1Script, "utf8");   // ASCII-only：编码安全
-    fs.writeFileSync(hc, hcScript, "utf8");
+    // BOM 前缀（v2.5.28 实验迭代⑥）：hc 内嵌中文路径字面量，UTF-8 无 BOM 被 PS5.1 按
+    // ANSI 读 → 路径乱码 → 探活永远 False → 误杀活实例+回滚失效。带 BOM 后 PS5.1 正确解码。
+    fs.writeFileSync(ps1, "\ufeff" + ps1Script, "utf8");
+    fs.writeFileSync(hc, "\ufeff" + hcScript, "utf8");
     // cmd start 解耦：powershell 由 cmd 拉起后即为独立进程（cmd 立即退出），不再依赖
     // 垂死 Electron 存活。不加 windowsVerbatimArguments——让 node 给含空格/中文的路径
     // 自动加引号（verbatim 拼接会在首个空格处截断路径，powershell 收到残缺参数静默退出）；
