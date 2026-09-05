@@ -189,8 +189,11 @@ function applyOnExit(exePath) {
     fs.writeFileSync(ps1, ps1Script, "utf8");   // ASCII-only：编码安全
     fs.writeFileSync(hc, hcScript, "utf8");
     const { spawn } = require("child_process");
-    // cmd start 解耦：powershell 不再是垂死 Electron 的直接子进程
-    const child = spawn("cmd.exe", ["/s", "/c", "start", "\"\"", "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, exePath, res], { detached: true, windowsVerbatimArguments: true, stdio: "ignore" });
+    // cmd start 解耦：powershell 由 cmd 拉起后即为独立进程（cmd 立即退出），不再依赖
+    // 垂死 Electron 存活。不加 windowsVerbatimArguments——让 node 给含空格/中文的路径
+    // 自动加引号（verbatim 拼接会在首个空格处截断路径，powershell 收到残缺参数静默退出）；
+    // start 第一个 token 用 "SuzuranPetUpdate" 占标题位。
+    const child = spawn("cmd.exe", ["/c", "start", "SuzuranPetUpdate", "/min", "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, exePath, res], { detached: true, stdio: "ignore" });
     child.on("error", (e) => { try { fs.appendFileSync(log, new Date().toISOString() + " spawn error: " + (e && e.message || e) + "\n"); } catch { /* 忽略 */ } });
     child.unref();
     return true;
