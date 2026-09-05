@@ -962,13 +962,15 @@ function playSpineInteract() {
 function setSpineMood(mood) {
   if (!spineObj || renderMode !== "spine") return;
   if (Date.now() < animDemoUntil) return; // 动作试演中，不被情绪切换打断
-  // 坐下/窗顶状态：一律保持坐姿呈现（sleep 例外，走下方通用分支维持原 Sleep 动画语义）。
+  // 坐下/窗顶状态：一切情绪（含 sleep）一律以坐姿呈现。
   // 旧逻辑只护 idle——5 动画基建皮肤（Sit/Move/Relax/Interact/Sleep）没有坐姿情绪变体，
   // 聊天情绪 happy/wave 全映射到 Relax/Interact（站姿类）：说话瞬间"坐着突然站起来"，
-  // 而窗口仍沉在任务栏里 → 脚陷进任务栏/观感悬空，且 busy 期间看门狗不纠（2026-09-05 用户报告）。
-  if ((walkState.seated || walkState.perched) && mood !== "sleep") {
+  // 窗口仍沉在任务栏里 → 脚陷进任务栏/观感悬空，且 busy 期间看门狗不纠（2026-09-05 用户报告）。
+  // sleep 同批纳入：Sleep 动画是站姿类，坐在任务栏上入睡后"变成站在任务栏里"
+  // （11:09 用户目击），改为保持坐姿入睡。
+  if (walkState.seated || walkState.perched) {
     const sit = sitAnimName();
-    const want = (mood === "idle" || mood === undefined) ? null : spineAnimForMood(mood);
+    const want = (mood === "idle" || mood === undefined || mood === "sleep") ? null : spineAnimForMood(mood);
     const target = (want && isSitClassAnim(want)) ? want : sit; // 情绪动画本身是坐姿类才允许替换
     if (target && spineObj.state.getCurrent(0)?.animation?.name !== target) {
       setSpineAnim(target, true, "seat-guard");
