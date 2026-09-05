@@ -169,8 +169,8 @@ function applyOnExit(exePath) {
     "if (Test-Path $pending) {",
     "  Move-Item $pending $asar -Force",
     "  Log 'asar swapped'",
-    "  Start-Process $exe",
-    "  Log 'app started'",
+    "  Start-Process explorer.exe -ArgumentList ('\"' + $exe + '\"')",
+    "  Log 'app started (via explorer, clean desktop ancestry)'",
     "  Start-Process powershell.exe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $res 'health-check.ps1'),$exe,$res) -WindowStyle Hidden",
     "  Log 'health check armed'",
     "} else { Log 'no pending' }",
@@ -178,22 +178,29 @@ function applyOnExit(exePath) {
   const hcScript = [
     "param($exe,$res)",
     "$log = Join-Path $res 'apply-update.log'",
+    "function Alive() { @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe }).Count -gt 0 }",
     "Start-Sleep 25",
-    "$alive = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe }).Count -gt 0",
-    "if ($alive) { Add-Content -Path $log -Value 'health check ok'; exit }",
+    "if (Alive) { Add-Content -Path $log -Value 'health check ok'; exit }",
+    "Start-Sleep 10",
+    "if (Alive) { Add-Content -Path $log -Value 'health check ok (retry)'; exit }",
+    "Add-Content -Path $log -Value 'health check failed: new instance died, cleaning up'",
+    "Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe } | Stop-Process -Force",
     "$bak = Join-Path $res 'app.asar.bak'",
-    "Add-Content -Path $log -Value 'health check failed'",
-    "if (Test-Path $bak) { Copy-Item $bak (Join-Path $res 'app.asar') -Force; Start-Process $exe; Add-Content -Path $log -Value 'rolled back to previous version' }",
+    "if (Test-Path $bak) {",
+    "  Copy-Item $bak (Join-Path $res 'app.asar') -Force",
+    "  Add-Content -Path $log -Value 'rolled back to previous version'",
+    "  Start-Process explorer.exe -ArgumentList ('\"' + $exe + '\"')",
+    "  Add-Content -Path $log -Value 'relaunched via explorer'",
+    "} else { Add-Content -Path $log -Value 'no backup, cannot roll back' }",
   ].join("\n");
   try {
     fs.writeFileSync(ps1, ps1Script, "utf8");   // ASCII-only：编码安全
     fs.writeFileSync(hc, hcScript, "utf8");
-    const { spawn } = require("child_process");
     // cmd start 解耦：powershell 由 cmd 拉起后即为独立进程（cmd 立即退出），不再依赖
     // 垂死 Electron 存活。不加 windowsVerbatimArguments——让 node 给含空格/中文的路径
     // 自动加引号（verbatim 拼接会在首个空格处截断路径，powershell 收到残缺参数静默退出）；
-    // start 第一个 token 用 "SuzuranPetUpdate" 占标题位。
-    const child = spawn("cmd.exe", ["/c", "start", "SuzuranPetUpdate", "/min", "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, exePath, res], { detached: true, stdio: "ignore" });
+    // start 第一个 token 必须是带引号的标题：'""' 空标题（裸词会被 start 当作待启动命令）。
+    const child = spawn("cmd.exe", ["/c", "start", '""', "/min", "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, exePath, res], { detached: true, stdio: "ignore" });
     child.on("error", (e) => { try { fs.appendFileSync(log, new Date().toISOString() + " spawn error: " + (e && e.message || e) + "\n"); } catch { /* 忽略 */ } });
     child.unref();
     return true;
