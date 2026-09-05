@@ -969,17 +969,15 @@ function setSpineMood(mood) {
   // 5 动画基建皮肤（Sitd/Sleepd/Move/Relax/Interact）没有坐姿情绪变体，聊天情绪
   // happy/wave 全映射到 Relax/Interact（站姿类）：说话瞬间"坐着突然站起来"，窗口仍沉在
   // 任务栏里 → 脚陷进任务栏/观感悬空，且 busy 期间看门狗不纠（2026-09-05 用户报告）。
-  // 入睡（实验 B）：Sleepd=基建趴桌打盹循环，比睁眼坐姿 Sitd 生动；姿态由 fit-probe
-  // 实测（[fit-probe] Sleepd），若站姿类不适配沉底窗口则回退 sitAnimName()。
+  // sleep 例外由主进程处理：set-sleeping(true) 会先起身回地面线，广播到达后走通用路径
+  // 播 Sleepd（用户指示：睡觉就是 sleep 动画，不要坐着睡）；广播前瞬态回落 Sitd。
   if (walkState.seated || walkState.perched) {
     const sit = sitAnimName();
-    const want = (mood === "idle" || mood === undefined) ? null : spineAnimForMood(mood);
-    const target = (mood === "sleep" && spineHas("Sleepd")) ? "Sleepd"
-                 : (want && isSitClassAnim(want)) ? want : sit;
+    const want = (mood === "idle" || mood === undefined || mood === "sleep") ? null : spineAnimForMood(mood);
+    const target = (want && isSitClassAnim(want)) ? want : sit;
     if (target && spineObj.state.getCurrent(0)?.animation?.name !== target) {
       setSpineAnim(target, true, "seat-guard");
       scheduleFitSpine({ seatPhase: true });
-      probeSeatGeometry(target); // 姿态实测：Sleepd 是否适配沉底坐窗（回退判据）
     }
     return;
   }
@@ -1001,6 +999,7 @@ function setSpineMood(mood) {
     setSpineAnim(animName, true, "mood:" + mood);
     moodAnimUntil = Date.now() + 6500; // 情绪动画展示窗口：期间相位对账不抢，过期由对账兜底回收
     scheduleFitSpine();
+    if (mood === "sleep") probeSeatGeometry(animName); // 睡姿姿态实测：Sleepd 高度/贴合入日志
   }
 }
 

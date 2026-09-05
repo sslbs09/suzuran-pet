@@ -4023,7 +4023,12 @@ ipcMain.on("pet:throw", (_e, vx, vy) => {
 ipcMain.on("pet:set-sleeping", (_e, v) => {
   const wasSleeping = walk.sleeping;
   walk.sleeping = !!v;
-  if (walk.sleeping) { cancelFlight(); cancelWalkJump(); }
+  if (walk.sleeping) {
+    cancelFlight(); cancelWalkJump();
+    // 睡觉=站着睡（Sleepd 站姿循环，用户 2026-09-05 指示"不要坐着睡"）：坐姿入睡先起身
+    // 回地面线。坐姿 sink/悬浮问题随之消失——睡眠位置永远在地面线。
+    if (walk.seated) { walk.seated = false; walk.resting = false; walk.sunk = false; walk.freeStand = false; }
+  }
   if (win && !win.isDestroyed() && config.getConfig().renderMode === "spine") {
     // v2.5.28 关键修复：位置分支必须按真实姿态——旧实现假设"睡着=站着"，把窗口无条件
     // 挪到 standY/sleepY。坐姿中入睡/睡醒会被拉回站立高度 → 坐姿动画叠在悬浮位置上
