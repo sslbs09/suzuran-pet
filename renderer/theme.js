@@ -17,10 +17,13 @@
   function apply(theme) {
     document.body.classList.toggle("theme-dark", isDark(theme));
   }
-  /** 辅助窗口引导：打开时读配置 + 订阅主题变更（主进程 v2.5.26 起全窗广播） */
-  function init() {
+  /** 辅助窗口引导：打开时读配置 + 订阅主题变更（主进程 v2.5.26 起全窗广播）。
+   *  override：主进程 loadFile 经 query 传入的主题（首帧同步应用，消除浅色闪屏）；缺省走 getState。 */
+  function init(override) {
     try {
-      if (window.petAPI && window.petAPI.getState) {
+      if (override === "dark" || override === "light" || override === "auto" || override === "system") {
+        apply(override);
+      } else if (window.petAPI && window.petAPI.getState) {
         window.petAPI.getState().then(function (st) { apply(st && st.theme); }).catch(function () { /* 忽略 */ });
       }
       if (window.petAPI && window.petAPI.onThemeChanged) window.petAPI.onThemeChanged(function (th) { apply(th); });

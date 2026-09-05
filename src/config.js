@@ -279,6 +279,12 @@ function buildSettingsView() {
     personify: cfg.personify !== false, // 人格化（设置页单独开关）
     features: cfg.features || {}, // 功能开关快照（剪贴板/系统监控/工作区感知等）
     rpMode: cfg.rpMode !== false, // 角色扮演模式（设置页单独开关）：关=助手模式优先服从指令
+    // v2.5.28 修复：设置页回显缺字段——theme 缺失导致主题下拉每次打开都显示"自动随时间"
+    // （用户选了深色、config 也存了，仅回显丢失）；softRender/live2d* 同批补齐
+    theme: cfg.theme || "auto",
+    softRender: !!cfg.softRender,
+    live2dSkinId: cfg.live2dSkinId || "",
+    live2dScale: Number(cfg.live2dScale) > 0 ? Number(cfg.live2dScale) : 1.0,
     walking: !!cfg.walking,
     persona: getPersonaText(),
     hasPersonaDefault: fs.existsSync(PERSONA_DEFAULT_PATH),

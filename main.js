@@ -6,7 +6,7 @@
  */
 "use strict";
 
-const { app, protocol, safeStorage, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, screen, dialog, Notification, powerMonitor } = require("electron");
+const { app, protocol, safeStorage, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, screen, dialog, Notification, powerMonitor, nativeTheme } = require("electron");
 // v2.5.22 修复（P0-2）：删除无条件 disableHardwareAcceleration——
 // 此前与下方按 softRender 配置的判断冲突，导致设置页「软件渲染」开关形同虚设。
 // 硬件加速默认开启（Spine/PIXI 性能更好）；若遇 GPU 崩溃，用户在设置开启 softRender 即回退 CPU 渲染。
@@ -539,10 +539,13 @@ function openSettings() {
     resizable: true,
     title: "苏苏洛 · 设置",
     autoHideMenuBar: true,
+    backgroundColor: "#1b2226", // 深色底：消除打开瞬间白闪（v2.5.28）
     webPreferences: winChild.childWebPrefs(config.APP_DIR)
   });
   settingsWin.setMenuBarVisibility(false);
-  settingsWin.loadFile(path.join(config.APP_DIR, "renderer", "settings.html"));
+  settingsWin.loadFile(path.join(config.APP_DIR, "renderer", "settings.html"), {
+    query: { theme: config.getConfig().theme || "auto" } // 首帧同步应用主题（theme-init 读参数，不等 IPC）
+  });
 attachCrashDiag(settingsWin, "settings");
     settingsWin.show();
     settingsWin.focus();
@@ -856,9 +859,20 @@ ipcMain.handle("pet:regenerate", async () => { // Swipes：重新生成最后一
   } catch (e) { logTts("chat", "regenerate 失败: " + (e && e.message || e)); sendToRenderer("pet:done", { mode: "chat", full: "", emotion: "" }); return null; }
   finally { conversation.finish(task.id); }
 });
+/** 原生窗口外观同步（v2.5.28）：把用户主题映射到 nativeTheme.themeSource——
+ *  Windows 下所有 BrowserWindow 的原生标题栏/滚动条随深浅色变化，设置页深色 UI
+ *  不再顶着白色标题栏（用户反馈"上页面和滚轮与设置 UI 一体"）。auto 沿用 19-6 点规则。 */
+function syncNativeTheme() {
+  try {
+    const t = config.getConfig().theme || "auto";
+    if (t === "dark" || t === "light" || t === "system") nativeTheme.themeSource = t;
+    else { const h = new Date().getHours(); nativeTheme.themeSource = (h >= 19 || h < 6) ? "dark" : "light"; }
+  } catch { /* 忽略 */ }
+}
 ipcMain.handle("pet:set-theme", (_e, theme) => {
   const v = ["auto", "light", "dark", "system"].includes(theme) ? theme : "auto";
   config.saveConfig({ theme: v });
+  syncNativeTheme(); // 原生标题栏/滚动条同步（设置页与 UI 一体）
   broadcastToRenderers("pet:theme-changed", v); // v2.5.26：全窗实时跟随
   return true;
 });
@@ -4419,6 +4433,7 @@ if (!gotLock) {
   });
 
   app.whenReady().then(() => {
+    syncNativeTheme(); // 原生标题栏/滚动条随用户主题（须在首个窗口创建前）
     relaunchIfAppDirNewer(); // zip 覆盖解压升级兜底：散目录比 asar 新时让位重启（须在其他初始化前）
     try {
       // 崩溃收集：minidump 存到 userData/crashes（不自动上传），便于排查渲染层 crashed
