@@ -260,12 +260,14 @@ function applyFullUpdate(exePath) {
     "if (-not (Test-Path $zip)) { Log 'no zip, abort'; exit }",
     "$tmp = Join-Path $env:TEMP 'suzuran-full-update'",
     "Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue",
-    "Expand-Archive -Path $zip -DestinationPath $tmp -Force",
+    // S2 安全加固（2026-09-06）：解压/复制失败必须显式中止——PS5.1 非 terminating error
+    // 会带着错误继续执行，导致"半更新态"（resources 被部分覆盖）。
+    "try { Expand-Archive -Path $zip -DestinationPath $tmp -Force -ErrorAction Stop } catch { Log ('expand failed, abort: ' + $_.Exception.Message); exit }",
     "Log 'expanded'",
     "$appdir = Get-ChildItem $tmp -Directory | Select-Object -First 1",
     "if (-not $appdir) { Log 'no app dir in zip'; exit }",
     "$srcRes = Join-Path $appdir.FullName 'resources'",
-    "if (Test-Path $srcRes) { Copy-Item (Join-Path $srcRes '*') $res -Recurse -Force; Log 'resources copied' }",
+    "if (Test-Path $srcRes) { try { Copy-Item (Join-Path $srcRes '*') $res -Recurse -Force -ErrorAction Stop; Log 'resources copied' } catch { Log ('copy failed, abort: ' + $_.Exception.Message); exit } }",
     "$oldAsar = Join-Path $res 'app.asar'",
     "if (Test-Path $oldAsar) { Remove-Item $oldAsar -Force -ErrorAction SilentlyContinue; Log 'old asar removed' }",
     "Start-Process explorer.exe -ArgumentList ('\"' + $exe + '\"')",
