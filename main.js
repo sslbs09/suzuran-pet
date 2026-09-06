@@ -226,6 +226,7 @@ function setPetLayer(v) {
   applyLayer(); // 坐姿/贴地接触任务栏时内部判定置顶，脚不被任务栏盖住
   logTts("walk", "显示层级: " + config.getConfig().layer);
 }
+ipcMain.on("pet:get-app-version-sync", (e) => { e.returnValue = app.getVersion(); }); // preload 初始化同步取版本（app 模块在 preload 不可用）
 ipcMain.handle("pet:set-layer", (_e, v) => { setPetLayer(v); return true; });
 
 /** 一键坐到任务栏上：角色脚底贴齐任务栏上沿（窗口按 groundGap 下探补偿），播放 Sit 坐姿 */
@@ -3444,6 +3445,9 @@ function invalidatePerchIfNeeded() {
   walk.returning = true;
   walk.resting = false;
   walk.seated = false;
+  // 2026-09-06 修复：跳上窗口后睡着的桌宠，屏障失效时若不唤醒，returning 会被
+  // walk tick 的 `&& !walk.sleeping` 挡住——桌宠悬空坐在原窗口位置睡着不落地。
+  walk.sleeping = false;
   walk.targetX = null;
   cancelWalkJump();
   walkBroadcast();
