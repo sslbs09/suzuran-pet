@@ -4004,7 +4004,7 @@ function walkDiag() {
       walkDiagAt = Date.now();
     } else if (walk.active && !walk.paused && walk.timer && Date.now() - walkDiagAt > 90000) {
       walkDiagAt = Date.now();
-      logTts("walk", "状态告警: 90s 无变化（含站着不动检查）x=" + (b ? b.x : "?") + " resting=" + walk.resting + " seated=" + walk.seated + " sleeping=" + walk.sleeping + " phaseTimer=" + !!walk.phaseTimer);
+      logTts("walk", "状态告警: 90s 无变化（含站着不动检查）x=" + (b ? b.x : "?") + " y=" + (b ? b.y : "?") + " resting=" + walk.resting + " seated=" + walk.seated + " perched=" + walk.perched + " returning=" + walk.returning + " sleeping=" + walk.sleeping + " phaseTimer=" + !!walk.phaseTimer);
     }
   } catch { /* 忽略 */ }
 }
@@ -4084,6 +4084,24 @@ ipcMain.on("pet:throw", (_e, vx, vy) => {
   }
 });
 ipcMain.on("pet:set-sleeping", (_e, v) => {
+  // 方案 2（2026-09-06，用户拍板）：不在别人窗口顶/图标顶上睡觉——坐窗（perched）或坐图标
+  // （iconRest）时收到入睡请求 → 先落回地面（returning 流程），本次入睡请求忽略；
+  // 落地坐下后相位机到点会再次请求入睡，届时已在地面上正常睡。窗口关闭时也有
+  // invalidatePerchIfNeeded 兜底唤醒，双重保证不悬空睡在别人窗口上。
+  if (v && (walk.perched || walk.iconRest)) {
+    walk.perched = false;
+    walk.iconRest = false;
+    walk.perchBarrier = null;
+    walk.returning = true;
+    walk.resting = false;
+    walk.seated = false;
+    walk.sleeping = false;
+    walk.targetX = null;
+    cancelWalkJump();
+    walkBroadcast();
+    logTts("walk", "窗顶入睡改约：先落回地面再睡");
+    return;
+  }
   const wasSleeping = walk.sleeping;
   walk.sleeping = !!v;
   if (walk.sleeping) {
