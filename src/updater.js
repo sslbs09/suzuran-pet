@@ -147,12 +147,15 @@ async function downloadPendingProgress(plan, onProgress = () => {}) {
   }
 }
 
-/** 退出时替换：写 apply-update.ps1（等退出→备份→pending 覆盖→重启）+ health-check.ps1
- *  （25s 后探活，失败用 .bak 回滚再拉起），cmd start 解耦生命周期后由调用方 quit。
- *  v2.5.28 发布实验实测两个静默失效点，已修：
+/** 退出时替换：写 apply-update.ps1（等旧实例退干净→备份→pending 覆盖→重启→探活→失败回滚），
+ *  cmd start 解耦生命周期后由调用方 quit。历史修复（v2.5.28 四轮实验，2026-09-05）：
  *  ① ps1 含中文注释（UTF-8 无 BOM 被 PS5.1 按 ANSI 解析）可致整脚本解析失败——现 ASCII-only；
- *  ② spawn detached 从垂死 Electron 直接启动 powershell 可能静默不存在——现经 cmd start
- *     解耦进程树，且每步写 apply-update.log、spawn error 也落盘，失败不再不可见。 */
+ *  ② 垂死 Electron 直接 spawn powershell 可能静默不存在——现经 cmd start 解耦进程树；
+ *  ③ PS5.1 Start-Process -ArgumentList 空格截断——运行期路径全部烘焙为单引号字面量；
+ *  ④ health-check.ps1 自身路径同样被截断——合并为单脚本。
+ *  锁竞争修复（2026-09-06，E1 实验）：启动新实例前等待旧实例 Path 计数归零（≤60s，超时强杀兜底），
+ *  否则新实例因单实例锁被占而 12s 重试耗尽后静默退出——即 09-05 误判的"CI 构建死亡"。
+ *  swap 失败（句柄占用等）现在会被检测并中止，不再记假 'asar swapped'。 */
 function applyOnExit(exePath) {
   const res = resourcesDir();
   const ps1 = path.join(res, "apply-update.ps1");
@@ -165,36 +168,50 @@ function applyOnExit(exePath) {
   // ③ 垂死 Electron 直接 spawn powershell 不可靠 → cmd start 解耦进程树；
   // ④ 不再拆 health-check.ps1 第二文件——其自身路径同样含空格会被截断，从未执行过。
   const q = (s) => "'" + String(s).replace(/'/g, "''") + "'"; // PS 单引号字面量转义
+  // v2.5.28 锁竞争修复（2026-09-06，E1 实验实锤）：ps1 启动新实例前必须等旧实例真正退干净。
+  // 此前新实例在旧实例 quit 流程中（实测退出 >16s）被拉起 → 单实例锁被占 → 12s 重试耗尽 →
+  // app.quit() 静默退出（EXIT code=0）→ 探活判死 → 回滚，即 09-05 误判为"CI 构建死亡"的现象。
+  // 等归零一举三得：无锁竞争（gotLock 第一把拿到）/ 探活精确（Path 匹配只剩新实例）/
+  // swap 可靠（无句柄占用，Move-Item 必然成功；失败则记日志中止，防半更新态）。
   const ps1Script = [
     "$exe = " + q(exePath),
     "$res = " + q(res),
     "$log = Join-Path $res 'apply-update.log'",
     "function Log($m) { Add-Content -Path $log -Value ((Get-Date -Format s) + ' ' + $m) }",
-    "function Alive() { @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe }).Count -gt 0 }",
+    "function CountProcs() { @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe }).Count }",
     "Log 'start'",
     "$asar = Join-Path $res 'app.asar'",
     "$pending = Join-Path $res 'app.asar.pending'",
+    "if (-not (Test-Path $pending)) { Log 'no pending'; exit }",
     "Start-Sleep 2",
-    "if (Test-Path $asar) { Copy-Item $asar ($asar + '.bak') -Force; Log 'backup ok' }",
-    "if (Test-Path $pending) {",
-    "  Move-Item $pending $asar -Force",
-    "  Log 'asar swapped'",
-    "  Start-Process explorer.exe -ArgumentList ('\"' + $exe + '\"')",
-    "  Log 'app started (via explorer)'",
-    "  Start-Sleep 25",
-    "  if (Alive) { Log 'health check ok'; exit }",
-    "  Start-Sleep 10",
-    "  if (Alive) { Log 'health check ok (retry)'; exit }",
-    "  Log 'health check failed: new instance died, cleaning up'",
+    "$waited = 0",
+    "while ((CountProcs) -gt 0 -and $waited -lt 60) { Start-Sleep 1; $waited++ }",
+    "if ((CountProcs) -gt 0) {",
+    "  Log 'old instance still alive after 60s, force killing'",
     "  Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe } | Stop-Process -Force",
-    "  $bak = $asar + '.bak'",
-    "  if (Test-Path $bak) {",
-    "    Copy-Item $bak $asar -Force",
-    "    Add-Content -Path $log -Value 'rolled back to previous version'",
-    "    Start-Process explorer.exe -ArgumentList ('\"' + $exe + '\"')",
-    "    Add-Content -Path $log -Value 'relaunched via explorer'",
-    "  } else { Add-Content -Path $log -Value 'no backup, cannot roll back' }",
-    "} else { Log 'no pending' }",
+    "  Start-Sleep 3",
+    "}",
+    "Log ('old instance exited (waited ' + $waited + 's)')",
+    "if (Test-Path $asar) { Copy-Item $asar ($asar + '.bak') -Force; Log 'backup ok' }",
+    "$swapErr = ''",
+    "try { Move-Item $pending $asar -Force -ErrorAction Stop } catch { $swapErr = $_.Exception.Message }",
+    "if ($swapErr -ne '') { Log ('swap failed, abort: ' + $swapErr); exit }",
+    "Log 'asar swapped'",
+    "Start-Process explorer.exe -ArgumentList ('\"' + $exe + '\"')",
+    "Log 'app started (via explorer)'",
+    "Start-Sleep 25",
+    "if ((CountProcs) -gt 0) { Log 'health check ok'; exit }",
+    "Start-Sleep 10",
+    "if ((CountProcs) -gt 0) { Log 'health check ok (retry)'; exit }",
+    "Log 'health check failed: new instance died, cleaning up'",
+    "Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe } | Stop-Process -Force",
+    "$bak = $asar + '.bak'",
+    "if (Test-Path $bak) {",
+    "  Copy-Item $bak $asar -Force",
+    "  Add-Content -Path $log -Value 'rolled back to previous version'",
+    "  Start-Process explorer.exe -ArgumentList ('\"' + $exe + '\"')",
+    "  Add-Content -Path $log -Value 'relaunched via explorer'",
+    "} else { Add-Content -Path $log -Value 'no backup, cannot roll back' }",
   ].join("\n");
   try {
     fs.writeFileSync(ps1, "\ufeff" + ps1Script, "utf8"); // BOM：PS5.1 正确解码中文路径字面量
