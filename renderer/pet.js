@@ -1326,14 +1326,26 @@ function playPresetVoice() {
     const names = ["017", "018", "021", "023", "025"];
     presetAudio = new Audio("sounds/preset-" + names[(idx - 1) % names.length] + ".wav");
     isSpeakingAudio = true;
-    presetAudio.onended = () => { isSpeakingAudio = false; };
-    presetAudio.onerror = () => { isSpeakingAudio = false; };
+    const done = () => { isSpeakingAudio = false; setTimeout(flushPendingAmbient, 250); }; // 播完补发暂存后台台词（O4 短提示音场景）
+    presetAudio.onended = done; presetAudio.onerror = done;
     presetAudio.play().catch(() => { isSpeakingAudio = false; });
   } catch (e) { isSpeakingAudio = false; }
 }
 
 function speakSystem(clean, rateOverride, pitchOverride) {
   stopTts();
+  // O4（2026-09-06）：系统音兜底可配置——tts=读中文（现状）/ mute=静音 / preset=短提示音
+  const mode = ttsConfig.systemVoiceFallback || "tts";
+  if (mode === "mute") { // 静音：不发声，仅气泡展示，保持收尾节奏（补发暂存后台台词）
+    isSpeakingAudio = false;
+    setTimeout(flushPendingAmbient, 250);
+    return;
+  }
+  if (mode === "preset") { // 短提示音：播角色语音切片替代读中文
+    playPresetVoice();
+    setTimeout(flushPendingAmbient, 250);
+    return;
+  }
   try {
     const u = new SpeechSynthesisUtterance(clean);
     if (zhVoice) u.voice = zhVoice;

@@ -159,6 +159,7 @@ async function renderOnboard(S) {
 
   $("tts-enabled").value = String(!!(S.tts && S.tts.enabled));
   $("tts-rate").value = (S.tts && S.tts.rate) || 0.9;
+  $("sys-voice-fallback").value = (S.tts && S.tts.systemVoiceFallback) || "tts"; // O4 系统音兜底三选
   const genie = S.ttsGenie || {};
   $("genie-python").value = genie.python || "";
   $("genie-script").value = genie.serverScript || "";
@@ -564,7 +565,7 @@ async function doSaveVoice() {
   const plan = $("tts-plan").value;
   const patch = {
     greetingOnStart: $("greeting-on-start").checked,
-    tts: { enabled, rate: parseFloat($("tts-rate").value) || 0.9 },
+    tts: { enabled, rate: parseFloat($("tts-rate").value) || 0.9, systemVoiceFallback: $("sys-voice-fallback").value || "tts" },
     ttsGenie: {
       enabled: plan === "genie",
       python: $("genie-python").value.trim(),

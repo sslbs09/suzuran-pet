@@ -339,6 +339,16 @@
     </div>
     <div class="row">
       <label class="col">
+        <span data-i18n="set.sysVoiceFallback">系统音兜底（TTS 引擎不可用时读什么）</span>
+        <select id="sys-voice-fallback">
+          <option value="tts" data-i18n="set.svfTts">读中文（系统语音）</option>
+          <option value="mute" data-i18n="set.svfMute">🔇 静音（只显示气泡）</option>
+          <option value="preset" data-i18n="set.svfPreset">🔔 短提示音（苏苏洛语音切片）</option>
+        </select>
+      </label>
+    </div>
+    <div class="row">
+      <label class="col">
         <input id="greeting-on-start" type="checkbox" />
         <span data-i18n="set.greetingOnStart">🗣 启动时自动问候（气泡 + 语音）</span>
       </label>
