@@ -53,9 +53,13 @@ async function translateToJa(text) {
   // 命中续期（2026-09-03 自查）：TTL 7 天且命中原本不刷新时间戳 → 固定台词整批过期后
   // 重新逐句调 API；续期后常用品目永不过期（LRU 500 上限照旧兜底淘汰冷句）。
   const tc = require("./translate-cache");
+  const d = ensureTrDisk();
+  const key = String(text || "");
+  // O1 stale-while-error（2026-09-06）：先抓磁盘过期旧译文——tc.get 命中失败会懒惰删除
+  // 过期条目，必须在其之前抓取。翻译 API 失败时回退此值（过期译文好过系统音读中文）。
+  let staleJa = "";
+  try { const s = tc.getStale(d.map, key); if (s) staleJa = s; } catch { /* 忽略 */ }
   {
-    const d = ensureTrDisk();
-    const key = String(text || "");
     const dja = tc.get(d.map, key);
     if (dja !== undefined) {
       tc.set(d.map, key, dja);
@@ -146,6 +150,11 @@ async function translateToJa(text) {
     if (attempt < 2) await new Promise((r) => setTimeout(r, retryWaitMs));
   }
   cacheSet(String(text || ""), ""); // 失败入池（10s 冷却）：冷却期内不反复撞 API，冷却后同句自动重新翻译
+  // O1 stale-while-error：API 两轮失败但磁盘有历史译文 → 回退过期旧译文（宁可念旧的日文，不念中文）
+  if (staleJa) {
+    logTts("ja", "翻译失败，回退过期旧译文（stale-while-error）");
+    return staleJa;
+  }
   return "";
 }
 

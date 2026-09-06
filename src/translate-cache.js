@@ -32,6 +32,12 @@ function get(map, text, now = Date.now(), ttlMs = DEFAULT_TTL_MS) {
   if (e) delete map[hashKey(text)]; // 过期条目懒惰清除
   return undefined;
 }
+/** O1 stale-while-error（2026-09-06）：读过期旧译文——不检查 TTL、不懒惰清除。
+ *  翻译 API 失败时回退用（过期译文好过系统音读中文）。无条目或译文为空返回 undefined。 */
+function getStale(map, text) {
+  const e = map[hashKey(text)];
+  return e && typeof e.ja === "string" && e.ja ? e.ja : undefined;
+}
 function set(map, text, ja, now = Date.now()) {
   map[hashKey(text)] = { ja, t: now };
   const keys = Object.keys(map);
@@ -43,4 +49,4 @@ function set(map, text, ja, now = Date.now()) {
 }
 function size(map) { return Object.keys(map).length; }
 
-module.exports = { cachePathFor, hashKey, load, save, get, set, size, DEFAULT_TTL_MS, MAX };
+module.exports = { cachePathFor, hashKey, load, save, get, getStale, set, size, DEFAULT_TTL_MS, MAX };
