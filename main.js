@@ -4004,7 +4004,7 @@ function walkDiag() {
       walkDiagAt = Date.now();
     } else if (walk.active && !walk.paused && walk.timer && Date.now() - walkDiagAt > 90000) {
       walkDiagAt = Date.now();
-      logTts("walk", "状态告警: 90s 无变化（含站着不动检查）x=" + (b ? b.x : "?") + " resting=" + walk.resting + " seated=" + walk.seated + " sleeping=" + walk.sleeping + " phaseTimer=" + !!walk.phaseTimer);
+      logTts("walk", "状态告警: 90s 无变化（含站着不动检查）x=" + (b ? b.x : "?") + " y=" + (b ? b.y : "?") + " resting=" + walk.resting + " seated=" + walk.seated + " perched=" + walk.perched + " returning=" + walk.returning + " sleeping=" + walk.sleeping + " phaseTimer=" + !!walk.phaseTimer);
     }
   } catch { /* 忽略 */ }
 }
