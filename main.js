@@ -558,6 +558,10 @@ function openSettings() {
     query: { theme: config.getConfig().theme || "auto" } // 首帧同步应用主题（theme-init 读参数，不等 IPC）
   });
 attachCrashDiag(settingsWin, "settings");
+  // v2.5.30 诊断：设置页白屏排查——渲染层 console 全量转发 tts.log
+  settingsWin.webContents.on("console-message", (_e, level, message, line, sourceId) => {
+    try { logTts("render", "[settings-console] L" + level + " " + String(message).slice(0, 300) + " @" + String(sourceId || "").split("/").pop() + ":" + line); } catch { /* 忽略 */ }
+  });
     settingsWin.show();
     settingsWin.focus();
     settingsWin.on("closed", () => { settingsWin = null; });
