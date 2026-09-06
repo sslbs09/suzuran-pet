@@ -909,7 +909,26 @@ function applyWalkState(s) {
     }
     return;
   }
-  if (busy) return;                       // 聊天表情优先，不打断
+  if (busy) {
+    // 2026-09-06 修「说话期间在移动但没有 Move 动画」：busy（聊天生成/语音回复）时相位
+    // 对账停摆（下方 return，聊天表情优先不打断），但一次性表情动画（think/cry/happy 等
+    // 非循环）播完后定格最后一帧，而主进程行走引擎仍在移动窗口 → 位置滑行、无动画；
+    // 说话结束 busy=false 后对账恢复（用户所见"后面恢复正常"）。
+    // 修复：非循环表情播完且行走引擎在动 → 接回 walk 相位动画；循环态表情（work 打字）
+    // 保持不打断。
+    if (walkState.active && !walkState.paused && !walkState.resting && spineObj) {
+      const cur = spineObj.state.getCurrent(0);
+      const curName = cur && cur.animation ? cur.animation.name : "";
+      const done = !!(cur && cur.animation && cur.loop === false &&
+        cur.animationEnd >= 0 && cur.trackTime >= cur.animationEnd);
+      const target = spinePhaseAnim();
+      if (done && target && curName !== target) {
+        setSpineAnim(target, true, "busy-walk-phase");
+        logPhaseSwitch("busy-walk-phase", target);
+      }
+    }
+    return;                       // 聊天表情优先，不打断
+  }
   const target = spinePhaseAnim();
   if (target && spineObj.state.getCurrent(0)?.animation?.name !== target) {
     setSpineAnim(target, true, "walk-phase");
