@@ -455,16 +455,6 @@
         </select>
       </label>
       <label class="col">
-        <span data-i18n="set.updateRow">软件更新</span>
-        <div class="update-row">
-          <span id="update-version" class="ver-inline"></span>
-          <button id="btn-check-update" type="button" data-i18n="set.checkUpdate">检查更新</button>
-        </div>
-        <div id="update-result" class="result"></div>
-        <div class="fixed-lines-progress"><span id="update-progress-bar"></span></div>
-        <div class="mini-hint" data-i18n="set.updateAutoCheckHint">每 24 小时自动静默检查一次新版本</div>
-      </label>
-      <label class="col">
         <span data-i18n="set.petSize">桌宠大小</span>
         <select id="pet-scale">
           <option value="0.6">60%</option>
@@ -633,6 +623,18 @@
         <input id="weather-key" type="password" autocomplete="off" placeholder="留空" />
       </label>
       <span id="weather-now" class="result" style="align-self:center;"></span>
+    </div>
+    <div class="row">
+      <label class="col full update-col">
+        <span data-i18n="set.updateRow">软件更新</span>
+        <div class="update-row">
+          <span id="update-version" class="ver-inline"></span>
+          <button id="btn-check-update" type="button" data-i18n="set.checkUpdate">检查更新</button>
+          <span class="mini-hint" data-i18n="set.updateAutoCheckHint">每 24 小时自动静默检查一次新版本</span>
+        </div>
+        <div id="update-result" class="result"></div>
+        <div class="fixed-lines-progress"><span id="update-progress-bar"></span></div>
+      </label>
     </div>
   </section>
   <!-- ============ 5. 密钥与凭据安全 ============ -->
