@@ -31,6 +31,10 @@
 .settings-page .actions button { margin: 0; }
 .settings-page .result { color: var(--ui-muted); font-size: 12px; }
 .settings-page .update-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+/* v2.5.30 排版优化：软件更新区此前误用 .hint 大框样式（版本号与说明都被渲染成带边框提示框，
+   列高失衡与左右两列错位）——版本号改行内小字与按钮并排，说明改紧凑小字 */
+.settings-page .update-row .ver-inline { align-self: center; color: var(--ui-muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.settings-page .mini-hint { color: var(--ui-muted); font-size: 11px; line-height: 1.5; }
 .settings-page .result.ok { color: var(--ui-success); font-weight: 600; }
 .settings-page .result.err { color: var(--ui-danger); font-weight: 600; }
 .settings-page .hint { color: var(--ui-muted); }
