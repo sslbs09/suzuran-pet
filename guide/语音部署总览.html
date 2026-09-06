@@ -1,6 +1,5 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
+<!doctype html>
+<html lang="zh-CN"><head>
 <meta charset="UTF-8" />
 <title>苏苏洛 · 语音部署与训练指南</title>
 <style>
@@ -62,31 +61,45 @@
   th { color: var(--accent-dark); }
   .foot { text-align: center; color: var(--light); font-size: 12px; margin-top: 30px; }
 </style>
+
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="../assets/icon.png">
+<link rel="stylesheet" href="../assets/site.css">
+<link rel="stylesheet" href="../assets/guides.css">
+<script src="../assets/site.js"></script>
 </head>
-<body>
-<button id="theme-toggle" title="切换深浅色" style="position:fixed;top:10px;right:12px;z-index:9;width:38px;height:38px;border-radius:50%;font-size:16px;cursor:pointer;background:var(--card,#fff);color:var(--text,#333);border:1px solid var(--border,#ccc);">☀️</button>
-<script>
-(function () {
-  if (localStorage.getItem('sp-guide-theme') === 'dark') document.body.classList.add('theme-dark');
-  var btn = document.getElementById('theme-toggle');
-  function sync() { btn.textContent = document.body.classList.contains('theme-dark') ? '🌙' : '☀️'; }
-  sync();
-  btn.addEventListener('click', function () {
-    document.body.classList.toggle('theme-dark');
-    localStorage.setItem('sp-guide-theme', document.body.classList.contains('theme-dark') ? 'dark' : 'light');
-    sync();
-  });
-})();
-</script>
+<body class="site-guide">
+<a class="skip-link" href="#guide-main">跳到指南正文</a>
+<div class="guide-shell">
+<header class="site-header">
+<a class="brand" href="../"><img src="../assets/icon.png" width="34" height="34" alt=""><span>苏苏洛桌宠<small>SuzuranPet</small></span></a>
+<a class="home-link" href="../">← 返回官网</a>
+<button id="theme" class="theme" type="button" aria-label="切换主题">◐</button>
+</header>
+<nav class="document-nav" aria-label="指南导航"><a href="开箱必读.html">开箱必读</a>
+<a href="使用说明.html">使用说明</a>
+<a href="API接入指南.html">API接入指南</a>
+<a href="语音部署总览.html" aria-current="page">语音部署总览</a></nav>
+<div class="breadcrumb"><a href="../#guides">使用手册</a><span aria-hidden="true">/</span><span>语音部署总览</span></div>
+<div class="guide-layout">
+<aside class="guide-sidebar"><details open><summary>本页目录</summary><nav aria-label="本页目录"><a href="#section-1">先搞懂：语音是怎么走的</a>
+<a href="#section-2">方案一：系统自带语音（零配置，推荐先试）</a>
+<a href="#section-3">方案二：edge-tts 云端语音（免费、音色好听）</a>
+<a href="#section-4">方案三：本地克隆音色（Genie / GPT-SoVITS）★ 苏苏洛本人音色</a>
+<a href="#section-5">方案四：百炼 CosyVoice 云端复刻</a>
+<a href="#section-6">常见问题</a></nav></details></aside>
+<main id="guide-main" class="guide-content" tabindex="-1">
+
+
   <h1>🎤 苏苏洛 · 语音部署与训练指南</h1>
   <div class="sub">桌宠默认是「文字气泡」交流，完全不需要语音。想让她开口说话？四种方案从易到难任选一个就行。</div>
 
-  <h2>先搞懂：语音是怎么走的</h2>
+  <h2 id="section-1">先搞懂：语音是怎么走的</h2>
   <p>桌宠的语音链路（按优先级）：</p>
   <p class="code">本地克隆音色（Genie）→ 百炼 CosyVoice → edge-tts → Windows 系统语音</p>
   <p>每一层失败会自动落到下一层，所以哪怕什么都不装，只要打开语音开关，至少会有「系统语音」出声。前几层都关掉的话，就直接用系统自带语音，<b>零安装</b>。</p>
 
-  <h2>方案一：系统自带语音（零配置，推荐先试）</h2>
+  <h2 id="section-2">方案一：系统自带语音（零配置，推荐先试）</h2>
   <div class="card">
     <span class="tag green">不需要装任何东西</span>
     <ol>
@@ -97,7 +110,7 @@
     <div class="note">效果：微软系统中文语音（晓晓等），清晰自然但音色是大众化的。</div>
   </div>
 
-  <h2>方案二：edge-tts 云端语音（免费、音色好听）</h2>
+  <h2 id="section-3">方案二：edge-tts 云端语音（免费、音色好听）</h2>
   <div class="card">
     <span class="tag">需要 Python</span><span class="tag orange">免费</span>
     <ol>
@@ -108,7 +121,7 @@
     <div class="note">效果：微软神经网络语音（默认晓晓 zh-CN-XiaoxiaoNeural），免费无 Key。声音是通用的，不是苏苏洛。</div>
   </div>
 
-  <h2>方案三：本地克隆音色（Genie / GPT-SoVITS）★ 苏苏洛本人音色</h2>
+  <h2 id="section-4">方案三：本地克隆音色（Genie / GPT-SoVITS）★ 苏苏洛本人音色</h2>
   <div class="card">
     <span class="tag red">需要 Python + 硬盘 2GB+</span><span class="tag orange">CPU 就能跑</span>
     <p>用本文件夹里的 <code>genie_tts_server.py</code> + 一段苏苏洛参考音频，就能克隆出苏苏洛的音色，全程本地、免费。</p>
@@ -151,7 +164,7 @@ venv\Scripts\pip install -r "语音部署与训练指南\requirements.txt"</pre>
     想训练出更像的音色？看旁边的「训练指南.html」。</div>
   </div>
 
-  <h2>方案四：百炼 CosyVoice 云端复刻</h2>
+  <h2 id="section-5">方案四：百炼 CosyVoice 云端复刻</h2>
   <div class="card">
     <span class="tag">需要阿里云百炼 API Key</span><span class="tag orange">付费</span>
     <ol>
@@ -160,7 +173,7 @@ venv\Scripts\pip install -r "语音部署与训练指南\requirements.txt"</pre>
     </ol>
   </div>
 
-  <h2>常见问题</h2>
+  <h2 id="section-6">常见问题</h2>
   <ul>
     <li><b>开了语音没声音？</b> 确认语音总开关是「🔊」；本地克隆的话先确认服务器 /health 返回 ok（可能是模型还在下载）</li>
     <li><b>服务器起不来？</b> 命令行直接跑 <code>genie_tts_server.py</code> 看报错；多半是 Python 版本或网络问题</li>
@@ -169,5 +182,8 @@ venv\Scripts\pip install -r "语音部署与训练指南\requirements.txt"</pre>
   </ul>
 
   <div class="foot">—— 苏苏洛桌宠 · 语音部署与训练指南 v1（Genie/GPT-SoVITS 引擎）——</div>
-</body>
-</html>
+</main>
+</div>
+<footer class="guide-footer"><a href="../">← 返回苏苏洛桌宠官网</a><span>苏苏洛桌宠 · 使用手册</span></footer>
+</div>
+</body></html>

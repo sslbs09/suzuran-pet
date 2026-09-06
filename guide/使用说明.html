@@ -1,6 +1,5 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
+<!doctype html>
+<html lang="zh-CN"><head>
 <meta charset="UTF-8" />
 <title>苏苏洛桌宠 · 使用说明</title>
 <style>
@@ -39,37 +38,51 @@
   .note { background: var(--warn-bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 13px; color: var(--warn-ink); margin-top: 10px; }
   .foot { text-align: center; color: var(--light); font-size: 12px; margin-top: 28px; }
 </style>
+
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="../assets/icon.png">
+<link rel="stylesheet" href="../assets/site.css">
+<link rel="stylesheet" href="../assets/guides.css">
+<script src="../assets/site.js"></script>
 </head>
-<body>
-<button id="theme-toggle" title="切换深浅色" style="position:fixed;top:10px;right:12px;z-index:9;width:38px;height:38px;border-radius:50%;font-size:16px;cursor:pointer;background:var(--card,#fff);color:var(--text,#333);border:1px solid var(--border,#ccc);">☀️</button>
-<script>
-(function () {
-  if (localStorage.getItem('sp-guide-theme') === 'dark') document.body.classList.add('theme-dark');
-  var btn = document.getElementById('theme-toggle');
-  function sync() { btn.textContent = document.body.classList.contains('theme-dark') ? '🌙' : '☀️'; }
-  sync();
-  btn.addEventListener('click', function () {
-    document.body.classList.toggle('theme-dark');
-    localStorage.setItem('sp-guide-theme', document.body.classList.contains('theme-dark') ? 'dark' : 'light');
-    sync();
-  });
-})();
-</script>
+<body class="site-guide">
+<a class="skip-link" href="#guide-main">跳到指南正文</a>
+<div class="guide-shell">
+<header class="site-header">
+<a class="brand" href="../"><img src="../assets/icon.png" width="34" height="34" alt=""><span>苏苏洛桌宠<small>SuzuranPet</small></span></a>
+<a class="home-link" href="../">← 返回官网</a>
+<button id="theme" class="theme" type="button" aria-label="切换主题">◐</button>
+</header>
+<nav class="document-nav" aria-label="指南导航"><a href="开箱必读.html">开箱必读</a>
+<a href="使用说明.html" aria-current="page">使用说明</a>
+<a href="API接入指南.html">API接入指南</a>
+<a href="语音部署总览.html">语音部署总览</a></nav>
+<div class="breadcrumb"><a href="../#guides">使用手册</a><span aria-hidden="true">/</span><span>使用说明</span></div>
+<div class="guide-layout">
+<aside class="guide-sidebar"><details open><summary>本页目录</summary><nav aria-label="本页目录"><a href="#section-1">🚀 三步开始使用</a>
+<a href="#section-2">🖱 日常操作</a>
+<a href="#section-3">⚙️ 配置 API 与换人设</a>
+<a href="#section-4">🎁 其他</a>
+<a href="#section-5">🆕 v2.5.18 更新</a>
+<a href="#section-6">⚠ 重要说明</a></nav></details></aside>
+<main id="guide-main" class="guide-content" tabindex="-1">
+
+
   <h1>🦊 苏苏洛桌宠 · 使用说明</h1>
   <div class="sub">罗德岛医疗干员 · 你的专属桌宠（绿色免安装版）——会聊天、会说话、会在桌面上散步、会记住你的事。</div>
 
-  <div class="card" style="background:#fff8ec;border-color:#f0dfc0;">
+  <div class="card" data-callout="warning">
     <b>⚠ 第一次运行被 SmartScreen 拦截？</b>这是程序没买数字签名导致的正常提示：点「更多信息」→「仍要运行」即可。放心，这是绿色程序，不解压到别处也能用。
   </div>
 
-  <h2>🚀 三步开始使用</h2>
+  <h2 id="section-1">🚀 三步开始使用</h2>
   <ol>
     <li>双击 <code>苏苏洛桌宠.exe</code></li>
     <li>首次启动会自动弹出「⚙️ 设置」：选服务商 → 填 API Key →「测试连接」→「保存」；再把「桌宠对你的称呼」改成你的名字</li>
     <li>单击小狐狸 → 输入框 → 回车，开始聊天 🩺</li>
   </ol>
 
-  <h2>🖱 日常操作</h2>
+  <h2 id="section-2">🖱 日常操作</h2>
   <ul>
     <li>单击小狐狸：打开/关闭聊天框</li>
     <li>按住拖动：移动位置（会自动记住）</li>
@@ -78,7 +91,7 @@
     <li>透明区域完全点击穿透，不挡其他软件</li>
   </ul>
 
-  <h2>⚙️ 配置 API 与换人设</h2>
+  <h2 id="section-3">⚙️ 配置 API 与换人设</h2>
   <ul>
     <li>托盘右键 →「⚙️ 设置」：API（支持 DeepSeek / Kimi / OpenAI / GLM / Qwen / 本地 Ollama 等）、称呼、人设编辑、语音方案，都在这里</li>
     <li>人设里 <code>{{userName}}</code> 会自动替换成你的称呼，保存立即生效，不用重启</li>
@@ -86,14 +99,14 @@
     <li>「语音部署与训练指南」文件夹里有开语音的完整教程（默认是关的，文字交流不需要）</li>
   </ul>
 
-  <h2>🎁 其他</h2>
+  <h2 id="section-4">🎁 其他</h2>
   <ul>
     <li>托盘 →「🎨 表情管理」：每个情绪单独换 GIF，还能自己加情绪（≤5 个字，最多 30 个）——AI 回复时会自动选最贴切的情绪表现</li>
     <li>高级配置：<code>resources\app\config.json</code> 可改热键、窗口尺寸、记忆轮数、情绪表等</li>
     <li>任务模式（/zcode 前缀操控电脑）：默认关闭，需要另装 ZCode 才能用</li>
   </ul>
 
-  <h2>🆕 v2.5.18 更新</h2>
+  <h2 id="section-5">🆕 v2.5.18 更新</h2>
   <div class="card">
     <ul>
       <li><b>修复首启退出</b>：点「同意并开始使用」后不再误退出，正常进入引导设置</li>
@@ -103,10 +116,13 @@
     </ul>
   </div>
 
-  <h2>⚠ 重要说明</h2>
+  <h2 id="section-6">⚠ 重要说明</h2>
   <div class="note"><b>关于 AI 回复：</b>聊天回复来自你自配的 OpenAI 兼容接口（第三方服务），程序不内置模型；API Key 只存在你本机（加密存储），不上传。</div>
   <div class="note"><b>关于引擎：</b>完整版含语音引擎（约 15GB），删除 <code>engines</code> 后语音不可用（聊天不受影响）。</div>
 
   <div class="foot">—— 苏苏洛桌宠 · 2.5 正式版 ——</div>
-</body>
-</html>
+</main>
+</div>
+<footer class="guide-footer"><a href="../">← 返回苏苏洛桌宠官网</a><span>苏苏洛桌宠 · 使用手册</span></footer>
+</div>
+</body></html>

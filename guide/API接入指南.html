@@ -1,8 +1,7 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
+<!doctype html>
+<html lang="zh-CN"><head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+
 <title>苏苏洛桌宠 · API 接入指南（白嫖版）</title>
 <style>
   :root {
@@ -39,27 +38,41 @@
   a { color: var(--accent-dark); }
   .foot { margin-top: 40px; color: var(--light); font-size: 13px; text-align: center; }
 </style>
+
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="../assets/icon.png">
+<link rel="stylesheet" href="../assets/site.css">
+<link rel="stylesheet" href="../assets/guides.css">
+<script src="../assets/site.js"></script>
 </head>
-<body>
-<button id="theme-toggle" title="切换深浅色" style="position:fixed;top:10px;right:12px;z-index:9;width:38px;height:38px;border-radius:50%;font-size:16px;cursor:pointer;background:var(--card,#fff);color:var(--text,#333);border:1px solid var(--border,#ccc);">☀️</button>
-<script>
-(function () {
-  if (localStorage.getItem('sp-guide-theme') === 'dark') document.body.classList.add('theme-dark');
-  var btn = document.getElementById('theme-toggle');
-  function sync() { btn.textContent = document.body.classList.contains('theme-dark') ? '🌙' : '☀️'; }
-  sync();
-  btn.addEventListener('click', function () {
-    document.body.classList.toggle('theme-dark');
-    localStorage.setItem('sp-guide-theme', document.body.classList.contains('theme-dark') ? 'dark' : 'light');
-    sync();
-  });
-})();
-</script>
+<body class="site-guide">
+<a class="skip-link" href="#guide-main">跳到指南正文</a>
+<div class="guide-shell">
+<header class="site-header">
+<a class="brand" href="../"><img src="../assets/icon.png" width="34" height="34" alt=""><span>苏苏洛桌宠<small>SuzuranPet</small></span></a>
+<a class="home-link" href="../">← 返回官网</a>
+<button id="theme" class="theme" type="button" aria-label="切换主题">◐</button>
+</header>
+<nav class="document-nav" aria-label="指南导航"><a href="开箱必读.html">开箱必读</a>
+<a href="使用说明.html">使用说明</a>
+<a href="API接入指南.html" aria-current="page">API接入指南</a>
+<a href="语音部署总览.html">语音部署总览</a></nav>
+<div class="breadcrumb"><a href="../#guides">使用手册</a><span aria-hidden="true">/</span><span>API接入指南</span></div>
+<div class="guide-layout">
+<aside class="guide-sidebar"><details open><summary>本页目录</summary><nav aria-label="本页目录"><a href="#section-1">一、先搞懂：桌宠要填哪三样</a>
+<a href="#section-2">二、白嫖渠道总览（按推荐顺序）</a>
+<a href="#section-3">三、阿里云百炼 + 学生 300 元券（重点推荐学生党）</a>
+<a href="#section-4">四、其他渠道快速上手</a>
+<a href="#section-5">五、填完之后</a>
+<a href="#section-6">六、安全三句话</a></nav></details></aside>
+<main id="guide-main" class="guide-content" tabindex="-1">
+
+
 <div class="wrap">
   <h1>🔌 API 接入指南（学生党白嫖版）</h1>
   <div class="sub">桌宠的聊天靠大模型 API 驱动。这篇教你从零拿到 Key、填进桌宠，顺便把能白嫖的渠道都列给你。额度政策随时会变，动手前以各家官网为准。</div>
 
-  <h2>一、先搞懂：桌宠要填哪三样</h2>
+  <h2 id="section-1">一、先搞懂：桌宠要填哪三样</h2>
   <div class="card">
     <p>打开托盘菜单 → 设置 → 聊天设置，就三样东西：</p>
     <ol class="steps">
@@ -70,7 +83,7 @@
     <p>桌宠支持两种协议：<b>OpenAI 兼容</b>（绝大多数家都用这个）和 <b>Anthropic</b>（Claude 官方）。选对协议，填对地址就行。</p>
   </div>
 
-  <h2>二、白嫖渠道总览（按推荐顺序）</h2>
+  <h2 id="section-2">二、白嫖渠道总览（按推荐顺序）</h2>
   <table>
     <tr><th>渠道</th><th>免费情况</th><th>适合谁</th></tr>
     <tr><td><b>阿里云百炼</b>（通义千问）</td><td>新人免费额度（约 90 天有效）+ 学生 300 元券</td><td>学生，想用正经大模型</td></tr>
@@ -83,7 +96,7 @@
   </table>
   <div class="warn">免费额度政策变动很频繁，下面的步骤是通用路子，具体金额和期限请以官网页面为准。</div>
 
-  <h2>三、阿里云百炼 + 学生 300 元券（重点推荐学生党）</h2>
+  <h2 id="section-3">三、阿里云百炼 + 学生 300 元券（重点推荐学生党）</h2>
   <div class="card">
     <h3>第 1 步：领学生券（云工开物计划）</h3>
     <ol class="steps">
@@ -109,7 +122,7 @@
     <p>学生券额度用完，还可以关注百炼的「先用后返」「全模型抵扣包」活动接着薅。</p>
   </div>
 
-  <h2>四、其他渠道快速上手</h2>
+  <h2 id="section-4">四、其他渠道快速上手</h2>
 
   <div class="card">
     <h3><span class="tag free">长期免费</span>智谱 GLM</h3>
@@ -144,7 +157,7 @@
     <p><code>platform.deepseek.com</code> 注册充值（10 块钱能用很久），端点 <code>https://api.deepseek.com/v1</code>，模型 <code>deepseek-chat</code>。桌宠出厂就配好这个端点，你只要填 Key。</p>
   </div>
 
-  <h2>五、填完之后</h2>
+  <h2 id="section-5">五、填完之后</h2>
   <div class="card">
     <ol class="steps">
       <li>设置页保存，桌宠气泡会提示连接结果</li>
@@ -154,7 +167,7 @@
     <div class="tip">连不上怎么办？按顺序查：① Key 有没有复制全（前后别带空格）② 端点结尾要不要 <code>/v1</code>（OpenAI 兼容一般要，桌宠会自动补）③ 账户里还有没有额度 ④ 看日志 <code>logs/tts.log</code> 里的报错。</div>
   </div>
 
-  <h2>六、安全三句话</h2>
+  <h2 id="section-6">六、安全三句话</h2>
   <div class="warn">
     <p>① API Key 等于钱包，别发群里、别贴网上；</p>
     <p>② 用免费额度也开着「用完即停」或限额，防超额；</p>
@@ -163,5 +176,8 @@
 
   <div class="foot">苏苏洛桌宠 · API 接入指南 —— 额度政策以各家官网实时页面为准</div>
 </div>
-</body>
-</html>
+</main>
+</div>
+<footer class="guide-footer"><a href="../">← 返回苏苏洛桌宠官网</a><span>苏苏洛桌宠 · 使用手册</span></footer>
+</div>
+</body></html>
