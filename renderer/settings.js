@@ -143,6 +143,7 @@ async function renderOnboard(S) {
     ck && ck.unreadable ? "已保存的密钥不可读取；输入新值可替换" :
     ck && ck.saved ? "密钥已安全保存；输入新值可替换" : "sk-…（Ollama 本地可留空）";
   $("pet-name").value = (S.pet && S.pet.name) || "苏苏洛";
+  $("net-proxy").value = S.netProxy || ""; // O8 网络代理
   $("user-name").value = S.chat.userName || "主人";
   _loadedChatUserName = $("user-name").value; // TD-9：改名检测基线
   $("temperature").value = S.chat.temperature ?? 0.85;
@@ -948,6 +949,7 @@ async function doSaveOther() {
     uiLang: $("ui-lang").value,
     hotkey: $("hotkey").value.trim() || "Alt+Shift+S",
     startHidden: $("start-hidden").value === "true",
+    netProxy: $("net-proxy").value.trim(), // O8：应用内网络代理（更新/天气）
     window: { scale },
     pet: { name: $("pet-name").value },
     features: {
