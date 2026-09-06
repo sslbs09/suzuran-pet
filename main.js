@@ -16,7 +16,7 @@ try {
   process.on("uncaughtException", (e) => { __dl("UNCAUGHT: " + (e && e.stack || e)); throw e; });
 } catch { /* 忽略 */ }
 
-const { app, protocol, safeStorage, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, screen, dialog, Notification, powerMonitor, nativeTheme } = require("electron");
+const { app, protocol, safeStorage, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, screen, dialog, Notification, powerMonitor, nativeTheme, session } = require("electron");
 // v2.5.22 修复（P0-2）：删除无条件 disableHardwareAcceleration——
 // 此前与下方按 softRender 配置的判断冲突，导致设置页「软件渲染」开关形同虚设。
 // 硬件加速默认开启（Spine/PIXI 性能更好）；若遇 GPU 崩溃，用户在设置开启 softRender 即回退 CPU 渲染。
@@ -227,6 +227,15 @@ function setPetLayer(v) {
   logTts("walk", "显示层级: " + config.getConfig().layer);
 }
 ipcMain.on("pet:get-app-version-sync", (e) => { e.returnValue = app.getVersion(); }); // preload 初始化同步取版本（app 模块在 preload 不可用）
+// O8（2026-09-06）：网络代理——config.netProxy 非空时对默认 session 显式设置（net.fetch 走此代理，
+// 应用内更新/天气即通）；空 = 跟随系统代理。即时生效（保存后调用），无需重启。
+function applyNetProxy() {
+  try {
+    const rules = String(config.getConfig().netProxy || "").trim();
+    session.defaultSession.setProxy(rules ? { proxyRules: rules } : { mode: "system" });
+    logTts("settings", "网络代理: " + (rules || "跟随系统"));
+  } catch (e) { logTts("settings", "设置网络代理失败: " + (e && e.message || e)); }
+}
 ipcMain.handle("pet:set-layer", (_e, v) => { setPetLayer(v); return true; });
 
 /** 一键坐到任务栏上：角色脚底贴齐任务栏上沿（窗口按 groundGap 下探补偿），播放 Sit 坐姿 */
@@ -558,6 +567,10 @@ function openSettings() {
     query: { theme: config.getConfig().theme || "auto" } // 首帧同步应用主题（theme-init 读参数，不等 IPC）
   });
 attachCrashDiag(settingsWin, "settings");
+  // v2.5.30 诊断：设置页白屏排查——渲染层 console 全量转发 tts.log
+  settingsWin.webContents.on("console-message", (_e, level, message, line, sourceId) => {
+    try { logTts("render", "[settings-console] L" + level + " " + String(message).slice(0, 300) + " @" + String(sourceId || "").split("/").pop() + ":" + line); } catch { /* 忽略 */ }
+  });
     settingsWin.show();
     settingsWin.focus();
     settingsWin.on("closed", () => { settingsWin = null; });
@@ -2317,6 +2330,7 @@ ipcMain.handle("pet:save-settings", (_e, patch) => {
     } else if (!!after.walking !== !!before.walking) {
       syncWalkingEngine();
     }
+    if ((after.netProxy || "") !== (before.netProxy || "")) applyNetProxy(); // O8：代理即时生效（独立于模式切换）
     return true;
   } catch (e) {
     return { ok: false, message: String(e.message || e) };
@@ -4506,6 +4520,7 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     syncNativeTheme(); // 原生标题栏/滚动条随用户主题（须在首个窗口创建前）
+    applyNetProxy(); // O8：启动时应用网络代理（net.fetch 的更新/天气走此代理）
     relaunchIfAppDirNewer(); // zip 覆盖解压升级兜底：散目录比 asar 新时让位重启（须在其他初始化前）
     try {
       // 崩溃收集：minidump 存到 userData/crashes（不自动上传），便于排查渲染层 crashed

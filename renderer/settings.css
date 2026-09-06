@@ -35,6 +35,7 @@
    列高失衡与左右两列错位）——版本号改行内小字与按钮并排，说明改紧凑小字 */
 .settings-page .update-row .ver-inline { align-self: center; color: var(--ui-muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .settings-page .mini-hint { color: var(--ui-muted); font-size: 11px; line-height: 1.5; }
+.settings-page .update-col .mini-hint { align-self: center; } /* v2.5.30：说明与版本号/按钮同行居中 */
 .settings-page .result.ok { color: var(--ui-success); font-weight: 600; }
 .settings-page .result.err { color: var(--ui-danger); font-weight: 600; }
 .settings-page .hint { color: var(--ui-muted); }

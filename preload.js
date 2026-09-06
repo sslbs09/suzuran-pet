@@ -8,7 +8,7 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 contextBridge.exposeInMainWorld("petAPI", {
   // 应用版本号（设置页显示，单一来源=package.json）。2026-09-06 修复：app 是主进程模块，
   // preload 里 require("electron").app 拿不到，此前恒为空串致设置页显示 "v?"——改走同步 IPC。
-  appVersion: (() => { try { return ipcRenderer.sendSync("pet:get-app-version"); } catch { return ""; } })(),
+  appVersion: (() => { try { return ipcRenderer.sendSync("pet:get-app-version-sync"); } catch { return ""; } })(),
   checkForUpdate: () => ipcRenderer.invoke("pet:check-update"), // 设置页「检查更新」
   onUpdateProgress: (cb) => ipcRenderer.on("pet:update-progress", (_e, pct) => cb(pct)),
   ask: (text) => ipcRenderer.invoke("pet:ask", { id: crypto.randomUUID(), text }),

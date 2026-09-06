@@ -143,6 +143,7 @@ async function renderOnboard(S) {
     ck && ck.unreadable ? "已保存的密钥不可读取；输入新值可替换" :
     ck && ck.saved ? "密钥已安全保存；输入新值可替换" : "sk-…（Ollama 本地可留空）";
   $("pet-name").value = (S.pet && S.pet.name) || "苏苏洛";
+  $("net-proxy").value = S.netProxy || ""; // O8 网络代理
   $("user-name").value = S.chat.userName || "主人";
   _loadedChatUserName = $("user-name").value; // TD-9：改名检测基线
   $("temperature").value = S.chat.temperature ?? 0.85;
@@ -159,6 +160,7 @@ async function renderOnboard(S) {
 
   $("tts-enabled").value = String(!!(S.tts && S.tts.enabled));
   $("tts-rate").value = (S.tts && S.tts.rate) || 0.9;
+  $("sys-voice-fallback").value = (S.tts && S.tts.systemVoiceFallback) || "tts"; // O4 系统音兜底三选
   const genie = S.ttsGenie || {};
   $("genie-python").value = genie.python || "";
   $("genie-script").value = genie.serverScript || "";
@@ -564,7 +566,7 @@ async function doSaveVoice() {
   const plan = $("tts-plan").value;
   const patch = {
     greetingOnStart: $("greeting-on-start").checked,
-    tts: { enabled, rate: parseFloat($("tts-rate").value) || 0.9 },
+    tts: { enabled, rate: parseFloat($("tts-rate").value) || 0.9, systemVoiceFallback: $("sys-voice-fallback").value || "tts" },
     ttsGenie: {
       enabled: plan === "genie",
       python: $("genie-python").value.trim(),
@@ -947,6 +949,7 @@ async function doSaveOther() {
     uiLang: $("ui-lang").value,
     hotkey: $("hotkey").value.trim() || "Alt+Shift+S",
     startHidden: $("start-hidden").value === "true",
+    netProxy: $("net-proxy").value.trim(), // O8：应用内网络代理（更新/天气）
     window: { scale },
     pet: { name: $("pet-name").value },
     features: {

@@ -339,6 +339,16 @@
     </div>
     <div class="row">
       <label class="col">
+        <span data-i18n="set.sysVoiceFallback">系统音兜底（TTS 引擎不可用时读什么）</span>
+        <select id="sys-voice-fallback">
+          <option value="tts" data-i18n="set.svfTts">读中文（系统语音）</option>
+          <option value="mute" data-i18n="set.svfMute">🔇 静音（只显示气泡）</option>
+          <option value="preset" data-i18n="set.svfPreset">🔔 短提示音（苏苏洛语音切片）</option>
+        </select>
+      </label>
+    </div>
+    <div class="row">
+      <label class="col">
         <input id="greeting-on-start" type="checkbox" />
         <span data-i18n="set.greetingOnStart">🗣 启动时自动问候（气泡 + 语音）</span>
       </label>
@@ -453,16 +463,6 @@
           <option value="en">English</option>
           <option value="ja">日本語</option>
         </select>
-      </label>
-      <label class="col">
-        <span data-i18n="set.updateRow">软件更新</span>
-        <div class="update-row">
-          <span id="update-version" class="ver-inline"></span>
-          <button id="btn-check-update" type="button" data-i18n="set.checkUpdate">检查更新</button>
-        </div>
-        <div id="update-result" class="result"></div>
-        <div class="fixed-lines-progress"><span id="update-progress-bar"></span></div>
-        <div class="mini-hint" data-i18n="set.updateAutoCheckHint">每 24 小时自动静默检查一次新版本</div>
       </label>
       <label class="col">
         <span data-i18n="set.petSize">桌宠大小</span>
@@ -633,6 +633,24 @@
         <input id="weather-key" type="password" autocomplete="off" placeholder="留空" />
       </label>
       <span id="weather-now" class="result" style="align-self:center;"></span>
+    </div>
+    <div class="row">
+      <label class="col grow">
+        <span data-i18n="set.netProxy">网络代理（应用内更新/天气走此代理；留空=跟随系统。例：http=127.0.0.1:7897）</span>
+        <input id="net-proxy" type="text" autocomplete="off" placeholder="留空 = 跟随系统代理" />
+      </label>
+    </div>
+    <div class="row">
+      <label class="col full update-col">
+        <span data-i18n="set.updateRow">软件更新</span>
+        <div class="update-row">
+          <span id="update-version" class="ver-inline"></span>
+          <button id="btn-check-update" type="button" data-i18n="set.checkUpdate">检查更新</button>
+          <span class="mini-hint" data-i18n="set.updateAutoCheckHint">每 24 小时自动静默检查一次新版本</span>
+        </div>
+        <div id="update-result" class="result"></div>
+        <div class="fixed-lines-progress"><span id="update-progress-bar"></span></div>
+      </label>
     </div>
   </section>
   <!-- ============ 5. 密钥与凭据安全 ============ -->

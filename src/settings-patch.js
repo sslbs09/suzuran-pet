@@ -14,7 +14,7 @@ const ALLOWED_TOP = new Set([
   "mouseTrackGlobal", "catToy", "fileGuard", "proactiveChat", "personify", "rpMode",
   "dimMode", "greetingOnStart", "security", "spineSkinId", "tts", "ttsCloud", "ttsCosy",
   "ttsGenie", "ttsGsv", "moods", "emotionalVoice", "emotionVoice", "live2dScale",
-  "autoLaunch", "walkGlobal", "walkSpeed", "proactiveMin", "agentClients",
+  "autoLaunch", "walkGlobal", "walkSpeed", "proactiveMin", "agentClients", "netProxy",
   "secrets"
 ]);
 

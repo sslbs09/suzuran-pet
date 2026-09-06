@@ -9,6 +9,16 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { spawn } = require("child_process"); // v2.5.28：此 require 自功能上线起就缺失——applyOnExit 每次 spawn 抛 "spawn is not defined" 被 catch 吞掉，应用内更新从未真正生效（用户所见=「安装目录不可写」误导弹窗）
+// O8（2026-09-06）：主进程网络请求改走 Electron net.fetch（Chromium 网络栈）——
+// 自动跟随系统代理（Clash 系统代理模式零配置生效），并可经 session.setProxy 显式配置；
+// 原全局 fetch（undici）不读系统代理，纯本地端口代理用户的应用内更新永远失败。
+// 纯 node 环境（单测）下 electron 导出为路径字符串，net 为 undefined——调用点在运行时才触达。
+let _net = null;
+function netFetch(url, opts) {
+  if (_net === null) { try { _net = require("electron").net || null; } catch { _net = null; } }
+  if (_net && _net.fetch) return _net.fetch(url, opts);
+  return fetch(url, opts); // 非 Electron 环境（单测/工具脚本）回退全局 fetch
+}
 
 const REPO = "sslbs09/suzuran-pet";
 
@@ -66,7 +76,7 @@ async function checkForUpdate(currentVersion) {
 const CHECK_TIMEOUT_MS = 15000;
 async function checkForUpdateDetailed(currentVersion) {
   try {
-    const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
+    const r = await netFetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
       headers: { Accept: "application/vnd.github+json", "User-Agent": "suzuran-pet" },
       signal: AbortSignal.timeout(CHECK_TIMEOUT_MS)
     });
@@ -88,7 +98,7 @@ async function expectedSha256(plan) {
   let expect = String(plan.sumsDigest || "").replace(/^sha256:/i, "").toLowerCase();
   if (!/^[a-f0-9]{64}$/.test(expect) && plan.sumsUrl) {
     try {
-      const sr = await fetch(plan.sumsUrl);
+      const sr = await netFetch(plan.sumsUrl);
       if (sr.ok) expect = extractAsarSha256(await sr.text());
     } catch { /* sums 拉取失败按无校验来源处理 */ }
   }
@@ -100,7 +110,7 @@ async function expectedSha256(plan) {
  *  pending（fail closed）。返回 {ok, reason}。 */
 async function downloadPending(plan) {
   try {
-    const r = await fetch(plan.asarUrl);
+    const r = await netFetch(plan.asarUrl);
     if (!r.ok) return { ok: false, reason: "download HTTP " + r.status };
     const buf = Buffer.from(await r.arrayBuffer());
     if (!buf.length || (plan.size && buf.length !== plan.size)) return { ok: false, reason: "size mismatch" };
@@ -119,7 +129,7 @@ async function downloadPending(plan) {
  *  2026-09-03 体验补全：更新包 ~188MB，给用户可见的下载进度。 */
 async function downloadPendingProgress(plan, onProgress = () => {}) {
   try {
-    const r = await fetch(plan.asarUrl);
+    const r = await netFetch(plan.asarUrl);
     if (!r.ok) return { ok: false, reason: "download HTTP " + r.status };
     const total = Number(r.headers.get("content-length")) || Number(plan.size) || 0;
     let buf;
@@ -184,7 +194,7 @@ function extractZipSha256(sumsText, zipName) {
 /** 完整包 zip 下载到 resources/app-update.zip（流式进度 + SHA-256 fail closed） */
 async function downloadFullZip(plan, onProgress = () => {}) {
   try {
-    const r = await fetch(plan.zipUrl);
+    const r = await netFetch(plan.zipUrl);
     if (!r.ok) return { ok: false, reason: "download HTTP " + r.status };
     const total = Number(r.headers.get("content-length")) || Number(plan.size) || 0;
     let buf;
@@ -208,7 +218,7 @@ async function downloadFullZip(plan, onProgress = () => {}) {
     let expect = String(plan.zipDigest || "").replace(/^sha256:/i, "").toLowerCase();
     if (!/^[a-f0-9]{64}$/.test(expect) && plan.sumsUrl) {
       try {
-        const sr = await fetch(plan.sumsUrl);
+        const sr = await netFetch(plan.sumsUrl);
         if (sr.ok) expect = extractZipSha256(await sr.text(), String(plan.zipUrl).split("/").pop());
       } catch { /* sums 拉取失败按无校验来源处理 */ }
     }
@@ -250,12 +260,14 @@ function applyFullUpdate(exePath) {
     "if (-not (Test-Path $zip)) { Log 'no zip, abort'; exit }",
     "$tmp = Join-Path $env:TEMP 'suzuran-full-update'",
     "Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue",
-    "Expand-Archive -Path $zip -DestinationPath $tmp -Force",
+    // S2 安全加固（2026-09-06）：解压/复制失败必须显式中止——PS5.1 非 terminating error
+    // 会带着错误继续执行，导致"半更新态"（resources 被部分覆盖）。
+    "try { Expand-Archive -Path $zip -DestinationPath $tmp -Force -ErrorAction Stop } catch { Log ('expand failed, abort: ' + $_.Exception.Message); exit }",
     "Log 'expanded'",
     "$appdir = Get-ChildItem $tmp -Directory | Select-Object -First 1",
     "if (-not $appdir) { Log 'no app dir in zip'; exit }",
     "$srcRes = Join-Path $appdir.FullName 'resources'",
-    "if (Test-Path $srcRes) { Copy-Item (Join-Path $srcRes '*') $res -Recurse -Force; Log 'resources copied' }",
+    "if (Test-Path $srcRes) { try { Copy-Item (Join-Path $srcRes '*') $res -Recurse -Force -ErrorAction Stop; Log 'resources copied' } catch { Log ('copy failed, abort: ' + $_.Exception.Message); exit } }",
     "$oldAsar = Join-Path $res 'app.asar'",
     "if (Test-Path $oldAsar) { Remove-Item $oldAsar -Force -ErrorAction SilentlyContinue; Log 'old asar removed' }",
     "Start-Process explorer.exe -ArgumentList ('\"' + $exe + '\"')",

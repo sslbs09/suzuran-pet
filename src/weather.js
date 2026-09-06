@@ -1,5 +1,14 @@
 "use strict";
 
+// O8（2026-09-06）：天气请求与更新链路统一走 Electron net.fetch（Chromium 网络栈，
+// 自动跟随系统代理 + session.setProxy 显式配置）。纯 node（单测）回退全局 fetch。
+let _net = null;
+function netFetch(url, opts) {
+  if (_net === null) { try { _net = require("electron").net || null; } catch { _net = null; } }
+  if (_net && _net.fetch) return _net.fetch(url, opts);
+  return fetch(url, opts);
+}
+
 /* weather.js — 免费天气（Open-Meteo，无需 API key，非商业免费，~1万/天；
  * 半小时一次=48/天，一个月零成本）。地理编码用内置城市表免请求。v2.5.26
  */
@@ -53,7 +62,7 @@ const PROVIDERS = {
   "open-meteo": async (loc) => {
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}` +
       `&current=temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m&timezone=auto`;
-    const r = await fetch(url, { headers: { "User-Agent": "suzuran-pet" } });
+    const r = await netFetch(url, { headers: { "User-Agent": "suzuran-pet" } });
     if (!r.ok) return null;
     const j = await r.json();
     const c = j.current || {};
@@ -62,7 +71,7 @@ const PROVIDERS = {
   "openweathermap": async (loc, key) => {
     if (!key) return null;
     const url = `https://api.openweathermap.org/data/2.5/weather?lat=${loc.lat}&lon=${loc.lon}&appid=${encodeURIComponent(key)}&units=metric&lang=zh_cn`;
-    const r = await fetch(url);
+    const r = await netFetch(url);
     if (!r.ok) return null;
     const j = await r.json();
     return { temp: j.main && j.main.temp, humidity: j.main && j.main.humidity, wind: j.wind && j.wind.speed, code: owmToWmo(j.weather && j.weather[0] && j.weather[0].id) };
