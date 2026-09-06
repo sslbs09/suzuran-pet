@@ -256,8 +256,8 @@ function applyFullUpdate(exePath) {
     "if (-not $appdir) { Log 'no app dir in zip'; exit }",
     "$srcRes = Join-Path $appdir.FullName 'resources'",
     "if (Test-Path $srcRes) { Copy-Item (Join-Path $srcRes '*') $res -Recurse -Force; Log 'resources copied' }",
-    "$oldAppDir = Join-Path $res 'app'",
-    "if (Test-Path $oldAppDir) { Remove-Item $oldAppDir -Recurse -Force -ErrorAction SilentlyContinue; Log 'old app dir removed' }",
+    "$oldAsar = Join-Path $res 'app.asar'",
+    "if (Test-Path $oldAsar) { Remove-Item $oldAsar -Force -ErrorAction SilentlyContinue; Log 'old asar removed' }",
     "Start-Process explorer.exe -ArgumentList ('\"' + $exe + '\"')",
     "Log 'relaunched'",
   ].join("\n");
