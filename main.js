@@ -634,9 +634,44 @@ function sendUpdateProgress(pct) {
   sendToRenderer("pet:toast", "⬇ " + pct + "%");
   if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send("pet:update-progress", pct);
 }
-/** 更新确认框 → 带进度下载（SHA-256 校验，fail closed）→ 退出后 ps1 备份替换重启（探活失败自动回滚） */
-async function runUpdateFlow(plan) {
+/** 更新确认框 → 带进度下载（SHA-256 校验，fail closed）→ 退出后覆盖升级。
+ *  TD-12（2026-09-06）：优先完整包更新（下载 zip → run-update.ps1 覆盖重启），
+ *  无 zip 资产时降级 asar-swap 增量（探活失败自动回滚）。 */
+async function runUpdateFlow(d) {
   const lang = config.getConfig().uiLang || "zh";
+  const fullPlan = d.fullPlan || null;
+  const plan = d.plan || null;
+  // 优先完整包（TD-12 云端更新：覆盖脚本逻辑固定，跨版本升级不再依赖旧版换包代码）
+  if (fullPlan) {
+    const { response } = await dialog.showMessageBox({
+      type: "question",
+      buttons: [i18n.t(lang, "tray.updateNow"), i18n.t(lang, "tray.updateLater")],
+      defaultId: 0, cancelId: 1,
+      message: `${i18n.t(lang, "tray.newVersion")} ${fullPlan.version}`,
+    });
+    if (response !== 0) return { accepted: false, downloaded: false };
+    let lastSent = -100;
+    const dl = await updater.downloadFullZip(fullPlan, (pct) => {
+      if (pct >= 100 || pct - lastSent >= 20) { lastSent = pct; sendUpdateProgress(pct); }
+    });
+    if (!dl.ok) {
+      logTts("update", "完整包下载/校验失败: " + (dl.reason || ""));
+      dialog.showMessageBox({ type: "error", message: i18n.t(lang, "tray.updateFail") });
+      return { accepted: true, downloaded: false, reason: dl.reason };
+    }
+    logTts("update", "完整包校验通过，退出后自动覆盖升级");
+    sendToRenderer("pet:toast", i18n.t(lang, "tray.updateRestarting"));
+    if (!updater.applyFullUpdate(app.getPath("exe"))) {
+      logTts("update", "applyFullUpdate 失败：安装目录不可写");
+      dialog.showMessageBox({ type: "error", message: i18n.t(lang, "tray.updateApplyFail") });
+      return { accepted: true, downloaded: true, applied: false };
+    }
+    quitting = true;
+    setTimeout(() => app.quit(), 800); // 留一拍让 toast 发出去
+    return { accepted: true, downloaded: true, applied: true, full: true };
+  }
+  // 降级 asar-swap 增量（无 zip 资产时；探活失败自动回滚）
+  if (!plan) return { accepted: false, downloaded: false };
   const { response } = await dialog.showMessageBox({
     type: "question",
     buttons: [i18n.t(lang, "tray.updateNow"), i18n.t(lang, "tray.updateLater")],
@@ -677,8 +712,8 @@ async function trayCheckUpdate() {
       dialog.showMessageBox({ type: "error", message: i18n.t(lang, "tray.updateCheckFail") + d.error + "）" });
       return;
     }
-    if (!d.plan) { dialog.showMessageBox({ type: "info", title: "苏苏洛桌宠", message: i18n.t(lang, "tray.alreadyLatest") }); return; }
-    await runUpdateFlow(d.plan);
+    if (!d.plan && !d.fullPlan) { dialog.showMessageBox({ type: "info", title: "苏苏洛桌宠", message: i18n.t(lang, "tray.alreadyLatest") }); return; }
+    await runUpdateFlow(d);
   } catch (e) { logTts("update", "检查更新异常: " + (e && e.message || e)); }
 }
 /** 启动静默检查（≥24h 一次，静默记 marker）：发现新版才弹确认框帮用户走完更新 */
@@ -688,7 +723,7 @@ async function startupUpdateCheck() {
     const d = await updater.checkForUpdateDetailed(app.getVersion());
     noteUpdateChecked();
     if (!d.ok) { logTts("update", "启动检查失败（网络不可达?）: " + d.error); return; } // 静默检查不打扰
-    if (d.plan) { logTts("update", "启动检查发现新版本 " + d.plan.version + "，弹确认框"); await runUpdateFlow(d.plan); }
+    if (d.plan || d.fullPlan) { logTts("update", "启动检查发现新版本 " + (d.fullPlan || d.plan).version + "，弹确认框"); await runUpdateFlow(d); }
     else logTts("update", "启动检查：已是最新 " + app.getVersion());
   } catch (e) { logTts("update", "启动检查更新异常: " + (e && e.message || e)); }
 }
@@ -697,9 +732,9 @@ ipcMain.handle("pet:check-update", async () => { // 设置页「检查更新」�
     const d = await updater.checkForUpdateDetailed(app.getVersion());
     noteUpdateChecked();
     if (!d.ok) return { ok: false, message: i18n.t(config.getConfig().uiLang || "zh", "tray.updateCheckFail") + d.error + "）" };
-    if (!d.plan) return { ok: true, updateAvailable: false, current: app.getVersion() };
-    const r = await runUpdateFlow(d.plan);
-    return { ok: true, updateAvailable: true, current: app.getVersion(), latest: d.plan.version, ...r };
+    if (!d.plan && !d.fullPlan) return { ok: true, updateAvailable: false, current: app.getVersion() };
+    const r = await runUpdateFlow(d);
+    return { ok: true, updateAvailable: true, current: app.getVersion(), latest: (d.fullPlan || d.plan).version, ...r };
   } catch (e) { return { ok: false, message: String(e && e.message || e) }; }
 });
 

@@ -70,11 +70,16 @@ async function checkForUpdateDetailed(currentVersion) {
       headers: { Accept: "application/vnd.github+json", "User-Agent": "suzuran-pet" },
       signal: AbortSignal.timeout(CHECK_TIMEOUT_MS)
     });
-    if (!r.ok) return { ok: false, plan: null, error: "GitHub API HTTP " + r.status };
+    if (!r.ok) return { ok: false, plan: null, fullPlan: null, error: "GitHub API HTTP " + r.status };
     const j = await r.json();
-    return { ok: true, plan: buildUpdatePlan({ current: currentVersion, latestTag: j.tag_name, assets: j.assets }), error: "" };
+    return {
+      ok: true,
+      plan: buildUpdatePlan({ current: currentVersion, latestTag: j.tag_name, assets: j.assets }),
+      fullPlan: buildFullUpdatePlan({ current: currentVersion, latestTag: j.tag_name, assets: j.assets }),
+      error: ""
+    };
   } catch (e) {
-    return { ok: false, plan: null, error: String((e && e.message) || e) };
+    return { ok: false, plan: null, fullPlan: null, error: String((e && e.message) || e) };
   }
 }
 
@@ -145,6 +150,125 @@ async function downloadPendingProgress(plan, onProgress = () => {}) {
   } catch (e) {
     return { ok: false, reason: String((e && e.message) || e) };
   }
+}
+
+/* ---------- 完整包更新（TD-12 云端更新，2026-09-06） ----------
+ * 取代 asar-swap 增量：下载完整 zip → SHA-256 fail closed → 退出后由 run-update.ps1
+ * 解压覆盖 resources/ 并重启。run-update.ps1 逻辑固定简单（不随版本演进），规避
+ * "换包 ps1 由旧版生成"的跨版本升级缺陷（旧版 updater bug 无法被新版修复）。 */
+
+/** 从 assets 找完整包 zip 资产（排除 SkinPack 皮肤包）。返回 plan 或 null。 */
+function buildFullUpdatePlan({ current, latestTag, assets }) {
+  if (!latestTag || compareSemver(latestTag, current) <= 0) return null;
+  const zip = (assets || []).find((a) => a.name && /\.zip$/i.test(a.name) && !/skinpack/i.test(a.name));
+  if (!zip) return null;
+  const sums = (assets || []).find((a) => a.name === "SHA256SUMS.txt");
+  return {
+    version: latestTag,
+    zipUrl: zip.browser_download_url,
+    size: zip.size || 0,
+    sumsUrl: sums ? sums.browser_download_url : "",
+    zipDigest: zip.digest || "",
+  };
+}
+
+/** 从 SHA256SUMS.txt 提取指定 zip 文件的 sha256 摘要 */
+function extractZipSha256(sumsText, zipName) {
+  for (const line of String(sumsText || "").split(/\r?\n/)) {
+    const m = line.match(/^([a-f0-9]{64})\s+\*?(.+)$/i);
+    if (m && m[2].trim() === zipName) return m[1].toLowerCase();
+  }
+  return "";
+}
+
+/** 完整包 zip 下载到 resources/app-update.zip（流式进度 + SHA-256 fail closed） */
+async function downloadFullZip(plan, onProgress = () => {}) {
+  try {
+    const r = await fetch(plan.zipUrl);
+    if (!r.ok) return { ok: false, reason: "download HTTP " + r.status };
+    const total = Number(r.headers.get("content-length")) || Number(plan.size) || 0;
+    let buf;
+    if (r.body && r.body.getReader) {
+      const reader = r.body.getReader();
+      const chunks = [];
+      let got = 0, lastPct = -1;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        got += value.length;
+        const pct = total ? Math.min(99, Math.floor((got * 100) / total)) : Math.min(99, Math.floor(got / 51200));
+        if (pct > lastPct) { lastPct = pct; onProgress(pct); }
+      }
+      buf = Buffer.concat(chunks);
+    } else {
+      buf = Buffer.from(await r.arrayBuffer());
+    }
+    if (!buf.length || (plan.size && buf.length !== plan.size)) return { ok: false, reason: "size mismatch" };
+    let expect = String(plan.zipDigest || "").replace(/^sha256:/i, "").toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(expect) && plan.sumsUrl) {
+      try {
+        const sr = await fetch(plan.sumsUrl);
+        if (sr.ok) expect = extractZipSha256(await sr.text(), String(plan.zipUrl).split("/").pop());
+      } catch { /* sums 拉取失败按无校验来源处理 */ }
+    }
+    if (!/^[a-f0-9]{64}$/.test(expect)) return { ok: false, reason: "no checksum available" };
+    const got = crypto.createHash("sha256").update(buf).digest("hex");
+    if (got !== expect) return { ok: false, reason: "sha256 mismatch" };
+    fs.writeFileSync(fullZipPath(), buf);
+    onProgress(100);
+    return { ok: true, reason: "" };
+  } catch (e) {
+    return { ok: false, reason: String((e && e.message) || e) };
+  }
+}
+
+/** 完整包 zip 在安装目录的落点 */
+function fullZipPath() { return path.join(resourcesDir(), "app-update.zip"); }
+
+/** 完整包覆盖更新：写 run-update.ps1（等旧实例退出→解压 zip 覆盖 resources→删旧散目录→启动），
+ *  cmd start 解耦后由调用方 quit。与 applyOnExit 的 asar-swap 不同，此脚本逻辑固定、
+ *  不随版本演进，任何版本生成它都得到同样的可靠行为（跨版本升级缺陷的根治）。 */
+function applyFullUpdate(exePath) {
+  const res = resourcesDir();
+  const ps1 = path.join(res, "run-update.ps1");
+  const log = path.join(res, "full-update.log");
+  const zip = path.join(res, "app-update.zip");
+  const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
+  const ps1Script = [
+    "$exe = " + q(exePath),
+    "$res = " + q(res),
+    "$zip = " + q(zip),
+    "$log = Join-Path $res 'full-update.log'",
+    "function Log($m) { Add-Content -Path $log -Value ((Get-Date -Format s) + ' ' + $m) }",
+    "function CountProcs() { @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe }).Count }",
+    "Log 'start'",
+    "$waited = 0",
+    "while ((CountProcs) -gt 0 -and $waited -lt 60) { Start-Sleep 1; $waited++ }",
+    "if ((CountProcs) -gt 0) { Log 'force kill'; Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe } | Stop-Process -Force; Start-Sleep 3 }",
+    "Log ('old exited (waited ' + $waited + 's)')",
+    "if (-not (Test-Path $zip)) { Log 'no zip, abort'; exit }",
+    "$tmp = Join-Path $env:TEMP 'suzuran-full-update'",
+    "Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue",
+    "Expand-Archive -Path $zip -DestinationPath $tmp -Force",
+    "Log 'expanded'",
+    "$appdir = Get-ChildItem $tmp -Directory | Select-Object -First 1",
+    "if (-not $appdir) { Log 'no app dir in zip'; exit }",
+    "$srcRes = Join-Path $appdir.FullName 'resources'",
+    "if (Test-Path $srcRes) { Copy-Item (Join-Path $srcRes '*') $res -Recurse -Force; Log 'resources copied' }",
+    "$oldAppDir = Join-Path $res 'app'",
+    "if (Test-Path $oldAppDir) { Remove-Item $oldAppDir -Recurse -Force -ErrorAction SilentlyContinue; Log 'old app dir removed' }",
+    "Start-Process explorer.exe -ArgumentList ('\"' + $exe + '\"')",
+    "Log 'relaunched'",
+  ].join("\n");
+  try {
+    fs.writeFileSync(ps1, "\ufeff" + ps1Script, "utf8");
+    const { spawn } = require("child_process");
+    const child = spawn("cmd.exe", ["/c", "start", '""', "/min", "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1], { detached: true, stdio: "ignore" });
+    child.on("error", (e) => { try { fs.appendFileSync(log, new Date().toISOString() + " spawn error: " + (e && e.message || e) + "\n"); } catch { /* 忽略 */ } });
+    child.unref();
+    return true;
+  } catch (e) { try { fs.appendFileSync(log, "applyFullUpdate throw: " + (e && e.message || e) + "\n"); } catch { /* 忽略 */ } return false; }
 }
 
 /** 退出时替换：写 apply-update.ps1（等旧实例退干净→备份→pending 覆盖→重启→探活→失败回滚），
@@ -228,5 +352,5 @@ function applyOnExit(exePath) {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { compareSemver, buildUpdatePlan, extractAsarSha256, checkForUpdate, checkForUpdateDetailed, downloadPending, downloadPendingProgress, applyOnExit, pendingAsar, currentAsar, REPO };
+  module.exports = { compareSemver, buildUpdatePlan, extractAsarSha256, checkForUpdate, checkForUpdateDetailed, downloadPending, downloadPendingProgress, applyOnExit, pendingAsar, currentAsar, buildFullUpdatePlan, extractZipSha256, downloadFullZip, applyFullUpdate, fullZipPath, REPO };
 }
