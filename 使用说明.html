@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>苏苏洛桌宠 · 使用说明</title>
 <style>
   /* v2.5.26：统一青系变量 + 深色主题（docs.js 把 body.theme-dark 传进 iframe） */
@@ -20,31 +21,38 @@
     font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
     background: var(--bg);
     color: var(--text);
-    padding: 26px 34px 40px;
-    line-height: 1.8;
-    font-size: 14px;
-    max-width: 800px;
+    padding: 48px 40px 64px;
+    line-height: 1.85;
+    font-size: 15px;
+    max-width: 920px;
     margin: 0 auto;
   }
-  h1 { font-size: clamp(20px, 3vw, 26px); color: var(--accent-dark); margin-bottom: 4px; }
-  .sub { color: var(--light); font-size: 13px; margin-bottom: 18px; }
-  h2 { font-size: clamp(15px, 2.2vw, 18px); color: var(--accent-dark); margin: 24px 0 8px; padding-left: 10px; border-left: 4px solid var(--accent); }
+  h1 { font-size: clamp(26px, 4vw, 34px); line-height: 1.25; color: var(--accent-dark); margin-bottom: 8px; }
+  .sub { color: var(--light); font-size: 14px; margin-bottom: 28px; }
+  h2 { font-size: clamp(20px, 2.6vw, 22px); line-height: 1.35; color: var(--accent-dark); margin: 32px 0 14px; padding-left: 12px; border-left: 4px solid var(--accent); }
   /* 可访问性：焦点可见环 + 减少动效（aesthetic-web） */
   a:focus-visible, button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
-  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 20px; margin-bottom: 12px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 20px 24px; margin-bottom: 16px; box-shadow: 0 8px 24px rgba(23,49,58,.06); }
   ol, ul { padding-left: 22px; }
-  li { margin-bottom: 4px; }
-  code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-family: Consolas, monospace; font-size: 13px; }
+  li { margin-bottom: 8px; }
+  code { background: var(--code-bg); padding: 2px 7px; border-radius: 4px; font-family: Consolas, monospace; font-size: 13px; overflow-wrap: anywhere; }
   .note { background: var(--warn-bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 13px; color: var(--warn-ink); margin-top: 10px; }
   .foot { text-align: center; color: var(--light); font-size: 12px; margin-top: 28px; }
+  a { color: var(--accent-dark); text-underline-offset: 3px; transition: color .18s ease; }
+  a:hover { color: var(--accent); }
+  p, li { text-wrap: pretty; }
+  @media (max-width: 560px) {
+    body { padding: 28px 16px 44px; font-size: 15px; }
+    .card { padding: 16px; }
+  }
 </style>
 </head>
 <body>
   <h1>🦊 苏苏洛桌宠 · 使用说明</h1>
   <div class="sub">罗德岛医疗干员 · 你的专属桌宠（绿色免安装版）——会聊天、会说话、会在桌面上散步、会记住你的事。</div>
 
-  <div class="card" style="background:#fff8ec;border-color:#f0dfc0;">
+  <div class="card note">
     <b>⚠ 第一次运行被 SmartScreen 拦截？</b>这是程序没买数字签名导致的正常提示：点「更多信息」→「仍要运行」即可。放心，这是绿色程序，不解压到别处也能用。
   </div>
 

@@ -34,6 +34,9 @@ const SPRITE_BASE = "pet-user://sprites/user/";
 /* ---------- Spine 渲染系统（可切换 GIF/Spine；支持桌面行走） ---------- */
 let spineApp = null;         // PixiJS Application
 let spineObj = null;         // PIXI Spine 对象
+const seatLifecycle = { ticker: null, owner: null, frame: 0, lastSafe: null };
+const seatEpisode = { id: 0, owner: null, active: false, entryScale: 0, previousScale: 0, finalFitDone: false, pendingFit: false };
+const leftEdgeTrace = { rows: [], max: 90, active: false, sessionId: "", movementSeq: 0, edgeSeq: 0, facingSeq: 0 };
 let skinSwitching = false;   // 换肤中：旧 context 销毁误触发的 lost 不触发整页 reload（v2.5.24）
 let renderMode = "gif";      // "gif" | "spine"
 let renderModeEpoch = 0;       // 异步 Spine 加载的会话号，最后一次模式选择获胜
@@ -248,6 +251,25 @@ function spineHas(name) { return !!spineObj && !!spineObj.spineData.animations.f
 /* ---------- 动画切换（Spine） ---------- */
 function setSpineAnim(name, loop, reason = "") {
   if (!spineObj) return;
+  const beforeName = spineObj.state.getCurrent(0)?.animation?.name || "";
+  const isSit = name === sitAnimName();
+  if (isSit && beforeName !== name) {
+    const visibleScale = Math.abs(Number(spineObj.scale?.y));
+    seatEpisode.id += 1;
+    seatEpisode.owner = spineObj;
+    seatEpisode.active = true;
+    seatEpisode.entryScale = Number.isFinite(visibleScale) && visibleScale > 0 ? visibleScale : Math.abs(spineBaseScaleX);
+    seatEpisode.previousScale = seatEpisode.entryScale;
+    seatEpisode.finalFitDone = false;
+    seatEpisode.pendingFit = false;
+  } else if (!isSit && beforeName === sitAnimName()) {
+    seatEpisode.active = false;
+    seatEpisode.pendingFit = false;
+  }
+  if (lastDragTraceId && (name === "Interact" || name === "interact" || name === sitAnimName() || beforeName === "Interact" || beforeName === "interact")) {
+    seatClipTrace("animation-set", { from: beforeName, to: name, loop, reason, source: "setSpineAnim" });
+  }
+  if (reason === "seat-phase") seatClipTrace("sit-before", { next: name });
   const entry = spineObj.state.setAnimation(0, name, loop);
   // 坐姿的可见脚底要在混合窗口内尽快落位：站→坐的长混合帧会把下半身带出 120px 条带
   // （“坐时掉脚”），而完全零混合（0.14 时期 9-3 的修复）又让站→坐过渡帧整段消失（“坐下生硬”）。
@@ -255,6 +277,7 @@ function setSpineAnim(name, loop, reason = "") {
   // 头几帧内并由 160ms fit 校回；掉脚回归判据 = 真机日志 [fit] seat-phase 后 visibleGap 持续 >0。
   if (reason === "seat-phase") {
     try { if (entry) entry.mixDuration = 0.12; } catch { /* 旧版 Spine TrackEntry 无此字段 */ }
+    seatClipTrace("sit-after", { next: name });
   }
 }
 function addSpineAnim(name, loop) {
@@ -269,6 +292,7 @@ let spineFitStableHits = 0;
 function scheduleFitSpine(opts = {}) {
   spineFitGeneration += 1;
   spineFitStableHits = 0;
+  if (lastDragTraceId) seatClipTrace("fit-scheduled", { reason: opts.seatPhase ? "seat-phase" : "scheduleFitSpine", generation: spineFitGeneration });
   // spineAutoScaled / spineFitKeepScale 跨动画保持（只在换皮肤 initSpine 时重置）：
   // 每次动画切换都重置会让适配无限累乘放大（迷迭香实测每次相位切换 ×1.59，几次后角色暴涨出画布消失）
   spineFitTimers.forEach(clearTimeout);
@@ -286,6 +310,13 @@ let spineFigLeftCss = 0; // 自动适配皮肤：角色可见左缘在窗口内�
 function fitSpinePose(generation = spineFitGeneration) {
   try {
     if (!spineObj || !spineApp || renderMode !== "spine" || generation !== spineFitGeneration) return;
+    const fitBefore = { x: spineObj.scale.x, y: spineObj.scale.y, baseX: spineBaseScaleX, baseY: spineBaseScaleX, bounds: (() => { try { return spineObj.getBounds(); } catch { return null; } })() };
+    if (lastDragTraceId) seatClipTrace("fit-BEGIN", { reason: "fitSpinePose", generation, scale: `${fitBefore.x.toFixed(4)},${fitBefore.y.toFixed(4)}`, base: `${fitBefore.baseX.toFixed(4)},${fitBefore.baseY.toFixed(4)}`, bounds: `${Math.round(fitBefore.bounds.x)},${Math.round(fitBefore.bounds.y)},${Math.round(fitBefore.bounds.width)},${Math.round(fitBefore.bounds.height)}` });
+    if (seatEpisode.active && seatEpisode.owner === spineObj && seatTrackActive()) {
+      seatEpisode.pendingFit = true;
+      if (lastDragTraceId) seatClipTrace("fit-request-only", { reason: "active-seat-transition", episode: seatEpisode.id, entryScale: seatEpisode.entryScale.toFixed(4) });
+      return;
+    }
     let W = spineApp.screen.width, H = spineApp.screen.height;
     const safe = 4;
     const flip = walkState.face === -1 ? -1 : 1;
@@ -345,6 +376,7 @@ function fitSpinePose(generation = spineFitGeneration) {
         spineFigLeftCss = petEl ? petEl.offsetLeft : 0;
       }
       reportGroundGap();
+      if (lastDragTraceId) { const b = spineObj.getBounds(); const sx = spineObj.scale.x, sy = spineObj.scale.y; seatClipTrace("fit-END", { reason: "fitSpinePose", generation, scale: `${sx.toFixed(4)},${sy.toFixed(4)}`, base: `${spineBaseScaleX.toFixed(4)},${spineBaseScaleX.toFixed(4)}`, scaleChanged: sx !== fitBefore.x || sy !== fitBefore.y, ratio: fitBefore.x ? (Math.abs(sx) / Math.abs(fitBefore.x)).toFixed(4) : "?", bounds: `${Math.round(b.x)},${Math.round(b.y)},${Math.round(b.width)},${Math.round(b.height)}` }); }
       scheduleGeometryReport();
       return;
     }
@@ -370,6 +402,7 @@ function fitSpinePose(generation = spineFitGeneration) {
           spineAutoScaled = true;
           spineFitKeepScale = true;
           try { window.petAPI.playback && window.petAPI.playback(`[spine] 自动适配 vis=${Math.round(visH)}px → ×${kk.toFixed(2)} (aspect=${aspect.toFixed(2)}) dir=${relDirOf()}`); } catch { /* 忽略 */ }
+          if (lastDragTraceId) seatClipTrace("fit-scale-mutation", { reason: "auto-pixel-fit", oldScale: `${spineObj.scale.x.toFixed(4)},${spineObj.scale.y.toFixed(4)}`, newBase: `${spineBaseScaleX.toFixed(4)},${spineBaseScaleX.toFixed(4)}`, ratio: kk.toFixed(4) });
           fitSpinePose();
           return;
         }
@@ -599,6 +632,70 @@ function spineAnimForMood(mood) {
   return null;
 }
 
+function seatTrackActive() {
+  if (!spineObj || !spineObj.state) return false;
+  const cur = spineObj.state.getCurrent(0);
+  const sit = sitAnimName();
+  return !!sit && !!cur && !!cur.animation && cur.animation.name === sit;
+}
+function seatContainmentCommit() {
+  if (!spineObj || !spineApp || !seatTrackActive() || !seatEpisode.active || seatEpisode.owner !== spineObj) return false;
+  const W = spineApp.screen.width, H = spineApp.screen.height;
+  let b = spineObj.getBounds();
+  if (!(Number.isFinite(b.x) && Number.isFinite(b.y) && b.width > 0 && b.height > 0)) return false;
+  const beforeScale = Math.abs(spineObj.scale.y);
+  const maxScale = Math.min(seatEpisode.previousScale || beforeScale, seatEpisode.entryScale || beforeScale);
+  let candidateScale = Math.min(beforeScale, maxScale);
+  const safeW = Math.max(1, W - 4), safeH = Math.max(1, H - 4);
+  const shrink = Math.min(b.width > safeW ? safeW / b.width : 1, b.height > safeH ? safeH / b.height : 1);
+  if (shrink < 1) candidateScale *= shrink;
+  if (candidateScale > maxScale) candidateScale = maxScale;
+  const before = { x: spineObj.x, y: spineObj.y };
+  if (lastDragTraceId && seatLifecycle.frame === 0) seatClipTrace("seat-lifecycle-enter", { reason: "ticker-install", autoUpdate: spineObj.autoUpdate, owner: seatLifecycle.owner === spineObj });
+  // Ignore sub-pixel/rasterization noise at the edge; correcting a 1px bound
+  // fluctuation every frame would visibly oscillate the whole seated pose.
+  const edgeTolerance = 2;
+  const beforeCorrection = { x: b.x, y: b.y, w: b.width, h: b.height };
+  if (candidateScale < beforeScale - 1e-6) {
+    const sign = spineObj.scale.x < 0 ? -1 : 1;
+    spineObj.scale.set(sign * candidateScale, candidateScale);
+    spineObj.updateTransform();
+    b = spineObj.getBounds();
+  }
+  const dx = b.x < -edgeTolerance ? -b.x : b.x + b.width > W + edgeTolerance ? W - (b.x + b.width) : 0;
+  const dy = b.y < -edgeTolerance ? -b.y : b.y + b.height > H + edgeTolerance ? H - (b.y + b.height) : 0;
+  if (dx || dy) { spineObj.x += dx; spineObj.y += dy; }
+  if (candidateScale < beforeScale - 1e-6 || dx || dy) spineObj.updateTransform();
+  seatEpisode.previousScale = candidateScale;
+  seatLifecycle.frame += 1;
+  if (candidateScale < beforeScale - 1e-6 || dx || dy) seatClipTrace("containment", { frame: seatLifecycle.frame, before: `${before.x.toFixed(2)},${before.y.toFixed(2)}`, after: `${spineObj.x.toFixed(2)},${spineObj.y.toFixed(2)}`, scale: `${beforeScale.toFixed(4)}→${candidateScale.toFixed(4)}`, boundsBefore: `${Math.round(beforeCorrection.x)},${Math.round(beforeCorrection.y)},${Math.round(beforeCorrection.w)},${Math.round(beforeCorrection.h)}`, boundsAfterScaleBeforeY: `${Math.round(b.x)},${Math.round(b.y)},${Math.round(b.width)},${Math.round(b.height)}`, boundsAfterY: `${Math.round(b.x)},${Math.round(b.y)},${Math.round(b.width)},${Math.round(b.height)}`, dy: dy.toFixed(2), trigger: `${dy < 0 ? "TOP" : dy > 0 ? "BOTTOM" : "NONE"}`, writer: "unified-seat-commit" });
+  return true;
+}
+function installSeatLifecycle() {
+  if (!spineApp || !spineObj || seatLifecycle.ticker) return;
+  seatLifecycle.owner = spineObj;
+  const ticker = (delta) => {
+    if (seatLifecycle.owner !== spineObj || !spineObj) return;
+    try {
+      const dt = typeof delta === "number" ? delta / 60 : (Number.isFinite(delta?.deltaMS) ? delta.deltaMS / 1000 : 1 / 60);
+      spineObj.update(dt);
+      seatContainmentCommit();
+      const wx = Number(window.screenX), row = Number.isFinite(wx) && wx < 50 && spineObj ? { timestamp: Date.now(), frame: seatLifecycle.frame, windowX: wx, movementSeq: leftEdgeTrace.movementSeq, edgeSeq: leftEdgeTrace.edgeSeq, facingSeq: leftEdgeTrace.facingSeq, facing: walkState.face, scaleSign: spineObj.scale.x < 0 ? -1 : 1, scale: Math.abs(spineObj.scale.y), x: spineObj.x, y: spineObj.y, bounds: (() => { const b = spineObj.getBounds(); return `${Math.round(b.x)},${Math.round(b.y)},${Math.round(b.width)},${Math.round(b.height)}`; })(), petRect: petEl?.getBoundingClientRect?.().toJSON?.() || null, edgeLeft: document.body.classList.contains("edge-left") } : null;
+      if (row) { leftEdgeTrace.active = true; leftEdgeTrace.rows.push(row); if (leftEdgeTrace.rows.length > leftEdgeTrace.max) leftEdgeTrace.rows.shift(); }
+      else if (leftEdgeTrace.active) { leftEdgeTrace.active = false; try { window.petAPI.playback(`[left-edge-trace] buffer session=${leftEdgeTrace.sessionId} rows=${JSON.stringify(leftEdgeTrace.rows)}`); } catch {} leftEdgeTrace.rows = []; }
+    } catch { /* 保持 Pixi 原有渲染链路 */ }
+  };
+  seatLifecycle.ticker = ticker;
+  spineObj.autoUpdate = false;
+  spineApp.ticker.add(ticker, spineApp.ticker, PIXI.UPDATE_PRIORITY.HIGH);
+}
+function uninstallSeatLifecycle() {
+  if (lastDragTraceId) seatClipTrace("seat-lifecycle-exit", { reason: "uninstall", autoUpdate: spineObj?.autoUpdate, owner: seatLifecycle.owner === spineObj });
+  if (seatLifecycle.ticker && spineApp?.ticker) spineApp.ticker.remove(seatLifecycle.ticker, spineApp.ticker);
+  seatLifecycle.ticker = null; seatLifecycle.owner = null; seatLifecycle.lastSafe = null;
+  seatEpisode.owner = null; seatEpisode.active = false; seatEpisode.entryScale = 0; seatEpisode.previousScale = 0; seatEpisode.finalFitDone = false; seatEpisode.pendingFit = false;
+}
+
 async function initSpine(epoch = renderModeEpoch) {
   try {
     if (spineApp) return true; // 已初始化
@@ -672,6 +769,7 @@ async function initSpine(epoch = renderModeEpoch) {
     const spineData = skelRes && skelRes.spineData ? skelRes.spineData : skelRes;
     spineObj = new SpineCtor(spineData);
     spineApp.stage.addChild(spineObj);
+    installSeatLifecycle();
     try { spineObj.state.data.defaultMix = 0.20; } catch { /* 忽略 */ } // 2026-09-04：0.14 过冲（“利落”取向），回调 0.20 折中流畅与利落（基线 0.25）
 
     // 居中并缩放到合适大小
@@ -828,7 +926,15 @@ function reconcileSpineAnimation(reason = "reconcile") {
     busy,
     sleeping: isSleeping,
     demo: Date.now() < animDemoUntil,
-    mood: Date.now() < moodAnimUntil && reason !== "speech-end"
+    mood: Date.now() < moodAnimUntil,
+    active: walkState.active,
+    resting: walkState.resting,
+    seated: walkState.seated,
+    perched: walkState.perched,
+    paused: walkState.paused,
+    currentAnimationEnd: cur && cur.animationEnd,
+    currentTrackTime: cur && cur.trackTime,
+    queuedSuccessor: !!(cur && cur.next)
   }) : (currentName === target ? "ok" : "restart");
   if (decision !== "restart") return false;
   try {
@@ -849,6 +955,7 @@ function applyWalkState(s) {
   const wasSleeping = walkState.sleeping;
   const wasResting = !!(walkState.seated || walkState.perched || walkState.sleeping);
   walkState = s || walkState;
+  seatClipTrace("walk-state", { nextAnim: spinePhaseAnim() || "" });
   // 自主坐下/上窗顶/入睡的瞬间收起聊天栏：输入栏悬浮在窗口底部，坐姿正好压在栏上
   // （视觉=坐在自己的输入条上）。单击打开会顺带聚焦输入框且焦点会一直留着，
   // 焦点本身不代表在用，故只认 60s 内的真实打字；有草稿或生成中也不动。
@@ -909,27 +1016,25 @@ function applyWalkState(s) {
     }
     return;
   }
-  if (busy) {
-    // 2026-09-06 修「说话期间在移动但没有 Move 动画」：busy（聊天生成/语音回复）时相位
-    // 对账停摆（下方 return，聊天表情优先不打断），但一次性表情动画（think/cry/happy 等
-    // 非循环）播完后定格最后一帧，而主进程行走引擎仍在移动窗口 → 位置滑行、无动画；
-    // 说话结束 busy=false 后对账恢复（用户所见"后面恢复正常"）。
-    // 修复：非循环表情播完且行走引擎在动 → 接回 walk 相位动画；循环态表情（work 打字）
-    // 保持不打断。
-    if (walkState.active && !walkState.paused && !walkState.resting && spineObj) {
-      const cur = spineObj.state.getCurrent(0);
-      const curName = cur && cur.animation ? cur.animation.name : "";
-      const done = !!(cur && cur.animation && cur.loop === false &&
-        cur.animationEnd >= 0 && cur.trackTime >= cur.animationEnd);
-      const target = spinePhaseAnim();
-      if (done && target && curName !== target) {
-        setSpineAnim(target, true, "busy-walk-phase");
-        logPhaseSwitch("busy-walk-phase", target);
-      }
-    }
-    return;                       // 聊天表情优先，不打断
-  }
   const target = spinePhaseAnim();
+  const cur = spineObj.state.getCurrent(0);
+  const decision = window.AnimationWatch ? window.AnimationWatch.trackDecision({
+    currentName: cur && cur.animation ? cur.animation.name : "",
+    targetName: target,
+    currentLoop: cur && cur.loop,
+    currentAnimationEnd: cur && cur.animationEnd,
+    currentTrackTime: cur && cur.trackTime,
+    queuedSuccessor: !!(cur && cur.next),
+    active: walkState.active,
+    busy,
+    mood: Date.now() < moodAnimUntil,
+    resting: walkState.resting,
+    paused: walkState.paused,
+    sleeping: walkState.sleeping,
+    seated: walkState.seated,
+    perched: walkState.perched
+  }) : "restart";
+  if (decision === "defer") return;
   if (target && spineObj.state.getCurrent(0)?.animation?.name !== target) {
     setSpineAnim(target, true, "walk-phase");
     logPhaseSwitch("walk-phase", target);
@@ -1172,6 +1277,7 @@ function setBubbleMode(mode) {
 function hideBubble() {
   bubbleEl.classList.add("hidden");
   stopReveal();
+  refreshClickable(lastMouse.x, lastMouse.y);
 }
 function stopReveal() {
   if (revealTimer) { clearInterval(revealTimer); revealTimer = null; }
@@ -1849,8 +1955,9 @@ window.petAPI.onDropped(() => {
 });
 }
 if (window.petAPI.onEdgeLeft) {
-  window.petAPI.onEdgeLeft((v) => document.body.classList.toggle("edge-left", !!v)); // 角色贴屏幕左缘：条带切左侧、气泡翻右侧
+  window.petAPI.onEdgeLeft((v) => { const d = v || {}; if (typeof d === "object") { leftEdgeTrace.sessionId = d.sessionId || leftEdgeTrace.sessionId; leftEdgeTrace.movementSeq = d.movementSeq || 0; leftEdgeTrace.edgeSeq = d.edgeSeq || 0; leftEdgeTrace.facingSeq = d.facingSeq || 0; } });
 }
+if (window.petAPI.onUiEdgeCompact) window.petAPI.onUiEdgeCompact((v) => { const d = v || {}; document.body.classList.toggle("ui-edge-compact", typeof d === "object" ? !!d.value : !!d); });
 if (window.petAPI.onRenderModeChanged) {
   window.petAPI.onRenderModeChanged(async (m) => {
     if (enlarged) { // 切模式还原放大状态：zoom 暂停标志不跨模式残留
@@ -1890,6 +1997,7 @@ async function rebuildSpine() {
   visibleCanvasGapHits = 0;
   spineTrackProbe = { name: "", time: NaN };
   try {
+    uninstallSeatLifecycle();
     if (spineObj) { try { spineObj.destroy(); } catch { /* 忽略 */ } spineObj = null; }
     if (spineApp) {
       const view = spineApp.view;
@@ -2369,7 +2477,7 @@ setInterval(() => {
       window.petAPI.playback && window.petAPI.playback("[anim] timeScale-recover");
     }
   } catch { /* 状态读取失败交给后续轨道判定 */ }
-  if (Date.now() < animDemoUntil || Date.now() < moodAnimUntil) return;
+  if (Date.now() < animDemoUntil) return;
   let cur = null;
   try { cur = spineObj.state.getCurrent(0); } catch { return; }
   // 相位目标：spinePhaseAnim 唯一来源（坐姿/暂停/走路/待机都在里面）；引擎关闭（null）→ 站姿待机。
@@ -2394,7 +2502,15 @@ setInterval(() => {
     busy,
     sleeping: isSleeping,
     demo: Date.now() < animDemoUntil,
-    mood: Date.now() < moodAnimUntil
+    mood: Date.now() < moodAnimUntil,
+    active: walkState.active,
+    resting: walkState.resting,
+    seated: walkState.seated,
+    perched: walkState.perched,
+    paused: walkState.paused,
+    currentAnimationEnd: cur && cur.animationEnd,
+    currentTrackTime: cur && cur.trackTime,
+    queuedSuccessor: !!(cur && cur.next)
   }) : (!cur || !cur.animation || currentName !== target ? "restart" : "ok");
   if (!cur || !cur.animation || decision === "restart") {
     try {
@@ -2427,6 +2543,19 @@ window.petAPI.onTermsAgreed(() => {
 
 /* ---------- 拖拽（手动，区分点击） ---------- */
 let dragState = null;
+let dragTraceSeq = 0;
+let lastDragTraceId = "";
+function seatClipTrace(label, extra = {}) {
+  if (!lastDragTraceId) return;
+  try {
+    const cur = spineObj && spineObj.state.getCurrent(0);
+    const cr = spineApp?.view?.getBoundingClientRect?.();
+    const pr = petEl?.getBoundingClientRect?.();
+    const sx = spineObj?.scale?.x, sy = spineObj?.scale?.y, b = spineObj?.getBounds?.();
+    const next = cur?.next;
+    window.petAPI.playback(`[seat-clip ${lastDragTraceId}] ${label} anim=${cur?.animation?.name || ""} track=${cur?.trackIndex ?? 0} trackTime=${Number.isFinite(cur?.trackTime) ? cur.trackTime.toFixed(3) : "?"} end=${Number.isFinite(cur?.animationEnd) ? cur.animationEnd.toFixed(3) : "?"} loop=${!!cur?.loop} mix=${Number.isFinite(cur?.mixTime) ? cur.mixTime.toFixed(3) : "?"}/${Number.isFinite(cur?.mixDuration) ? cur.mixDuration.toFixed(3) : "?"} next=${next?.animation?.name || ""} autoUpdate=${spineObj?.autoUpdate} tickerOwner=${seatLifecycle.owner === spineObj} containment=${seatTrackActive()} scale=${Number.isFinite(sx) ? sx.toFixed(4) : "?"},${Number.isFinite(sy) ? sy.toFixed(4) : "?"} base=${Number.isFinite(spineBaseScaleX) ? spineBaseScaleX.toFixed(4) : "?"},${Number.isFinite(spineBaseScaleX) ? spineBaseScaleX.toFixed(4) : "?"} bounds=${b ? `${Math.round(b.x)},${Math.round(b.y)},${Math.round(b.width)},${Math.round(b.height)}` : "?"} win=${window.innerWidth}x${window.innerHeight} canvas=${spineApp?.screen?.width || "?"}x${spineApp?.screen?.height || "?"} canvasRect=${cr ? `${Math.round(cr.x)},${Math.round(cr.y)},${Math.round(cr.width)},${Math.round(cr.height)}` : "?"} petRect=${pr ? `${Math.round(pr.x)},${Math.round(pr.y)},${Math.round(pr.width)},${Math.round(pr.height)}` : "?"} state=${!!walkState.seated}/${!!walkState.resting}/${!!walkState.sleeping} ${Object.entries(extra).map(([k,v]) => `${k}=${v}`).join(" ")}`);
+  } catch { /* 诊断失败不影响显示 */ }
+}
 let pokeResumeTimer = null; // 戳一戳后的原地站立计时
 const THROW_SAMPLE_WINDOW_MS = 80;
 const THROW_MIN_SPEED = 200;
@@ -2445,6 +2574,9 @@ function dragVelocity(state) {
   return { vx: (last.x - first.x) / dt, vy: (last.y - first.y) / dt };
 }
 function onDragStart(e) {
+  const traceId = "drag-" + Date.now().toString(36) + "-" + (++dragTraceSeq);
+  const curAnim = (() => { try { return spineObj && spineObj.state.getCurrent(0)?.animation?.name || ""; } catch { return ""; } })();
+  try { window.petAPI.playback(`[drag ${traceId}] start wakeBefore sleeping=${isSleeping} walkSleeping=${!!walkState.sleeping} anim=${curAnim} previewMs=${Math.max(0, animDemoUntil - Date.now())} resting=${!!walkState.resting} seated=${!!walkState.seated} paused=${!!walkState.paused}`); } catch { /* 忽略 */ }
   try { window.petAPI.playback("[ui] dragStart btn=" + e.button + " target=" + (e.target.id || e.target.tagName)); } catch { /* 忽略 */ }
   wake();
   if (e.button !== 0) return;
@@ -2452,9 +2584,9 @@ function onDragStart(e) {
   // v2.5.22d Q 弹按压（GIF 模式）：按下压缩，松手回弹（CSS 仅对 GIF 生效，其他模式无此动画）
   petEl.classList.remove("pet-squash", "pet-squash-release");
   petEl.classList.add("pet-squash");
-  dragState = { sx: e.screenX, sy: e.screenY, moved: false, active: true, samples: [] };
+  dragState = { traceId, sx: e.screenX, sy: e.screenY, moved: false, active: true, samples: [] };
   addDragSample(dragState, e);
-  window.petAPI.walkingPause(true); // 拖拽中暂停桌面行走，松手恢复
+  window.petAPI.walkingPause(true, "drag:" + traceId); // 拖拽中暂停桌面行走，松手恢复
 }
 petEl.addEventListener("mousedown", onDragStart);
 const rigCanvasEl = document.getElementById("rig-canvas");
@@ -2519,7 +2651,8 @@ window.addEventListener("mouseup", () => {
   if (!dragState) return;
   const state = dragState;
   const wasDrag = state.moved;
-  try { window.petAPI.playback("[ui] mouseup wasDrag=" + wasDrag + " samples=" + state.samples.length); } catch { /* 忽略 */ }
+  lastDragTraceId = state.traceId;
+  try { window.petAPI.playback(`[drag ${state.traceId}] mouseup wasDrag=${wasDrag} samples=${state.samples.length}`); } catch { /* 忽略 */ }
   dragState = null;
   petEl.classList.remove("dragging");
   // v2.5.22d Q 弹回弹（GIF 模式）：松手换 release 动画，播完清理
@@ -2528,6 +2661,8 @@ window.addEventListener("mouseup", () => {
   setTimeout(() => petEl.classList.remove("pet-squash-release"), 400);
   const velocity = wasDrag ? dragVelocity(state) : null;
   const speed = velocity ? Math.round(Math.hypot(velocity.vx, velocity.vy)) : 0;
+  seatClipTrace("release", { branch: wasDrag && velocity && speed > THROW_MIN_SPEED ? "THROW" : "PAUSE_RELEASE", speed });
+  try { window.petAPI.playback(`[drag ${state.traceId}] release speed=${speed} branch=${wasDrag && velocity && speed > THROW_MIN_SPEED ? "THROW" : "PAUSE_RELEASE"}`); } catch { /* 忽略 */ }
   if (!wasDrag) {
     try { window.petAPI.playback("[ui] click 未拖动 count=" + ((patSeq && patSeq.count) || 0)); } catch { /* 忽略 */ }
     const now = Date.now();
@@ -2555,10 +2690,10 @@ window.addEventListener("mouseup", () => {
     pokeResumeTimer = setTimeout(() => { if (!dragState) window.petAPI.walkingPause(false); }, 2600);
   } else {
     if (velocity && speed > THROW_MIN_SPEED) {
-      window.petAPI.throwPet(velocity.vx, velocity.vy);
+      window.petAPI.throwPet(velocity.vx, velocity.vy, state.traceId);
       scheduleDizzyFeedback(); // 被抛出去：落地时晕乎/抗议
     } else {
-      window.petAPI.walkingPause(false);
+      window.petAPI.walkingPause(false, "drag:" + state.traceId);
     }
   }
 });
@@ -2597,7 +2732,8 @@ function isPetUI(el, e) {
   }
   // 行走容差圈（v2.5.1）：只在真正走动时启用（移动目标精确命中太难）——
   // 静止时鼠标直接点中画布/角色即可（上方已判定），容差圈不再无条件把小人附近的下层应用挡掉
-  if (e && petEl && renderMode === "spine" && !busy && walkState.active && !walkState.resting) {
+  if (e && petEl && renderMode === "spine" && !busy && walkState.active && !walkState.resting &&
+      !walkState.paused && !walkState.sleeping && !walkState.seated && !walkState.perched) {
     try {
       const r = petEl.getBoundingClientRect();
       if (Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2)) < 130) return true;

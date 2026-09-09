@@ -17,14 +17,14 @@
     --tip-bg: #243036; --warn-bg: #2e2a20; --danger: #e07a7f;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background: var(--bg); color: var(--text); line-height: 1.8; font-size: 15px; padding: 30px 18px 60px; }
-  .wrap { max-width: 880px; margin: 0 auto; }
-  h1 { color: var(--accent-dark); font-size: 26px; margin-bottom: 6px; }
-  .sub { color: var(--light); margin-bottom: 24px; font-size: 13.5px; }
-  h2 { color: var(--accent-dark); font-size: 20px; margin: 34px 0 12px; padding-bottom: 6px; border-bottom: 2px solid var(--border); }
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background: var(--bg); color: var(--text); line-height: 1.85; font-size: 15px; padding: 48px 40px 72px; }
+  .wrap { max-width: 920px; margin: 0 auto; }
+  h1 { color: var(--accent-dark); font-size: clamp(26px, 4vw, 34px); line-height: 1.25; margin-bottom: 8px; }
+  .sub { color: var(--light); margin-bottom: 28px; font-size: 14px; }
+  h2 { color: var(--accent-dark); font-size: clamp(20px, 2.6vw, 22px); line-height:1.35; margin: 32px 0 14px; padding-bottom: 8px; border-bottom: 2px solid var(--border); }
   h3 { font-size: 16px; margin: 20px 0 8px; }
   p { margin: 8px 0; }
-  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px 22px; margin: 14px 0; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 22px 24px; margin: 16px 0; box-shadow:0 8px 24px rgba(23,49,58,.06); }
   .tip { background: var(--tip-bg); border-left: 4px solid var(--accent); border-radius: 0 10px 10px 0; padding: 12px 16px; margin: 12px 0; font-size: 14px; }
   .warn { background: var(--warn-bg); border-left: 4px solid var(--danger); border-radius: 0 10px 10px 0; padding: 12px 16px; margin: 12px 0; font-size: 14px; }
   code { background: var(--code-bg); padding: 2px 7px; border-radius: 5px; font-family: Consolas, monospace; font-size: 13px; word-break: break-all; }
@@ -34,10 +34,20 @@
   .tag { display: inline-block; background: var(--accent); color: #fff; border-radius: 20px; padding: 1px 10px; font-size: 12px; margin-right: 6px; }
   .tag.free { background: var(--ok); }
   ol, ul { padding-left: 26px; }
-  li { margin: 6px 0; }
+  li { margin: 8px 0; }
   .steps li { margin: 10px 0; }
-  a { color: var(--accent-dark); }
   .foot { margin-top: 40px; color: var(--light); font-size: 13px; text-align: center; }
+  a { color: var(--accent-dark); text-underline-offset: 3px; }
+  a:hover { color: var(--accent); }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  p, li { text-wrap: pretty; }
+  td, th { overflow-wrap: anywhere; }
+  @media (max-width: 600px) {
+    body { padding: 28px 16px 48px; font-size: 15px; }
+    .card { padding: 16px; }
+    table { display:block; overflow-x:auto; }
+    th, td { padding: 8px 10px; }
+  }
 </style>
 </head>
 <body>

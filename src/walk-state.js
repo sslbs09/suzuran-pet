@@ -19,6 +19,12 @@ function edgeFlipDecision({ edgeLeft, charLeft, edgeL, now, lastFlipAt = 0, back
   return null;
 }
 
+function uiEdgeCompactFromBounds({ windowX, workAreaLeft = 0, compact = false, margin = 2 } = {}) {
+  const x = Number(windowX), left = Number(workAreaLeft), m = Math.max(0, Number(margin) || 0);
+  if (!Number.isFinite(x) || !Number.isFinite(left)) return !!compact;
+  return compact ? x < left + m : x < left - m;
+}
+
 /** 垂直钳位决策。返回 {type:'down'|'up'} 或 null。
  *  down: 掉太低（拖出/掉出屏幕）→ 钳回地面；up: 非瞬态悬太高 → 拉回地面。 */
 function verticalClampDecision({ y, groundY, seated, resting, transient, downTol = 120, upTol = 140 }) {
@@ -36,5 +42,5 @@ function seatReanchorOnResizeDecision({ seated, perched, dragPaused, flight, jum
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { edgeFlipDecision, verticalClampDecision, seatReanchorOnResizeDecision };
+  module.exports = { edgeFlipDecision, uiEdgeCompactFromBounds, verticalClampDecision, seatReanchorOnResizeDecision };
 }

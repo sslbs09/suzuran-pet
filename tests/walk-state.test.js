@@ -1,6 +1,6 @@
 /** walk-state 纯函数单测（node）——翻边滞回/垂直钳位/坐姿尺寸重锚决策（v2.5.26 收敛①，行为等价校验） */
 "use strict";
-const { edgeFlipDecision, verticalClampDecision, seatReanchorOnResizeDecision } = require("../src/walk-state");
+const { edgeFlipDecision, uiEdgeCompactFromBounds, verticalClampDecision, seatReanchorOnResizeDecision } = require("../src/walk-state");
 let failed = 0;
 function assert(name, cond, extra) {
   if (!cond) { failed++; console.log("FAIL", name, extra || ""); }
@@ -13,6 +13,9 @@ assert("非左缘+离边界远→不翻", edgeFlipDecision({ edgeLeft: false, ch
 assert("左缘+未超回翻阈值→不翻", edgeFlipDecision({ edgeLeft: true, charLeft: 100, edgeL: 0, now: 1000, lastFlipAt: 0 }) === null);
 assert("左缘+超140→回翻", edgeFlipDecision({ edgeLeft: true, charLeft: 150, edgeL: 0, now: 1000, lastFlipAt: 0 }).flip === false);
 assert("防抖内→不翻", edgeFlipDecision({ edgeLeft: true, charLeft: 150, edgeL: 0, now: 1000, lastFlipAt: 500 }) === null);
+assert("UI：仍在屏外保持紧凑", uiEdgeCompactFromBounds({ windowX: -50, workAreaLeft: 0, compact: true }) === true);
+assert("UI：回到屏内立即恢复，即使 walking edge 仍在", uiEdgeCompactFromBounds({ windowX: 3, workAreaLeft: 0, compact: true }) === false);
+assert("UI：进入阈值使用小空间滞回", uiEdgeCompactFromBounds({ windowX: -3, workAreaLeft: 0, compact: false }) === true);
 
 // 垂直钳位
 assert("掉太低→down", verticalClampDecision({ y: 1000, groundY: 800, seated: false, resting: true, transient: false }).type === "down");

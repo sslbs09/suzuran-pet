@@ -333,7 +333,8 @@ function createWindow() {
       win.reload();
       setTimeout(() => {
         if (walk.active) walkBroadcast();
-        if (walk.edgeLeft) sendToRenderer("pet:edge-left", true); // 重载后恢复翻边布局，避免条带位置不一致
+        if (walk.edgeLeft) sendToRenderer("pet:edge-left", true); // 保留 walking edge 状态诊断
+        updateUiEdgeCompactFromBounds(win.getBounds(), walkGeo.workAreaOf(screen, win.getBounds()));
       }, 3000);
     } catch (e2) { logTts("render", "自动重载失败: " + (e2 && e2.message || e2)); }
   });
@@ -2918,7 +2919,7 @@ function dragSeatUpdate(final = false) {
       return false;
     } else if (desktopIconMode()) {
       // 桌面层级＋已授权：松手贴近真实桌面图标顶(±44px)才坐上
-      const charCx = (walk.charInset + b.width - 2) / 2;
+      const charCx = (PET_LOCAL_X + b.width - 2) / 2;
       let best = null, bestD = Infinity;
       for (const p of desktopIconCache.list) {
         const d = Math.abs(feet - p.y);
@@ -2992,6 +2993,18 @@ const walk = walkCore.createWalkState(); // 行走状态（walk-core 提供，�
 let skinHasSit = true; // 当前皮肤是否有可播的坐下动画（渲染层皮肤加载后上报；false 时坐姿不做下沉，修复"站着脚陷进任务栏"）
 const WALK_TICK_MS = 40;
 const WALK_SPEED = 1.2;                        // 每 tick 像素 ≈ 30px/s
+const PET_LOCAL_X = 138;                       // 标准 Spine 260×200 窗口的唯一角色锚点
+const runtimeTraceSessionId = `rt-${Date.now().toString(36)}`;
+let sleepSeq = 0;
+let sleepPositionTrace = null;
+function sleepPositionState() {
+  return `state=${!!walk.sleeping}/${!!walk.resting}/${!!walk.seated}/${!!walk.perched}/${!!walk.returning}/${!!walk.flight}/${!!walk.paused} phase=${!!walk.phaseTimer}`;
+}
+function traceSleepWindow(source, reason, beforeY, requestedY, afterY, extra = "") {
+  if (!sleepPositionTrace || Date.now() > sleepPositionTrace.until) return;
+  logTts("walk", `[WINDOW-Y-WRITE] session=${runtimeTraceSessionId} sleepSeq=${sleepPositionTrace.seq} source=${source} reason=${reason} beforeY=${beforeY} requestedY=${requestedY} afterY=${afterY} ${sleepPositionState()}${extra ? ` ${extra}` : ""}`);
+}
+let runtimeMovementSeq = 0, runtimeEdgeSeq = 0, runtimeFacingSeq = 0, runtimeWindowMutationSeq = 0;
 function walkSpeed() {                         // 托盘速度档位倍率（借鉴 Ark-Pets 可调移速）
   return WALK_SPEED * (Number(config.getConfig().walkSpeedMul) || 1);
 }
@@ -3006,7 +3019,16 @@ function walkSetPosition(x, y, where) {
     logTts("walk", "拦截非法窗口坐标(" + where + "): x=" + px + " y=" + py);
     return false;
   }
-  try { win.setPosition(px, py); applyLayerThrottled(); return true; }
+  try {
+    const before = win.getBounds();
+    win.setPosition(px, py); runtimeWindowMutationSeq += 1; applyLayerThrottled();
+    if (sleepPositionTrace && Date.now() <= sleepPositionTrace.until) {
+      const after = win.getBounds();
+      traceSleepWindow("walkSetPosition", where, before.y, py, after.y);
+    }
+    if (px < 50 || before.x < 50) logTts("walk", `[left-edge-trace] session=${runtimeTraceSessionId} movementSeq=${runtimeMovementSeq} edgeSeq=${runtimeEdgeSeq} facingSeq=${runtimeFacingSeq} windowMutationSeq=${runtimeWindowMutationSeq} reason=${where} before=${before.x},${before.y},${before.width},${before.height} requested=${px},${py}`);
+    return true;
+  }
   catch (e) {
     let bounds = "";
     try { bounds = " bounds=" + JSON.stringify(win.getBounds()); } catch { /* 忽略 */ }
@@ -3137,14 +3159,19 @@ function walkFlightTick() {
     walk.sunk = false;
     walk.perchBarrier = { hwnd: landingBarrier.hwnd, left: landingBarrier.left, right: landingBarrier.right, top: landingBarrier.top, title: landingBarrier.title };
   } else {
-    // 物理积分已经精确落在任务栏地面；不可再由坐姿定位叠加下沉量。
-    walk.seated = skinHasSit;
-    walk.sunk = skinHasSit;
+    // 最终地面落定统一复用既有休息姿态提交，确保状态与坐姿 Y 同步提交。
+    // 物理积分/弹跳仍使用 landingFloorY；这里只在最后一次落定时应用坐姿下沉。
+    enterRestPose();
   }
-  walkSetPosition(nx, landingFloorY, "flight-settle");
+  if (landingBarrier) walkSetPosition(nx, landingFloorY, "flight-settle");
+  const settleBounds = win.getBounds();
+  const settleWa = walkGeo.workAreaOf(screen, settleBounds);
+  const settleGroundY = walkGeo.groundLine(settleWa, settleBounds.height, walk.groundGap);
+  logTts("walk", `[drag flight] settle reason=${landingBarrier ? "perched" : "ground"} final=resting:${!!walk.resting},seated:${!!walk.seated},sunk:${!!walk.sunk} actualY=${settleBounds.y} intendedY=${landingFloorY} windowH=${settleBounds.height} groundGap=${walk.groundGap} seatSink=${effectiveSeatSink()} groundY=${settleGroundY} phaseTimerScheduled=false`);
   walkBroadcast();
   sendToRenderer("pet:dropped");
   walkSchedulePhase(sitPhaseMs());
+  logTts("walk", `[drag flight] phase timer scheduled=true`);
   logTts("walk", "抛掷落地");
   // 人格化：被抛掷落地 / 抛掷落在窗顶
   if (landingBarrier) maybePersonify("perch", { chance: 0.25, cooldownMs: 120000 });
@@ -3169,30 +3196,18 @@ function safeSetPosition(x, y, source = "position") {
   // v2.5.22d 合并（技术债 #5）：与 walkSetPosition 实现完全相同，收敛为别名
   return walkSetPosition(x, y, source);
 }
-function clampWalkX(x, wa, width) { return walkGeo.clampWalkX(x, wa, width, walk.edgeLeft, walk.charInset); }
+function clampWalkX(x, wa, width) { return walkGeo.clampWalkX(x, wa, width, false, PET_LOCAL_X); }
 function walkSpan() { return walkGeo.spanOf(() => screen.getAllDisplays(), config.getConfig().walkGlobal); }
-function clampWalkSpan(x, span, width) { return walkGeo.clampWalkSpan(x, span, width, walk.edgeLeft, walk.charInset); }
-function walkMinX(wa) { return walkGeo.walkMinX(wa, walk.edgeLeft, walk.charInset); }
+function clampWalkSpan(x, span, width) { return walkGeo.clampWalkSpan(x, span, width, false, PET_LOCAL_X); }
+function walkMinX(wa) { return walkGeo.walkMinX(wa, false, PET_LOCAL_X); }
 function setEdgeLeft(v) {
   v = !!v;
   if (walk.edgeLeft === v) return;
-  // 气泡翻边：角色条带从窗口右缘切到左缘（或反向），同步平移窗口保持角色屏幕位置不变
-  // （条带位移 = 窗口宽-124；配合渲染层 body.edge-left 的 .pet left:2）
-  // 注意：必须「窗口平移 + 渲染层条带切换」在同一同步块内一次完成。
-  // 曾实验 4×45ms 快滑 + CSS transition —— 主进程 setTimeout 时钟与渲染 CSS 动画时钟无法
-  // 对齐，滑动中途 walkTick(40ms) 用新 charInset 判旧位置，把窗口硬拽回去，形成来回拉锯
-  // （日志「边翻滑移 -20px → 160ms 后 出屏钳回 x=-20→-2」），视觉抖动比一步切换更严重。
-  let delta = 0, width = 0;
-  try { if (win && !win.isDestroyed()) { width = win.getBounds().width; delta = width - 124; } } catch { /* 忽略 */ }
   walk.edgeLeft = v;
-  walk.charInset = v ? 2 : Math.max(0, width - 122); // 同步条带切换后的布局偏移（避免判定/边界用旧值）
-  if (delta > 0 && win && !win.isDestroyed()) {
-    try {
-      const [x, y] = win.getPosition();
-      win.setPosition(Math.round(x + (v ? delta : -delta)), y);
-    } catch { /* 忽略 */ }
-  }
-  sendToRenderer("pet:edge-left", v); // 渲染层据此把角色条带切到左侧、气泡翻到右侧
+  runtimeEdgeSeq += 1;
+  const eb = win && !win.isDestroyed() ? win.getBounds() : null;
+  logTts("walk", `[left-edge-trace] session=${runtimeTraceSessionId} movementSeq=${runtimeMovementSeq} edgeSeq=${runtimeEdgeSeq} facingSeq=${runtimeFacingSeq} windowMutationSeq=${runtimeWindowMutationSeq} reason=EDGE_FLIP edgeLeft=${v} window=${eb ? `${eb.x},${eb.y},${eb.width},${eb.height}` : "?"}`);
+  sendToRenderer("pet:edge-left", { value: v, sessionId: runtimeTraceSessionId, movementSeq: runtimeMovementSeq, edgeSeq: runtimeEdgeSeq, facingSeq: runtimeFacingSeq, windowMutationSeq: runtimeWindowMutationSeq, timestamp: Date.now() }); // 渲染层据此把角色条带切到左侧、气泡翻到右侧
 }
 function timingSec(key, min, max) {
   const n = Number((config.getConfig().walkTiming || {})[key]);
@@ -3336,6 +3351,8 @@ function walkUpdateFace(dx) {
       if (now - (walk._lastFaceFlip || 0) > 150) {
         walk._lastFaceFlip = now;
         walk.face = f;
+        runtimeFacingSeq += 1;
+        logTts("walk", `[left-edge-trace] session=${runtimeTraceSessionId} movementSeq=${runtimeMovementSeq} edgeSeq=${runtimeEdgeSeq} facingSeq=${runtimeFacingSeq} windowMutationSeq=${runtimeWindowMutationSeq} reason=FACE_CHANGE facing=${f}`);
         walkBroadcast();
       }
     }
@@ -3358,6 +3375,9 @@ function initBarrierApi() {
       HWND, RECT,
       enumWindows: user32.func("bool __stdcall EnumWindows(EnumProc *lpEnumFunc, long lParam)"),
       isVisible: user32.func("bool __stdcall IsWindowVisible(void *hWnd)"),
+      isIconic: user32.func("bool __stdcall IsIconic(void *hWnd)"),
+      getStyle: user32.func("long __stdcall GetWindowLongPtrW(void *hWnd, int nIndex)"),
+      getOwner: user32.func("void * __stdcall GetWindow(void *hWnd, uint32_t uCmd)"),
       getRect: user32.func("bool __stdcall GetWindowRect(void *hWnd, _Out_ BarrierRect *lpRect)"),
       getText: user32.func("int __stdcall GetWindowTextW(void *hWnd, _Out_ uint16_t *lpString, int nMaxCount)"),
       getClass: user32.func("int __stdcall GetClassNameW(void *hWnd, _Out_ uint16_t *lpClassName, int nMaxCount)"),
@@ -3405,16 +3425,18 @@ function refreshWinBarriers() {
       const rect = {};
       if (!api.getRect(hwnd, rect)) return true;
       const w = rect.right - rect.left, h = rect.bottom - rect.top;
-      if (w < 150 || h < 100) return true;
+      // Count ordinary windows independently of perch geometry; small windows remain countable.
       const titleBuf = new Uint16Array(512), classBuf = new Uint16Array(256);
       const titleLen = api.getText(hwnd, titleBuf, titleBuf.length);
       const classLen = api.getClass(hwnd, classBuf, classBuf.length);
       const title = readWide(titleBuf, titleLen), cls = readWide(classBuf, classLen);
-      if (!title || title.includes("苏苏洛") || /^(WorkerW|Progman|Shell_TrayWnd)$/.test(cls)) return true;
+      if (isPetWindowHwnd(hwnd) || /^(WorkerW|Progman|Shell_TrayWnd)$/.test(cls)) return true;
       const cloak = new Uint32Array(1);
       if (api.cloaked(hwnd, 14, cloak, 4) === 0 && cloak[0]) return true;
+      const exStyle = Number(api.getStyle(hwnd, -20)) >>> 0;
+      if (api.isIconic(hwnd) || (exStyle & 0x80) || api.getOwner(hwnd, 4)) return true;
       const dip = winRectToDip(rect);
-      next.push({ top: dip.top, left: dip.left, right: dip.right, bottom: dip.bottom, hwnd, title });
+      next.push({ top: dip.top, left: dip.left, right: dip.right, bottom: dip.bottom, hwnd, title, width: w, height: h });
       return true;
     };
     api.enumWindows(cb, 0);
@@ -3446,15 +3468,39 @@ function barrierFloorFor(b, x, wa) {
 function barrierRects() {
   return winBarriers.map((r) => ({ x: r.left, y: r.top, w: r.right - r.left, h: r.bottom - r.top, top: r.top, right: r.right, title: r.title, hwnd: r.hwnd }));
 }
+function updateUiEdgeCompactFromBounds(bounds, workArea) {
+  const next = walkState.uiEdgeCompactFromBounds({ windowX: bounds?.x, workAreaLeft: workArea?.x, compact: !!walk.uiEdgeCompact, margin: 2 });
+  if (next === !!walk.uiEdgeCompact) return;
+  walk.uiEdgeCompact = next;
+  sendToRenderer("pet:ui-edge-compact", { value: next, timestamp: Date.now() });
+  logTts("walk", `[ui-edge-compact] value=${next} windowX=${bounds?.x} workAreaLeft=${workArea?.x}`);
+}
+function nativeHwndKey(value) {
+  try {
+    const buf = Buffer.from(value), width = process.arch === "ia32" ? 4 : 8;
+    if (buf.length < width) return null;
+    let n = 0n;
+    for (let i = 0; i < width; i++) n |= BigInt(buf[i]) << BigInt(i * 8);
+    return n > 0n ? n : null;
+  } catch { return null; }
+}
+function isPetWindowHwnd(hwnd) {
+  const windows = [win, settingsWin, helpWin, quickstartWin, voiceWin, moodWin, termsWin, scheduleWin, psdWin];
+  return windows.filter((w) => w && !w.isDestroyed())
+    .some((w) => { const a = nativeHwndKey(w.getNativeWindowHandle()), b = hwndKey(hwnd); return a !== null && b !== null && a === b; });
+}
 function hwndKey(hwnd) {
-  try { return String(hwnd); } catch { return ""; }
+  try { return typeof hwnd === "bigint" && hwnd > 0n ? hwnd : null; } catch { return null; }
 }
 function barrierIsCurrent(p) {
   return !!p && winBarriers.some((r) => hwndKey(r.hwnd) === hwndKey(p.hwnd) && Math.abs(r.top - p.top) <= 2 && Math.abs(r.left - p.left) <= 2 && Math.abs(r.right - p.right) <= 2);
 }
 function invalidatePerchIfNeeded() {
-  if (!walk.perched || !walk.perchBarrier || barrierIsCurrent(walk.perchBarrier)) return;
+  if ((!walk.perched && !walk.gotoPerch) || !walk.perchBarrier ||
+      (winBarriers.length === 1 && barrierIsCurrent(walk.perchBarrier))) return;
   walk.perched = false;
+  walk.gotoPerch = false;
+  walk.iconTarget = false;
   walk.perchBarrier = null;
   walk.returning = true;
   walk.resting = false;
@@ -3633,6 +3679,13 @@ function walkAttemptPerch() {
       const b = win.getBounds();
       const wa = walkGeo.workAreaOf(screen, b);
       const wins = barrierRects();
+      if (wins.length !== 1) {
+        logTts("walk", "多窗口不自动栖停: " + wins.length);
+        cancelWalkJump(); walk.gotoPerch = false; walk.iconTarget = false;
+        walk.returning = false; walk.targetX = null; walk.perchBarrier = null;
+        enterRestPose(); walkBroadcast(); walkSchedulePhase(sitPhaseMs());
+        return;
+      }
       const cands = wins.filter((r) =>
         r.w >= 280 && r.h >= 140 &&
         r.y >= wa.y + 60 &&
@@ -3647,13 +3700,14 @@ function walkAttemptPerch() {
         return;
       }
       const t = cands[Math.floor(Math.random() * cands.length)];
+      if (barrierRects().length !== 1) { enterRestPose(); walkBroadcast(); walkSchedulePhase(sitPhaseMs()); return; }
       walk.perchBarrier = { hwnd: t.hwnd, left: t.x, right: t.x + t.w, top: t.y, title: t.title };
       walk.perchTopY = t.y - b.height + walk.groundGap;
       // 近窗沿落点（2026-09-04 修 gotoPerch 必超时）：原取窗口中心，真实距离 500–800px 按实测
       // 速度（≈18px/s，标称 30px/s 的 60%）需 17–40s，必超 10s 瞬态守卫（9-3 晚 4 次尝试
       // 4 次超时 0 成功）。改取离宠物较近的窗沿侧，平均缩短约 60% 距离；沿口内缩 EDGE
       // 保证角色条带主体仍在窗上。charCx 与图标坐（walkAttemptIconPerch）同款公式。
-      const charCx = (walk.charInset + b.width - 2) / 2; // 角色条带中心在宠物窗口内偏移
+      const charCx = (PET_LOCAL_X + b.width - 2) / 2; // 标准模式固定角色锚点
       const EDGE = Math.min(120, Math.max(48, Math.round(t.w * 0.15))); // 距窗沿内缩
       const lx = t.x + EDGE - charCx;                   // 左沿落点（宠物窗口 x）
       const rx = t.x + t.w - EDGE - charCx;             // 右沿落点
@@ -3692,7 +3746,7 @@ function outOfScreenGuard() {
       if (walk.seated) applySeatPosition();
     }
     // 水平：角色条带左缘越出工作区左缘 → 钳回贴边（与 walkTick 同款死区，越界 ≤8px 不干预）
-    const inset = walk.edgeLeft ? 2 : (Number(walk.charInset) || 0);
+    const inset = PET_LOCAL_X;
     const charLeft = b.x + inset;
     if (walkGeo.clampNeeded(wa.x, charLeft).overdue) {
       const fixX = wa.x - inset;
@@ -3704,6 +3758,7 @@ function outOfScreenGuard() {
 
 function walkTick() {
   if (!win || win.isDestroyed()) return;
+  runtimeMovementSeq += 1;
   // 左缘翻边判定（坐下/静止在左缘也要切；拖拽/飞行/跳跃中不切防干扰）
   // 用「角色条带左缘」判断而非窗口 x：切边/切回时窗口被平移 ±276，用窗口 x 会立即再次触发形成左右横跳
   if (!walk.paused && !walk.sleeping && !walk.flight && !walk.jump) {
@@ -3723,7 +3778,7 @@ function walkTick() {
         win.setPosition(eb.x, Math.round(groundY));
         if (walk.seated) applySeatPosition(); // 应坐姿时再校正下沉
       }
-      const inset = walk.edgeLeft ? 2 : (Number(walk.charInset) || 0);
+      const inset = PET_LOCAL_X;
       let charLeft = eb.x + inset;
       // 坐姿自愈（v2.5.26）：坐下后 Y 若漂移（皮肤 Sit 姿态/多屏匹配/瞬态残留），5s 低频拉回任务栏
       if (walk.seated && !walk.sleeping && Date.now() - (walk._seatHealAt || 0) > 5000) {
@@ -3753,6 +3808,7 @@ function walkTick() {
       }
       // 左缘翻边滞回（v2.5.26 收敛①）：判定抽到 walk-state 纯函数，setEdgeLeft 副作用留主干
       const nowE = Date.now();
+      updateUiEdgeCompactFromBounds(eb, wa);
       const fDec = walkState.edgeFlipDecision({ edgeLeft: walk.edgeLeft, charLeft, edgeL, now: nowE, lastFlipAt: walk._edgeFlipAt || 0 });
       if (fDec) { walk._edgeFlipAt = fDec.at; setEdgeLeft(fDec.flip); }
     } catch { /* 忽略 */ }
@@ -3822,7 +3878,7 @@ function walkTick() {
     }
     if (p < 1) return;
     walk.jump = null;
-    if (walk.gotoPerch) {
+    if (walk.gotoPerch && !walk.returning && winBarriers.length === 1 && barrierIsCurrent(walk.perchBarrier)) {
       walk.gotoPerch = false;
       const onIcon = walk.iconTarget;
       // 坐到图标/窗顶统一走 perched：渲染层播 Sit、按边缘下沉腿垂入图标格/窗口沿，
@@ -3838,9 +3894,13 @@ function walkTick() {
       maybePersonify("perch", { chance: 0.2, cooldownMs: 150000 });
     } else if (walk.returning) {
       walk.returning = false;
+      walk.gotoPerch = false; walk.iconTarget = false; walk.perchBarrier = null; walk.targetX = null;
       enterRestPose();
       walkBroadcast();
       walkSchedulePhase(sitPhaseMs());
+    } else {
+      walk.gotoPerch = false; walk.iconTarget = false; walk.perchBarrier = null;
+      walk.returning = false; walk.targetX = null; enterRestPose(); walkBroadcast(); walkSchedulePhase(sitPhaseMs());
     }
     return;
   }
@@ -3883,7 +3943,7 @@ function walkTick() {
   /* —— 逗猫棒：追鼠标（水平移动），到达鼠标正下方后站立 —— */
   if (walk.catToy && !walk.sleeping) {
     if (Number.isFinite(lastCursor.x)) {
-      const tx = Math.min(Math.max(lastCursor.x - (walk.edgeLeft ? 2 : (walk.charInset || 0)), minX), maxX);
+      const tx = Math.min(Math.max(lastCursor.x - PET_LOCAL_X, minX), maxX);
       const dx = tx - x;
       const moving = Math.abs(dx) > 4;
       if (moving !== !walk.resting) { walk.resting = !moving; walkBroadcast(); } // 走/停状态变化才广播（动画 Move↔idle）
@@ -4037,6 +4097,8 @@ ipcMain.on("pet:walking-engine-stop", () => { // 运行时停走（不持久化�
   stopWalkingEngine();
 });
 ipcMain.on("pet:walking-pause", (_e, p, source) => {
+  const traceId = typeof source === "string" && source.startsWith("drag:") ? source.slice(5) : "";
+  if (traceId) logTts("walk", `[drag ${traceId}] main release active=${!!walk.active} resting=${!!walk.resting} seated=${!!walk.seated} sleeping=${!!walk.sleeping} perched=${!!walk.perched} paused=${!!walk.paused} flight=${!!walk.flight} jump=${!!walk.jump} returning=${!!walk.returning}`);
   if (p) { cancelFlight(); cancelWalkJump(); walk.taskbarHang = false; } // 鼠标重新抓住时立即停止飞行/跳跃/半挂
   if (source === "zoom") { // 放大聊天框暂停：独立标志，60s 拖拽自愈不得解除（否则大窗口下恢复行走会打乱几何）
     walk.zoomPaused = !!p;
@@ -4072,7 +4134,8 @@ ipcMain.on("pet:walking-pause", (_e, p, source) => {
     }
   }
 });
-ipcMain.on("pet:throw", (_e, vx, vy) => {
+ipcMain.on("pet:throw", (_e, vx, vy, traceId) => {
+  if (traceId) logTts("walk", `[drag ${traceId}] main THROW active=${!!walk.active} resting=${!!walk.resting} seated=${!!walk.seated} sleeping=${!!walk.sleeping} perched=${!!walk.perched} paused=${!!walk.paused} flight=${!!walk.flight} jump=${!!walk.jump} returning=${!!walk.returning}`);
   vx = Number(vx); vy = Number(vy);
   if (Number.isFinite(vx) && Number.isFinite(vy) && startFlight(vx, vy)) return;
   // 渲染层甩动后不再发送 walkingPause(false)；拒绝飞行时必须立即恢复，不能等 60 秒看门狗。
@@ -4103,6 +4166,8 @@ ipcMain.on("pet:set-sleeping", (_e, v) => {
     return;
   }
   const wasSleeping = walk.sleeping;
+  if (wasSleeping !== !!v) sleepSeq += 1;
+  if (wasSleeping !== !!v) sleepPositionTrace = { seq: sleepSeq, until: Date.now() + 5000 };
   walk.sleeping = !!v;
   if (walk.sleeping) {
     cancelFlight(); cancelWalkJump();
@@ -4125,7 +4190,20 @@ ipcMain.on("pet:set-sleeping", (_e, v) => {
       const liftRatio = Number.isFinite(lift) && lift >= 0 && lift <= 0.5 ? lift : 0; // 默认 0：不抬窗口
       const sleepY = standY - Math.round(b.height * liftRatio);
       const targetY = v ? sleepY : standY;
-      if (Math.abs(b.y - targetY) > 1) win.setPosition(b.x, Math.round(targetY));
+      if (v) logTts("walk", `[SLEEP-POSITION ENTER] session=${runtimeTraceSessionId} sleepSeq=${sleepSeq} bounds=${b.x},${b.y},${b.width},${b.height} workArea=${wa.x},${wa.y},${wa.width},${wa.height} groundGap=${walk.groundGap} windowHeight=${b.height} standY=${standY} sleepLift=${liftRatio} calculatedSleepY=${sleepY} ${sleepPositionState()}`);
+      if (Math.abs(b.y - targetY) > 1) {
+        if (v) logTts("walk", `[SLEEP-POSITION WRITE] session=${runtimeTraceSessionId} sleepSeq=${sleepSeq} before=${b.x},${b.y} target=${b.x},${Math.round(targetY)} ${sleepPositionState()}`);
+        try {
+          win.setPosition(b.x, Math.round(targetY));
+          const after = win.getBounds();
+          if (v) logTts("walk", `[SLEEP-POSITION WRITE] session=${runtimeTraceSessionId} sleepSeq=${sleepSeq} after=${after.x},${after.y} success=true`);
+          traceSleepWindow("sleep-position", v ? "sleep-enter" : "wake", b.y, Math.round(targetY), after.y);
+        } catch (e) {
+          if (v) logTts("walk", `[SLEEP-POSITION WRITE] session=${runtimeTraceSessionId} sleepSeq=${sleepSeq} after=? success=false exception=${e?.message || e}`);
+        }
+      } else if (v) {
+        logTts("walk", `[SLEEP-POSITION WRITE] session=${runtimeTraceSessionId} sleepSeq=${sleepSeq} before=${b.x},${b.y} target=${b.x},${Math.round(targetY)} after=${b.x},${b.y} success=skipped`);
+      }
       walkBroadcast();
     } else {
       walkBroadcast(); // 窗顶/图标顶/跳跃等高位态：栖位几何不变（旧行为会把窗顶睡觉的她瞬移到地面）
@@ -4180,7 +4258,10 @@ ipcMain.on("pet:set-ground-gap", (_e, px) => {
 });
 ipcMain.on("pet:set-char-inset", (_e, px) => { // 渲染层上报：窗口左缘到角色左缘的距离（上限 200=正常贴左缘值；异常上报会把行走左边界扩到屏幕外导致“闪现”）
   const v = Number(px);
-  if (Number.isFinite(v)) walk.charInset = Math.max(0, Math.min(200, Math.round(v)));
+  if (Number.isFinite(v)) {
+    walk.charInset = PET_LOCAL_X;
+    logTts("walk", `标准角色锚点固定: rendererInset=${Math.round(v)} → ${PET_LOCAL_X}`);
+  }
 });
 ipcMain.handle("pet:get-walk-timing", () => ({
   sitMaxSec: timingSec("sitMaxSec", 15, 180) || 30,

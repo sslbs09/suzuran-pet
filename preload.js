@@ -8,7 +8,7 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 contextBridge.exposeInMainWorld("petAPI", {
   // 应用版本号（设置页显示，单一来源=package.json）。2026-09-06 修复：app 是主进程模块，
   // preload 里 require("electron").app 拿不到，此前恒为空串致设置页显示 "v?"——改走同步 IPC。
-  appVersion: (() => { try { return ipcRenderer.sendSync("pet:get-app-version"); } catch { return ""; } })(),
+  appVersion: (() => { try { return ipcRenderer.sendSync("pet:get-app-version-sync"); } catch { return ""; } })(),
   checkForUpdate: () => ipcRenderer.invoke("pet:check-update"), // 设置页「检查更新」
   onUpdateProgress: (cb) => ipcRenderer.on("pet:update-progress", (_e, pct) => cb(pct)),
   ask: (text) => ipcRenderer.invoke("pet:ask", { id: crypto.randomUUID(), text }),
@@ -50,9 +50,10 @@ contextBridge.exposeInMainWorld("petAPI", {
   setSeatSink: (px) => ipcRenderer.invoke("pet:set-seat-sink", px),
   setCharInset: (px) => ipcRenderer.send("pet:set-char-inset", px),
   onEdgeLeft: (cb) => ipcRenderer.on("pet:edge-left", (_e, v) => cb(v)),
+  onUiEdgeCompact: (cb) => ipcRenderer.on("pet:ui-edge-compact", (_e, v) => cb(v)),
   onSetDim: (cb) => ipcRenderer.on("pet:set-dim", (_e, v) => cb(v)), // 半透明模式开关
   onNameChanged: (cb) => ipcRenderer.on("pet:name-changed", (_e, name) => cb(name)),
-  throwPet: (vx, vy) => ipcRenderer.send("pet:throw", Number(vx) || 0, Number(vy) || 0), // 拖拽抛掷
+  throwPet: (vx, vy, traceId) => ipcRenderer.send("pet:throw", Number(vx) || 0, Number(vy) || 0, traceId || ""), // 拖拽抛掷
   onDropped: (cb) => ipcRenderer.on("pet:dropped", () => cb()), // 抛掷落地通知
   getWalkTiming: () => ipcRenderer.invoke("pet:get-walk-timing"),
   setWalkTiming: (patch) => ipcRenderer.invoke("pet:set-walk-timing", patch),

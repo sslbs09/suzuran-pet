@@ -20,10 +20,22 @@ function trackDecision({
   sleeping = false,
   demo = false,
   mood = false,
+  active = false,
+  resting = false,
+  seated = false,
+  perched = false,
+  paused = false,
+  currentAnimationEnd = NaN,
+  currentTrackTime = NaN,
+  queuedSuccessor = false,
 } = {}) {
-  if (busy || sleeping || demo || mood) return "defer";
+  if (resting || seated || perched || paused || sleeping || demo || queuedSuccessor) return "defer";
   if (!currentName) return "restart";
-  if (currentLoop === false) return "defer";
+  if (currentLoop === false) {
+    const finished = Number.isFinite(currentAnimationEnd) && Number.isFinite(currentTrackTime) && currentTrackTime >= currentAnimationEnd;
+    return finished && active && !mood ? "restart" : "defer";
+  }
+  if ((busy || mood) && !active) return "defer";
   if (targetName && currentName !== targetName) return "restart";
   const sameTrack = previousName === currentName && !!currentName;
   const noProgress = !Number.isFinite(previousTime) || !Number.isFinite(currentTime)
@@ -31,6 +43,19 @@ function trackDecision({
     : Math.abs(currentTime - previousTime) < 0.01;
   if (noProgress && sameTrack) return stallCount >= 2 ? "restart" : "ok";
   return "ok";
+}
+
+function hwndIdentity(value, pointerBytes = 8) {
+  if (value === null || value === undefined) return null;
+  try {
+    if (typeof value === "bigint") return value > 0n ? value : null;
+    if (!Buffer.isBuffer(value)) return null;
+    const width = pointerBytes === 4 ? 4 : 8;
+    if (value.length < width) return null;
+    let n = 0n;
+    for (let i = 0; i < width; i++) n |= BigInt(value[i]) << BigInt(i * 8);
+    return n > 0n ? n : null;
+  } catch { return null; }
 }
 
 function trackHasProgress(previousName, previousTime, currentName, currentTime) {
@@ -45,5 +70,5 @@ function movementDecision({ active, resting, seated, paused, sleeping, positionC
   return stallCount >= 3 ? "restart" : "observe";
 }
 
-if (typeof module !== "undefined" && module.exports) module.exports = { trackDecision, trackHasProgress, movementDecision };
+if (typeof module !== "undefined" && module.exports) module.exports = { trackDecision, trackHasProgress, movementDecision, hwndIdentity };
 if (typeof window !== "undefined") window.AnimationWatch = { trackDecision, trackHasProgress, movementDecision };

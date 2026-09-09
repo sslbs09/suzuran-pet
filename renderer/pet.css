@@ -152,23 +152,26 @@ html, body {
 }
 /* 左缘延伸区模式（主进程 edge-left 事件）：角色条带切到窗口左侧，气泡自动落在角色右侧，
    避免被屏幕左缘裁掉（原「气泡头顶」模式废弃，改用翻边）。 */
-body.edge-left .pet {
-  left: 2px; /* 条带切到窗口左缘——与主进程 setEdgeLeft 一步平移同一 tick 原子完成 */
+body.ui-edge-compact .pet {
+  left: 138px; /* edge 只切附属 UI；角色局部锚点始终固定 */
 }
-body.edge-left .input-bar {
-  left: 2px;                     /* 输入栏与角色同步切到窗口左侧（角色正下方） */
+body.ui-edge-compact .input-bar {
+  left: 138px;
+  width: 120px;
 }
-body.edge-left .bubble {
-  right: 4px;                     /* 气泡贴窗口右缘，落在角色右侧（角色条带已切到左侧） */
-  max-width: calc(100% - 136px);  /* 左侧 136px 为角色条带+间隙预留，不盖住角色 */
+body.ui-edge-compact .bubble {
+  left: 140px;
+  right: auto;
+  width: 116px;
+  max-width: 116px;
 }
-body.edge-left .bubble::after {
+body.ui-edge-compact .bubble::after {
   right: auto;
   left: -7px;
   border-left: 0;
   border-right: 5.5px solid var(--pet-panel-bg);  /* 尾巴朝左指向角色 */
 }
-body.edge-left .bubble::before {
+body.ui-edge-compact .bubble::before {
   right: auto;
   left: -8.5px;
   border-left: 0;
@@ -365,7 +368,7 @@ body.rig-mode .bubble {
   padding: 6px 34px 8px 10px;    /* 压缩内边距；右侧留按钮空间 */
   line-height: 1.45;
 }
-body.rig-mode.edge-left .bubble { left: auto; right: 8px; } /* 贴屏幕左缘 → 气泡右上角 */
+body.rig-mode.ui-edge-compact .bubble { left: auto; right: 8px; } /* 贴屏幕左缘 → 气泡右上角 */
 body.rig-mode .bubble::after { display: none; }
 body.rig-mode .bubble::before { display: none; }
 /* rig 模式 ⤢ 放大：角色临时缩小让位，气泡占更大区域（能看到完整内容），角色不放大 */
@@ -431,7 +434,8 @@ body.rig-mode .info-panel {
   box-shadow: var(--pet-shadow);
   z-index: 8;
 }
-body.edge-left .info-panel { right: 4px; width: 230px; } /* 翻边时与气泡一起到右侧（右侧空间足够，保持原宽） */
+body.ui-edge-compact .info-panel { right: 4px; width: 230px; } /* 翻边时与气泡一起到右侧（右侧空间足够，保持原宽） */
+body.ui-edge-compact .info-panel { left: 140px; right: auto; width: 116px; }
 .info-panel.hidden { display: none; }
 .info-head { font-weight: bold; margin-bottom: 6px; color: var(--pet-accent-strong); cursor: move; user-select: none; }
 .info-panel.info-dragging { opacity: 0.85; }
@@ -533,7 +537,7 @@ body.edge-left .info-panel { right: 4px; width: 230px; } /* 翻边时与气泡�
 
 /* v2.5.10 宽皮肤（如迷迭香第三皮肤 300px 画布）：气泡右缘避开更宽的角色条带 */
 body.wide-skin .bubble { right: 308px; max-width: calc(100% - 314px); }
-body.wide-skin.edge-left .bubble { right: 4px; max-width: calc(100% - 314px); }
+body.wide-skin.ui-edge-compact .bubble { right: 4px; max-width: calc(100% - 314px); }
 
 /* RP 动作斜体 + Swipes 切换条（v2.5.1，酒馆学习） */
 .rp-action { font-style: italic; opacity: 0.72; }

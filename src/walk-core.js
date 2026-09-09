@@ -21,6 +21,7 @@ function createWalkState() {
     groundGap: 0,     // 角色脚底到窗口底边的空隙（渲染层上报）
     charInset: 0,     // 窗口左缘到角色左缘的距离（渲染层上报）
     edgeLeft: false,  // 当前是否探出屏幕左侧（气泡需切到头顶模式）
+    uiEdgeCompact: false,
     sunk: false,      // 当前是否处于坐姿下沉状态
     gotoPerch: false, // 正走向/爬向窗口顶
     iconTarget: false,// 本次跳的目标是桌面图标
