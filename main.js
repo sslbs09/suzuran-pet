@@ -333,7 +333,6 @@ function createWindow() {
       win.reload();
       setTimeout(() => {
         if (walk.active) walkBroadcast();
-        if (walk.edgeLeft) sendToRenderer("pet:edge-left", true); // 保留 walking edge 状态诊断
         updateUiEdgeCompactFromBounds(win.getBounds(), walkGeo.workAreaOf(screen, win.getBounds()));
       }, 3000);
     } catch (e2) { logTts("render", "自动重载失败: " + (e2 && e2.message || e2)); }
@@ -2994,17 +2993,6 @@ let skinHasSit = true; // 当前皮肤是否有可播的坐下动画（渲染层
 const WALK_TICK_MS = 40;
 const WALK_SPEED = 1.2;                        // 每 tick 像素 ≈ 30px/s
 const PET_LOCAL_X = 138;                       // 标准 Spine 260×200 窗口的唯一角色锚点
-const runtimeTraceSessionId = `rt-${Date.now().toString(36)}`;
-let sleepSeq = 0;
-let sleepPositionTrace = null;
-function sleepPositionState() {
-  return `state=${!!walk.sleeping}/${!!walk.resting}/${!!walk.seated}/${!!walk.perched}/${!!walk.returning}/${!!walk.flight}/${!!walk.paused} phase=${!!walk.phaseTimer}`;
-}
-function traceSleepWindow(source, reason, beforeY, requestedY, afterY, extra = "") {
-  if (!sleepPositionTrace || Date.now() > sleepPositionTrace.until) return;
-  logTts("walk", `[WINDOW-Y-WRITE] session=${runtimeTraceSessionId} sleepSeq=${sleepPositionTrace.seq} source=${source} reason=${reason} beforeY=${beforeY} requestedY=${requestedY} afterY=${afterY} ${sleepPositionState()}${extra ? ` ${extra}` : ""}`);
-}
-let runtimeMovementSeq = 0, runtimeEdgeSeq = 0, runtimeFacingSeq = 0, runtimeWindowMutationSeq = 0;
 function walkSpeed() {                         // 托盘速度档位倍率（借鉴 Ark-Pets 可调移速）
   return WALK_SPEED * (Number(config.getConfig().walkSpeedMul) || 1);
 }
@@ -3020,13 +3008,7 @@ function walkSetPosition(x, y, where) {
     return false;
   }
   try {
-    const before = win.getBounds();
-    win.setPosition(px, py); runtimeWindowMutationSeq += 1; applyLayerThrottled();
-    if (sleepPositionTrace && Date.now() <= sleepPositionTrace.until) {
-      const after = win.getBounds();
-      traceSleepWindow("walkSetPosition", where, before.y, py, after.y);
-    }
-    if (px < 50 || before.x < 50) logTts("walk", `[left-edge-trace] session=${runtimeTraceSessionId} movementSeq=${runtimeMovementSeq} edgeSeq=${runtimeEdgeSeq} facingSeq=${runtimeFacingSeq} windowMutationSeq=${runtimeWindowMutationSeq} reason=${where} before=${before.x},${before.y},${before.width},${before.height} requested=${px},${py}`);
+    win.setPosition(px, py); applyLayerThrottled();
     return true;
   }
   catch (e) {
@@ -3164,14 +3146,9 @@ function walkFlightTick() {
     enterRestPose();
   }
   if (landingBarrier) walkSetPosition(nx, landingFloorY, "flight-settle");
-  const settleBounds = win.getBounds();
-  const settleWa = walkGeo.workAreaOf(screen, settleBounds);
-  const settleGroundY = walkGeo.groundLine(settleWa, settleBounds.height, walk.groundGap);
-  logTts("walk", `[drag flight] settle reason=${landingBarrier ? "perched" : "ground"} final=resting:${!!walk.resting},seated:${!!walk.seated},sunk:${!!walk.sunk} actualY=${settleBounds.y} intendedY=${landingFloorY} windowH=${settleBounds.height} groundGap=${walk.groundGap} seatSink=${effectiveSeatSink()} groundY=${settleGroundY} phaseTimerScheduled=false`);
   walkBroadcast();
   sendToRenderer("pet:dropped");
   walkSchedulePhase(sitPhaseMs());
-  logTts("walk", `[drag flight] phase timer scheduled=true`);
   logTts("walk", "抛掷落地");
   // 人格化：被抛掷落地 / 抛掷落在窗顶
   if (landingBarrier) maybePersonify("perch", { chance: 0.25, cooldownMs: 120000 });
@@ -3204,10 +3181,6 @@ function setEdgeLeft(v) {
   v = !!v;
   if (walk.edgeLeft === v) return;
   walk.edgeLeft = v;
-  runtimeEdgeSeq += 1;
-  const eb = win && !win.isDestroyed() ? win.getBounds() : null;
-  logTts("walk", `[left-edge-trace] session=${runtimeTraceSessionId} movementSeq=${runtimeMovementSeq} edgeSeq=${runtimeEdgeSeq} facingSeq=${runtimeFacingSeq} windowMutationSeq=${runtimeWindowMutationSeq} reason=EDGE_FLIP edgeLeft=${v} window=${eb ? `${eb.x},${eb.y},${eb.width},${eb.height}` : "?"}`);
-  sendToRenderer("pet:edge-left", { value: v, sessionId: runtimeTraceSessionId, movementSeq: runtimeMovementSeq, edgeSeq: runtimeEdgeSeq, facingSeq: runtimeFacingSeq, windowMutationSeq: runtimeWindowMutationSeq, timestamp: Date.now() }); // 渲染层据此把角色条带切到左侧、气泡翻到右侧
 }
 function timingSec(key, min, max) {
   const n = Number((config.getConfig().walkTiming || {})[key]);
@@ -3351,8 +3324,6 @@ function walkUpdateFace(dx) {
       if (now - (walk._lastFaceFlip || 0) > 150) {
         walk._lastFaceFlip = now;
         walk.face = f;
-        runtimeFacingSeq += 1;
-        logTts("walk", `[left-edge-trace] session=${runtimeTraceSessionId} movementSeq=${runtimeMovementSeq} edgeSeq=${runtimeEdgeSeq} facingSeq=${runtimeFacingSeq} windowMutationSeq=${runtimeWindowMutationSeq} reason=FACE_CHANGE facing=${f}`);
         walkBroadcast();
       }
     }
@@ -3473,7 +3444,6 @@ function updateUiEdgeCompactFromBounds(bounds, workArea) {
   if (next === !!walk.uiEdgeCompact) return;
   walk.uiEdgeCompact = next;
   sendToRenderer("pet:ui-edge-compact", { value: next, timestamp: Date.now() });
-  logTts("walk", `[ui-edge-compact] value=${next} windowX=${bounds?.x} workAreaLeft=${workArea?.x}`);
 }
 function nativeHwndKey(value) {
   try {
@@ -3758,7 +3728,6 @@ function outOfScreenGuard() {
 
 function walkTick() {
   if (!win || win.isDestroyed()) return;
-  runtimeMovementSeq += 1;
   // 左缘翻边判定（坐下/静止在左缘也要切；拖拽/飞行/跳跃中不切防干扰）
   // 用「角色条带左缘」判断而非窗口 x：切边/切回时窗口被平移 ±276，用窗口 x 会立即再次触发形成左右横跳
   if (!walk.paused && !walk.sleeping && !walk.flight && !walk.jump) {
@@ -4097,8 +4066,6 @@ ipcMain.on("pet:walking-engine-stop", () => { // 运行时停走（不持久化�
   stopWalkingEngine();
 });
 ipcMain.on("pet:walking-pause", (_e, p, source) => {
-  const traceId = typeof source === "string" && source.startsWith("drag:") ? source.slice(5) : "";
-  if (traceId) logTts("walk", `[drag ${traceId}] main release active=${!!walk.active} resting=${!!walk.resting} seated=${!!walk.seated} sleeping=${!!walk.sleeping} perched=${!!walk.perched} paused=${!!walk.paused} flight=${!!walk.flight} jump=${!!walk.jump} returning=${!!walk.returning}`);
   if (p) { cancelFlight(); cancelWalkJump(); walk.taskbarHang = false; } // 鼠标重新抓住时立即停止飞行/跳跃/半挂
   if (source === "zoom") { // 放大聊天框暂停：独立标志，60s 拖拽自愈不得解除（否则大窗口下恢复行走会打乱几何）
     walk.zoomPaused = !!p;
@@ -4134,8 +4101,7 @@ ipcMain.on("pet:walking-pause", (_e, p, source) => {
     }
   }
 });
-ipcMain.on("pet:throw", (_e, vx, vy, traceId) => {
-  if (traceId) logTts("walk", `[drag ${traceId}] main THROW active=${!!walk.active} resting=${!!walk.resting} seated=${!!walk.seated} sleeping=${!!walk.sleeping} perched=${!!walk.perched} paused=${!!walk.paused} flight=${!!walk.flight} jump=${!!walk.jump} returning=${!!walk.returning}`);
+ipcMain.on("pet:throw", (_e, vx, vy) => {
   vx = Number(vx); vy = Number(vy);
   if (Number.isFinite(vx) && Number.isFinite(vy) && startFlight(vx, vy)) return;
   // 渲染层甩动后不再发送 walkingPause(false)；拒绝飞行时必须立即恢复，不能等 60 秒看门狗。
@@ -4166,8 +4132,6 @@ ipcMain.on("pet:set-sleeping", (_e, v) => {
     return;
   }
   const wasSleeping = walk.sleeping;
-  if (wasSleeping !== !!v) sleepSeq += 1;
-  if (wasSleeping !== !!v) sleepPositionTrace = { seq: sleepSeq, until: Date.now() + 5000 };
   walk.sleeping = !!v;
   if (walk.sleeping) {
     cancelFlight(); cancelWalkJump();
@@ -4190,19 +4154,10 @@ ipcMain.on("pet:set-sleeping", (_e, v) => {
       const liftRatio = Number.isFinite(lift) && lift >= 0 && lift <= 0.5 ? lift : 0; // 默认 0：不抬窗口
       const sleepY = standY - Math.round(b.height * liftRatio);
       const targetY = v ? sleepY : standY;
-      if (v) logTts("walk", `[SLEEP-POSITION ENTER] session=${runtimeTraceSessionId} sleepSeq=${sleepSeq} bounds=${b.x},${b.y},${b.width},${b.height} workArea=${wa.x},${wa.y},${wa.width},${wa.height} groundGap=${walk.groundGap} windowHeight=${b.height} standY=${standY} sleepLift=${liftRatio} calculatedSleepY=${sleepY} ${sleepPositionState()}`);
       if (Math.abs(b.y - targetY) > 1) {
-        if (v) logTts("walk", `[SLEEP-POSITION WRITE] session=${runtimeTraceSessionId} sleepSeq=${sleepSeq} before=${b.x},${b.y} target=${b.x},${Math.round(targetY)} ${sleepPositionState()}`);
         try {
           win.setPosition(b.x, Math.round(targetY));
-          const after = win.getBounds();
-          if (v) logTts("walk", `[SLEEP-POSITION WRITE] session=${runtimeTraceSessionId} sleepSeq=${sleepSeq} after=${after.x},${after.y} success=true`);
-          traceSleepWindow("sleep-position", v ? "sleep-enter" : "wake", b.y, Math.round(targetY), after.y);
-        } catch (e) {
-          if (v) logTts("walk", `[SLEEP-POSITION WRITE] session=${runtimeTraceSessionId} sleepSeq=${sleepSeq} after=? success=false exception=${e?.message || e}`);
-        }
-      } else if (v) {
-        logTts("walk", `[SLEEP-POSITION WRITE] session=${runtimeTraceSessionId} sleepSeq=${sleepSeq} before=${b.x},${b.y} target=${b.x},${Math.round(targetY)} after=${b.x},${b.y} success=skipped`);
+        } catch { /* 窗口已销毁或坐标写入失败 */ }
       }
       walkBroadcast();
     } else {
@@ -4260,7 +4215,6 @@ ipcMain.on("pet:set-char-inset", (_e, px) => { // 渲染层上报：窗口左缘
   const v = Number(px);
   if (Number.isFinite(v)) {
     walk.charInset = PET_LOCAL_X;
-    logTts("walk", `标准角色锚点固定: rendererInset=${Math.round(v)} → ${PET_LOCAL_X}`);
   }
 });
 ipcMain.handle("pet:get-walk-timing", () => ({

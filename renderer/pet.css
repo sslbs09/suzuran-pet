@@ -434,7 +434,6 @@ body.rig-mode .info-panel {
   box-shadow: var(--pet-shadow);
   z-index: 8;
 }
-body.ui-edge-compact .info-panel { right: 4px; width: 230px; } /* 翻边时与气泡一起到右侧（右侧空间足够，保持原宽） */
 body.ui-edge-compact .info-panel { left: 140px; right: auto; width: 116px; }
 .info-panel.hidden { display: none; }
 .info-head { font-weight: bold; margin-bottom: 6px; color: var(--pet-accent-strong); cursor: move; user-select: none; }

@@ -49,11 +49,10 @@ contextBridge.exposeInMainWorld("petAPI", {
   setWeather: (patch) => ipcRenderer.invoke("pet:set-weather", patch),
   setSeatSink: (px) => ipcRenderer.invoke("pet:set-seat-sink", px),
   setCharInset: (px) => ipcRenderer.send("pet:set-char-inset", px),
-  onEdgeLeft: (cb) => ipcRenderer.on("pet:edge-left", (_e, v) => cb(v)),
   onUiEdgeCompact: (cb) => ipcRenderer.on("pet:ui-edge-compact", (_e, v) => cb(v)),
   onSetDim: (cb) => ipcRenderer.on("pet:set-dim", (_e, v) => cb(v)), // 半透明模式开关
   onNameChanged: (cb) => ipcRenderer.on("pet:name-changed", (_e, name) => cb(name)),
-  throwPet: (vx, vy, traceId) => ipcRenderer.send("pet:throw", Number(vx) || 0, Number(vy) || 0, traceId || ""), // 拖拽抛掷
+  throwPet: (vx, vy) => ipcRenderer.send("pet:throw", Number(vx) || 0, Number(vy) || 0), // 拖拽抛掷
   onDropped: (cb) => ipcRenderer.on("pet:dropped", () => cb()), // 抛掷落地通知
   getWalkTiming: () => ipcRenderer.invoke("pet:get-walk-timing"),
   setWalkTiming: (patch) => ipcRenderer.invoke("pet:set-walk-timing", patch),
