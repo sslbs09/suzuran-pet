@@ -600,19 +600,30 @@ attachCrashDiag(psdWin, "psd");
 /* ---------- 文档中心（v2.5.1）---------- */
 let docsWin = null;
 
+function selectTutorialDir(exeDir, appDir, fsImpl = fs) {
+  const candidates = [path.join(exeDir, "新手教程"), path.join(appDir, "新手教程")];
+  for (const dir of candidates) {
+    try {
+      if (!fsImpl.existsSync(dir) || !fsImpl.statSync(dir).isDirectory()) continue;
+      if (fsImpl.readdirSync(dir).some((f) => f.endsWith(".md"))) return dir;
+    } catch { /* 单个候选目录不可用时继续尝试 fallback */ }
+  }
+  return null;
+}
+
 /** 文档清单：新手教程在 exe 旁（发布目录），其余在应用内（asar）。白名单按此固定生成。 */
 function docsManifest() {
   const exeDir = path.dirname(process.execPath || "");
   const appDir = config.APP_DIR;
   const items = [];
-  try {
-    const nb = path.join(exeDir, "新手教程");
+  const nb = selectTutorialDir(exeDir, appDir);
+  if (nb) try {
     for (const f of fs.readdirSync(nb)) {
       if (f.endsWith(".md")) {
         items.push({ key: "newbie/" + f, name: f.replace(/^\d+-/, "").replace(/\.md$/, ""), group: "新手教程", file: path.join(nb, f), html: false });
       }
     }
-  } catch (e) { /* dev 运行无发布目录时跳过新手教程 */ }
+  } catch (e) { /* 目录在枚举期间不可用时跳过教程 */ }
   const quickstart = path.join(appDir, "!!开箱必读-先看我.html");
   if (fs.existsSync(quickstart)) items.push({ key: "app/开箱必读.html", name: "⭐ 开箱必读（三步上手）", group: "使用说明", file: quickstart, html: true });
   const usage = path.join(appDir, "使用说明.html");
