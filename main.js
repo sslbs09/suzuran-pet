@@ -3483,9 +3483,16 @@ function nativeHwndKey(value) {
   } catch { return null; }
 }
 function isPetWindowHwnd(hwnd) {
-  const windows = [win, settingsWin, helpWin, quickstartWin, voiceWin, moodWin, termsWin, scheduleWin, psdWin];
-  return windows.filter((w) => w && !w.isDestroyed())
-    .some((w) => { const a = nativeHwndKey(w.getNativeWindowHandle()), b = hwndKey(hwnd); return a !== null && b !== null && a === b; });
+  const windows = [win, settingsWin, helpWin, quickstartWin, voiceWin, moodWin, termsWin, scheduleWin, psdWin, docsWin, addCharWin];
+  const b = hwndKey(hwnd);
+  if (b === null) return false;
+  return windows.some((w) => {
+    try {
+      if (!w || w.isDestroyed()) return false;
+      const a = nativeHwndKey(w.getNativeWindowHandle());
+      return a !== null && a === b;
+    } catch { return false; }
+  });
 }
 function hwndKey(hwnd) {
   try { return typeof hwnd === "bigint" && hwnd > 0n ? hwnd : null; } catch { return null; }
