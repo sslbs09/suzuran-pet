@@ -13,6 +13,7 @@ const path = require("path");
 const storage = require("./storage");
 const secrets = require("./secrets");
 const { sanitizeClients } = require("./agent-auth");
+const { normalizeConfigShape, mergeConfigPatch } = require("./config-shape");
 const APP_DIR = storage.APP_DIR; // 只读程序资源目录
 const STORAGE = storage.initializeStorage();
 const CONFIG_PATH = STORAGE.config;
@@ -160,26 +161,70 @@ const DEFAULTS = {
 };
 
 let cache = null;
+const CONFIG_SHAPE_BACKUP_PATH = CONFIG_PATH + ".shape-recovery.bak";
+let configWriteBlocked = false;
+let shapeRecoveryPending = false;
+let shapeRecoveryBackupMade = false;
 
-function loadPetConfig() {
+function warnConfig(message) {
+  try { console.warn(message); } catch { /* 诊断失败不影响配置读取 */ }
+}
+
+function readConfigFile() {
   try {
-    // 容忍 BOM（记事本等以 UTF-8 BOM 保存会导致 JSON.parse 失败 → 误回收默认值）
-    return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8").replace(/^﻿/, ""));
-  } catch {
-    return {};
+    // 容忍 BOM（记事本等以 UTF-8 BOM 保存会导致 JSON.parse 失败）
+    const text = fs.readFileSync(CONFIG_PATH, "utf8").replace(/^﻿/, "");
+    try {
+      return { status: "ok", value: JSON.parse(text) };
+    } catch {
+      return { status: "parse-error", value: {} };
+    }
+  } catch (e) {
+    return { status: e && e.code === "ENOENT" ? "missing" : "read-error", value: {} };
   }
 }
 
-function deepMerge(base, extra) {
-  const out = { ...base };
-  for (const [k, v] of Object.entries(extra || {})) {
-    if (v && typeof v === "object" && !Array.isArray(v) && base[k] && typeof base[k] === "object") {
-      out[k] = deepMerge(base[k], v);
-    } else if (v !== undefined) {
-      out[k] = v;
-    }
+function applyReadState(read) {
+  configWriteBlocked = read.status === "parse-error" || read.status === "read-error";
+  shapeRecoveryPending = false;
+  shapeRecoveryBackupMade = false;
+  if (read.status === "parse-error") {
+    warnConfig("config parse error: using defaults; file preserved");
+  } else if (read.status === "read-error") {
+    warnConfig("config read error: using defaults; file preserved");
   }
-  return out;
+  return read;
+}
+
+function reportShapeRecovery(normalized) {
+  if (normalized.topLevelInvalid) {
+    warnConfig("config top-level invalid: using defaults");
+  }
+  for (const recoveredPath of normalized.recoveredPaths) {
+    warnConfig("config shape recovery: " + recoveredPath + " expected object");
+  }
+}
+
+function normalizeLoadedConfig(read) {
+  const normalized = normalizeConfigShape(DEFAULTS, read.value);
+  if (read.status === "ok") {
+    reportShapeRecovery(normalized);
+    shapeRecoveryPending = normalized.topLevelInvalid || normalized.recoveredPaths.length > 0;
+  }
+  return normalized;
+}
+
+function ensureShapeRecoveryBackup() {
+  if (!shapeRecoveryPending || shapeRecoveryBackupMade) return;
+  try {
+    // Fixed in-userData backup: one current recovery copy, without a rotation system.
+    fs.copyFileSync(CONFIG_PATH, CONFIG_SHAPE_BACKUP_PATH);
+    shapeRecoveryBackupMade = true;
+  } catch {
+    const error = new Error("config save blocked: failed to back up recovered config");
+    error.code = "CONFIG_BACKUP_FAILED";
+    throw error;
+  }
 }
 
 /** 探测 zcode.cjs 位置：先看配置文件，再探测常见路径 */
@@ -199,8 +244,8 @@ function detectZcodeCli() {
 
 function getConfig(force = false) {
   if (cache && !force) return cache;
-  const pet = loadPetConfig();
-  const cfg = deepMerge(DEFAULTS, pet);
+  const read = applyReadState(readConfigFile());
+  const cfg = normalizeLoadedConfig(read).value;
 
   cfg.chat.apiKey = secrets.get("chatApiKey") || cfg.chat.apiKey || "";
   cfg.ttsCosy.apiKey = secrets.get("ttsCosyApiKey") || cfg.ttsCosy.apiKey || "";
@@ -213,15 +258,20 @@ function getConfig(force = false) {
 }
 
 function initializeSecretStorage(safeStorage) {
-  const raw = loadPetConfig();
+  const read = applyReadState(readConfigFile());
+  const raw = read.value;
+  if (read.status === "ok") normalizeLoadedConfig(read);
   const info = secrets.initialize(safeStorage);
   if (!info.chatApiKey.available) return info;
   const migrated = secrets.migratePlaintext(raw);
   if (migrated.migrated) {
-    if (raw.chat) delete raw.chat.apiKey;
-    if (raw.ttsCosy) delete raw.ttsCosy.apiKey;
-    if (raw.agentApi) delete raw.agentApi.bearerToken;
+    if (raw && raw.chat) delete raw.chat.apiKey;
+    if (raw && raw.ttsCosy) delete raw.ttsCosy.apiKey;
+    if (raw && raw.agentApi) delete raw.agentApi.bearerToken;
+    ensureShapeRecoveryBackup();
     storage.atomicWrite(CONFIG_PATH, JSON.stringify(raw, null, 2));
+    shapeRecoveryPending = false;
+    shapeRecoveryBackupMade = false;
   }
   cache = null;
   return secrets.status();
@@ -301,10 +351,17 @@ function saveConfig(patch) {
   if (patch?.pet && Object.prototype.hasOwnProperty.call(patch.pet, "name")) {
     patch = { ...patch, pet: { ...patch.pet, name: normalizePetName(patch.pet.name) } };
   }
-  try { require("./file-guard").checkBeforeWrite(); } catch { /* 蜜标监控未启用 */ }
   const cfg = getConfig(true);
-  const merged = deepMerge(cfg, patch);
-  const clean = JSON.parse(JSON.stringify(merged));
+  if (configWriteBlocked) {
+    const error = new Error("config save blocked: config file cannot be read");
+    error.code = "CONFIG_WRITE_BLOCKED";
+    throw error;
+  }
+  ensureShapeRecoveryBackup();
+  try { require("./file-guard").checkBeforeWrite(); } catch { /* 蜜标监控未启用 */ }
+  const merged = mergeConfigPatch(DEFAULTS, cfg, patch);
+  reportShapeRecovery({ topLevelInvalid: false, recoveredPaths: merged.recoveredPaths });
+  const clean = JSON.parse(JSON.stringify(merged.value));
   delete clean._keySource;
   delete clean._configPath;
   // 运行时解密的值绝不可因普通设置保存重新写回 config.json。
@@ -312,9 +369,12 @@ function saveConfig(patch) {
   delete clean.ttsCosy.apiKey;
   delete clean.agentApi.bearerToken;
   clean.agentApi.clients = sanitizeClients(clean.agentApi.clients);
-  if (!patch?.zcodeCli && !loadPetConfig()?.zcodeCli) clean.zcodeCli = "";
+  const raw = readConfigFile();
+  if (!patch?.zcodeCli && !(raw.status === "ok" && raw.value && raw.value.zcodeCli)) clean.zcodeCli = "";
   storage.atomicWrite(CONFIG_PATH, JSON.stringify(clean, null, 2));
   cache = null;
+  shapeRecoveryPending = false;
+  shapeRecoveryBackupMade = false;
   try { require("./file-guard").noteConfigWritten(); } catch { /* 蜜标监控未启用 */ }
 }
 
@@ -349,6 +409,7 @@ function resetPersona() {
 
 module.exports = {
   APP_DIR, STORAGE, CONFIG_PATH, PERSONA_PATH, PERSONA_DEFAULT_PATH,
+  CONFIG_SHAPE_BACKUP_PATH,
   getConfig, saveConfig, getPersonaText, savePersonaText, resetPersona,
   initializeSecretStorage, secretStatus, replaceSecrets, buildSettingsView,
   fillTokens, detectZcodeCli
