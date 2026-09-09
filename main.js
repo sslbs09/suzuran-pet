@@ -80,6 +80,7 @@ const updater = require("./src/updater"); // asar-swap 自动更新（v2.5.26 �
 const weather = require("./src/weather"); // 免费天气 Open-Meteo（v2.5.26）
 const walkCore = require("./src/walk-core");
 const { createTaskQueue } = require("./src/task-queue");
+const { createQuitLifecycle, runCleanupSteps } = require("./src/quit-lifecycle");
 const { createConversationService, classifyError } = require("./src/conversation-service"); // TD-4：会话单写者（统一任务ID/取消/错误码）
 const { createLineGate } = require("./src/line-gate");
 const { transitionSleep, createWorkflowSignalState, recordWorkflowSignal, consumeWorkflowSignal, requeueWorkflowSignal } = require("./src/dialogue-state");
@@ -430,7 +431,7 @@ function refreshTrayMenu() {
     reloadPersona: () => { personaCache = config.getPersonaText(); sendToRenderer("pet:toast", i18n.t(lang, "tray.personaReloaded")); },
     openConfigPath: () => shell.openPath(config.CONFIG_PATH),
     openPersonaPath: () => shell.openPath(config.PERSONA_PATH),
-    quitApp: () => { quitting = true; savePosSafe(); app.quit(); }
+    quitApp: () => { quitting = true; app.quit(); }
   });
   tray.setContextMenu(Menu.buildFromTemplate(items));
 }
@@ -1318,14 +1319,41 @@ async function readAgentJson(req, maxBytes) {
     return body && typeof body === "object" && !Array.isArray(body) ? { body } : { error: 400 };
   } catch { return { error: 400 }; }
 }
-function stopAgentApi() {
+function stopAgentApi(options = {}) {
   const server = agentServer;
   agentServer = null;
   agentServerPort = 0;
   agentServerState = "disabled";
   agentTaskQueue.cancelAll();
   if (!server) return Promise.resolve();
-  return new Promise((resolve) => server.close(() => resolve()));
+  const timeoutMs = Number(options.timeoutMs);
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return new Promise((resolve) => {
+      try { server.close(() => resolve()); } catch { resolve(); }
+    });
+  }
+  return new Promise((resolve) => {
+    let timer = null;
+    let settled = false;
+    const agentLog = (message) => { try { logTts("agent", message); } catch { /* 日志失败不能阻断退出 */ } };
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve();
+    };
+    timer = setTimeout(() => {
+      try { server.closeAllConnections?.(); } catch (e) { agentLog("关闭活动接口连接失败: " + (e && e.message || e)); }
+      agentLog("关闭接口等待超时，已结束活动连接");
+      finish();
+    }, timeoutMs);
+    try {
+      server.close(() => finish());
+    } catch (e) {
+      agentLog("关闭接口异常: " + (e && e.message || e));
+      finish();
+    }
+  });
 }
 
 function startAgentApi() {
@@ -4741,32 +4769,38 @@ if (!gotLock) {
     });
   });
 
-  app.on("window-all-closed", (e) => {
+  app.on("window-all-closed", () => {
     // 桌宠常驻托盘，不随窗口退出
-    e.preventDefault?.();
   });
 
 let engineCleanupDone = false;
-app.on("before-quit", (e) => {
-  if (engineCleanupDone) return; // 第二次触发（清理完成后 app.quit()）直接退出
-  e.preventDefault();
-  quitting = true;
-  schedules.stop();
-  clearInterval(barrierTimer);
-  barrierTimer = null;
-  savePosSafe();
-  // 退出时阻塞清理语音引擎（Genie/GSV 是 detached 独立进程）：等待 taskkill 完成 + 按端口兜底，
-  // 确保"退出 = 彻底退出"——否则残留 python 进程占端口/显存，重启后连到旧引擎（换引擎文件不生效的根因）
-  (async () => {
-    try { await stopAgentApi(); } catch (e) { logTts("agent", "关闭接口失败: " + (e && e.message || e)); }
-    try { await tts.shutdownGenieServer(); } catch { /* 忽略 */ }
-    try { await tts.killGsvProcesses(config.getConfig().ttsGsv || {}); } catch { /* 忽略 */ }
-    try { await tts.killPortListener(9881); } catch { /* 忽略 */ } // 兜底：按端口清残留
-    try { await tts.killPortListener(9880); } catch { /* 忽略 */ }
-    engineCleanupDone = true;
-    app.quit();
-  })();
+let cleanupStarted = false;
+const reportQuitCleanupError = (error, step) => {
+  try { logTts("quit", "退出清理步骤失败" + (step ? " [" + step + "]" : "") + ": " + (error && error.message || error)); } catch { /* 日志失败不能阻断退出 */ }
+};
+const quitLifecycle = createQuitLifecycle({
+  isCleanupDone: () => engineCleanupDone,
+  isCleanupStarted: () => cleanupStarted,
+  markCleanupStarted: () => { cleanupStarted = true; },
+  onStart: () => { quitting = true; },
+  cleanup: () => runCleanupSteps([
+    { name: "schedules.stop", run: () => schedules.stop() },
+    { name: "barrier timer", run: () => { clearInterval(barrierTimer); barrierTimer = null; } },
+    { name: "save position", run: savePosSafe },
+    { name: "Agent API", run: () => stopAgentApi({ timeoutMs: 5000 }) },
+    { name: "Genie", run: () => tts.shutdownGenieServer() },
+    { name: "GSV processes", run: () => tts.killGsvProcesses(config.getConfig().ttsGsv || {}) },
+    { name: "port 9881", run: () => tts.killPortListener(9881) },
+    { name: "port 9880", run: () => tts.killPortListener(9880) },
+  ], {
+    onError: reportQuitCleanupError,
+    onTimeout: (step) => reportQuitCleanupError(new Error("退出清理超时"), step),
+  }),
+  setCleanupDone: () => { engineCleanupDone = true; },
+  requestQuit: () => app.quit(),
+  onError: reportQuitCleanupError,
 });
+app.on("before-quit", quitLifecycle.beforeQuit);
 }
 
 const _startupCfg = config.getConfig();
