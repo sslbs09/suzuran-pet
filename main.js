@@ -2336,19 +2336,19 @@ ipcMain.handle("pet:save-settings", (_e, patch) => {
       // 不做对齐会出现切模式后角色悬空/陷地的跳变
       try {
         if (win && !win.isDestroyed()) {
-          // 强制对齐主屏任务栏上沿 + 钳回主屏水平范围：
-          // getDisplayMatching 在窗口漂到显示边界/副屏时会取错 workArea，导致贴地失败、窗口悬空或跨屏
+          // 按桌宠当前所在显示器对齐任务栏上沿并钳回该显示器水平范围。
           const eb = win.getBounds();
-          const wa = screen.getPrimaryDisplay().workArea;
+          const wa = walkGeo.workAreaOf(screen, eb);
           const al = renderModeMod.groundAlign(eb, wa, walk.groundGap);
           win.setPosition(al.x, al.y);
           logTts("walk", "模式切换贴地: " + after.renderMode + " → (" + al.x + "," + al.y + ") " + eb.width + "x" + eb.height);
-          // 延迟二次贴地：渲染层模式初始化（setSize/几何上报）会异步挪动窗口，2.5s 后按实际尺寸再贴一次主屏任务栏
+          // 延迟二次贴地：渲染层模式初始化（setSize/几何上报）会异步挪动窗口，
+          // 2.5s 后按当时的窗口 bounds 和所在显示器再贴一次。
           setTimeout(() => {
             try {
               if (!win || win.isDestroyed()) return;
               const eb2 = win.getBounds();
-              const wa2 = screen.getPrimaryDisplay().workArea;
+              const wa2 = walkGeo.workAreaOf(screen, eb2);
               const al2 = renderModeMod.groundAlign(eb2, wa2, walk.groundGap);
               win.setPosition(al2.x, al2.y);
             } catch { /* 忽略 */ }
