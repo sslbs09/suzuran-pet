@@ -101,6 +101,34 @@ function mdToHtml(src) {
 
 /* ---------- 文档加载 ---------- */
 const $ = (id) => document.getElementById(id);
+const DOCS_IFRAME_SCROLLBAR_STYLE = `<style id="suzuran-docs-scrollbar">
+html::-webkit-scrollbar { width: 9px; height: 9px; }
+html::-webkit-scrollbar-track { background: #f4f8f7; }
+html::-webkit-scrollbar-thumb {
+  min-height: 32px;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: #b7cfca;
+  background-clip: padding-box;
+}
+html::-webkit-scrollbar-thumb:hover {
+  background: #96b9b2;
+  background-clip: padding-box;
+}
+html::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+html::-webkit-scrollbar-corner { background: #f4f8f7; }
+html.theme-dark::-webkit-scrollbar-track { background: #1f282d; }
+html.theme-dark::-webkit-scrollbar-thumb { background: #46545b; background-clip: padding-box; }
+html.theme-dark::-webkit-scrollbar-thumb:hover { background: #5c7076; background-clip: padding-box; }
+html.theme-dark::-webkit-scrollbar-corner { background: #1f282d; }
+</style>`;
+
+function injectDocsScrollbarStyle(srcdoc) {
+  const html = String(srcdoc || "");
+  if (html.includes('id="suzuran-docs-scrollbar"')) return html;
+  if (/<\/head\s*>/i.test(html)) return html.replace(/<\/head\s*>/i, DOCS_IFRAME_SCROLLBAR_STYLE + "</head>");
+  return DOCS_IFRAME_SCROLLBAR_STYLE + html;
+}
 
 async function applyTheme(theme) { // 规则唯一来源 renderer/theme.js（v2.5.26 收敛）
   window.petTheme.apply(theme);
@@ -111,7 +139,11 @@ async function applyTheme(theme) { // 规则唯一来源 renderer/theme.js（v2.
 function syncIframeTheme() {
   try {
     const d = $("docs-iframe").contentDocument;
-    if (d && d.body) d.body.classList.toggle("theme-dark", document.body.classList.contains("theme-dark"));
+    if (d && d.documentElement) {
+      const dark = document.body.classList.contains("theme-dark");
+      d.documentElement.classList.toggle("theme-dark", dark);
+      if (d.body) d.body.classList.toggle("theme-dark", dark);
+    }
   } catch { /* 忽略 */ }
 }
 
@@ -157,7 +189,7 @@ async function openDoc(doc, btn) {
   }
   if (r.html) {
     const iframe = $("docs-iframe");
-    iframe.srcdoc = r.srcdoc || "";
+    iframe.srcdoc = injectDocsScrollbarStyle(r.srcdoc || "");
     iframe.hidden = false;
     iframe.addEventListener("load", syncIframeTheme, { once: true }); // srcdoc 异步加载，载入后补主题
     document.title = "苏苏洛 · " + doc.name;
@@ -176,5 +208,5 @@ if (typeof window !== "undefined") {
 }
 /* node 单测用：浏览器环境 module 不存在，自动跳过 */
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { mdToHtml, esc };
+  module.exports = { mdToHtml, esc, injectDocsScrollbarStyle };
 }
