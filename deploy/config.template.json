@@ -101,13 +101,13 @@
     }
   ],
   "agentApi": {
-    "enabled": true,
+    "enabled": false,
     "port": 8765,
     "invokeWord": "",
     "bearerToken": "",
     "maxBodyBytes": 65536
   },
-  "zcodeCli": "E:\\ZCODE\\resources\\glm\\zcode.cjs",
+  "zcodeCli": "",
   "workspace": "",
   "zcodeEnabled": false,
   "firstRunAt": null,
@@ -223,8 +223,6 @@
     "pomodoro": true,
     "proactiveInterval": 8
   },
-  "_keySource": "未配置（请在设置中填写或显式导入 API Key）",
-  "_configPath": "C:\\Users\\xsbil\\AppData\\Roaming\\SuzuranPet\\config.json",
   "live2dSkinId": "",
   "theme": "auto",
   "live2dScale": 1.0
