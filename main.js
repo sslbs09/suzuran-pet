@@ -182,6 +182,7 @@ function showWindow() {
   win.focus();
 }
 function hideWindow() {
+  clearDragPause("window-hide");
   cancelFlight();
   cancelWalkJump();
   if (win && !win.isDestroyed()) win.hide();
@@ -319,7 +320,8 @@ function createWindow() {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.loadFile(path.join(config.APP_DIR, "renderer", "index.html"));
   // 渲染进程异常退出（崩溃/OOM/被系统回收）：自动重载恢复，防桌宠无声消失；60s 内连续 3 次则停止自愈
-    win.webContents.on("render-process-gone", (_e, details) => {
+  win.webContents.on("render-process-gone", (_e, details) => {
+    clearDragPause("renderer-crash");
     const now = Date.now();
     if (now - renderCrashWindowAt > 60000) { renderCrashWindowAt = now; renderCrashCount = 0; }
     renderCrashCount += 1;
@@ -370,12 +372,13 @@ function createWindow() {
   };
   win.on("moved", debounce(savePos, 500));
   win.on("close", (e) => {
+    clearDragPause("window-close");
     if (!quitting) {
       e.preventDefault();
       hideWindow(); // 关窗 = 隐藏到托盘
     }
   });
-  win.on("closed", () => { win = null; });
+  win.on("closed", () => { clearDragPause("window-closed"); win = null; });
 
   // 启动即隐藏（仅托盘运行）
   if (config.getConfig().startHidden) hideWindow();
@@ -951,6 +954,7 @@ ipcMain.handle("pet:reload-renderer", () => { // WebGL 上下文丢失等场景�
   const now = Date.now();
   if (!win || win.isDestroyed() || now - rendererReloadAt < 60000) return false;
   rendererReloadAt = now;
+  clearDragPause("renderer-reload");
   logTts("render", "渲染层自愈：webContents.reload（WebGL 上下文丢失/渲染异常）");
   win.webContents.reload();
   return true;
@@ -3032,6 +3036,19 @@ let skinHasSit = true; // 当前皮肤是否有可播的坐下动画（渲染层
 const WALK_TICK_MS = 40;
 const WALK_SPEED = 1.2;                        // 每 tick 像素 ≈ 30px/s
 const PET_LOCAL_X = 138;                       // 标准 Spine 260×200 窗口的唯一角色锚点
+
+/** 清理拖拽暂停；只触碰 dragPaused 及其专属时间状态，保留 chat/zoom 暂停。 */
+function clearDragPause(reason = "drag-cleanup", broadcast = true) {
+  const ownsPausedAt = !walk.chatPaused && !walk.zoomPaused;
+  const changed = !!walk.dragPaused || (ownsPausedAt && !!walk.pausedAt) ||
+    walk.paused !== (walk.chatPaused || walk.zoomPaused);
+  walk.dragPaused = false;
+  if (ownsPausedAt) walk.pausedAt = 0;
+  walk.paused = walk.chatPaused || walk.zoomPaused;
+  if (changed && broadcast && walk.active) walkBroadcast();
+  return changed;
+}
+
 function walkSpeed() {                         // 托盘速度档位倍率（借鉴 Ark-Pets 可调移速）
   return WALK_SPEED * (Number(config.getConfig().walkSpeedMul) || 1);
 }
@@ -3096,6 +3113,7 @@ function startFlight(vx, vy) {
   if (!win || win.isDestroyed() || !walk.active || walk.sleeping || !win.isVisible()) return false;
   const speed = Math.hypot(vx, vy);
   if (!Number.isFinite(speed) || speed <= 200) return false;
+  clearDragPause("throw-accepted", false);
   const limit = Math.min(1, 1200 / speed);
   clearTimeout(walk.phaseTimer);
   walk.phaseTimer = null;
@@ -3830,10 +3848,7 @@ function walkTick() {
   }
   // 自愈①：拖拽 mouseup 丢失导致 paused 卡死——60s 无移动事件自动解除（对话暂停/放大暂停不受此影响）
   if (walk.dragPaused && walk.pausedAt && !walk.chatPaused && !walk.zoomPaused && Date.now() - walk.pausedAt > 60000 && Date.now() - (dbgLastMoveTs || 0) > 5000) {
-    walk.dragPaused = false;
-    walk.pausedAt = 0;
-    walk.paused = walk.chatPaused || walk.zoomPaused;
-    walkBroadcast(); // 自愈解除暂停，同步渲染层动画
+    clearDragPause("watchdog"); // 自愈解除暂停，同步渲染层动画
     logTts("walk", "拖拽暂停超时，自动恢复");
   }
   // 瞬态守卫（ottopet restore_timer 借鉴）：gotoPerch/returning 长时间未完成（屏障/状态错乱）→ 强制回地面
@@ -4116,11 +4131,13 @@ ipcMain.on("pet:walking-pause", (_e, p, source) => {
   if (source === "zoom") { // 放大聊天框暂停：独立标志，60s 拖拽自愈不得解除（否则大窗口下恢复行走会打乱几何）
     walk.zoomPaused = !!p;
     walk.pausedAt = p ? Date.now() : 0;
+  } else if (!p) {
+    clearDragPause("walking-pause", false);
   } else {
-    walk.dragPaused = !!p;
-    walk.pausedAt = p ? Date.now() : 0;
+    walk.dragPaused = true;
+    walk.pausedAt = Date.now();
     // 人格化：被抓住/点按时偶尔嘀咕
-    if (p) maybePersonify("grabbed", { chance: 0.2, cooldownMs: 90000 });
+    maybePersonify("grabbed", { chance: 0.2, cooldownMs: 90000 });
   }
   walk.paused = walk.dragPaused || walk.chatPaused || walk.zoomPaused; // 拖拽/对话/放大任一暂停都停住
   if (walk.active) walkBroadcast(); // 暂停/恢复即时同步渲染层动画（暂停时切站立待机）
@@ -4151,12 +4168,7 @@ ipcMain.on("pet:throw", (_e, vx, vy) => {
   vx = Number(vx); vy = Number(vy);
   if (Number.isFinite(vx) && Number.isFinite(vy) && startFlight(vx, vy)) return;
   // 渲染层甩动后不再发送 walkingPause(false)；拒绝飞行时必须立即恢复，不能等 60 秒看门狗。
-  if (walk.dragPaused) {
-    walk.dragPaused = false;
-    walk.paused = walk.chatPaused || walk.zoomPaused; // 对话/放大暂停不受拖拽恢复影响
-    walk.pausedAt = 0;
-    if (walk.active) walkBroadcast();
-  }
+  clearDragPause("throw-rejected");
 });
 ipcMain.on("pet:set-sleeping", (_e, v) => {
   // 方案 2（2026-09-06，用户拍板）：不在别人窗口顶/图标顶上睡觉——坐窗（perched）或坐图标
@@ -4802,6 +4814,7 @@ const quitLifecycle = createQuitLifecycle({
   markCleanupStarted: () => { cleanupStarted = true; },
   onStart: () => { quitting = true; },
   cleanup: () => runCleanupSteps([
+    { name: "drag pause", run: () => clearDragPause("app-quit") },
     { name: "schedules.stop", run: () => schedules.stop() },
     { name: "barrier timer", run: () => { clearInterval(barrierTimer); barrierTimer = null; } },
     { name: "save position", run: savePosSafe },

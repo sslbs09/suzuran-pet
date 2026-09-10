@@ -2504,6 +2504,8 @@ window.petAPI.onTermsAgreed(() => {
 /* ---------- 拖拽（手动，区分点击） ---------- */
 let dragState = null;
 let pokeResumeTimer = null; // 戳一戳后的原地站立计时
+let dragReleaseTimer = null;
+let lastMouse = { x: -1, y: -1 };
 const THROW_SAMPLE_WINDOW_MS = 80;
 const THROW_MIN_SPEED = 200;
 function addDragSample(state, e) {
@@ -2520,30 +2522,142 @@ function dragVelocity(state) {
   if (dt <= 0) return null;
   return { vx: (last.x - first.x) / dt, vy: (last.y - first.y) / dt };
 }
-function onDragStart(e) {
-  try { window.petAPI.playback("[ui] dragStart btn=" + e.button + " target=" + (e.target.id || e.target.tagName)); } catch { /* 忽略 */ }
-  wake();
-  if (e.button !== 0) return;
-  clearTimeout(pokeResumeTimer);
-  // v2.5.22d Q 弹按压（GIF 模式）：按下压缩，松手回弹（CSS 仅对 GIF 生效，其他模式无此动画）
-  petEl.classList.remove("pet-squash", "pet-squash-release");
-  petEl.classList.add("pet-squash");
-  dragState = { sx: e.screenX, sy: e.screenY, moved: false, active: true, samples: [] };
-  addDragSample(dragState, e);
-  window.petAPI.walkingPause(true, "drag"); // 拖拽中暂停桌面行走，松手恢复
+
+function releaseDragPointer(state) {
+  const target = state && state.target;
+  if (!target || typeof target.releasePointerCapture !== "function") return;
+  try { target.releasePointerCapture(state.pointerId); } catch { /* capture 可能已被浏览器收回 */ }
 }
-petEl.addEventListener("mousedown", onDragStart);
+
+function clearDragVisuals() {
+  petEl.classList.remove("dragging", "pet-squash", "pet-squash-release");
+  if (dragReleaseTimer) {
+    clearTimeout(dragReleaseTimer);
+    dragReleaseTimer = null;
+  }
+}
+
+function refreshDragClickable() {
+  try {
+    if (lastMouse.x >= 0 && lastMouse.y >= 0) refreshClickable(lastMouse.x, lastMouse.y);
+    else window.petAPI.setClickable(false);
+  } catch { /* 页面销毁时 IPC 可能已不可用 */ }
+}
+
+function finishDrag(reason = "cancel") {
+  const state = dragState;
+  if (!state || !state.active) return false;
+
+  // 先摘掉全局状态，再 releasePointerCapture；release 可能同步触发 lostpointercapture。
+  dragState = null;
+  state.active = false;
+  releaseDragPointer(state);
+  clearDragVisuals();
+  refreshDragClickable();
+
+  if (reason !== "pointerup") {
+    // 异常取消只安全放下当前位置：不 click、不 pat、不 throw、不打开输入栏。
+    window.petAPI.walkingPause(false, "drag");
+    return true;
+  }
+
+  const wasDrag = state.moved;
+  // 正常 pointerup 不把释放坐标额外加入 samples，保持原 mouseup 的甩动算法。
+  // v2.5.22d Q 弹回弹（GIF 模式）：松手换 release 动画，播完清理
+  petEl.classList.add("pet-squash-release");
+  dragReleaseTimer = setTimeout(() => {
+    petEl.classList.remove("pet-squash-release");
+    dragReleaseTimer = null;
+  }, 400);
+  const velocity = wasDrag ? dragVelocity(state) : null;
+  const speed = velocity ? Math.round(Math.hypot(velocity.vx, velocity.vy)) : 0;
+
+  if (!wasDrag) {
+    try { window.petAPI.playback("[ui] click 未拖动 count=" + ((patSeq && patSeq.count) || 0)); } catch { /* 忽略 */ }
+    const now = Date.now();
+    if (!patSeq || now - patSeq.at > 2000) patSeq = { at: now, count: 0, barOpenedByFirst: false };
+    patSeq.count += 1;
+    patSeq.at = now;
+    if (patSeq.count >= 2) {
+      // 摸头：把第 1 击误开的聊天栏关回去，保持"摸头不开栏"的直觉
+      if (patSeq.barOpenedByFirst) {
+        if (!inputBar.classList.contains("hidden")) toggleInputBar();
+        patSeq.barOpenedByFirst = false;
+      }
+      wake(); // 被摸会醒：否则主进程 sleeping=true 不位移，摸头互动排队恢复的 Move 变成原地空走
+      playSpineInteract();
+      if (rigSkinId && rigRuntime) rigRuntime.preset("smile"); // 2.5D：微笑回应
+      showPatFeedback();
+      window.petAPI.pat && window.petAPI.pat();
+    } else {
+      toggleInputBar();
+      playSpineInteract(); // 单击互动：还原基建里点一下干员的反应动作
+      patSeq.barOpenedByFirst = !inputBar.classList.contains("hidden");
+    }
+    // 戳一戳/摸头时原地站定：等互动动作播完再继续散步
+    clearTimeout(pokeResumeTimer);
+    pokeResumeTimer = setTimeout(() => { if (!dragState) window.petAPI.walkingPause(false); }, 2600);
+  } else if (velocity && speed > THROW_MIN_SPEED) {
+    try {
+      window.petAPI.throwPet(velocity.vx, velocity.vy);
+      scheduleDizzyFeedback(); // 被抛出去：落地时晕乎/抗议
+    } catch {
+      // IPC 发送失败时也立即解除 drag pause，不能把恢复交给 watchdog。
+      window.petAPI.walkingPause(false, "drag");
+    }
+  } else {
+    window.petAPI.walkingPause(false, "drag");
+  }
+  return true;
+}
+
+function onDragStart(e) {
+  if (dragState || e.pointerType !== "mouse" || e.isPrimary !== true || e.button !== 0) return;
+  const target = e.currentTarget;
+  if (!target || typeof target.setPointerCapture !== "function") return;
+  let state = null;
+  try {
+    target.setPointerCapture(e.pointerId);
+    try { window.petAPI.playback("[ui] dragStart btn=" + e.button + " target=" + (e.target.id || e.target.tagName)); } catch { /* 忽略 */ }
+    wake();
+    clearTimeout(pokeResumeTimer);
+    // v2.5.22d Q 弹按压（GIF 模式）：按下压缩，松手回弹（CSS 仅对 GIF 生效，其他模式无此动画）
+    petEl.classList.remove("pet-squash", "pet-squash-release");
+    petEl.classList.add("pet-squash");
+    state = { pointerId: e.pointerId, target, sx: e.screenX, sy: e.screenY, moved: false, active: true, samples: [] };
+    dragState = state;
+    addDragSample(state, e);
+    window.petAPI.walkingPause(true, "drag"); // 拖拽中暂停桌面行走，松手恢复
+  } catch {
+    if (dragState === state) dragState = null;
+    if (state) state.active = false;
+    clearDragVisuals();
+    releaseDragPointer({ target, pointerId: e.pointerId });
+  }
+}
 const rigCanvasEl = document.getElementById("rig-canvas");
-if (rigCanvasEl) rigCanvasEl.addEventListener("mousedown", onDragStart); // rig 模式（独立大画布）也可拖动
 const live2dCanvasEl = document.getElementById("live2d-canvas");
-if (live2dCanvasEl) live2dCanvasEl.addEventListener("mousedown", onDragStart); // live2d 模式（独立大画布）也可拖动
+const dragSurfaces = [petEl, rigCanvasEl, live2dCanvasEl].filter(Boolean);
+for (const surface of dragSurfaces) {
+  surface.addEventListener("pointerdown", onDragStart);
+  surface.addEventListener("lostpointercapture", (e) => {
+    if (!dragState || e.currentTarget !== dragState.target || e.pointerId !== dragState.pointerId) return;
+    finishDrag("lostpointercapture");
+  });
+}
 // 右键宠物 → 隐藏到托盘
 petEl.addEventListener("contextmenu", (e) => {
   e.preventDefault();
   window.petAPI.hideWindow();
 });
-window.addEventListener("mousemove", (e) => {
+window.addEventListener("pointermove", (e) => {
   if (!dragState || !dragState.active) return;
+  if (e.pointerId !== dragState.pointerId) return;
+  if (!(e.buttons & 1)) {
+    finishDrag("buttons");
+    return;
+  }
+  lastMouse = { x: e.clientX, y: e.clientY };
   addDragSample(dragState, e);
   const dx = e.screenX - dragState.sx;
   const dy = e.screenY - dragState.sy;
@@ -2556,6 +2670,20 @@ window.addEventListener("mousemove", (e) => {
     dragState.sy = e.screenY;
   }
 });
+window.addEventListener("pointerup", (e) => {
+  if (dragState && e.pointerId === dragState.pointerId) {
+    lastMouse = { x: e.clientX, y: e.clientY };
+    finishDrag("pointerup");
+  }
+});
+window.addEventListener("pointercancel", (e) => {
+  if (dragState && e.pointerId === dragState.pointerId) finishDrag("pointercancel");
+});
+window.addEventListener("blur", () => finishDrag("blur"));
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") finishDrag("visibilitychange");
+});
+window.addEventListener("pagehide", () => finishDrag("pagehide"));
 /* ---------- 摸头互动（v2.3）：2 秒内快速连点角色 = 摸头 ---------- */
 let patSeq = null; // { at, count, barOpenedByFirst } 连击窗口
 let patFeedbackTimer = null;
@@ -2591,52 +2719,6 @@ function scheduleDizzyFeedback() {
 document.addEventListener("mousedown", (e) => { // 诊断：确认鼠标事件到达渲染层
   try { window.petAPI.playback("[ui] mousedown target=" + (e.target.id || e.target.className || e.target.tagName)); } catch { /* 忽略 */ }
 }, true);
-window.addEventListener("mouseup", () => {
-  if (!dragState) return;
-  const state = dragState;
-  const wasDrag = state.moved;
-  dragState = null;
-  petEl.classList.remove("dragging");
-  // v2.5.22d Q 弹回弹（GIF 模式）：松手换 release 动画，播完清理
-  petEl.classList.remove("pet-squash");
-  petEl.classList.add("pet-squash-release");
-  setTimeout(() => petEl.classList.remove("pet-squash-release"), 400);
-  const velocity = wasDrag ? dragVelocity(state) : null;
-  const speed = velocity ? Math.round(Math.hypot(velocity.vx, velocity.vy)) : 0;
-  if (!wasDrag) {
-    try { window.petAPI.playback("[ui] click 未拖动 count=" + ((patSeq && patSeq.count) || 0)); } catch { /* 忽略 */ }
-    const now = Date.now();
-    if (!patSeq || now - patSeq.at > 2000) patSeq = { at: now, count: 0, barOpenedByFirst: false };
-    patSeq.count += 1;
-    patSeq.at = now;
-    if (patSeq.count >= 2) {
-      // 摸头：把第 1 击误开的聊天栏关回去，保持"摸头不开栏"的直觉
-      if (patSeq.barOpenedByFirst) {
-        if (!inputBar.classList.contains("hidden")) toggleInputBar();
-        patSeq.barOpenedByFirst = false;
-      }
-      wake(); // 被摸会醒：否则主进程 sleeping=true 不位移，摸头互动排队恢复的 Move 变成原地空走
-      playSpineInteract();
-      if (rigSkinId && rigRuntime) rigRuntime.preset("smile"); // 2.5D：微笑回应
-      showPatFeedback();
-      window.petAPI.pat && window.petAPI.pat();
-    } else {
-      toggleInputBar();
-      playSpineInteract(); // 单击互动：还原基建里点一下干员的反应动作
-      patSeq.barOpenedByFirst = !inputBar.classList.contains("hidden");
-    }
-    // 戳一戳/摸头时原地站定：等互动动作播完再继续散步
-    clearTimeout(pokeResumeTimer);
-    pokeResumeTimer = setTimeout(() => { if (!dragState) window.petAPI.walkingPause(false); }, 2600);
-  } else {
-    if (velocity && speed > THROW_MIN_SPEED) {
-      window.petAPI.throwPet(velocity.vx, velocity.vy);
-      scheduleDizzyFeedback(); // 被抛出去：落地时晕乎/抗议
-    } else {
-      window.petAPI.walkingPause(false, "drag");
-    }
-  }
-});
 
 /* ---------- 等比缩放自愈兜底：渲染层所有缩放写入都应是等比的，
    一旦发现 |scale.x| 与 scale.y 失配（非等比拉伸残留），立即恢复均匀缩放。 ---------- */
@@ -2681,7 +2763,6 @@ function isPetUI(el, e) {
   }
   return false;
 }
-let lastMouse = { x: -1, y: -1 };
 function refreshClickable(x, y) { // 穿透判定（mousemove 与定时兜底共用）
   const el = document.elementFromPoint(x, y);
   window.petAPI.setClickable(isPetUI(el, { clientX: x, clientY: y }) || (dragState && dragState.active));
