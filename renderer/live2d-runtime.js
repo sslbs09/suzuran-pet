@@ -8,55 +8,107 @@
  * v1 范围：显示 + 自动 Idle 动作 + 点击动作（库自带）；行走/坐姿联动后续迭代。
  */
 (function () {
-  let app = null;
   let model = null;
   let active = false;
+  let activeOwner = null;
+  let pendingOwner = null;
+  let currentToken = null;
 
   let scaleFactor = 1.0;
-  function fit() {
-    if (!app || !model) return;
+  function fitOwner(owner) {
+    if (!owner || !owner.app || !owner.model) return;
     const winW = window.innerWidth || 300;
     const winH = window.innerHeight || 460;
-    app.renderer.resize(winW, winH);
+    owner.app.renderer.resize(winW, winH);
     // 等比贴底：目标高度 = 窗口高 88%，水平居中，脚底贴窗口底
-    const baseH = model.internalModel && model.internalModel.height ? model.internalModel.height : model.height;
-    const baseW = model.internalModel && model.internalModel.width ? model.internalModel.width : model.width;
+    const baseH = owner.model.internalModel && owner.model.internalModel.height ? owner.model.internalModel.height : owner.model.height;
+    const baseW = owner.model.internalModel && owner.model.internalModel.width ? owner.model.internalModel.width : owner.model.width;
     if (!baseH || !baseW) return;
     const k = ((winH * 0.88) / baseH) * scaleFactor;
-    model.scale.set(k);
-    model.x = Math.round((winW - baseW * k) / 2);
-    model.y = Math.round(winH - baseH * k);
+    owner.model.scale.set(k);
+    owner.model.x = Math.round((winW - baseW * k) / 2);
+    owner.model.y = Math.round(winH - baseH * k);
   }
 
-  async function init(canvasEl, modelUrl) {
-    destroy();
+  function fit() { fitOwner(activeOwner); }
+
+  function cleanupOwner(owner, hideCanvas = true) {
+    if (!owner) return;
+    if (owner.resizeHandler) window.removeEventListener("resize", owner.resizeHandler);
+    try { if (owner.model) owner.model.destroy(); } catch (e) { /* 忽略 */ }
+    // #live2d-canvas 是项目静态节点，也是 A-3 的稳定拖拽 surface。
+    // Pixi 的第一个参数为 removeView；这里必须保留 false，不能让 destroy 移除 DOM 节点。
+    try { if (owner.app) owner.app.destroy(false, { children: true, texture: false, baseTexture: false }); } catch (e) { /* 忽略 */ }
+    if (hideCanvas && owner.canvas) {
+      owner.canvas.classList.add("hidden");
+      owner.canvas.style.pointerEvents = "none";
+    }
+    owner.model = null;
+    owner.app = null;
+    owner.resizeHandler = null;
+    if (pendingOwner === owner) pendingOwner = null;
+  }
+
+  async function init(canvasEl, modelUrl, requestToken) {
     if (!window.PIXI) throw new Error("PIXI 未加载");
     const live2d = (window.PIXI.live2d && window.PIXI.live2d.Live2DModel) || window.Live2DModel;
     if (!live2d) throw new Error("pixi-live2d 未加载");
-    app = new PIXI.Application({
-      view: canvasEl,
-      width: window.innerWidth || 300,
-      height: window.innerHeight || 460,
-      backgroundAlpha: 0,
-      autoDensity: true,
-      resolution: window.devicePixelRatio || 1,
-      antialias: true
-    });
-    model = await live2d.from(modelUrl, { autoInteract: true }); // 自动 idle + 点击动作
-    app.stage.addChild(model);
-    fit();
-    window.addEventListener("resize", fit);
-    active = true;
-    return true;
+    const token = requestToken || {};
+    const owner = { token, canvas: canvasEl, app: null, model: null, resizeHandler: null };
+    cleanupOwner(activeOwner);
+    activeOwner = null;
+    cleanupOwner(pendingOwner, false);
+    currentToken = token;
+    pendingOwner = owner;
+    try {
+      owner.app = new PIXI.Application({
+        view: canvasEl,
+        width: window.innerWidth || 300,
+        height: window.innerHeight || 460,
+        backgroundAlpha: 0,
+        autoDensity: true,
+        resolution: window.devicePixelRatio || 1,
+        antialias: true
+      });
+      owner.model = await live2d.from(modelUrl, { autoInteract: true }); // 自动 idle + 点击动作
+      if (currentToken !== token) {
+        cleanupOwner(owner, false);
+        return false;
+      }
+      owner.app.stage.addChild(owner.model);
+      fitOwner(owner);
+      owner.resizeHandler = () => fitOwner(owner);
+      window.addEventListener("resize", owner.resizeHandler);
+      if (currentToken !== token) {
+        cleanupOwner(owner, false);
+        return false;
+      }
+      activeOwner = owner;
+      pendingOwner = null;
+      model = owner.model;
+      active = true;
+      return true;
+    } catch (e) {
+      cleanupOwner(owner, currentToken === token);
+      if (currentToken === token) {
+        activeOwner = null;
+        model = null;
+        active = false;
+      }
+      throw e;
+    }
   }
 
-  function destroy() {
+  function destroy(ownerToken) {
+    if (ownerToken && currentToken && ownerToken !== currentToken) return false;
+    currentToken = null;
+    cleanupOwner(activeOwner);
+    activeOwner = null;
+    cleanupOwner(pendingOwner, false);
+    pendingOwner = null;
     active = false;
-    window.removeEventListener("resize", fit);
-    try { if (model) model.destroy(); } catch (e) { /* 忽略 */ }
-    try { if (app) app.destroy(true, { children: true, texture: false, baseTexture: false }); } catch (e) { /* 忽略 */ }
     model = null;
-    app = null;
+    return true;
   }
 
   /* 情绪 → 动作映射：优先 Tap 组动作（播一次自动回 Idle），表情按名称匹配（有对应才用）。
@@ -103,6 +155,6 @@
     setScale,
     get active() { return active; },
     /** 供错误上报/诊断 */
-    version: "v1.1"
+    version: "v1.2"
   };
 })();

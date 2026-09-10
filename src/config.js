@@ -319,7 +319,7 @@ function buildSettingsView() {
     hotkey: cfg.hotkey,
     startHidden: !!cfg.startHidden,
     uiLang: cfg.uiLang || "zh",
-    renderMode: cfg.renderMode === "spine" ? "spine" : cfg.renderMode === "rig" ? "rig" : "gif",
+    renderMode: cfg.renderMode === "spine" ? "spine" : cfg.renderMode === "rig" ? "rig" : cfg.renderMode === "live2d" ? "live2d" : "gif",
     rigSkinId: cfg.rigSkinId || "", // PSD 2.5D 皮肤（v2.2）
     rigScale: Number(cfg.rigScale) > 0 ? Number(cfg.rigScale) : 1.0,
     rigMouseFollow: cfg.rigMouseFollow !== false, // 2.5D 头部/眼睛跟随鼠标（v2.2.1 实验性）
