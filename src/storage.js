@@ -65,7 +65,8 @@ function healFileAsDir() {
     ["config.json", PATHS.config, path.join(APP_DIR, "config.json")],
     ["persona.md", PATHS.persona, path.join(APP_DIR, "persona.md")]
   ];
-  for (const [, target, source] of items) {
+  const healed = [];
+  for (const [name, target, source] of items) {
     try {
       const t = path.resolve(target);
       const s = path.resolve(source);
@@ -73,15 +74,34 @@ function healFileAsDir() {
       if (fs.existsSync(t) && fs.statSync(t).isDirectory() && fs.readdirSync(t).length === 0) {
         fs.rmdirSync(t);
         copyIfMissing(s, t, []);
+        healed.push(name);
       }
     } catch { /* 单项自愈失败不阻塞启动 */ }
   }
+  return healed;
+}
+
+function sanitizeMigratedConfigConsent(cfg, { targetConfigExistedBeforeMigration, configCopiedThisMigration }) {
+  if (targetConfigExistedBeforeMigration || !configCopiedThisMigration || !cfg || cfg.agreed !== true) return cfg;
+  return { ...cfg, agreed: false };
 }
 
 function initializeStorage() {
+  const configWasFile = fs.existsSync(PATHS.config) && fs.statSync(PATHS.config).isFile();
+  const configWasEmptyDir = fs.existsSync(PATHS.config) && fs.statSync(PATHS.config).isDirectory() && fs.readdirSync(PATHS.config).length === 0;
   fs.mkdirSync(PATHS.userDir, { recursive: true });
-  healFileAsDir();
-  if (fs.existsSync(PATHS.marker)) return PATHS;
+  const healed = healFileAsDir();
+  const healedConfig = healed.includes("config.json") && configWasEmptyDir && !configWasFile;
+  if (fs.existsSync(PATHS.marker)) {
+    if (healedConfig) {
+      try {
+        const cfg = JSON.parse(fs.readFileSync(PATHS.config, "utf8"));
+        if (cfg && cfg.agreed === true) fs.writeFileSync(PATHS.config, JSON.stringify({ ...cfg, agreed: false }, null, 2), "utf8");
+      } catch { /* malformed healed config remains pending */ }
+    }
+    return PATHS;
+  }
+  const targetConfigExistedBeforeMigration = configWasFile;
   const migrated = [], failed = [];
   const pairs = [
     [path.join(APP_DIR, "config.json"), PATHS.config],
@@ -98,16 +118,22 @@ function initializeStorage() {
     try { copyIfMissing(from, to, migrated); } catch (e) { failed.push({ from, message: e.message }); }
   }
   fs.writeFileSync(PATHS.marker, JSON.stringify({ version: 1, at: new Date().toISOString(), migrated, failed }, null, 2), "utf8");
-  // §14 追加 94：首启迁移强制 agreed=false——安装根 config.json 模板常携带开发者/曾使用者的
-  // 同意状态（宿主已同意过），全新用户不能因此跳过《使用条款》弹窗（合规）。迁移标记已写，
-  // 仅本次生效；已存在的用户（标记在）不受影响。
+  // 首启迁移只清除“本次从安装目录模板复制”的 agreed:true。
+  // 目标 userData 在迁移前已有自己的 config.json 时，它代表真实老用户状态，必须保留，
+  // 即使旧版本没有留下迁移 marker。
   try {
     const cfgPath = PATHS.config;
-    if (cfgPath && fs.existsSync(cfgPath)) {
+    const configSource = path.join(APP_DIR, "config.json");
+    const configCopiedThisMigration = !targetConfigExistedBeforeMigration &&
+      (healedConfig || migrated.includes(path.relative(APP_DIR, configSource)));
+    if (configCopiedThisMigration && cfgPath && fs.existsSync(cfgPath)) {
       const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
-      if (cfg && cfg.agreed) {
-        cfg.agreed = false;
-        fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), "utf8"); // Node utf8 写回无 BOM
+      const sanitized = sanitizeMigratedConfigConsent(cfg, {
+        targetConfigExistedBeforeMigration,
+        configCopiedThisMigration
+      });
+      if (sanitized !== cfg) {
+        fs.writeFileSync(cfgPath, JSON.stringify(sanitized, null, 2), "utf8"); // Node utf8 写回无 BOM
       }
     }
   } catch { /* 迁移期配置修正失败不影响启动 */ }
@@ -126,4 +152,4 @@ function atomicWrite(file, content) {
   }
 }
 
-module.exports = { APP_DIR, PATHS, initializeStorage, atomicWrite };
+module.exports = { APP_DIR, PATHS, initializeStorage, atomicWrite, sanitizeMigratedConfigConsent };

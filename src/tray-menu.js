@@ -13,6 +13,7 @@
 function buildTrayItems(deps) {
   const {
     cfg, lang, i18n, zcodeOn, forcedMode,
+    pending = false, openTerms,
     isWindowVisible, toggleWindow, setMode, setTts, setRate, setSpeakJa, setWalking,
     detectSpineModels, skinParseDir, SPINE_CN, SKIN_CHAR_NAMES, SKIN_PERSON_NAMES, setSpineSkin, skinIconOf,
     sendToRenderer, setPetLayer, openPsdWindow, rigSkinList, setRigSkin,
@@ -21,6 +22,14 @@ function buildTrayItems(deps) {
     diagClick, openDocs, openSchedule, openSettings, openMoodManager, openVoiceStudio, openTtsGuide, openQuickstart, openHelp, openAddChar, checkUpdate,
     reloadPersona, openConfigPath, openPersonaPath, quitApp
   } = deps;
+
+  if (pending) {
+    return [
+      { label: "查看/继续确认使用条款与隐私政策", click: () => openTerms() },
+      { type: "separator" },
+      { label: "退出", click: () => quitApp() }
+    ];
+  }
 
   const modeLabel = !zcodeOn ? i18n.t(lang, "tray.modeChat")
     : forcedMode === "zcode" ? i18n.t(lang, "tray.modeZcode")

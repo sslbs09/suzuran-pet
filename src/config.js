@@ -304,7 +304,7 @@ function buildSettingsView() {
     emotionVoice: cfg.emotionVoice || {}, // 情绪音色分档开关（v2.6）
     zcodeEnabled: !!cfg.zcodeEnabled,
     zcodeCli: cfg.zcodeCli,
-    agreed: !!cfg.agreed,
+    agreed: cfg.agreed === true,
     scale: cfg.window.scale || 1.0,
     agentApi: {
       ...cfg.agentApi,

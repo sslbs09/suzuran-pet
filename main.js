@@ -81,6 +81,8 @@ const weather = require("./src/weather"); // 免费天气 Open-Meteo（v2.5.26�
 const walkCore = require("./src/walk-core");
 const { createTaskQueue } = require("./src/task-queue");
 const { createQuitLifecycle, runCleanupSteps } = require("./src/quit-lifecycle");
+const { isConsentAccepted, canUseRuntime, acceptConsent } = require("./src/consent-gate");
+const { createOnceRunner } = require("./src/runtime-lifecycle");
 const { createConversationService, classifyError } = require("./src/conversation-service"); // TD-4：会话单写者（统一任务ID/取消/错误码）
 const { createLineGate } = require("./src/line-gate");
 const { transitionSleep, createWorkflowSignalState, recordWorkflowSignal, consumeWorkflowSignal, requeueWorkflowSignal } = require("./src/dialogue-state");
@@ -173,13 +175,26 @@ function attachCrashDiag(w, label) {
 function isWindowVisible() {
   return win && !win.isDestroyed() && win.isVisible();
 }
+function ensureRuntimeAccess() {
+  if (canUseRuntime(config.getConfig())) return true;
+  openTerms();
+  return false;
+}
+function ensureMainWindow() {
+  if (!isConsentAccepted(config.getConfig())) { openTerms(); return false; }
+  const runtime = startNormalRuntimeOnce();
+  if (runtime.state !== "started") return false;
+  if (!win || win.isDestroyed()) createWindow();
+  return !!win && !win.isDestroyed();
+}
 function showWindow() {
-  if (!win || win.isDestroyed()) return;
+  if (!ensureMainWindow()) return false;
   win.show();
   // 从托盘恢复时先接收一次鼠标命中，渲染层后续会按透明区域重新开启穿透。
   win.setIgnoreMouseEvents(false);
   applyLayer(walk.active || walk.seated);
   win.focus();
+  return true;
 }
 function hideWindow() {
   clearDragPause("window-hide");
@@ -188,8 +203,10 @@ function hideWindow() {
   if (win && !win.isDestroyed()) win.hide();
 }
 function toggleWindow() {
+  if (!ensureRuntimeAccess()) return false;
   if (isWindowVisible()) hideWindow();
   else showWindow();
+  return true;
 }
 
 /* ---------- 显示层级（置顶眼前 / 桌面层级）与坐任务栏 ---------- */
@@ -347,7 +364,7 @@ function createWindow() {
   // v2.5.21 修复：必须带 "screen-saver" level——无 level 的 setAlwaysOnTop(true) 用默认层级，
   // 会每 5s 把 applyLayer 设的最高层级降级，导致脚被任务栏盖住（"时前时后"根因之一）。
   // v2.5.21b：间隔 5s→2s——被全屏游戏/置顶窗口抢占后的恢复窗口缩短，极小概率被挡进一步压低。
-  setInterval(() => {
+  const layerTimer = setInterval(() => {
     try {
       if (!win || win.isDestroyed() || !win.isVisible()) return;
       if ((config.getConfig().layer || "top") !== "top") return;
@@ -378,7 +395,7 @@ function createWindow() {
       hideWindow(); // 关窗 = 隐藏到托盘
     }
   });
-  win.on("closed", () => { clearDragPause("window-closed"); win = null; });
+  win.on("closed", () => { clearInterval(layerTimer); clearDragPause("window-closed"); win = null; });
 
   // 启动即隐藏（仅托盘运行）
   if (config.getConfig().startHidden) hideWindow();
@@ -405,13 +422,14 @@ function debounce(fn, ms) {
 
 /* ---------- 托盘 ---------- */
 function createTray() {
+  if (tray) return;
   let icon = nativeImage.createEmpty();
   try { icon = nativeImage.createFromPath(ICON_PATH); } catch { /* 无图标用空图 */ }
   tray = new Tray(icon.resize({ width: 16, height: 16 }));
-  tray.setToolTip("苏苏洛桌宠（点击隐藏/显示）");
   refreshTrayMenu();
   tray.on("click", () => toggleWindow());
   tray.on("double-click", () => {
+    if (!ensureRuntimeAccess()) return;
     showWindow();
     sendToRenderer("pet:toggle-input");
   });
@@ -421,8 +439,10 @@ function refreshTrayMenu() {
   const cfg = config.getConfig();
   const lang = cfg.uiLang || "zh";
   const zcodeOn = !!cfg.zcodeEnabled;
+  const pending = !isConsentAccepted(cfg);
+  if (tray) tray.setToolTip(pending ? "苏苏洛桌宠（点击查看使用条款）" : "苏苏洛桌宠（点击隐藏/显示）");
   const items = buildTrayItems({
-    cfg, lang, i18n, zcodeOn, forcedMode,
+    cfg, lang, i18n, zcodeOn, forcedMode, pending, openTerms,
     isWindowVisible, toggleWindow, setMode, setTts, setRate, setSpeakJa, setWalking,
     detectSpineModels, skinParseDir, SPINE_CN, SKIN_CHAR_NAMES, SKIN_PERSON_NAMES, setSpineSkin, skinIconOf,
     sendToRenderer, setPetLayer, openPsdWindow, rigSkinList, setRigSkin,
@@ -1229,7 +1249,13 @@ ipcMain.handle("pet:set-mood-type", (_e, { name, emotion }) => {
 
 /* ---------- 使用条款强制确认 ---------- */
 function openTerms() {
-  if (termsWin && !termsWin.isDestroyed()) { termsWin.focus(); return; }
+  if (!app.isReady()) return false;
+  if (termsWin && !termsWin.isDestroyed()) {
+    if (termsWin.isMinimized()) termsWin.restore();
+    termsWin.show();
+    termsWin.focus();
+    return true;
+  }
   termsWin = new BrowserWindow({
     width: 660,
     height: 760,
@@ -1243,25 +1269,38 @@ function openTerms() {
   termsWin.setMenuBarVisibility(false);
   termsWin.loadFile(path.join(config.APP_DIR, "renderer", "terms.html"));
 attachCrashDiag(termsWin, "terms");
-    termsWin.on("closed", () => { termsWin = null; });
+  termsWin.on("closed", () => {
+    termsWin = null;
+    // 主进程真实持久化状态是兜底依据；renderer 的 beforeunload 不是安全边界。
+    if (!isConsentAccepted(config.getConfig(true)) && !quitting) {
+      quitting = true;
+      app.quit();
+    }
+  });
+  return true;
 }
 
 ipcMain.handle("pet:agree-terms", () => {
-  config.saveConfig({ agreed: true });
-  refreshTrayMenu();
-  sendToRenderer("pet:terms-agreed");
-  // 同意后：首次运行且无 Key → 自动打开设置引导
-  const cfg = config.getConfig(true);
-  if (cfg.firstRun) {
-    config.saveConfig({ firstRun: false });
-    if (!cfg.chat.apiKey) {
-      setTimeout(() => {
-        openSettings();
-        sendToRenderer("pet:toast", "首次使用：请在设置里填写 API Key 与称呼 💕");
-      }, 800);
+  try {
+    if (!isConsentAccepted(config.getConfig(true))) {
+      acceptConsent({
+        saveConfig: config.saveConfig,
+        readConfig: () => config.getConfig(true)
+      });
     }
+    const runtime = startNormalRuntimeOnce();
+    if (runtime.state !== "started") {
+      refreshTrayMenu();
+      return { ok: false, accepted: true, runtimeFailed: true, message: "已记录同意，但桌宠启动失败，请重启应用" };
+    }
+    refreshTrayMenu();
+    sendToRenderer("pet:terms-agreed");
+    return { ok: true };
+  } catch (e) {
+    logTts("consent", "同意状态保存/确认失败: " + String(e && e.message || e));
+    refreshTrayMenu();
+    return { ok: false, message: "保存同意状态失败，请重试" };
   }
-  return true;
 });
 
 ipcMain.handle("pet:refuse-terms", () => {
@@ -1269,7 +1308,7 @@ ipcMain.handle("pet:refuse-terms", () => {
   app.quit();
   return true;
 });
-ipcMain.handle("pet:open-terms", () => { openTerms(); return true; });
+ipcMain.handle("pet:open-terms", () => openTerms());
 ipcMain.handle("pet:open-quickstart", () => { openQuickstart(); return true; });
 
 /* ---------- 桌宠大小缩放 ---------- */
@@ -1458,7 +1497,7 @@ function startAgentApi() {
         return;
       }
       if (!/^application\/json(?:\s*;|$)/i.test(String(req.headers["content-type"] || ""))) { send(415, { ok: false, error: "application/json required" }); return; }
-      if (!cfg.agreed) { send(403, { ok: false, error: "请先同意《使用条款与隐私政策》" }); return; }
+      if (!isConsentAccepted(cfg)) { send(403, { ok: false, error: "请先同意《使用条款与隐私政策》" }); return; }
       const maxBytes = Math.max(1024, Math.min(1024 * 1024, Number(apiCfg.maxBodyBytes) || 65536));
       const parsed = await readAgentJson(req, maxBytes);
       if (parsed.error) { send(parsed.error, { ok: false, error: parsed.error === 413 ? "payload too large" : "invalid json" }); return; }
@@ -2028,7 +2067,7 @@ async function handleAsk(sender, payload) {
   }
 }
 async function handleAskInner(sender, { id, text }) {
-  if (!config.getConfig().agreed) {
+  if (!isConsentAccepted(config.getConfig())) {
     sender.send("pet:error", { id, message: "请先阅读并同意《使用条款与隐私政策》后使用" });
     return;
   }
@@ -2226,7 +2265,7 @@ ipcMain.handle("pet:get-state", () => {
     petName: (cfg.pet && cfg.pet.name) || "苏苏洛",
     userName: (cfg.chat && cfg.chat.userName) || "主人",
     moods: getMoodList(),
-    agreed: !!cfg.agreed,
+    agreed: cfg.agreed === true,
     scale: cfg.window.scale || 1.0,
     agentApi: { ...cfg.agentApi, bearerToken: undefined }, // token 原值不回传 renderer
     firstRun: !!cfg.firstRun,
@@ -4098,8 +4137,6 @@ function walkDiag() {
     }
   } catch { /* 忽略 */ }
 }
-setInterval(walkDiag, 20000);
-
 function setWalking(on) {
   config.saveConfig({ walking: !!on });
   refreshTrayMenu();
@@ -4621,16 +4658,31 @@ for (let lockRetry = 0; !gotLock && lockRetry < 24; lockRetry++) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
   gotLock = app.requestSingleInstanceLock();
 }
+let normalRuntimeRunner = null;
+let normalRuntimeStartImpl = null;
+let secondInstanceBeforeReady = false;
+function startNormalRuntimeOnce() {
+  if (!canUseRuntime(config.getConfig())) return { started: false, state: "pending" };
+  if (!normalRuntimeStartImpl) return { started: false, state: "not-ready" };
+  if (!normalRuntimeRunner) normalRuntimeRunner = createOnceRunner(() => normalRuntimeStartImpl());
+  try {
+    return normalRuntimeRunner.start();
+  } catch (e) {
+    logTts("startup", "normal runtime 启动失败（不会重复启动）: " + String(e && e.stack || e));
+    return { started: false, state: normalRuntimeRunner.state, error: e };
+  }
+}
 if (!gotLock) {
   try { logTts("update", "单实例锁被占（重试 12s 后放弃），退出"); } catch { /* 忽略 */ }
   app.quit();
 } else {
   app.on("second-instance", () => {
-    if (win) { win.show(); win.focus(); }
+    if (!app.isReady()) { secondInstanceBeforeReady = true; return; }
+    if (!isConsentAccepted(config.getConfig())) { openTerms(); return; }
+    showWindow();
   });
 
-  app.whenReady().then(() => {
-    syncNativeTheme(); // 原生标题栏/滚动条随用户主题（须在首个窗口创建前）
+function initializeNormalRuntime() {
     applyNetProxy(); // O8：启动时应用网络代理（net.fetch 的更新/天气走此代理）
     relaunchIfAppDirNewer(); // zip 覆盖解压升级兜底：散目录比 asar 新时让位重启（须在其他初始化前）
     try {
@@ -4698,6 +4750,7 @@ if (!gotLock) {
     clearInterval(barrierTimer);
     barrierTimer = setInterval(refreshWinBarriers, 3000);
     syncWalkingEngine(); // 配置了 Spine+行走时，启动即开始桌面行走
+    setInterval(walkDiag, 20000);
     if (config.getConfig().fileGuard) setFileGuard(true); // 蜜标监控（检测敏感配置区域被其他程序访问）
     runDllGuard(); // §14 追加 98：DLL 侧载自检（exe 目录 dll 基线对比，可疑即告警）
 
@@ -4727,12 +4780,7 @@ if (!gotLock) {
       logTts("gsv", "日语模式/声音开关未全开，跳过引擎预热");
     }
 
-    // 使用条款强制确认：未同意 → 弹条款窗口，桌宠/聊天/Agent 均不可用
     const _cfg = config.getConfig();
-    if (!_cfg.agreed) {
-      setTimeout(() => openTerms(), 600);
-      sendToRenderer("pet:terms-pending");
-    }
 
     // 本地 Agent 调用接口（其他 agent / 脚本可调用，仅 127.0.0.1）
     startAgentApi();
@@ -4774,7 +4822,7 @@ if (!gotLock) {
     }
 
     // 首次启动：已同意条款且无 API Key 时自动打开设置引导
-    if (_cfg.agreed && _cfg.firstRun) {
+    if (isConsentAccepted(_cfg) && _cfg.firstRun) {
       config.saveConfig({ firstRun: false });
       if (!_cfg.chat.apiKey) {
         setTimeout(() => {
@@ -4794,8 +4842,27 @@ if (!gotLock) {
       console.error("[SuzuranPet] 热键注册异常:", e.message);
     }
 
+}
+  normalRuntimeStartImpl = initializeNormalRuntime;
+
+  app.whenReady().then(() => {
+    syncNativeTheme();
+    if (isConsentAccepted(config.getConfig())) {
+      startNormalRuntimeOnce();
+    } else {
+      createTray();
+      setTimeout(() => {
+        if (!quitting && !isConsentAccepted(config.getConfig(true))) openTerms();
+      }, 600);
+    }
+    if (secondInstanceBeforeReady) {
+      secondInstanceBeforeReady = false;
+      if (ensureRuntimeAccess()) {
+        showWindow();
+      }
+    }
     app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      ensureMainWindow();
     });
   });
 
