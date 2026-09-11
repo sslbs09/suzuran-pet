@@ -124,6 +124,7 @@ function registerUserAssetProtocol() {
 }
 
 let win = null;
+const windowSizeRevision = renderModeMod.createResizeRevision(); // 只用于使模式切换/连续尺寸提交的旧稳定化回调失效
 let tray = null;
 let helpWin = null; // 使用说明窗口
 let quickstartWin = null; // 新手教程窗口
@@ -262,9 +263,13 @@ function sitOnTaskbar() {
   if (!win || win.isDestroyed()) return;
   const b = win.getBounds();
   const wa = walkGeo.workAreaOf(screen, b);
+  const mode = config.getConfig().renderMode;
+  const groundGap = renderModeMod.effectiveGroundGap(mode, walk.groundGap, gifVisualGroundGap);
+  // Native BrowserWindow coordinates must be integral; keep the visual gap precise until this boundary.
+  const targetY = renderModeMod.groundAlign(b, wa, groundGap).y || 0;
   win.setPosition(
-    Math.min(Math.max(b.x, walkMinX(wa)), wa.x + wa.width - b.width),
-    wa.y + wa.height + walk.groundGap - b.height
+    Math.round(Math.min(Math.max(b.x, walkMinX(wa)), wa.x + wa.width - b.width)) || 0,
+    targetY
   );
   showWindow();
   walk.seated = skinHasSit; // 无坐下动画皮肤恢复为站立
@@ -1316,17 +1321,33 @@ function setScale(scale) {
   const s = clampScale(scale);
   config.saveConfig({ window: { scale: s } });
   if (win && !win.isDestroyed()) {
+    const resizeRevision = windowSizeRevision.next();
+    const wasGrounded = captureResizeAnchor();
     const cfg = config.getConfig();
     const ws = Math.round((cfg.window.width || 260) * s);
     const hs = Math.round((cfg.window.height || 200) * s);
+    // resizable:false 时 Electron 可能忽略缩小；沿用 pet:set-size 的安全 resize 流程。
+    try { if (!win.isResizable()) win.setResizable(true); } catch { /* 忽略 */ }
     win.setSize(ws, hs);
-    setTimeout(() => clampPetToWorkArea("缩放"), 120);
     try {
       const wa = walkGeo.workAreaOf(screen, win.getBounds());
       const [x, y] = win.getPosition();
       win.setPosition(Math.min(Math.max(x, walkMinX(wa)), wa.x + wa.width - ws),
                       Math.min(Math.max(y, wa.y), wa.y + wa.height - hs + 80));
     } catch { /* 忽略 */ }
+    repositionAfterWindowSizeChange(false, wasGrounded);
+    setTimeout(() => {
+      const revisionCurrent = windowSizeRevision.isCurrent(resizeRevision);
+      try {
+        if (revisionCurrent) {
+          clampPetToWorkArea("缩放");
+          repositionAfterWindowSizeChange(false, wasGrounded);
+        }
+      } finally {
+        // stale callback 也必须收回自己打开的 resizable 状态，不能因 stale 直接跳过恢复。
+        try { if (win && !win.isDestroyed()) win.setResizable(false); } catch { /* 忽略 */ }
+      }
+    }, 120);
     applySeatPosition(); // 尺寸档位变了，若正处于坐姿立即按新档位重新落座
   }
   refreshTrayMenu();
@@ -2381,34 +2402,12 @@ ipcMain.handle("pet:save-settings", (_e, patch) => {
     }
     if (after.renderMode !== before.renderMode) {
       sendToRenderer("pet:render-mode-changed", after.renderMode);
+      windowSizeRevision.next(); // 旧模式的 150ms 尺寸回调不得回写新模式
       // 模式切换是显式操作：旧模式的瞬态暂停（拖拽/对话/放大）不带入新模式，
       // 否则切回 Spine 后行走引擎恢复但 paused 冻结，表现为"不能移动，过一会才好"
       walk.dragPaused = false; walk.chatPaused = false; walk.zoomPaused = false;
       walk.paused = false; walk.pausedAt = 0;
       syncWalkingEngine(); // 切回 GIF 时自动停走；切回 Spine 且开关开着则恢复
-      // v2.5.13 模式切换后把窗口底边对齐任务栏上沿：三种模式窗口高度不同（rig 300×138 等），
-      // 不做对齐会出现切模式后角色悬空/陷地的跳变
-      try {
-        if (win && !win.isDestroyed()) {
-          // 按桌宠当前所在显示器对齐任务栏上沿并钳回该显示器水平范围。
-          const eb = win.getBounds();
-          const wa = walkGeo.workAreaOf(screen, eb);
-          const al = renderModeMod.groundAlign(eb, wa, walk.groundGap);
-          win.setPosition(al.x, al.y);
-          logTts("walk", "模式切换贴地: " + after.renderMode + " → (" + al.x + "," + al.y + ") " + eb.width + "x" + eb.height);
-          // 延迟二次贴地：渲染层模式初始化（setSize/几何上报）会异步挪动窗口，
-          // 2.5s 后按当时的窗口 bounds 和所在显示器再贴一次。
-          setTimeout(() => {
-            try {
-              if (!win || win.isDestroyed()) return;
-              const eb2 = win.getBounds();
-              const wa2 = walkGeo.workAreaOf(screen, eb2);
-              const al2 = renderModeMod.groundAlign(eb2, wa2, walk.groundGap);
-              win.setPosition(al2.x, al2.y);
-            } catch { /* 忽略 */ }
-          }, 2500);
-        }
-      } catch (e) { logTts("walk", "贴地异常: " + (e && e.message || e)); }
     } else if (!!after.walking !== !!before.walking) {
       syncWalkingEngine();
     }
@@ -2969,7 +2968,8 @@ function dragSeatUpdate(final = false) {
   if (!win || win.isDestroyed()) return false;
   const b = win.getBounds();
   const wa = walkGeo.workAreaOf(screen, b);
-  const feet = b.y + b.height - walk.groundGap; // 角色脚底实际屏幕位置
+  const groundGap = renderModeMod.effectiveGroundGap(config.getConfig().renderMode, walk.groundGap, gifVisualGroundGap);
+  const feet = b.y + b.height - groundGap; // 角色脚底实际屏幕位置
   const waBottom = wa.y + wa.height;
   let seated = false;
   let magnet = null;                                // 本次吸附类型："taskbar"|"icon"|null
@@ -2981,7 +2981,7 @@ function dragSeatUpdate(final = false) {
       seated = true;                                   // 任务栏完整坐姿磁吸
       magnet = "taskbar";
       walk.taskbarHang = false;
-      ny = waBottom + walk.groundGap - b.height + effectiveSeatSink();
+      ny = waBottom + groundGap - b.height + effectiveSeatSink();
       nx = Math.min(Math.max(b.x, walkMinX(wa)), wa.x + wa.width - b.width);
     } else if (freeDragMode && final && feet > waBottom - 40 && feet < waBottom + 20) {
       // 任务栏半挂：保留释放高度，仅有限下探，不强制塞入坐姿下沉量（原 -120/+80 → -40/+20 收窄）
@@ -2991,7 +2991,7 @@ function dragSeatUpdate(final = false) {
       walk.sunk = false;
       walk.freeStand = true;
       // 半挂只允许在可见工作区内，避免透明窗口底部落到屏幕外被裁切。
-      const visibleFeetY = Math.min(feet + walk.groundGap, waBottom);
+      const visibleFeetY = Math.min(feet + groundGap, waBottom);
       ny = Math.round(Math.max(wa.y, visibleFeetY - b.height + 22));
       nx = Math.min(Math.max(b.x, walkMinX(wa)), wa.x + wa.width - b.width);
       walkSetPosition(nx, ny, "taskbar-half-hang");
@@ -3009,7 +3009,7 @@ function dragSeatUpdate(final = false) {
       if (best) {
         seated = true;                                 // 图标顶磁吸
         magnet = "icon";
-        ny = best.y + walk.groundGap - b.height + effectiveSeatSink(); // 任务栏同款下沉：臀坐图标沿、腿垂进图标格（无坐下动画则不下沉）
+        ny = best.y + groundGap - b.height + effectiveSeatSink(); // 任务栏同款下沉：臀坐图标沿、腿垂进图标格（无坐下动画则不下沉）
         nx = Math.round(best.x - charCx);
       }
     } else {
@@ -3024,7 +3024,7 @@ function dragSeatUpdate(final = false) {
         const rowTop = oy + Math.max(0, Math.round((feet - oy) / cellH)) * cellH;
         if (col >= 0 && Math.abs(feet - rowTop) <= 44) {
           seated = true;                               // 图标顶磁吸
-          ny = rowTop + walk.groundGap - b.height;
+          ny = rowTop + groundGap - b.height;
           nx = Math.round(cellCx - b.width / 2);
         }
       }
@@ -3071,6 +3071,8 @@ function dragSeatUpdate(final = false) {
 /* ---------- 桌面行走 v2（仅 Spine 模式，与 GIF 表情系统完全独立）
    地面 = 任务栏上沿；水平左右走动、走走停停；偶尔跳到桌面程序窗口顶上坐下休息（Sit）。 ---------- */
 const walk = walkCore.createWalkState(); // 行走状态（walk-core 提供，纯数据）
+let gifVisualGroundGap = 0; // GIF 可见脚底到窗口底的视觉 gap；独立于 Spine walk.groundGap
+const lastGroundGapReports = { spine: null, gif: null };
 let skinHasSit = true; // 当前皮肤是否有可播的坐下动画（渲染层皮肤加载后上报；false 时坐姿不做下沉，修复"站着脚陷进任务栏"）
 const WALK_TICK_MS = 40;
 const WALK_SPEED = 1.2;                        // 每 tick 像素 ≈ 30px/s
@@ -3304,6 +3306,32 @@ function applySeatPosition() {
   applyLayer(walk.seated || walk.active); // 接触任务栏表面时保证在任务栏之上
 }
 
+function resizeTransientActive() {
+  return walk.perched || walk.dragPaused || walk.flight || walk.jump ||
+    walk.iconRest || walk.iconTarget || walk.gotoPerch || walk.returning || walk.freeStand;
+}
+
+/** 在 setSize 前保存 grounded 语义；resize 后不得用新底边反推旧状态。 */
+function captureResizeAnchor() {
+  if (!win || win.isDestroyed() || resizeTransientActive()) return false;
+  try {
+    const mode = config.getConfig().renderMode;
+    const bounds = win.getBounds();
+    const wa = walkGeo.workAreaOf(screen, bounds);
+    return renderModeMod.wasGroundAnchored({
+      mode,
+      bounds,
+      wa,
+      groundGap: walk.groundGap,
+      gifGroundGap: gifVisualGroundGap,
+      seated: walk.seated,
+      seatSink: effectiveSeatSink()
+    });
+  } catch {
+    return false;
+  }
+}
+
 /** 进入休息姿态（相位机/落地/瞬态守卫共用）：有坐下动画皮肤→坐姿下沉；
  *  无坐下动画皮肤→站立休息（seated=false），避免"站着发呆却按坐姿调度"的怪异观感。 */
 function enterRestPose() {
@@ -3313,14 +3341,31 @@ function enterRestPose() {
   applySeatPosition();
 }
 
-/** 坐姿窗口尺寸变化重锚（TD-1 winter 悬空坐）：气泡开/关走 pet:set-size 改变窗口高度，
- *  窗口顶不动、底边随动，clamp 后坐姿脚底偏离任务栏沿口；且放大暂停（zoomPaused）期间
- *  walkTick 的 5s 坐姿自愈不跑——悬空一直持续到气泡关闭/起身。凡坐姿中的尺寸变化都立即重锚。
- *  判定抽到 walk-state 纯函数（v2.5.26 收敛①惯例），副作用留主干。 */
-function reseatAfterWindowSizeChange() {
-  if (!win || win.isDestroyed() || config.getConfig().renderMode !== "spine") return;
-  if (!walkState.seatReanchorOnResizeDecision({ seated: walk.seated, perched: walk.perched, dragPaused: walk.dragPaused, flight: walk.flight, jump: walk.jump })) return;
-  applySeatPosition();
+/** 尺寸提交后的最终定位：只读取提交后的最新 bounds，并按当前姿态决定落点。 */
+function repositionAfterWindowSizeChange(renderModeCommit = false, wasGroundAnchored = false) {
+  if (!win || win.isDestroyed()) return;
+  const bounds = win.getBounds();
+  const wa = walkGeo.workAreaOf(screen, bounds);
+  const decision = renderModeMod.resizeRepositionDecision({
+    mode: config.getConfig().renderMode,
+    bounds,
+    wa,
+    groundGap: walk.groundGap,
+    gifGroundGap: gifVisualGroundGap,
+    seated: walk.seated,
+    perched: walk.perched,
+    dragPaused: walk.dragPaused,
+    flight: walk.flight,
+    jump: walk.jump,
+    transient: walk.iconRest || walk.iconTarget || walk.gotoPerch || walk.returning || walk.freeStand,
+    renderModeCommit,
+    wasGroundAnchored
+  });
+  if (decision.type === "seat") {
+    applySeatPosition();
+  } else if (decision.type === "ground") {
+    win.setPosition(decision.position.x, decision.position.y);
+  }
 }
 
 function chooseWalkBehavior() {
@@ -3811,8 +3856,9 @@ function outOfScreenGuard() {
     if (walk.paused || walk.flight || walk.jump) return; // 拖拽/飞行中不干预
     const b = win.getBounds();
     const wa = walkGeo.workAreaOf(screen, b);
+    const groundGap = renderModeMod.effectiveGroundGap(config.getConfig().renderMode, walk.groundGap, gifVisualGroundGap);
     // 垂直：窗口底超出工作区底太多（含被拖到屏幕下方）→ 钳回地面线
-    const groundY = Math.max(wa.y, wa.y + wa.height - b.height) + (walk.groundGap || 0);
+    const groundY = Math.max(wa.y, wa.y + wa.height - b.height) + groundGap;
     if (b.y > groundY + 120) {
       if (Date.now() - (walk._vLog || 0) > 10000) { walk._vLog = Date.now(); logTts("walk", `垂直出屏钳回: y=${b.y}→${Math.round(groundY)}`); }
       win.setPosition(b.x, Math.round(groundY));
@@ -4297,14 +4343,31 @@ ipcMain.handle("pet:set-fixed-only", async (_e, on) => {
     return { ok: true };
   } catch (e) { return { ok: false, message: String(e && (e.message || e)) }; }
 });
-ipcMain.on("pet:set-ground-gap", (_e, px) => {
-  const v = Number(px);
-  if (!Number.isFinite(v)) return;
-  const raw = Math.max(0, Math.min(80, Math.round(v)));
-  const next = Math.max(0, Math.min(80, raw + standSinkOffset())); // v2.5.26 站立脚底微调偏移
-  if (next === walk.groundGap) return;
-  walk.groundGap = next;
-  if (!walk.paused && !walk.flight && !walk.jump && walk.seated) applySeatPosition();
+ipcMain.on("pet:set-ground-gap", (_e, px, meta = {}) => {
+  const mode = config.getConfig().renderMode;
+  const report = renderModeMod.groundGapReportDecision({
+    mode,
+    sourceMode: meta && meta.sourceMode,
+    current: walk.groundGap,
+    gifCurrent: gifVisualGroundGap,
+    px,
+    standSinkOffset: standSinkOffset(),
+    geometryRevision: meta && meta.geometryRevision,
+    renderGeneration: meta && meta.renderGeneration,
+    lastReport: lastGroundGapReports[mode]
+  });
+  if (!report.accepted) return;
+  lastGroundGapReports[mode] = report.identity;
+  if (report.target === "spine") {
+    walk.groundGap = report.value;
+    if (!walk.paused && !walk.flight && !walk.jump && walk.seated) applySeatPosition();
+    return;
+  }
+  if (report.target === "gif") {
+    const wasGrounded = captureResizeAnchor();
+    gifVisualGroundGap = report.value;
+    if (report.changed && wasGrounded) repositionAfterWindowSizeChange(false, true);
+  }
 });
 ipcMain.on("pet:set-char-inset", (_e, px) => { // 渲染层上报：窗口左缘到角色左缘的距离（上限 200=正常贴左缘值；异常上报会把行走左边界扩到屏幕外导致“闪现”）
   const v = Number(px);
@@ -4552,18 +4615,23 @@ ipcMain.on("pet:set-clickable", (_e, clickable) => {
   if (clickable !== _lastClickable) { _lastClickable = !!clickable; logTts("ui", "clickable=" + !!clickable + "（鼠标命中角色区变化）"); }
 });
 let _lastClickable = null;
-ipcMain.on("pet:set-size", (_e, w, h) => {
+ipcMain.on("pet:set-size", (_e, w, h, source) => {
   if (!win || win.isDestroyed()) return;
+  const resizeRevision = windowSizeRevision.next();
+  const renderModeCommit = source === "render-mode";
+  const wasGrounded = captureResizeAnchor();
   const ws = Math.max(120, Math.min(1200, Math.round(w || 170)));
   const hs = Math.max(120, Math.min(900, Math.round(h || 260)));
   // resizable:false 时 setSize 缩小会被忽略（放大接近原值看不出），先临时允许缩放
   try { if (!win.isResizable()) win.setResizable(true); } catch { /* 忽略 */ }
   win.setSize(ws, hs);
-  reseatAfterWindowSizeChange(); // TD-1：气泡开/关改窗口高后窗口底随动，坐姿立即重锚回任务栏沿口
+  repositionAfterWindowSizeChange(renderModeCommit, wasGrounded);
   setTimeout(() => {
+    const revisionCurrent = windowSizeRevision.isCurrent(resizeRevision);
+    if (!revisionCurrent) return;
     try { win.setResizable(false); } catch { /* 忽略 */ }
     clampPetToWorkArea("窗口尺寸");
-    reseatAfterWindowSizeChange(); // clamp 可能又挪了 y，补一次重锚
+    repositionAfterWindowSizeChange(renderModeCommit, wasGrounded); // Electron bounds 稳定后，以最终尺寸再定位一次
   }, 150);
 });
 ipcMain.handle("pet:tts-clone", (_e, text, opts) => {

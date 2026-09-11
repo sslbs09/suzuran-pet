@@ -220,7 +220,7 @@ function createPetLifecycleHarness() {
 
   const liveOwners = [];
   const spineQueries = { immediate: true, pending: [], calls: 0 };
-  const stateReads = { hold: false, pending: [], calls: 0 };
+  const stateReads = { hold: false, pending: [], calls: 0, walkState: null };
   const liveRuntime = {
     current: null,
     pending: [],
@@ -241,7 +241,10 @@ function createPetLifecycleHarness() {
     setScale() {}, setMood() {}, poke() {}
   };
 
-  const stateSnapshot = () => ({ renderMode: "gif", rigSkinId: "", live2dSkinId: "" });
+  const stateSnapshot = () => ({
+    renderMode: "gif", rigSkinId: "", live2dSkinId: "",
+    ...(stateReads.walkState ? { walkState: { ...stateReads.walkState } } : {})
+  });
   const petAPI = new Proxy({
     getState: () => {
       stateReads.calls += 1;
@@ -254,7 +257,7 @@ function createPetLifecycleHarness() {
       return new Promise((resolve, reject) => spineQueries.pending.push({ resolve, reject }));
     },
     live2dList: async () => [{ id: "builtin/test", name: "test", url: "test.model3.json" }],
-    setSize(w, h) { calls.sizes.push([w, h]); },
+    setSize(w, h, source) { calls.sizes.push(source ? [w, h, source] : [w, h]); },
     setClickable(value) { calls.clickable.push(!!value); },
     playback(message) { calls.playback.push(String(message)); },
     setGroundGap() {}, setCharInset() {}, setHasSit() {}, setSleeping() {}, walkingEngineStop() {},
@@ -286,6 +289,7 @@ function createPetLifecycleHarness() {
     innerWidth: 260,
     innerHeight: 200,
     devicePixelRatio: 1,
+    location: { search: "" },
     performance: { now: () => Date.now() },
     requestAnimationFrame: (fn) => nativeSetTimeout(fn, 0),
     cancelAnimationFrame: nativeClearTimeout,
@@ -304,6 +308,7 @@ function createPetLifecycleHarness() {
     },
     ResizeObserver: undefined,
     URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} },
+    URLSearchParams,
     petAPI,
     petTheme: { apply() {} },
     GenericParts: null,
@@ -392,6 +397,120 @@ test("all real mode changes converge on switchRenderMode", () => {
   assert.match(renderer, /onLive2dChanged\(async \(id\) =>/);
   assert.match(renderer, /onRigSkinChanged\(async \(id\) =>/);
   assert.match(renderer, /switchRenderMode\("spine", \{ force: true, delayMs: 200 \}\)/);
+});
+
+function assertSpineReadyReplayWiring(source = renderer) {
+  const start = source.indexOf("if (window.petAPI.onRenderModeChanged)");
+  const end = source.indexOf("if (window.petAPI.onLive2dChanged)", start);
+  assert.ok(start >= 0 && end > start, "render-mode listener block exists");
+  const block = source.slice(start, end);
+  const readyStart = block.indexOf("if (isCurrentModeRequest() && (result.status === \"ready\" || result.status === \"noop\") && activeRenderMode === mode)");
+  assert.ok(readyStart >= 0, "ready/current owner guard exists");
+  const ready = block.slice(readyStart);
+  const mood = ready.indexOf('setMood(lastMood || "idle")');
+  const replay = ready.indexOf("applyWalkState(state.walkState)");
+  assert.ok(mood >= 0, "post-commit mood restoration exists");
+  assert.ok(replay > mood, "latest walkState replay follows mood restoration");
+  assert.match(ready, /mode === "spine" && state\.walkState && activeRenderGeneration === requestGeneration/,
+    "replay is limited to current Spine owner generation");
+  assert.match(block, /if \(!result \|\| result\.status === "superseded" \|\| !isCurrentModeRequest\(\)\) return;[\s\S]*const state = await window\.petAPI\.getState\(\)/,
+    "state is read only after the request is current");
+}
+
+test("Spine mode-ready replay uses latest state after mood restoration", () => {
+  assertSpineReadyReplayWiring();
+});
+
+function expectSpineReplayMutationToFail(label, mutate) {
+  let failed = false;
+  try { assertSpineReadyReplayWiring(mutate(renderer)); } catch { failed = true; }
+  assert.equal(failed, true, `${label} must fail replay wiring validation`);
+}
+
+test("Spine mode-ready replay mutation matrix", () => {
+  expectSpineReplayMutationToFail("删除 post-commit applyWalkState", (source) => source.replace(
+    '      if (mode === "spine" && state.walkState && activeRenderGeneration === requestGeneration) {\n' +
+    '        applyWalkState(state.walkState); // 新 owner ready 后重放最新行走状态，收敛 Sit/Rest/Move\n' +
+    '      }\n', ""));
+  expectSpineReplayMutationToFail("applyWalkState 前置到 setMood 之前", (source) => source.replace(
+    '      setMood(lastMood || "idle"); // 切换后恢复当前情绪\n' +
+    '      if (mode === "spine" && state.walkState && activeRenderGeneration === requestGeneration) {\n' +
+    '        applyWalkState(state.walkState); // 新 owner ready 后重放最新行走状态，收敛 Sit/Rest/Move\n' +
+    '      }\n',
+    '      if (mode === "spine" && state.walkState && activeRenderGeneration === requestGeneration) {\n' +
+    '        applyWalkState(state.walkState);\n' +
+    '      }\n' +
+    '      setMood(lastMood || "idle"); // 切换后恢复当前情绪\n'));
+  expectSpineReplayMutationToFail("删除 current-request guard", (source) => source.replace(
+    'if (isCurrentModeRequest() && (result.status === "ready" || result.status === "noop") && activeRenderMode === mode)',
+    "if (true)"));
+  expectSpineReplayMutationToFail("改用旧 cached walkState", (source) => source.replace(
+    "applyWalkState(state.walkState)", "applyWalkState(walkState)"));
+});
+
+function walkState(overrides = {}) {
+  return {
+    active: false, resting: true, perched: false, seated: false,
+    face: 1, paused: false, sleeping: false, ...overrides
+  };
+}
+
+async function enterSpineFromModeEvent(harness, latestState, earlyState) {
+  harness.lifecycle.setMoods([]); // 禁止 setMood 偶然掩盖 post-commit replay
+  harness.spineQueries.immediate = false;
+  const pending = harness.handlers.onRenderModeChanged("spine");
+  await wait(8);
+  assert.equal(harness.spineQueries.pending.length, 1, "Spine owner ready 前仍在等待模型查询");
+  if (earlyState) harness.handlers.onWalking(earlyState);
+  harness.stateReads.walkState = latestState;
+  harness.spineQueries.pending.shift().resolve({ list: [], current: "builtin" });
+  const result = await pending;
+  assert.equal(result, undefined, "mode event handler completes without exposing an unrelated result");
+  return harness.lifecycle.getState().spineObj;
+}
+
+test("production early seated broadcast is replayed after the new Spine owner commits", async () => {
+  const harness = createPetLifecycleHarness();
+  const seated = walkState({ seated: true });
+  const owner = await enterSpineFromModeEvent(harness, seated, seated);
+  assert.equal(owner.state.getCurrent(0).animation.name, "Sitd", "owner ready 后 seated=true 最终进入 Sit");
+});
+
+test("production active=false plus seated=true still replays Sit", async () => {
+  const harness = createPetLifecycleHarness();
+  const owner = await enterSpineFromModeEvent(harness, walkState({ active: false, seated: true }), walkState({ active: false, seated: true }));
+  assert.equal(owner.state.getCurrent(0).animation.name, "Sitd", "active=false 不得把 seated=true 降级为 idle");
+});
+
+test("production mode-ready replay uses the latest state instead of the cached pre-owner state", async () => {
+  const harness = createPetLifecycleHarness();
+  const cached = walkState({ active: true, resting: false, seated: false });
+  const latest = walkState({ active: false, seated: true });
+  const owner = await enterSpineFromModeEvent(harness, latest, cached);
+  assert.equal(owner.state.getCurrent(0).animation.name, "Sitd", "latest getState walkState wins over cached state");
+});
+
+test("production mode-ready replay does not turn seated=false into Sit", async () => {
+  const harness = createPetLifecycleHarness();
+  const owner = await enterSpineFromModeEvent(harness, walkState({ active: false, seated: false }), null);
+  assert.notEqual(owner.state.getCurrent(0).animation.name, "Sitd", "seated=false 不误播 Sit");
+});
+
+test("production stale Spine state response cannot replay into the later GIF request", async () => {
+  const harness = createPetLifecycleHarness();
+  harness.lifecycle.setMoods([]);
+  harness.stateReads.hold = true;
+  const staleSpine = harness.handlers.onRenderModeChanged("spine");
+  await wait(10);
+  assert.equal(harness.stateReads.pending.length, 1, "Spine ready 后 state response 被挂起");
+
+  harness.stateReads.hold = false;
+  const currentGif = harness.handlers.onRenderModeChanged("gif");
+  await currentGif;
+  harness.stateReads.pending.shift()({ walkState: walkState({ seated: true }) });
+
+  assert.equal(await staleSpine, undefined, "旧 Spine handler 在 request 失效后 no-op");
+  assert.equal(harness.lifecycle.getState().active, "gif", "旧 state response 不改变当前 mode");
 });
 
 test("directed transition contract retains all 12 requested edges", () => {
@@ -855,10 +974,10 @@ test("production GIF/Spine commits restore base window and appearance size", asy
   const harness = createPetLifecycleHarness();
   await harness.enter("rig", "rig-a");
   await harness.enter("gif");
-  assert.deepEqual(harness.calls.sizes.at(-1), [260, 200]);
+  assert.deepEqual(harness.calls.sizes.at(-1), [260, 200, "render-mode"]);
   await harness.enter("live2d", "live-a");
   await harness.enter("spine");
-  assert.deepEqual(harness.calls.sizes.at(-1), [260, 200]);
+  assert.deepEqual(harness.calls.sizes.at(-1), [260, 200, "render-mode"]);
 });
 
 test("production Spine initial fit runs for the committed owner generation", async () => {

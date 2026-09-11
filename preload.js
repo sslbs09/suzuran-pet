@@ -20,7 +20,7 @@ contextBridge.exposeInMainWorld("petAPI", {
   openConfig: () => ipcRenderer.invoke("pet:open-config"),
   moveWindow: (dx, dy) => ipcRenderer.send("pet:move", dx, dy),
   hideWindow: () => ipcRenderer.send("pet:hide"),
-  setSize: (w, h) => ipcRenderer.send("pet:set-size", w, h),
+  setSize: (w, h, source) => ipcRenderer.send("pet:set-size", w, h, source),
   setClickable: (v) => ipcRenderer.send("pet:set-clickable", !!v),
   setTts: (enabled) => ipcRenderer.invoke("pet:set-tts", enabled),
   setRate: (rate) => ipcRenderer.invoke("pet:set-rate", rate),
@@ -33,7 +33,7 @@ contextBridge.exposeInMainWorld("petAPI", {
   onPlayAnim: (cb) => ipcRenderer.on("pet:play-anim", (_e, name) => cb(name)),
   setSleeping: (v) => ipcRenderer.send("pet:set-sleeping", !!v),
   setHasSit: (v) => ipcRenderer.send("pet:set-has-sit", !!v), // 皮肤有无坐下动画上报（无则坐姿不下沉，防"站着脚陷进任务栏"）
-  setGroundGap: (px) => ipcRenderer.send("pet:set-ground-gap", px),
+  setGroundGap: (px, meta) => ipcRenderer.send("pet:set-ground-gap", px, meta || null),
   setWalking: (on) => ipcRenderer.invoke("pet:set-walking", !!on),
   walkingPause: (b, source) => ipcRenderer.send("pet:walking-pause", !!b, source || "drag"),
   walkingEngineStop: () => ipcRenderer.send("pet:walking-engine-stop"),

@@ -44,6 +44,7 @@ let requestedRenderMode = "gif";
 let activeRenderMode = null;
 let activeRenderGeneration = 0;
 let renderSwitchGeneration = 0;
+let gifGeometryRevision = 0;
 let renderSwitchStatus = "idle"; // idle | switching | ready | failed | superseded
 let renderRuntimeReady = false;
 let renderRuntimeResource = "";
@@ -283,8 +284,6 @@ let spineFitGeneration = 0;
 let spineFitStableHits = 0;
 let spineFitOwnerGeneration = 0;
 let spineFitOwner = null;
-let spineProbeTimers = [];
-let spineProbeOwner = null;
 function scheduleFitSpine(opts = {}) {
   spineFitGeneration += 1;
   spineFitStableHits = 0;
@@ -459,31 +458,56 @@ function relDirOf() {
 }
 
 /** 上报角色脚底到窗口底边的空隙（宠物元素悬浮在输入栏上方导致），
- *  主进程贴地吸附时用它把窗口下探相应距离，让脚真正踩在任务栏/图标上 */
-/** 使用未缩放布局坐标上报几何，避免 CSS zoom 的视觉矩形与 Electron DIP 混用。 */
+ *  主进程贴地吸附时用它把窗口下探相应距离，让脚真正踩在任务栏/图标上。
+ *  GIF 使用 CSS zoom 后的 visual DOM rect；Spine 保留原有布局/画布补偿。 */
 let visibleCanvasGap = 0;
 let visibleCanvasGapCandidate = 0;
 let visibleCanvasGapHits = 0;
 let geometryReportTimer = null;
-function reportGroundGap() {
+function nextGifGeometryRevision() {
+  gifGeometryRevision += 1;
+  return gifGeometryRevision;
+}
+function geometryReportContextCurrent(context) {
+  if (!context) return true;
+  return activeRenderMode === context.mode &&
+    activeRenderGeneration === context.renderGeneration &&
+    (context.mode !== "gif" || gifGeometryRevision === context.geometryRevision);
+}
+function reportGroundGap(context = null) {
   try {
-    if (!petEl || !document.documentElement) return;
+    if (!petEl || !document.documentElement || !geometryReportContextCurrent(context)) return;
+    if (activeRenderMode !== "gif" && activeRenderMode !== "spine") return;
     const insetRaw = spineFitKeepScale && spineFigLeftCss > 0
       ? spineFigLeftCss // 自动适配皮肤：角色可见左缘（画布已按宽比加宽，元素左缘 ≠ 角色左缘）
       : Number(petEl.offsetLeft) || 0;
     const inset = Math.max(0, Math.min(document.documentElement.clientWidth || 260, Math.round(insetRaw))); // 左边界补偿：角色条带不可能超出窗口宽，用 clientWidth 作上限（异常上报会把行走左边界扩到屏幕外导致角色“闪现”出屏）
-    const layoutGap = (document.documentElement.clientHeight || 0) - ((Number(petEl.offsetTop) || 0) + (Number(petEl.offsetHeight) || 0));
-    const gap = Math.max(0, Math.min(80, Math.round(layoutGap + visibleCanvasGap)));
-    window.petAPI.setGroundGap(gap);
+    const gap = activeRenderMode === "gif"
+      ? Math.max(0, Math.min(80, Math.round((window.innerHeight - petEl.getBoundingClientRect().bottom) * 100) / 100))
+      : Math.max(0, Math.min(80, Math.round(((document.documentElement.clientHeight || 0) - ((Number(petEl.offsetTop) || 0) + (Number(petEl.offsetHeight) || 0)) + visibleCanvasGap))));
+    const reportMeta = {
+      sourceMode: activeRenderMode,
+      renderGeneration: activeRenderGeneration
+    };
+    if (activeRenderMode === "gif") reportMeta.geometryRevision = gifGeometryRevision;
+    window.petAPI.setGroundGap(gap, reportMeta);
     window.petAPI.setCharInset && window.petAPI.setCharInset(inset);
   } catch { /* 忽略 */ }
 }
 function scheduleGeometryReport() {
   cancelAnimationFrame(scheduleGeometryReport.raf || 0);
   clearTimeout(geometryReportTimer);
+  const context = {
+    mode: activeRenderMode,
+    renderGeneration: activeRenderGeneration,
+    geometryRevision: gifGeometryRevision
+  };
   scheduleGeometryReport.raf = requestAnimationFrame(() => {
-    reportGroundGap();
-    geometryReportTimer = setTimeout(reportGroundGap, 120);
+    if (!geometryReportContextCurrent(context)) return;
+    reportGroundGap(context);
+    if (context.mode !== "gif") {
+      geometryReportTimer = setTimeout(() => reportGroundGap(context), 120);
+    }
   });
 }
 
@@ -520,38 +544,6 @@ function sitAnimName() {
 function reportHasSit() {
   try { window.petAPI.setHasSit && window.petAPI.setHasSit(!!sitAnimName()); } catch { /* 忽略 */ }
 }
-/** 坐姿几何探针（v2.5.27 诊断）：fit 收敛后量可见像素底边与包围盒底边相对画布底边的间隙。
- *  若 visibleGap 远大于 0 → 皮肤坐姿的可见内容在画布内偏上（包围盒含隐藏骨骼），
- *  窗口下沉 30px 不足以让"座位线"落到任务栏沿口 → 悬空坐。拿到数据后做针对性补偿。 */
-function probeSeatGeometry(animName) {
-  const owner = spineRuntimeOwner;
-  const ownerGeneration = owner && owner.context ? owner.context.generation : activeRenderGeneration;
-  spineProbeOwner = owner;
-  const timer = setTimeout(() => {
-    try {
-      if (!spineObj || !spineApp || activeRenderMode !== "spine" || spineRuntimeOwner !== owner || spineProbeOwner !== owner || ownerGeneration !== activeRenderGeneration || !(walkState.seated || walkState.perched)) return;
-      const W = spineApp.screen.width, H = spineApp.screen.height;
-      const rt = PIXI.RenderTexture.create({ width: Math.ceil(W), height: Math.ceil(H) });
-      spineApp.renderer.render(spineObj, { renderTexture: rt, clear: true });
-      const px = spineApp.renderer.extract.pixels(rt);
-      const pw = rt.width, ph = rt.height, fy = H / ph, step = 4, thr = 32;
-      let y1 = -1;
-      for (let y = 0; y < ph; y += step) for (let x = 0; x < pw; x += step) {
-        if (px[(y * pw + x) * 4 + 3] > thr) { if (y > y1) y1 = y; break; }
-      }
-      rt.destroy(true);
-      const b = spineObj.getBounds();
-      const visibleGap = y1 >= 0 ? Math.round(H - (y1 + step) * fy) : -1;
-      // 画布在窗口内的布局：canvasRect 底边距窗口视口底边的距离（=座位线离窗口底的真实间隙）
-      const view = spineApp.view;
-      const cr = view && view.getBoundingClientRect ? view.getBoundingClientRect() : null;
-      const cssGapBelow = cr ? Math.round(window.innerHeight - cr.bottom) : -1;
-      window.petAPI.playback && window.petAPI.playback("[fit-probe] " + animName + " H=" + Math.round(H) + " visibleBottom=" + (y1 >= 0 ? Math.round((y1 + step) * fy) : "?") + " visibleGap=" + visibleGap + " bboxBottom=" + Math.round(b.y + b.height) + " bboxGap=" + Math.round(H - (b.y + b.height)) + " y=" + Math.round(spineObj.y) + " scale=" + spineObj.scale.x.toFixed(3) + " innerH=" + Math.round(window.innerHeight) + " canvasBottom=" + (cr ? Math.round(cr.bottom) : "?") + " cssGapBelow=" + cssGapBelow + " zoom=" + (window.getComputedStyle(document.body).zoom || "1"));
-    } catch { /* 探针失败不影响显示 */ }
-  }, 4600);
-  spineProbeTimers.push(timer);
-}
-
 /** 当前应播放的移动相位动画：坐/窗顶→Sit，地面放松→待机（Relax），走动→Move。
  *  注意必须认识 seated：抛掷落地后 playSpineInteract/onDropped 用本函数恢复动画，
  *  若只认 perched 会在坐姿下沉窗口上恢复站姿（"脚陷进任务栏，点一下才好"根因）。 */
@@ -687,12 +679,9 @@ function uninstallSeatLifecycle() {
 function clearSpineLifecycleTimers() {
   spineFitTimers.forEach(clearTimeout);
   spineFitTimers = [];
-  spineProbeTimers.forEach(clearTimeout);
-  spineProbeTimers = [];
   spineFitGeneration += 1;
   spineFitOwnerGeneration = 0;
   spineFitOwner = null;
-  spineProbeOwner = null;
   cancelAnimationFrame(scheduleGeometryReport.raf || 0);
   scheduleGeometryReport.raf = 0;
   clearTimeout(geometryReportTimer);
@@ -932,9 +921,10 @@ function commitRenderMode(context, result) {
     petEl.style.display = "";
     petEl.style.visibility = "";
     petEl.style.pointerEvents = "auto";
-    window.petAPI.setSize(winSize.width || 260, winSize.height || 200);
+    window.petAPI.setSize(winSize.width || 260, winSize.height || 200, "render-mode");
     applyBubbleSize();
     if (appearanceCfg) applyAppearance(appearanceCfg);
+    scheduleGeometryReport();
     return true;
   }
   if (mode === "spine") {
@@ -945,7 +935,7 @@ function commitRenderMode(context, result) {
     petEl.style.display = "";
     petEl.style.visibility = "";
     petEl.style.pointerEvents = "auto";
-    window.petAPI.setSize(winSize.width || 260, winSize.height || 200);
+    window.petAPI.setSize(winSize.width || 260, winSize.height || 200, "render-mode");
     applyBubbleSize();
     if (appearanceCfg) applyAppearance(appearanceCfg);
     if (spineApp && spineApp.view) {
@@ -970,7 +960,7 @@ function commitRenderMode(context, result) {
       rigCanvas.style.visibility = "";
       rigCanvas.style.pointerEvents = "auto";
     }
-    window.petAPI.setSize(RIG_WIN_W, Math.round(RIG_WIN_H * rigScale));
+    window.petAPI.setSize(RIG_WIN_W, Math.round(RIG_WIN_H * rigScale), "render-mode");
     window.petAPI.walkingEngineStop && window.petAPI.walkingEngineStop();
     return true;
   }
@@ -989,7 +979,7 @@ function commitRenderMode(context, result) {
       canvas.style.visibility = "";
       canvas.style.pointerEvents = "auto";
     }
-    window.petAPI.setSize(Math.round(300 * live2dScaleFactor), Math.round(460 * live2dScaleFactor));
+    window.petAPI.setSize(Math.round(300 * live2dScaleFactor), Math.round(460 * live2dScaleFactor), "render-mode");
     window.petAPI.walkingEngineStop && window.petAPI.walkingEngineStop();
     return true;
   }
@@ -1003,6 +993,7 @@ async function switchRenderMode(nextMode, options = {}) {
       renderRuntimeResource === targetResource) {
     return { status: "noop", mode, generation: activeRenderGeneration, resource: renderRuntimeResource };
   }
+  nextGifGeometryRevision();
   requestedRenderMode = mode;
   const generation = ++renderSwitchGeneration;
   const context = {
@@ -1143,7 +1134,6 @@ function applyWalkState(s) {
       setSpineAnim(target, true, "seat-phase");
       try { window.petAPI.playback && window.petAPI.playback("[fit] seat-phase anim=" + target); } catch { /* 忽略 */ }
       scheduleFitSpine({ seatPhase: true });
-      probeSeatGeometry(target); // 几何探针：fit 收敛后量"可见像素底边 vs 画布底边"，定位悬空坐
     }
     return;
   }
@@ -1277,7 +1267,6 @@ function setSpineMood(mood) {
     setSpineAnim(animName, true, "mood:" + mood);
     moodAnimUntil = Date.now() + 6500; // 情绪动画展示窗口：期间相位对账不抢，过期由对账兜底回收
     scheduleFitSpine();
-    if (mood === "sleep") probeSeatGeometry(animName); // 睡姿姿态实测：Sleepd 高度/贴合入日志
   }
 }
 
@@ -2149,6 +2138,9 @@ if (window.petAPI.onRenderModeChanged) {
     }
     if (isCurrentModeRequest() && (result.status === "ready" || result.status === "noop") && activeRenderMode === mode) {
       setMood(lastMood || "idle"); // 切换后恢复当前情绪
+      if (mode === "spine" && state.walkState && activeRenderGeneration === requestGeneration) {
+        applyWalkState(state.walkState); // 新 owner ready 后重放最新行走状态，收敛 Sit/Rest/Move
+      }
     }
   });
 }
@@ -2600,6 +2592,7 @@ document.addEventListener("mousemove", (e) => {
 // 桌宠大小缩放（CSS zoom 整体缩放，窗口由主进程同步调整）
 function applyScale(s) {
   const v = Math.max(0.6, Math.min(2.0, parseFloat(s) || 1.0));
+  nextGifGeometryRevision();
   document.body.style.zoom = String(v);
   scheduleGeometryReport();
 }
