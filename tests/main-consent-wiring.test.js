@@ -67,6 +67,7 @@ function boot(agreed, options = {}) {
     "walkDiag", "setFileGuard", "runDllGuard", "startAgentApi", "sendProactive", "proactiveStateFn",
     "startFocusWatch", "startWeatherWatch", "startWorkspaceWatch", "openSettings", "applyLayer", "clearDragPause",
     "cancelFlight", "cancelWalkJump"]) context[name] = stub(name);
+  context.applyNativeIgnore = () => {}; // native 穿透写唯一入口（定义于下部切片外）：静默 no-op，本测试只验窗口/生命周期接线，不记录 order
   if (options.partialFailure) context.startAgentApi = () => { hit("startAgentApi"); throw new Error("partial startup failure"); };
   vm.createContext(context);
   vm.runInContext(section("function isWindowVisible()", "/* ---------- 显示层级"), context);

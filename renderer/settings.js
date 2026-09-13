@@ -349,6 +349,17 @@ async function renderOnboard(S) {
   loadRigSkins();
 
   // 渲染模式与桌面行走
+  async function ensureRigSkinForMode() {
+    const skins = await window.petAPI.rigSkins().catch(() => []);
+    if (!skins || !skins.length) return false;
+    const selected = skins.find((s) => s.id === (S.rigSkinId || "")) || skins[0];
+    if (selected.id !== (S.rigSkinId || "")) {
+      const r = await window.petAPI.rigSet(selected.id);
+      if (!r || r.ok === false) return false;
+      S.rigSkinId = selected.id;
+    }
+    return true;
+  }
   $("render-mode").value = S.renderMode === "spine" ? "spine" : S.renderMode === "rig" ? "rig" : S.renderMode === "live2d" ? "live2d" : "gif";
   $("walking-opt").checked = !!S.walking;
   applyRenderModeUI($("render-mode").value);
@@ -356,10 +367,43 @@ async function renderOnboard(S) {
   // 渲染模式即时保存（v2.5.1）：选中即生效，不用滚到页底找保存
   $("render-mode").addEventListener("change", async () => {
     const v = $("render-mode").value;
+    // 明显缺资源时只做 UX 拦截；renderer 仍保留真实 init failure + GIF fallback。
+    if (v === "rig" && !(await ensureRigSkinForMode())) {
+      const committed = S.renderMode === "spine" ? "spine" : S.renderMode === "rig" ? "rig" : S.renderMode === "live2d" ? "live2d" : "gif";
+      $("render-mode").value = committed;
+      applyRenderModeUI(committed);
+      const emptyHint = $("rm-hint");
+      if (emptyHint) emptyHint.textContent = "没有 PSD 皮肤，已保持当前渲染模式";
+      return;
+    }
+    if ($("render-mode").value !== v) return;
     const r = await window.petAPI.saveSettings({ renderMode: v }).catch(() => null);
     const hint = $("rm-hint");
-    if (hint && r && r.ok !== false) hint.textContent = "已切换并保存 ✓";
+    if (!hint) return;
+    if (r === false || (r && r.ok === false)) hint.textContent = "切换请求失败";
+    else hint.textContent = "切换中…";
   });
+  if (window.petAPI.onRenderModeOutcome) {
+    window.petAPI.onRenderModeOutcome((outcome) => {
+      if (!outcome || !/^(?:gif|spine|rig|live2d)$/.test(String(outcome.committedMode || ""))) return;
+      const committed = outcome.committedMode;
+      S.renderMode = committed;
+      $("render-mode").value = committed;
+      applyRenderModeUI(committed);
+      const hint = $("rm-hint");
+      if (!hint) return;
+      const correctionSource = /^(?:rig|live2d|spine)$/.test(String(outcome.correctionSourceMode || ""))
+        ? outcome.correctionSourceMode : "";
+      if (correctionSource || outcome.requestedMode !== committed) {
+        const source = correctionSource || outcome.requestedMode;
+        hint.textContent = source === "rig" ? "2.5D 资源不可用，已回退到 GIF"
+          : source === "live2d" ? "Live2D 初始化失败，已回退到 GIF"
+            : source === "spine" ? "Spine 初始化失败，已回退到 GIF" : "已回退到 GIF";
+      } else {
+        hint.textContent = "已切换并保存 ✓";
+      }
+    });
+  }
   // 主题颜色（v2.5.1）：切换即时保存并全窗生效（auto=19 点-6 点深色）
   const themeSel = $("theme-select");
   if (themeSel) {

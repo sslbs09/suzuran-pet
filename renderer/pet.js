@@ -48,6 +48,8 @@ let gifGeometryRevision = 0;
 let renderSwitchStatus = "idle"; // idle | switching | ready | failed | superseded
 let renderRuntimeReady = false;
 let renderRuntimeResource = "";
+let currentMainRenderModeSeq = null; // main-side identity；renderer generation 不跨 IPC
+let currentRenderSwitchPromise = Promise.resolve();
 const SPINE_BASE = "spine/sussurro/";
 let spinePaths = {           // 默认内置模型；spine/user/ 有用户模型时由主进程探测替换（懒人换模型）
   atlas: SPINE_BASE + "build_char_298_susuro.atlas",
@@ -153,7 +155,6 @@ async function initLive2d(context) {
   const canvas = document.getElementById("live2d-canvas");
   if (!canvas || !window.Live2DRuntime) return { status: "failed", error: new Error("Live2D runtime 未加载") };
   if (!window.Live2DCubismCore) {
-    toast("Live2D 引擎组件缺失，Live2D 初始化失败");
     window.petAPI.playback && window.petAPI.playback("[live2d] Live2D Core 缺失，初始化失败");
     return { status: "failed", error: new Error("Live2D Core 缺失") };
   }
@@ -988,10 +989,12 @@ function commitRenderMode(context, result) {
 
 async function switchRenderMode(nextMode, options = {}) {
   const mode = RENDER_MODES.includes(nextMode) ? nextMode : "gif";
+  if (Number.isSafeInteger(options.mainSeq)) currentMainRenderModeSeq = options.mainSeq;
   const targetResource = resourceKeyFor(mode, options);
   if (!options.force && activeRenderMode === mode && renderRuntimeReady && renderSwitchStatus !== "switching" &&
       renderRuntimeResource === targetResource) {
-    return { status: "noop", mode, generation: activeRenderGeneration, resource: renderRuntimeResource };
+    return { status: "noop", mode, generation: activeRenderGeneration, resource: renderRuntimeResource,
+      requestedMode: mode, committedMode: mode, fallback: false };
   }
   nextGifGeometryRevision();
   requestedRenderMode = mode;
@@ -999,6 +1002,7 @@ async function switchRenderMode(nextMode, options = {}) {
   const context = {
     mode,
     generation,
+    mainSeq: Number.isSafeInteger(options.mainSeq) ? options.mainSeq : null,
     resourceId: options.resourceId !== undefined ? String(options.resourceId || "") : targetResource,
     token: {}
   };
@@ -1028,12 +1032,30 @@ async function switchRenderMode(nextMode, options = {}) {
       renderRuntimeReady = false;
       renderRuntimeResource = "";
       renderSwitchStatus = result && result.status === "superseded" ? "superseded" : "failed";
-      return { status: renderSwitchStatus, mode, generation, error: result && result.error };
+      const error = result && result.error;
+      // B-2：只有当前、真正失败的非 GIF request 才能建立一个新的 GIF request。
+      // fallback 复用 switchRenderMode，推进正常 renderer generation；GIF 自身不递归 fallback。
+      if (renderSwitchStatus === "failed" && mode !== "gif" && isCurrentRenderRequest(context, mode)) {
+        const fallback = await switchRenderMode("gif", { mainSeq: context.mainSeq });
+        if (fallback.status === "ready" || fallback.status === "noop") {
+          return {
+            ...fallback,
+            requestedMode: mode,
+            committedMode: "gif",
+            fallback: true,
+            error
+          };
+        }
+        return { status: fallback.status, mode, generation, requestedMode: mode, committedMode: null, fallback: true, error };
+      }
+      return { status: renderSwitchStatus, mode, generation, error, requestedMode: mode, committedMode: null, fallback: false };
     }
     commitRenderMode(context, result);
     renderSwitchStatus = "ready";
-    return { status: "ready", mode, generation, resource: renderRuntimeResource };
+    return { status: "ready", mode, generation, resource: renderRuntimeResource,
+      requestedMode: mode, committedMode: mode, fallback: false };
   })();
+  currentRenderSwitchPromise = run.catch(() => {});
   return run;
 }
 
@@ -1428,7 +1450,7 @@ function setBubbleMode(mode) {
 function hideBubble() {
   bubbleEl.classList.add("hidden");
   stopReveal();
-  refreshClickable(lastMouse.x, lastMouse.y);
+  clickability.refreshFromLastMouse(); // 无效坐标（-1,-1 等）由核心守卫拒绝：尚未观测到光标时不得主动切穿透
 }
 function stopReveal() {
   if (revealTimer) { clearInterval(revealTimer); revealTimer = null; }
@@ -2105,56 +2127,153 @@ window.petAPI.onDropped(() => {
   if (!(activeRenderMode === "rig" && rigRuntime)) playSpineInteract(); // 2.5D 模式不播 Spine 互动
 });
 }
+function renderModeErrorText(error) {
+  return error ? String(error && (error.message || error) || error).slice(0, 300) : undefined;
+}
+function reportRenderModeOutcome(mainSeq, requestedMode, result, isCurrent) {
+  if (!Number.isSafeInteger(mainSeq) || !isCurrent() || !result ||
+      (result.status !== "ready" && result.status !== "noop") ||
+      !RENDER_MODES.includes(result.committedMode)) return;
+  try {
+    window.petAPI.reportRenderModeOutcome && window.petAPI.reportRenderModeOutcome({
+      seq: mainSeq,
+      ok: result.fallback !== true && result.committedMode === requestedMode,
+      requestedMode,
+      committedMode: result.committedMode,
+      error: renderModeErrorText(result.error)
+    });
+  } catch { /* IPC 窗口销毁等瞬时错误忽略 */ }
+}
+function reportRenderModeCorrection(baseSeq, sourceMode, result, isCurrent) {
+  if (!Number.isSafeInteger(baseSeq) || !isCurrent() || !result || result.fallback !== true ||
+      result.status !== "ready" || result.requestedMode !== sourceMode || result.committedMode !== "gif") return;
+  try {
+    window.petAPI.reportRenderModeCorrection && window.petAPI.reportRenderModeCorrection({
+      baseSeq,
+      sourceMode,
+      committedMode: "gif",
+      error: renderModeErrorText(result.error)
+    });
+  } catch { /* IPC 窗口销毁等瞬时错误忽略 */ }
+}
+function isCurrentInternalRenderResult(baseSeq, result) {
+  return Number.isSafeInteger(baseSeq) && currentMainRenderModeSeq === baseSeq &&
+    result && renderSwitchGeneration === result.generation && requestedRenderMode === "gif";
+}
+function isStableFormalRenderMode(mode, mainSeq) {
+  return Number.isSafeInteger(mainSeq) && currentMainRenderModeSeq === mainSeq &&
+    renderSwitchStatus === "ready" && renderRuntimeReady && activeRenderGeneration > 0 &&
+    !!renderRuntimeResource && activeRenderMode === mode && requestedRenderMode === mode;
+}
+async function reconcileFormalRenderMode(mode, mainSeq) {
+  if (!Number.isSafeInteger(mainSeq) || currentMainRenderModeSeq !== mainSeq) return false;
+  while (currentMainRenderModeSeq === mainSeq) {
+    const ownerPromise = currentRenderSwitchPromise;
+    await ownerPromise;
+    if (currentMainRenderModeSeq !== mainSeq) return false;
+    if (isStableFormalRenderMode(mode, mainSeq)) {
+      reportRenderModeOutcome(mainSeq, mode, {
+        status: "ready",
+        requestedMode: mode,
+        committedMode: activeRenderMode,
+        fallback: false
+      }, () => isStableFormalRenderMode(mode, mainSeq));
+      return true;
+    }
+    if (currentRenderSwitchPromise !== ownerPromise) continue;
+    return false;
+  }
+  return false;
+}
 if (window.petAPI.onUiEdgeCompact) window.petAPI.onUiEdgeCompact((v) => { const d = v || {}; document.body.classList.toggle("ui-edge-compact", typeof d === "object" ? !!d.value : !!d); });
 if (window.petAPI.onRenderModeChanged) {
   window.petAPI.onRenderModeChanged(async (m) => {
+    const request = m && typeof m === "object" ? m : { mode: m };
     if (enlarged) { // 切模式还原放大状态：zoom 暂停标志不跨模式残留
       enlarged = false;
       document.body.classList.remove("enlarged");
       zoomBtn.textContent = "⤢";
       window.petAPI.walkingPause && window.petAPI.walkingPause(false, "zoom");
     }
-    const mode = RENDER_MODES.includes(m) ? m : "gif";
+    const mode = RENDER_MODES.includes(request.mode) ? request.mode : "gif";
+    const mainSeq = Number.isSafeInteger(request.seq) ? request.seq : null;
+    if (mainSeq !== null && currentMainRenderModeSeq !== null && mainSeq < currentMainRenderModeSeq) return;
     // 先登记本次 mode intent；状态读取不能先于 generation，否则快速切换时它会成为无主 await。
     let result = await switchRenderMode(mode, {
+      mainSeq,
       resourceId: mode === "rig" ? rigSkinId : mode === "live2d" ? live2dSkinId : undefined
     });
     let requestGeneration = result && result.generation;
-    const isCurrentModeRequest = () => requestGeneration !== undefined &&
-      renderSwitchGeneration === requestGeneration && requestedRenderMode === mode;
-    // 初次 switch 已被更新的 intent 淘汰时，回调必须在任何状态补读/资源修正前结束。
-    if (!result || result.status === "superseded" || !isCurrentModeRequest()) return;
-    const state = await window.petAPI.getState();
-    // getState 期间可能已经发生了新的 mode/resource intent；旧回调不得写回或 force reload。
-    if (!isCurrentModeRequest()) return;
-    if (typeof state?.rigSkinId === "string") rigSkinId = state.rigSkinId;
-    if (typeof state?.live2dSkinId === "string") live2dSkinId = state.live2dSkinId;
-    const latestResource = mode === "rig" ? rigSkinId : mode === "live2d" ? live2dSkinId : undefined;
-    if (requestedRenderMode === mode && latestResource && result.resource !== latestResource) {
-      if (!isCurrentModeRequest()) return;
-      result = await switchRenderMode(mode, { force: true, resourceId: latestResource });
-      requestGeneration = result && result.generation;
-      if (!result || result.status === "superseded" || !isCurrentModeRequest()) return;
+    const isCurrentModeRequest = () => {
+      const generationCurrent = requestGeneration !== undefined && renderSwitchGeneration === requestGeneration;
+      return mainSeq !== null
+        ? currentMainRenderModeSeq === mainSeq && generationCurrent
+        : generationCurrent && requestedRenderMode === mode;
+    };
+    // 初次 switch 已被更新的 intent 淘汰时，只等待当前 owner 收敛，不再补读旧状态。
+    if (!result) return;
+    if (result.status === "superseded") {
+      await reconcileFormalRenderMode(mode, mainSeq);
+      return;
     }
-    if (isCurrentModeRequest() && (result.status === "ready" || result.status === "noop") && activeRenderMode === mode) {
-      setMood(lastMood || "idle"); // 切换后恢复当前情绪
-      if (mode === "spine" && state.walkState && activeRenderGeneration === requestGeneration) {
+    if (!isCurrentModeRequest()) {
+      await reconcileFormalRenderMode(mode, mainSeq);
+      return;
+    }
+    // fallback 已经完成最终 GIF commit；不能把 GIF 当成原 target 再触发一次资源修正。
+    let state = null;
+    if (!result.fallback) state = await window.petAPI.getState();
+    // getState 期间可能已经发生了新的 mode/resource intent；旧回调不得写回或 force reload。
+    if (!isCurrentModeRequest()) {
+      await reconcileFormalRenderMode(mode, mainSeq);
+      return;
+    }
+    if (!result.fallback) {
+      if (typeof state?.rigSkinId === "string") rigSkinId = state.rigSkinId;
+      if (typeof state?.live2dSkinId === "string") live2dSkinId = state.live2dSkinId;
+      const latestResource = mode === "rig" ? rigSkinId : mode === "live2d" ? live2dSkinId : undefined;
+      if (requestedRenderMode === mode && latestResource && result.resource !== latestResource) {
+        if (!isCurrentModeRequest()) return;
+        result = await switchRenderMode(mode, { force: true, mainSeq, resourceId: latestResource });
+        requestGeneration = result && result.generation;
+        if (!result || result.status === "superseded" || !isCurrentModeRequest()) {
+          if ((result && result.status === "superseded") || !isCurrentModeRequest()) {
+            await reconcileFormalRenderMode(mode, mainSeq);
+          }
+          return;
+        }
+      }
+    }
+    if (isCurrentModeRequest() && (result.status === "ready" || result.status === "noop")) {
+      if (activeRenderMode === mode || result.fallback) setMood(lastMood || "idle"); // 切换/回退后恢复当前情绪
+      if (!result.fallback && mode === "spine" && state.walkState && activeRenderGeneration === requestGeneration) {
         applyWalkState(state.walkState); // 新 owner ready 后重放最新行走状态，收敛 Sit/Rest/Move
       }
+      // 初始 lastMouse 尚未有效，或旧模式此前处于穿透态时，ready 的新 owner 先恢复可点击；
+      // 后续 mousemove/兜底判定会继续细化透明区域穿透。
+      clickability.petSetClickable(true);
+      reportRenderModeOutcome(mainSeq, mode, result, isCurrentModeRequest);
     }
   });
 }
 if (window.petAPI.onLive2dChanged) {
   window.petAPI.onLive2dChanged(async (id) => { // 同模式换模型：重载
+    const baseMainSeq = currentMainRenderModeSeq;
     live2dSkinId = id || "";
     if (activeRenderMode !== "live2d" && requestedRenderMode !== "live2d") return;
     const result = await switchRenderMode("live2d", { force: true, resourceId: live2dSkinId });
     if ((result.status === "ready" || result.status === "noop") && activeRenderMode === "live2d") setMood(lastMood || "idle");
+    reportRenderModeCorrection(baseMainSeq, "live2d", result,
+      () => isCurrentInternalRenderResult(baseMainSeq, result));
   });
 }
 
 /** 换肤：销毁旧模型与画布，重新探测皮肤并完整初始化 */
 async function rebuildSpine() {
+  if (activeRenderMode !== "spine" && requestedRenderMode !== "spine") {
+    return { status: "ignored" };
+  }
+  const baseMainSeq = currentMainRenderModeSeq;
   skinSwitching = true; // 换肤全程吞掉旧 context 销毁触发的 lost（新画布随后重建，不整页 reload）
   visibleCanvasGap = 0;
   visibleCanvasGapCandidate = 0;
@@ -2168,31 +2287,39 @@ async function rebuildSpine() {
     const result = await switchRenderMode("spine", { force: true, delayMs: 200 });
     if (walkState.active) applyWalkState(walkState);
     reportGroundGap();
-    return result;
+    return { ...result, baseMainSeq };
   } catch (e) {
     console.error("[Spine] 换肤重建失败:", e);
-    return { status: "failed", error: e };
+    return { status: "failed", error: e, baseMainSeq };
   } finally {
     skinSwitching = false;
   }
 }
 if (window.petAPI.onSpineSkinChanged) {
   window.petAPI.onSpineSkinChanged(async () => {
+    if (activeRenderMode !== "spine" && requestedRenderMode !== "spine") return;
     const result = await rebuildSpine();
     if ((result && result.status === "ready") && activeRenderMode === "spine") setMood(lastMood || "idle");
+    reportRenderModeCorrection(result && result.baseMainSeq, "spine", result,
+      () => isCurrentInternalRenderResult(result && result.baseMainSeq, result));
   });
 }
 if (window.petAPI.onRigSkinChanged) { // v2.2：2.5D 皮肤切换（独立于 Spine）
   window.petAPI.onRigSkinChanged(async (id) => {
+    const baseMainSeq = currentMainRenderModeSeq;
     rigSkinId = id || "";
     const rigRequested = requestedRenderMode === "rig" || activeRenderMode === "rig";
     if (!rigRequested) return;
     if (id) {
       const result = await switchRenderMode("rig", { force: true, resourceId: id });
       if ((result.status === "ready" || result.status === "noop") && activeRenderMode === "rig") setMood(lastMood || "idle");
+      reportRenderModeCorrection(baseMainSeq, "rig", result,
+        () => isCurrentInternalRenderResult(baseMainSeq, result));
     } else {
-      // 无资源时保持 requested=rig，清理当前 owner 并报告 failed；fallback 留给 B-2。
-      await switchRenderMode("rig", { force: true, resourceId: "" });
+      // 无资源时保持现有内部换肤路径；B-2 fallback 后向 main 发独立 correction。
+      const result = await switchRenderMode("rig", { force: true, resourceId: "" });
+      reportRenderModeCorrection(baseMainSeq, "rig", result,
+        () => isCurrentInternalRenderResult(baseMainSeq, result));
     }
   });
 }
@@ -2241,7 +2368,7 @@ window.petAPI.onSpritesChanged(({ name, moods }) => {
 /* ---------- 输入栏 ---------- */
 function toggleInputBar() {
   wake();
-  window.petAPI.setClickable(true);
+  clickability.petSetClickable(true);
   inputBar.classList.toggle("hidden");
   clampBubbleToWindow();
   if (!inputBar.classList.contains("hidden")) {
@@ -2713,7 +2840,6 @@ window.petAPI.onTermsAgreed(() => {
 let dragState = null;
 let pokeResumeTimer = null; // 戳一戳后的原地站立计时
 let dragReleaseTimer = null;
-let lastMouse = { x: -1, y: -1 };
 const THROW_SAMPLE_WINDOW_MS = 80;
 const THROW_MIN_SPEED = 200;
 function addDragSample(state, e) {
@@ -2747,8 +2873,7 @@ function clearDragVisuals() {
 
 function refreshDragClickable() {
   try {
-    if (lastMouse.x >= 0 && lastMouse.y >= 0) refreshClickable(lastMouse.x, lastMouse.y);
-    else window.petAPI.setClickable(false);
+    clickability.refreshFromLastMouse(); // 坐标缺失由核心守卫拒绝：清理路径不得主动切穿透（无效坐标无 native 变更权限）
   } catch { /* 页面销毁时 IPC 可能已不可用 */ }
 }
 
@@ -2865,7 +2990,7 @@ window.addEventListener("pointermove", (e) => {
     finishDrag("buttons");
     return;
   }
-  lastMouse = { x: e.clientX, y: e.clientY };
+  clickability.setLastMouse(e.clientX, e.clientY);
   addDragSample(dragState, e);
   const dx = e.screenX - dragState.sx;
   const dy = e.screenY - dragState.sy;
@@ -2880,7 +3005,7 @@ window.addEventListener("pointermove", (e) => {
 });
 window.addEventListener("pointerup", (e) => {
   if (dragState && e.pointerId === dragState.pointerId) {
-    lastMouse = { x: e.clientX, y: e.clientY };
+    clickability.setLastMouse(e.clientX, e.clientY);
     finishDrag("pointerup");
   }
 });
@@ -2943,46 +3068,27 @@ setInterval(() => {
 
 /* ---------- 点击穿透：透明区域不挡下层应用 ----------
    只有鼠标在 桌宠/气泡/输入栏 上时才放行鼠标事件，其余穿透给下层应用；
-   拖拽中强制放行（否则 mouseup 被穿透吞掉会导致拖拽卡死） */
-function isPetUI(el, e) {
-  if (!el) return false;
-  // 精确命中：角色/气泡/输入栏/信息版/渲染画布 这些真正的可交互实体
-  if (el.closest("#pet") || el.closest("#bubble") || el.closest("#input-bar") ||
-      el.closest("#rig-canvas") || el.closest("#live2d-canvas") || el.closest("#info-panel")) return true;
-  // 视觉实体兜底（v2.5.1 死结修复的收紧版）：画布/图片元素从容器中跑出（如 rig 画布直挂 body）时，
-  // 元素本身就算实体——但 .pet-root 容器/空白背景不再算，否则收起对话框后整个窗口区域都被当成
-  // 可点击实体，挡住下层应用的点击（隐藏对话框后点不到后面应用的根因）
-  if (el.tagName === "CANVAS" || el.tagName === "IMG") return true;
-  // 诊断：命中了元素但 closest 全空 → DOM 结构异常（元素被移出容器）
-  if (el && e) {
-    const cp = el.closest("#pet"), cr = el.closest(".pet-root");
-    if (!cp && !cr) {
-      try { window.petAPI.playback("[ui] closest断点 target=" + (el.id || el.tagName) + " pet祖先=无 pet-root祖先=" + (!!cr)); } catch { /* 忽略 */ }
-    }
-  }
-  // 行走容差圈（v2.5.1）：只在真正走动时启用（移动目标精确命中太难）——
-  // 静止时鼠标直接点中画布/角色即可（上方已判定），容差圈不再无条件把小人附近的下层应用挡掉
-  if (e && petEl && activeRenderMode === "spine" && !busy && walkState.active && !walkState.resting &&
-      !walkState.paused && !walkState.sleeping && !walkState.seated && !walkState.perched) {
-    try {
-      const r = petEl.getBoundingClientRect();
-      if (Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2)) < 130) return true;
-    } catch { /* 忽略 */ }
-  }
-  return false;
-}
-function refreshClickable(x, y) { // 穿透判定（mousemove 与定时兜底共用）
-  const el = document.elementFromPoint(x, y);
-  window.petAPI.setClickable(isPetUI(el, { clientX: x, clientY: y }) || (dragState && dragState.active));
-}
-document.addEventListener("mousemove", (e) => {
-  lastMouse = { x: e.clientX, y: e.clientY };
-  refreshClickable(e.clientX, e.clientY);
+   拖拽中强制放行（否则 mouseup 被穿透吞掉会导致拖拽卡死）。
+   判定逻辑本体在 src/clickability.js（Node 可单测），此处只接活环境。 */
+const clickability = window.PetClickability.createClickabilityCore({
+  elementFromPoint: (x, y) => document.elementFromPoint(x, y),
+  setClickable: (v) => window.petAPI.setClickable(v),
+  getDragState: () => dragState,
+  isPetUI: (el, e) => window.PetClickability.petUiHit(el, e, {
+    petEl: () => petEl,
+    activeRenderMode: () => activeRenderMode,
+    busy: () => busy,
+    walkState: () => walkState,
+    playback: (msg) => { try { window.petAPI.playback(msg); } catch { /* 忽略 */ } },
+  }),
 });
+document.addEventListener("mousemove", (e) => clickability.onRealMouseMove(e.clientX, e.clientY));
 setInterval(() => { // 兜底：小人走动会改变鼠标下方内容但不触发 mousemove（静止盲区），定时重判自愈
-  if (lastMouse.x < 0) return;
-  refreshClickable(lastMouse.x, lastMouse.y);
+  clickability.refreshFromLastMouse(); // 穿透期间 lastMouse 已被 native cursor 恢复刷新为真实位置，兜底重放的就是当前位置；失效值由核心守卫吞掉
 }, 500);
+if (window.petAPI.onCursorRecovery) { // B-2 自锁断路器：穿透期 forwarded mousemove 不可靠，main 轮询系统光标推送 viewport 坐标，
+  window.petAPI.onCursorRecovery((p) => clickability.onNativeCursorPush(p)); // 恢复判定不依赖 renderer 能否收到鼠标事件；不聚焦、不抢鼠标、不动窗口
+}
 
 function applyPetName(name) {
   const value = String(name || "苏苏洛").trim() || "苏苏洛";
@@ -3001,6 +3107,10 @@ if (window.__renderLifecycleTestMode) {
     scheduleMoodReset,
     setMood,
     setMoods: (moods) => { MOODS = Array.isArray(moods) ? moods : []; },
+    setResourceIds: ({ rig, live2d } = {}) => {
+      if (typeof rig === "string") rigSkinId = rig;
+      if (typeof live2d === "string") live2dSkinId = live2d;
+    },
     getState: () => ({
       requested: requestedRenderMode,
       active: activeRenderMode,
@@ -3058,11 +3168,16 @@ if (!window.__renderLifecycleTestMode) (async function init() {
   }
   if (window.petAPI.onThemeChanged) window.petAPI.onThemeChanged((th) => { state.theme = th; applyTheme(th); });
 
-  // 启动只由 renderMode 决定；rig/live2d id 只作为对应 mode 的资源选择。
+  // 启动与 runtime switch 共用 main 分配的正式 seq；rig/live2d id 只作为对应 mode 的资源选择。
   rigSkinId = state.rigSkinId || "";
   live2dSkinId = state.live2dSkinId || "";
-  const initialMode = RENDER_MODES.includes(state.renderMode) ? state.renderMode : "gif";
+  const initialRequest = state.renderModeRequest && typeof state.renderModeRequest === "object"
+    ? state.renderModeRequest : { mode: state.renderMode };
+  const initialMode = RENDER_MODES.includes(initialRequest.mode) ? initialRequest.mode : "gif";
+  const initialMainSeq = Number.isSafeInteger(initialRequest.seq) ? initialRequest.seq : null;
+  if (initialMainSeq !== null) currentMainRenderModeSeq = initialMainSeq;
   const initialResult = await switchRenderMode(initialMode, {
+    mainSeq: initialMainSeq,
     resourceId: initialMode === "rig" ? rigSkinId : initialMode === "live2d" ? live2dSkinId : undefined
   });
   if ((initialResult.status === "ready" || initialResult.status === "noop") && initialMode === "spine" && state.walkState) {
@@ -3070,7 +3185,9 @@ if (!window.__renderLifecycleTestMode) (async function init() {
   }
   // v2.5.24 修复：渲染层 reload 自愈（WebGL context lost）后穿透状态不随页面恢复——
   // init 完成立即放行鼠标（角色在窗口内，初始可交互合理），后续 mousemove 再按命中精细重判
-  window.petAPI.setClickable(initialResult.status === "ready" || initialResult.status === "noop");
+  clickability.petSetClickable(initialResult.status === "ready" || initialResult.status === "noop");
+  reportRenderModeOutcome(initialMainSeq, initialMode, initialResult,
+    () => currentMainRenderModeSeq === initialMainSeq);
 
   if (!agreed) {
     showBubble();

@@ -14,6 +14,63 @@ function renderModeOf(value) {
 }
 
 /**
+ * 校验 renderer 回传的 render-mode outcome。
+ * seq 是 main-side identity；renderer generation 不应跨 IPC 参与判定。
+ */
+function renderModeOutcomeDecision({ currentSeq, expectedRequestedMode, outcome } = {}) {
+  const msg = outcome && typeof outcome === "object" ? outcome : null;
+  if (!Number.isSafeInteger(currentSeq) || !msg || !Number.isSafeInteger(msg.seq) || msg.seq !== currentSeq) {
+    return { accepted: false, reason: "stale" };
+  }
+  if (!RENDER_MODES.includes(msg.requestedMode) || !RENDER_MODES.includes(msg.committedMode)) {
+    return { accepted: false, reason: "invalid-mode" };
+  }
+  if (expectedRequestedMode && msg.requestedMode !== expectedRequestedMode) {
+    return { accepted: false, reason: "unexpected-requested-mode" };
+  }
+  return {
+    accepted: true,
+    seq: msg.seq,
+    ok: msg.ok === true && msg.requestedMode === msg.committedMode,
+    requestedMode: msg.requestedMode,
+    committedMode: msg.committedMode,
+    error: msg.error
+  };
+}
+
+/**
+ * 校验 renderer 内部 reskin 触发的 GIF correction。
+ * correction 不是 formal outcome，也不能直接改变持久化配置；它只允许
+ * 当前 formal intent 把 renderer 已完成的 GIF fallback 重新纳入正式协议。
+ */
+function renderModeCorrectionDecision({ currentSeq, currentSourceMode, correction } = {}) {
+  const msg = correction && typeof correction === "object" ? correction : null;
+  if (!Number.isSafeInteger(currentSeq) || !msg || !Number.isSafeInteger(msg.baseSeq) || msg.baseSeq !== currentSeq) {
+    return { accepted: false, reason: "stale" };
+  }
+  if (!RENDER_MODES.includes(currentSourceMode) || currentSourceMode === "gif" ||
+      !RENDER_MODES.includes(msg.sourceMode) || msg.sourceMode === "gif" ||
+      msg.sourceMode !== currentSourceMode) {
+    return { accepted: false, reason: "unexpected-source-mode" };
+  }
+  if (msg.committedMode !== "gif") {
+    return { accepted: false, reason: "invalid-committed-mode" };
+  }
+  return {
+    accepted: true,
+    baseSeq: msg.baseSeq,
+    sourceMode: msg.sourceMode,
+    committedMode: "gif",
+    error: msg.error
+  };
+}
+
+/** sender identity 是引用身份，不能用 seq 代替。 */
+function isCurrentRenderSender(sender, currentSender) {
+  return !!sender && !!currentSender && sender === currentSender;
+}
+
+/**
  * 模式切换贴地坐标：窗口底边与工作区底对齐、水平钳回工作区。
  * 与原 main.js 公式逐位一致（不额外加 Math.max(wa.y,…) 保护，避免行为漂移）。
  * @param {Object} bounds 窗口 {x,y,width,height}
@@ -131,6 +188,9 @@ function groundGapReportDecision({
 module.exports = {
   RENDER_MODES,
   renderModeOf,
+  renderModeOutcomeDecision,
+  renderModeCorrectionDecision,
+  isCurrentRenderSender,
   groundAlign,
   effectiveGroundGap,
   wasGroundAnchored,

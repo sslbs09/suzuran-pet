@@ -155,6 +155,45 @@ let personaCache = config.getPersonaText();
 let quitting = false;
 let renderCrashCount = 0;      // 渲染进程崩溃自动重载计数（60s 内连崩 3 次停止自愈）
 let renderCrashWindowAt = 0;
+// render-mode 跨 IPC 唯一 identity；renderer generation 只在 renderer 内部使用。
+let renderModeSeq = 0;
+let renderModeIntentMode = null;
+let renderModeCorrectionMeta = null;
+
+function beginRenderModeIntent(mode) {
+  const normalized = renderModeMod.renderModeOf(mode);
+  renderModeSeq += 1;
+  renderModeIntentMode = normalized;
+  return { mode: normalized, seq: renderModeSeq };
+}
+
+function ensureRenderModeRequest(mode) {
+  if (!renderModeSeq) beginRenderModeIntent(mode);
+  return { mode: renderModeIntentMode, seq: renderModeSeq };
+}
+
+function renderModeFallbackToast(mode) {
+  if (mode === "rig") return "2.5D 资源不可用，已回退到 GIF";
+  if (mode === "live2d") return "Live2D 初始化失败，已回退到 GIF";
+  if (mode === "spine") return "Spine 初始化失败，已回退到 GIF";
+  return "渲染模式初始化失败，已回退到 GIF";
+}
+
+function dispatchRenderModeIntent(mode) {
+  renderModeCorrectionMeta = null;
+  const request = beginRenderModeIntent(mode);
+  sendToRenderer("pet:render-mode-changed", request);
+  windowSizeRevision.next(); // 旧模式的 150ms 尺寸回调不得回写新模式
+  // 模式切换是显式操作：旧模式的瞬态暂停不带入新模式。
+  walk.dragPaused = false; walk.chatPaused = false; walk.zoomPaused = false;
+  walk.paused = false; walk.pausedAt = 0;
+  return request;
+}
+
+function bumpRenderModeIntentForRecovery() {
+  // recovery 只换 identity，恢复最后一次已提交的模式；不广播给即将 reload 的旧 renderer。
+  return beginRenderModeIntent(renderModeMod.renderModeOf(config.getConfig().renderMode));
+}
 /** §14 追加 102：任意窗口渲染进程崩溃诊断+自愈——日志带窗口标识与关键状态，连续 3 次停止自愈 */
 function attachCrashDiag(w, label) {
   if (!w || w.__crashDiag) return;
@@ -192,7 +231,7 @@ function showWindow() {
   if (!ensureMainWindow()) return false;
   win.show();
   // 从托盘恢复时先接收一次鼠标命中，渲染层后续会按透明区域重新开启穿透。
-  win.setIgnoreMouseEvents(false);
+  applyNativeIgnore(win, false);
   applyLayer(walk.active || walk.seated);
   win.focus();
   return true;
@@ -355,6 +394,7 @@ function createWindow() {
       " 第" + renderCrashCount + "次（60s内），自动重载");
     if (renderCrashCount >= 3) { logTts("render", "渲染进程连续崩溃，停止自动重载（可手动重启桌宠）"); return; }
     try {
+      bumpRenderModeIntentForRecovery();
       win.reload();
       setTimeout(() => {
         if (walk.active) walkBroadcast();
@@ -363,7 +403,8 @@ function createWindow() {
     } catch (e2) { logTts("render", "自动重载失败: " + (e2 && e2.message || e2)); }
   });
   // 初始即开启点击穿透（透明区域不挡下层应用），由渲染层按需放行
-  win.setIgnoreMouseEvents(true, { forward: true });
+  nativeIgnore.reset(); // 新窗口：native 状态缓存必须重置，首写必定真实生效（renderer 生命周期不得沿用旧窗缓存）
+  applyNativeIgnore(win, true);
   startOutOfScreenGuard(); // 出屏哨兵：任何路径导致窗口严重滑出屏幕时 2s 内钳回（防角色在屏幕边缘“闪现”/消失）
   // 置顶层级周期重断言（借鉴 dsh-dafeiyu）：全屏游戏/其他置顶窗口抢占后自动恢复置顶；桌面层级/托盘隐藏不干预
   // v2.5.21 修复：必须带 "screen-saver" level——无 level 的 setAlwaysOnTop(true) 用默认层级，
@@ -981,6 +1022,7 @@ ipcMain.handle("pet:reload-renderer", () => { // WebGL 上下文丢失等场景�
   rendererReloadAt = now;
   clearDragPause("renderer-reload");
   logTts("render", "渲染层自愈：webContents.reload（WebGL 上下文丢失/渲染异常）");
+  bumpRenderModeIntentForRecovery();
   win.webContents.reload();
   return true;
 });
@@ -1745,6 +1787,11 @@ function sendToRenderer(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
 
+function isCurrentPetRendererSender(event) {
+  return !!(event && win && !win.isDestroyed() &&
+    renderModeMod.isCurrentRenderSender(event.sender, win.webContents));
+}
+
 /** 全窗广播（v2.5.26）：主题等全局状态变更送达所有窗口，辅助窗口实时跟随
     （此前 sendToRenderer 只推主窗口，辅助窗口只能打开时跟随） */
 function broadcastToRenderers(channel, payload) {
@@ -2275,6 +2322,7 @@ ipcMain.on("pet:stop", () => {
 });
 ipcMain.handle("pet:get-state", () => {
   const cfg = config.getConfig();
+  const renderModeRequest = ensureRenderModeRequest(cfg.renderMode);
   return {
     personaOpening: openingLine(personaCache),
     greetingOnStart: cfg.greetingOnStart !== false,
@@ -2302,6 +2350,7 @@ ipcMain.handle("pet:get-state", () => {
     winSize: { width: cfg.window.width || 260, height: cfg.window.height || 200 },
     hasUserSprite: fs.existsSync(path.join(config.STORAGE.spritesUser, "sprite.png")),
     renderMode: renderModeMod.renderModeOf(cfg.renderMode),
+    renderModeRequest,
     live2dSkinId: cfg.live2dSkinId || "",
     live2dScale: Number(cfg.live2dScale) > 0 ? Number(cfg.live2dScale) : 1.0,
     theme: cfg.theme || "auto",
@@ -2385,9 +2434,16 @@ ipcMain.handle("pet:save-settings", (_e, patch) => {
     }
     if (Object.keys(secrets).length) config.replaceSecrets(secrets);
     const before = config.getConfig();
+    const hasRenderModePatch = Object.prototype.hasOwnProperty.call(safePatch, "renderMode");
+    const requestedRenderMode = hasRenderModePatch ? renderModeMod.renderModeOf(safePatch.renderMode) : null;
+    const currentRenderModeIntent = renderModeIntentMode || renderModeMod.renderModeOf(before.renderMode);
+    const renderModeChanged = hasRenderModePatch && requestedRenderMode !== currentRenderModeIntent;
+    // renderMode is committed only by pet:render-mode-outcome; ordinary settings remain on the old path.
+    const ordinaryPatch = { ...safePatch };
+    delete ordinaryPatch.renderMode;
     const oldAgent = before.agentApi || {};
     const nextAgent = safePatch.agentApi ? { ...oldAgent, ...safePatch.agentApi } : oldAgent;
-    config.saveConfig(safePatch);
+    if (Object.keys(ordinaryPatch).length) config.saveConfig(ordinaryPatch);
     if (safePatch.agentApi && (oldAgent.enabled !== nextAgent.enabled || Number(oldAgent.port) !== Number(nextAgent.port))) {
       stopAgentApi().then(() => startAgentApi()).catch((e) => logTts("agent", "重绑失败: " + (e && e.message || e)));
     }
@@ -2400,15 +2456,10 @@ ipcMain.handle("pet:save-settings", (_e, patch) => {
       sendToRenderer("pet:tts-changed", !!after.tts.enabled);
       applyTtsEngine(!!after.tts.enabled);
     }
-    if (after.renderMode !== before.renderMode) {
-      sendToRenderer("pet:render-mode-changed", after.renderMode);
-      windowSizeRevision.next(); // 旧模式的 150ms 尺寸回调不得回写新模式
-      // 模式切换是显式操作：旧模式的瞬态暂停（拖拽/对话/放大）不带入新模式，
-      // 否则切回 Spine 后行走引擎恢复但 paused 冻结，表现为"不能移动，过一会才好"
-      walk.dragPaused = false; walk.chatPaused = false; walk.zoomPaused = false;
-      walk.paused = false; walk.pausedAt = 0;
-      syncWalkingEngine(); // 切回 GIF 时自动停走；切回 Spine 且开关开着则恢复
+    if (renderModeChanged) {
+      dispatchRenderModeIntent(requestedRenderMode);
     } else if (!!after.walking !== !!before.walking) {
+      // render-mode 的 walking 收敛在 accepted outcome 后执行；这里仅处理普通 walking 变化。
       syncWalkingEngine();
     }
     if ((after.netProxy || "") !== (before.netProxy || "")) applyNetProxy(); // O8：代理即时生效（独立于模式切换）
@@ -2416,6 +2467,65 @@ ipcMain.handle("pet:save-settings", (_e, patch) => {
   } catch (e) {
     return { ok: false, message: String(e.message || e) };
   }
+});
+ipcMain.on("pet:render-mode-outcome", (event, outcome) => {
+  if (!isCurrentPetRendererSender(event)) {
+    logTts("render", "忽略非当前 pet renderer 的 render-mode outcome");
+    return;
+  }
+  const decision = renderModeMod.renderModeOutcomeDecision({
+    currentSeq: renderModeSeq,
+    expectedRequestedMode: renderModeIntentMode,
+    outcome
+  });
+  if (!decision.accepted) {
+    logTts("render", "忽略旧/非法 render-mode outcome seq=" + String(outcome && outcome.seq) + " reason=" + decision.reason);
+    return;
+  }
+  const correctionMeta = renderModeCorrectionMeta && renderModeCorrectionMeta.seq === decision.seq
+    ? { ...renderModeCorrectionMeta } : null;
+  if (correctionMeta) renderModeCorrectionMeta = null;
+  try {
+    const before = config.getConfig();
+    if (before.renderMode !== decision.committedMode) config.saveConfig({ renderMode: decision.committedMode });
+    renderModeIntentMode = decision.committedMode;
+    refreshTrayMenu();
+    syncWalkingEngine();
+    if (settingsWin && !settingsWin.isDestroyed()) {
+      settingsWin.webContents.send("pet:render-mode-outcome", correctionMeta
+        ? { ...decision, correctionSourceMode: correctionMeta.sourceMode } : decision);
+    }
+    if (correctionMeta) {
+      sendToRenderer("pet:toast", renderModeFallbackToast(correctionMeta.sourceMode));
+    } else if (decision.requestedMode !== decision.committedMode) {
+      sendToRenderer("pet:toast", renderModeFallbackToast(decision.requestedMode));
+    }
+    logTts("render", "渲染模式结果 seq=" + decision.seq + " " + decision.requestedMode + " -> " +
+      decision.committedMode + (decision.ok ? " ready" : " fallback") +
+      (decision.error ? " error=" + String(decision.error).slice(0, 180) : ""));
+  } catch (e) {
+    logTts("render", "渲染模式结果收敛失败: " + String(e && e.message || e));
+  }
+});
+ipcMain.on("pet:render-mode-correction", (event, correction) => {
+  if (!isCurrentPetRendererSender(event)) {
+    logTts("render", "忽略非当前 pet renderer 的 render-mode correction");
+    return;
+  }
+  const decision = renderModeMod.renderModeCorrectionDecision({
+    currentSeq: renderModeSeq,
+    currentSourceMode: renderModeIntentMode,
+    correction
+  });
+  if (!decision.accepted) {
+    logTts("render", "忽略旧/非法 render-mode correction baseSeq=" +
+      String(correction && correction.baseSeq) + " reason=" + decision.reason);
+    return;
+  }
+  // correction 只重新发起正式 GIF intent；config/settings/tray 仍由正式 outcome 单一收敛。
+  logTts("render", "接受内部渲染回退 correction seq=" + decision.baseSeq + " " + decision.sourceMode + " -> gif");
+  const request = dispatchRenderModeIntent("gif");
+  renderModeCorrectionMeta = { seq: request.seq, sourceMode: decision.sourceMode };
 });
 ipcMain.handle("pet:save-persona", (_e, text) => {
   config.savePersonaText(String(text || ""));
@@ -2583,9 +2693,12 @@ function setRigSkin(id) {
     const list = rigSkinList();
     const hit = list.find((s) => s.id === String(id || ""));
     if (id && !hit) return false;
-    config.saveConfig({ rigSkinId: id ? hit.id : "" });
-    sendToRenderer("pet:rig-skin-changed", id ? hit.id : "");
-    logTts("rig", id ? "切换 2.5D 皮肤: " + id : "关闭 2.5D 模式");
+    const nextId = id ? hit.id : "";
+    const previousId = config.getConfig().rigSkinId || "";
+    config.saveConfig({ rigSkinId: nextId });
+    if (previousId === nextId) return true;
+    sendToRenderer("pet:rig-skin-changed", nextId);
+    logTts("rig", nextId ? "切换 2.5D 皮肤: " + nextId : "关闭 2.5D 模式");
     return true;
   } catch { return false; }
 }
@@ -4553,14 +4666,15 @@ function skinIconOf(m) {
 function setSpineSkin(id) {
   config.saveConfig({ spineSkinId: String(id || "") });
   // 选择皮肤即进入 Spine 渲染模式（GIF 模式下只换模型不换画面，会让人以为切换无效）
-  if (config.getConfig().renderMode !== "spine") {
-    config.saveConfig({ renderMode: "spine" });
-    sendToRenderer("pet:render-mode-changed", "spine");
-    syncWalkingEngine();
+  const enteringSpine = renderModeIntentMode !== "spine";
+  if (enteringSpine) {
+    dispatchRenderModeIntent("spine");
     logTts("walk", "选择新皮肤，已自动切换到 Spine 模式");
   }
   refreshTrayMenu();
-  sendToRenderer("pet:spine-skin-changed", String(id || ""));
+  // 进入 Spine 时正式 mode request 已按刚保存的皮肤初始化；避免紧随其后的无 seq reload
+  // 抢占该 request，导致 main 永远收不到 outcome。
+  if (!enteringSpine) sendToRenderer("pet:spine-skin-changed", String(id || ""));
   logTts("walk", "切换小人皮肤: " + (id || "builtin"));
 }
 
@@ -4609,9 +4723,34 @@ ipcMain.handle("pet:set-spine-skin", (_e, id) => { setSpineSkin(id); return true
 
 ipcMain.on("pet:hide", () => hideWindow());
 ipcMain.on("pet:tts-playback", (_e, msg) => logTts("render", String(msg || "")));
+/* ---------- 点击穿透：native 状态控制器 + cursor 恢复哨兵（B-2 自锁修复；纯逻辑 src/clickability.js） ----------
+   B-2 实机结论：Windows + Electron 43 + transparent 桌宠窗口下，ignoreMouseEvents(true,{forward:true})
+   不能可靠把 mousemove 转发进 renderer——一旦穿透，renderer 自己的 mousemove/500ms 兜底都只能基于
+   过期的 lastMouse 判定，形成永久自锁。因此穿透期间由 main 以 200ms 轮询系统光标
+   （screen.getCursorScreenPoint，只读：不聚焦、不抢鼠标、不动窗口），换算为 renderer viewport 坐标
+   推送给渲染层做真实位置的 elementFromPoint 重判；恢复路径完全不依赖 renderer 鼠标事件流。 */
+const { clientPointInContent, createNativeIgnoreController } = require("./src/clickability");
+const nativeIgnore = createNativeIgnoreController({
+  setIntervalFn: (fn, ms) => setInterval(fn, ms),
+  clearIntervalFn: (t) => clearInterval(t),
+  pollIntervalMs: 200,
+  onPoll: () => cursorRecoveryTick(),
+});
+function cursorRecoveryTick() {
+  try {
+    if (!win || win.isDestroyed() || !win.isVisible()) return; // 隐藏/托盘：穿透状态无意义，不空转
+    const p = clientPointInContent(screen.getCursorScreenPoint(), win.getContentBounds());
+    if (!p) return; // 光标不在窗口内：保持穿透本就是正确判定，无需恢复
+    win.webContents.send("pet:cursor-recovery", p); // 判定权在 renderer（isPetUI 是 DOM 事实），main 只供真实位置输入
+  } catch { /* 窗口/webContents 销毁等瞬时错误忽略 */ }
+}
+function applyNativeIgnore(winRef, ignore) { // native 写唯一入口：同状态去抖；缓存随窗口生命周期（新窗口 reset 后首写必达）
+  if (!winRef || winRef.isDestroyed()) return;
+  nativeIgnore.apply((ig, opts) => winRef.setIgnoreMouseEvents(ig, opts), ignore);
+}
 ipcMain.on("pet:set-clickable", (_e, clickable) => {
   // 透明区域点击穿透：只有鼠标在 桌宠/气泡/输入栏 上时才接收鼠标事件，其余穿透给下层应用
-  if (win && !win.isDestroyed()) win.setIgnoreMouseEvents(!clickable, { forward: true });
+  applyNativeIgnore(win, !clickable);
   if (clickable !== _lastClickable) { _lastClickable = !!clickable; logTts("ui", "clickable=" + !!clickable + "（鼠标命中角色区变化）"); }
 });
 let _lastClickable = null;

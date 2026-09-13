@@ -9,6 +9,7 @@ const mainSource = fs.readFileSync(require.resolve("../main.js"), "utf8").replac
 const renderModeSource = fs.readFileSync(require.resolve("../src/render-mode"), "utf8").replace(/\r\n/g, "\n");
 const rendererSource = fs.readFileSync(require.resolve("../renderer/pet.js"), "utf8").replace(/\r\n/g, "\n");
 const preloadSource = fs.readFileSync(require.resolve("../preload.js"), "utf8").replace(/\r\n/g, "\n");
+const settingsSource = fs.readFileSync(require.resolve("../renderer/settings.js"), "utf8").replace(/\r\n/g, "\n");
 let failed = 0;
 function assertEq(name, got, want) {
   const ok = JSON.stringify(got) === JSON.stringify(want);
@@ -217,6 +218,63 @@ assertEq("renderModeOf 空串回落 gif", RM.renderModeOf(""), "gif");
 assertEq("renderModeOf 未知值回落 gif", RM.renderModeOf("psd"), "gif");
 assertEq("renderModeOf 大写不匹配回落 gif", RM.renderModeOf("SPINE"), "gif");
 assertEq("RENDER_MODES 四态", JSON.stringify(RM.RENDER_MODES), JSON.stringify(["gif", "spine", "rig", "live2d"]));
+
+// B-2 outcome acceptance：main 只接受当前 main-side seq，且必须能表达 requested/committed。
+assert.deepEqual(
+  RM.renderModeOutcomeDecision({
+    currentSeq: 7,
+    expectedRequestedMode: "rig",
+    outcome: { seq: 7, ok: false, requestedMode: "rig", committedMode: "gif", error: "missing skin" }
+  }),
+  { accepted: true, seq: 7, ok: false, requestedMode: "rig", committedMode: "gif", error: "missing skin" }
+);
+assert.deepEqual(
+  RM.renderModeOutcomeDecision({
+    currentSeq: 7,
+    expectedRequestedMode: "rig",
+    outcome: { seq: 6, ok: true, requestedMode: "rig", committedMode: "rig" }
+  }),
+  { accepted: false, reason: "stale" },
+  "old outcome cannot be accepted"
+);
+assert.deepEqual(
+  RM.renderModeOutcomeDecision({
+    currentSeq: 7,
+    expectedRequestedMode: "rig",
+    outcome: { seq: 7, ok: true, requestedMode: "live2d", committedMode: "live2d" }
+  }),
+  { accepted: false, reason: "unexpected-requested-mode" },
+  "same seq but wrong intent cannot be accepted"
+);
+assert.deepEqual(
+  RM.renderModeCorrectionDecision({
+    currentSeq: 9,
+    currentSourceMode: "rig",
+    correction: { baseSeq: 9, sourceMode: "rig", committedMode: "gif", error: "missing skin" }
+  }),
+  { accepted: true, baseSeq: 9, sourceMode: "rig", committedMode: "gif", error: "missing skin" }
+);
+assert.deepEqual(
+  RM.renderModeCorrectionDecision({
+    currentSeq: 9,
+    currentSourceMode: "rig",
+    correction: { baseSeq: 8, sourceMode: "rig", committedMode: "gif" }
+  }),
+  { accepted: false, reason: "stale" },
+  "old internal correction cannot be accepted"
+);
+assert.deepEqual(
+  RM.renderModeCorrectionDecision({
+    currentSeq: 9,
+    currentSourceMode: "live2d",
+    correction: { baseSeq: 9, sourceMode: "rig", committedMode: "gif" }
+  }),
+  { accepted: false, reason: "unexpected-source-mode" },
+  "correction from another source mode cannot be accepted"
+);
+const sender = {};
+assert.equal(RM.isCurrentRenderSender(sender, sender), true, "current renderer sender is accepted");
+assert.equal(RM.isCurrentRenderSender({}, sender), false, "wrong renderer sender is rejected");
 
 // 2) 切换贴地坐标
 const wa = { x: 0, y: 0, width: 1536, height: 800 };
@@ -526,13 +584,54 @@ assertEq(
 );
 
 // 7) 模式切换不再有立即/2500ms 位置回写；尺寸回调只接受当前 revision。
-const modeChangeBlockStart = mainSource.indexOf("if (after.renderMode !== before.renderMode)");
-const modeChangeBlockEnd = mainSource.indexOf("} else if (!!after.walking !== !!before.walking)", modeChangeBlockStart);
+const modeChangeBlockStart = mainSource.indexOf("function dispatchRenderModeIntent");
+const modeChangeBlockEnd = mainSource.indexOf("/** §14 追加 102", modeChangeBlockStart);
 const modeChangeBlock = mainSource.slice(modeChangeBlockStart, modeChangeBlockEnd);
 assert.ok(modeChangeBlockStart >= 0 && modeChangeBlockEnd > modeChangeBlockStart, "模式切换处理块存在");
 assert.doesNotMatch(modeChangeBlock, /setPosition\(|setTimeout\(|groundAlign\(/, "模式切换处理块不再直接贴地或延迟贴地");
 assert.doesNotMatch(mainSource, /2500/, "不存在旧 2500ms delayed groundAlign");
 assert.match(modeChangeBlock, /windowSizeRevision\.next\(\); \/\/ 旧模式的 150ms 尺寸回调不得回写新模式/, "模式切换使旧尺寸回调失效");
+assert.match(mainSource, /let renderModeSeq = 0/, "main 持有单调 renderModeSeq");
+assert.match(mainSource, /sendToRenderer\("pet:render-mode-changed", request\)/, "main→renderer 发送 versioned request");
+assert.match(mainSource, /delete ordinaryPatch\.renderMode/, "renderMode intent 不提前持久化");
+assert.match(mainSource, /renderModeOutcomeDecision\(/, "main 校验 renderer outcome");
+assert.match(renderModeSource, /msg\.seq !== currentSeq/, "旧 seq outcome 被拒绝");
+assert.match(preloadSource, /reportRenderModeOutcome: \(outcome\) => ipcRenderer\.send\("pet:render-mode-outcome", outcome\)/, "renderer→main outcome bridge");
+assert.match(preloadSource, /reportRenderModeCorrection: \(correction\) => ipcRenderer\.send\("pet:render-mode-correction", correction\)/, "internal correction bridge");
+assert.match(settingsSource, /onRenderModeOutcome/, "settings listens for accepted outcome");
+assert.match(settingsSource, /outcome\.requestedMode !== committed/, "settings distinguishes fallback from success");
+assert.match(settingsSource, /已切换并保存 ✓/, "settings shows success only after outcome");
+assert.match(settingsSource, /已回退到 GIF/, "settings shows fallback correction");
+assert.match(settingsSource, /correctionSourceMode/, "settings preserves correction-derived UI context");
+assert.match(settingsSource, /function ensureRigSkinForMode\(\)/, "settings has a narrow Rig resource precheck");
+assert.match(settingsSource, /renderer 仍保留真实 init failure \+ GIF fallback/, "precheck is UX-only");
+assert.match(rendererSource, /reportRenderModeCorrection\(baseSeq, sourceMode, result/, "internal fallback reports correction");
+assert.match(rendererSource, /result\.status !== "ready" && result\.status !== "noop"/, "formal outcome accepts ready and noop");
+assert.match(rendererSource, /mainSeq < currentMainRenderModeSeq/, "stale formal request cannot report a noop");
+assert.match(rendererSource, /if \(result\.status === "superseded"\)/, "formal superseded result has reconciliation path");
+assert.match(rendererSource, /renderSwitchStatus === "ready" && renderRuntimeReady/, "superseded reconciliation requires stable ready owner");
+assert.match(rendererSource, /activeRenderMode === mode && requestedRenderMode === mode/, "superseded reconciliation requires target mode ownership");
+assert.match(mainSource, /renderModeMod\.isCurrentRenderSender\(event\.sender, win\.webContents\)/, "main validates current pet renderer sender");
+assert.match(mainSource, /bumpRenderModeIntentForRecovery\(\)/, "renderer recovery creates a new formal intent identity");
+assert.match(mainSource, /renderModeMod\.renderModeOf\(config\.getConfig\(\)\.renderMode\)/, "recovery uses committed config mode");
+const correctionBlockStart = mainSource.indexOf('ipcMain.on("pet:render-mode-correction"');
+const correctionBlockEnd = mainSource.indexOf('ipcMain.handle("pet:save-persona"', correctionBlockStart);
+const correctionBlock = mainSource.slice(correctionBlockStart, correctionBlockEnd);
+assert.ok(correctionBlockStart >= 0 && correctionBlockEnd > correctionBlockStart, "internal correction handler exists");
+assert.match(correctionBlock, /renderModeCorrectionDecision\(/, "main validates internal correction");
+assert.match(correctionBlock, /dispatchRenderModeIntent\("gif"\)/, "correction starts a formal GIF intent");
+assert.doesNotMatch(correctionBlock, /config\.saveConfig\(/, "correction does not write config directly");
+const reloadBlock = mainSource.slice(mainSource.indexOf('ipcMain.handle("pet:reload-renderer"'), mainSource.indexOf('app.whenReady()'));
+assert.match(reloadBlock, /bumpRenderModeIntentForRecovery\(\)/, "manual reload bumps seq before reload");
+assert.match(mainSource, /bumpRenderModeIntentForRecovery\(\);\n      win\.reload\(\)/, "render-process-gone recovery bumps seq");
+const recoveryHelperStart = mainSource.indexOf("function bumpRenderModeIntentForRecovery");
+const recoveryHelperEnd = mainSource.indexOf("/** §14 追加 102", recoveryHelperStart);
+const recoveryHelper = mainSource.slice(recoveryHelperStart, recoveryHelperEnd);
+assert.doesNotMatch(recoveryHelper, /sendToRenderer|syncWalkingEngine|saveConfig|refreshTrayMenu|walk\./,
+  "recovery identity helper has no renderer/UI/walking side effects");
+assert.match(mainSource, /const correctionMeta = renderModeCorrectionMeta && renderModeCorrectionMeta\.seq === decision\.seq/, "accepted correction metadata is matched by formal seq");
+assert.match(mainSource, /correctionSourceMode: correctionMeta\.sourceMode/, "accepted correction context reaches settings");
+assert.match(mainSource, /sendToRenderer\("pet:toast", renderModeFallbackToast\(correctionMeta\.sourceMode\)\)/, "accepted correction uses source-mode fallback toast");
 assert.match(mainSource, /source === "render-mode"/, "主进程区分 render-mode resize 来源");
 assert.match(mainSource, /groundGapReportDecision\(/, "ground-gap handler 使用 mode guard 决策");
 assert.match(mainSource, /let gifVisualGroundGap = 0/, "GIF visual gap 有独立安全初值");
@@ -557,6 +656,314 @@ assertSetSizeWiring();
 assertSetScaleWiring();
 assertSitOnTaskbarWiring();
 assertOutOfScreenGuardWiring();
+
+// B-2 主进程协议行为夹具：直接执行 production handler block，覆盖 sender、seq、
+// correction metadata 与正式 outcome 的收敛边界，而不是只依赖 source regex。
+function createMainRenderModeProtocolHarness({ seq = 40, intent = "rig", configMode = intent } = {}) {
+  const currentSender = { id: "current-pet-renderer" };
+  const otherSender = { id: "old-pet-renderer" };
+  const handlers = {};
+  const saves = [];
+  const settingsMessages = [];
+  const rendererMessages = [];
+  const dispatches = [];
+  const logs = [];
+  let trayRefreshes = 0;
+  let walkingSyncs = 0;
+  let persistedMode = configMode;
+  const ipcMain = { on: (channel, handler) => { handlers[channel] = handler; } };
+  const config = {
+    getConfig: () => ({ renderMode: persistedMode }),
+    saveConfig: (patch) => {
+      saves.push({ ...patch });
+      if (patch && Object.prototype.hasOwnProperty.call(patch, "renderMode")) persistedMode = patch.renderMode;
+    }
+  };
+  const settingsWin = {
+    isDestroyed: () => false,
+    webContents: { send: (channel, payload) => settingsMessages.push({ channel, payload }) }
+  };
+  const renderModeFallbackToast = (mode) => mode === "rig"
+    ? "2.5D 资源不可用，已回退到 GIF"
+    : mode === "live2d"
+      ? "Live2D 初始化失败，已回退到 GIF"
+      : mode === "spine"
+        ? "Spine 初始化失败，已回退到 GIF"
+        : "渲染模式初始化失败，已回退到 GIF";
+  const registered = new Function(
+    "ipcMain", "renderModeMod", "isCurrentPetRendererSender", "config", "refreshTrayMenu",
+    "syncWalkingEngine", "settingsWin", "sendToRenderer", "logTts", "renderModeFallbackToast",
+    `
+      let renderModeSeq = ${seq};
+      let renderModeIntentMode = ${JSON.stringify(intent)};
+      let renderModeCorrectionMeta = null;
+      const dispatches = [];
+      function dispatchRenderModeIntent(mode) {
+        renderModeCorrectionMeta = null;
+        const request = { mode: renderModeMod.renderModeOf(mode), seq: ++renderModeSeq };
+        renderModeIntentMode = request.mode;
+        dispatches.push(request);
+        return request;
+      }
+      ${sourceBlock(mainSource, 'ipcMain.on("pet:render-mode-outcome"', 'ipcMain.on("pet:render-mode-correction"', "protocol outcome")}
+      ${sourceBlock(mainSource, 'ipcMain.on("pet:render-mode-correction"', 'ipcMain.handle("pet:save-persona"', "protocol correction")}
+      return {
+        getSeq: () => renderModeSeq,
+        getIntent: () => renderModeIntentMode,
+        getCorrectionMeta: () => renderModeCorrectionMeta,
+        dispatches
+      };
+    `
+  )(
+    ipcMain,
+    RM,
+    (event) => !!event && event.sender === currentSender,
+    config,
+    () => { trayRefreshes += 1; },
+    () => { walkingSyncs += 1; },
+    settingsWin,
+    (channel, payload) => rendererMessages.push({ channel, payload }),
+    (...args) => logs.push(args),
+    renderModeFallbackToast
+  );
+  return {
+    handlers,
+    currentSender,
+    otherSender,
+    saves,
+    settingsMessages,
+    rendererMessages,
+    dispatches: registered.dispatches,
+    logs,
+    get trayRefreshes() { return trayRefreshes; },
+    get walkingSyncs() { return walkingSyncs; },
+    get persistedMode() { return persistedMode; },
+    get seq() { return registered.getSeq(); },
+    get intent() { return registered.getIntent(); },
+    get correctionMeta() { return registered.getCorrectionMeta(); }
+  };
+}
+
+const m1 = createMainRenderModeProtocolHarness({ seq: 40, intent: "rig", configMode: "rig" });
+m1.handlers["pet:render-mode-correction"]({ sender: m1.currentSender }, {
+  baseSeq: 40, sourceMode: "rig", committedMode: "gif", error: "missing rig asset"
+});
+assertEq("M1 current correction 只创建一个正式 GIF intent", m1.dispatches, [{ mode: "gif", seq: 41 }]);
+assertEq("M1 correction 不直接写 config", m1.saves, []);
+
+const m2 = createMainRenderModeProtocolHarness({ seq: 40, intent: "rig", configMode: "rig" });
+m2.handlers["pet:render-mode-correction"]({ sender: m2.otherSender }, {
+  baseSeq: 40, sourceMode: "rig", committedMode: "gif"
+});
+assertEq("M2 非当前 sender 不 dispatch", m2.dispatches, []);
+assertEq("M2 非当前 sender 不写 config", m2.saves, []);
+
+const m3 = createMainRenderModeProtocolHarness({ seq: 40, intent: "rig", configMode: "rig" });
+m3.handlers["pet:render-mode-correction"]({ sender: m3.currentSender }, {
+  baseSeq: 39, sourceMode: "rig", committedMode: "gif"
+});
+assertEq("M3 stale baseSeq 不 dispatch", m3.dispatches, []);
+
+const m4 = createMainRenderModeProtocolHarness({ seq: 40, intent: "rig", configMode: "rig" });
+m4.handlers["pet:render-mode-correction"]({ sender: m4.currentSender }, {
+  baseSeq: 40, sourceMode: "rig", committedMode: "gif", error: "missing rig asset"
+});
+m4.handlers["pet:render-mode-outcome"]({ sender: m4.currentSender }, {
+  seq: 41, requestedMode: "gif", committedMode: "gif", ok: true
+});
+assertEq("M4 correction-derived GIF outcome 持久化 committed mode", m4.persistedMode, "gif");
+assertEq("M4 correction-derived GIF outcome 只保存一次", m4.saves, [{ renderMode: "gif" }]);
+assertEq("M4 correction-derived outcome 刷新 tray 与 walking", [m4.trayRefreshes, m4.walkingSyncs], [1, 1]);
+assertEq("M4 settings 收到 source marker", m4.settingsMessages[0] && m4.settingsMessages[0].payload.correctionSourceMode, "rig");
+assertEq("M4 correction metadata 被消费", m4.correctionMeta, null);
+assertEq("M4 correction 使用 source-specific toast", m4.rendererMessages, [
+  { channel: "pet:toast", payload: "2.5D 资源不可用，已回退到 GIF" }
+]);
+
+const m5 = createMainRenderModeProtocolHarness({ seq: 40, intent: "rig", configMode: "rig" });
+const repeatedCorrection = { baseSeq: 40, sourceMode: "rig", committedMode: "gif" };
+m5.handlers["pet:render-mode-correction"]({ sender: m5.currentSender }, repeatedCorrection);
+m5.handlers["pet:render-mode-correction"]({ sender: m5.currentSender }, repeatedCorrection);
+assertEq("M5 repeated correction 只创建一个正式 GIF intent", m5.dispatches, [{ mode: "gif", seq: 41 }]);
+
+const staleOutcome = createMainRenderModeProtocolHarness({ seq: 8, intent: "gif", configMode: "rig" });
+staleOutcome.handlers["pet:render-mode-outcome"]({ sender: staleOutcome.currentSender }, {
+  seq: 7, requestedMode: "gif", committedMode: "gif", ok: true
+});
+assertEq("R3 stale outcome 不收敛 config", staleOutcome.saves, []);
+
+const wrongOutcome = createMainRenderModeProtocolHarness({ seq: 8, intent: "gif", configMode: "rig" });
+wrongOutcome.handlers["pet:render-mode-outcome"]({ sender: wrongOutcome.otherSender }, {
+  seq: 8, requestedMode: "gif", committedMode: "gif", ok: true
+});
+assertEq("R4 old renderer outcome 不收敛 config", wrongOutcome.saves, []);
+
+const ordinaryGifNoop = createMainRenderModeProtocolHarness({ seq: 8, intent: "gif", configMode: "gif" });
+ordinaryGifNoop.handlers["pet:render-mode-outcome"]({ sender: ordinaryGifNoop.currentSender }, {
+  seq: 8, requestedMode: "gif", committedMode: "gif", ok: true
+});
+assert.equal(Object.prototype.hasOwnProperty.call(ordinaryGifNoop.settingsMessages[0].payload, "correctionSourceMode"), false,
+  "ordinary GIF→GIF noop 不携带 fallback source marker");
+assertEq("ordinary GIF→GIF noop 不产生 fallback toast", ordinaryGifNoop.rendererMessages, []);
+
+let recoverySeq = 20;
+let recoveryIntent = "live2d";
+let recoveryBeginCalls = [];
+const recoveryFn = new Function(
+  "beginRenderModeIntent", "renderModeMod", "config",
+  `${recoveryHelper}; return bumpRenderModeIntentForRecovery;`
+)(
+  (mode) => {
+    recoverySeq += 1;
+    recoveryIntent = mode;
+    recoveryBeginCalls.push(mode);
+    return { mode, seq: recoverySeq };
+  },
+  RM,
+  { getConfig: () => ({ renderMode: "rig" }) }
+);
+assertEq("R1 recovery helper 只 bump 到 committed mode", recoveryFn(), { mode: "rig", seq: 21 });
+assertEq("R1 recovery helper 只调用一次 begin", recoveryBeginCalls, ["rig"]);
+assertEq("R1 recovery helper 更新 intent identity", [recoverySeq, recoveryIntent], [21, "rig"]);
+
+const recoveryStartup = new Function(
+  "renderModeMod", "config",
+  `
+    let renderModeSeq = 20;
+    let renderModeIntentMode = "live2d";
+    function beginRenderModeIntent(mode) {
+      const normalized = renderModeMod.renderModeOf(mode);
+      renderModeSeq += 1;
+      renderModeIntentMode = normalized;
+      return { mode: normalized, seq: renderModeSeq };
+    }
+    ${recoveryHelper}
+    ${sourceBlock(mainSource, "function ensureRenderModeRequest", "function renderModeFallbackToast", "ensureRenderModeRequest")}
+    const recovery = bumpRenderModeIntentForRecovery();
+    const startup = ensureRenderModeRequest("gif");
+    return { recovery, startup };
+  `
+)(RM, { getConfig: () => ({ renderMode: "rig" }) });
+assertEq("R2 reload 后 startup get-state 复用 N+1", recoveryStartup, {
+  recovery: { mode: "rig", seq: 21 }, startup: { mode: "rig", seq: 21 }
+});
+assert.equal(/walk\.|syncWalkingEngine|dragPaused|chatPaused|zoomPaused/.test(recoveryHelper), false,
+  "R5 recovery helper 不修改 walking pause");
+
+const spineSkinDispatches = [];
+const spineSkinMessages = [];
+const setSpineSkinForTest = new Function(
+  "config", "renderModeIntentMode", "dispatchRenderModeIntent", "refreshTrayMenu", "sendToRenderer", "logTts",
+  `${sourceBlock(mainSource, "function setSpineSkin(id)", "/** 皮肤三层菜单", "setSpineSkin")}; return setSpineSkin;`
+)(
+  {
+    getConfig: () => ({ renderMode: "spine", spineSkinId: "" }),
+    saveConfig: () => {}
+  },
+  "live2d",
+  (mode) => spineSkinDispatches.push({ mode, seq: 22 }),
+  () => {},
+  (channel, payload) => spineSkinMessages.push({ channel, payload }),
+  () => {}
+);
+setSpineSkinForTest("builtin");
+assertEq("T8 Spine skin 在 pending Live2D intent 下创建正式 Spine intent", spineSkinDispatches, [{ mode: "spine", seq: 22 }]);
+assertEq("T8 不向 pending Live2D 发送无 seq Spine reskin", spineSkinMessages, []);
+
+function renderModeListenerBlock(source = rendererSource) {
+  return sourceBlock(source, "if (window.petAPI.onRenderModeChanged)", "if (window.petAPI.onLive2dChanged)", "render-mode listener");
+}
+function assertReconciliationHelperWiring(source = rendererSource) {
+  const block = sourceBlock(source, "async function reconcileFormalRenderMode", "if (window.petAPI.onUiEdgeCompact)", "formal reconciliation helper");
+  assert.match(block, /while \(currentMainRenderModeSeq === mainSeq\)/);
+  assert.match(block, /const ownerPromise = currentRenderSwitchPromise/);
+  assert.match(block, /await ownerPromise/);
+  assert.match(block, /if \(currentMainRenderModeSeq !== mainSeq\) return false/);
+  assert.match(block, /isStableFormalRenderMode\(mode, mainSeq\)/);
+  assert.match(block, /currentRenderSwitchPromise !== ownerPromise/);
+  assert.match(block, /reportRenderModeOutcome\(mainSeq, mode/);
+}
+function assertPostGetStateReconciliation(source = rendererSource) {
+  const block = renderModeListenerBlock(source);
+  assert.match(block, /let state = null;[\s\S]*if \(!isCurrentModeRequest\(\)\) \{\s*await reconcileFormalRenderMode\(mode, mainSeq\);/);
+}
+function assertSpineEnteringUsesIntent(source = mainSource) {
+  const block = sourceBlock(source, "function setSpineSkin(id)", "/** 皮肤三层菜单", "setSpineSkin");
+  assert.match(block, /const enteringSpine = renderModeIntentMode !== "spine";/);
+}
+function assertSpineModeGuard(source = rendererSource) {
+  const block = sourceBlock(source, "async function rebuildSpine()", "if (window.petAPI.onSpineSkinChanged)", "Spine rebuild guard");
+  assert.match(block, /if \(activeRenderMode !== "spine" && requestedRenderMode !== "spine"\)/);
+}
+function assertStableFormalOwnerGuard(source = rendererSource) {
+  const block = sourceBlock(source, "function isStableFormalRenderMode", "if (window.petAPI.onUiEdgeCompact)", "stable formal owner guard");
+  assert.match(block, /renderSwitchStatus === "ready"/);
+  assert.match(block, /renderRuntimeReady/);
+  assert.match(block, /renderRuntimeResource/);
+  assert.match(block, /activeRenderMode === mode/);
+  assert.match(block, /requestedRenderMode === mode/);
+}
+function assertRecoveryHelperPure(source = mainSource) {
+  const block = sourceBlock(source, "function bumpRenderModeIntentForRecovery", "/** §14 追加 102", "recovery helper");
+  assert.match(block, /beginRenderModeIntent\(/);
+  assert.doesNotMatch(block, /sendToRenderer|syncWalkingEngine|saveConfig|refreshTrayMenu|walk\./);
+}
+function assertCorrectionMetadataWiring(source = mainSource) {
+  const block = sourceBlock(source, 'ipcMain.on("pet:render-mode-correction"', 'ipcMain.handle("pet:save-persona"', "correction metadata");
+  assert.match(block, /renderModeCorrectionMeta = \{ seq: request\.seq, sourceMode: decision\.sourceMode \}/);
+  assert.doesNotMatch(block, /config\.saveConfig\(/);
+  const outcome = sourceBlock(source, 'ipcMain.on("pet:render-mode-outcome"', 'ipcMain.on("pet:render-mode-correction"', "outcome metadata");
+  assert.match(outcome, /correctionMeta\.sourceMode/);
+  assert.match(outcome, /renderModeCorrectionMeta = null/);
+}
+
+// B-2 mutation matrix：每个新 guard 都必须能被对应的行为/结构断言抓住。
+const removePostGetStateReconciliation = (source) => source.replace(
+  '    if (!isCurrentModeRequest()) {\n      await reconcileFormalRenderMode(mode, mainSeq);\n      return;\n    }\n    if (!result.fallback) {',
+  '    if (!isCurrentModeRequest()) return;\n    if (!result.fallback) {'
+);
+const removeOwnerLoop = (source) => source.replace(
+  "  while (currentMainRenderModeSeq === mainSeq) {",
+  "  if (currentMainRenderModeSeq === mainSeq) {"
+);
+const removePostAwaitMainSeqGuard = (source) => source.replace(
+  "    if (currentMainRenderModeSeq !== mainSeq) return false;\n",
+  ""
+);
+const removeActiveFormalModeGuard = (source) => source.replace(
+  "    !!renderRuntimeResource && activeRenderMode === mode && requestedRenderMode === mode;",
+  "    !!renderRuntimeResource && requestedRenderMode === mode;"
+);
+const revertSpineEnteringToConfig = (source) => source.replace(
+  'const enteringSpine = renderModeIntentMode !== "spine";',
+  'const enteringSpine = config.getConfig().renderMode !== "spine";'
+);
+const removeSpineModeGuard = (source) => source.replace(
+  'async function rebuildSpine() {\n  if (activeRenderMode !== "spine" && requestedRenderMode !== "spine") {\n    return { status: "ignored" };\n  }',
+  "async function rebuildSpine() {"
+);
+const addRecoveryBroadcast = (source) => source.replace(
+  "  return beginRenderModeIntent(renderModeMod.renderModeOf(config.getConfig().renderMode));",
+  "  const request = beginRenderModeIntent(renderModeMod.renderModeOf(config.getConfig().renderMode));\n  sendToRenderer(\"pet:render-mode-changed\", request);\n  return request;"
+);
+const removeRecoveryBump = (source) => source.replace(
+  "  return beginRenderModeIntent(renderModeMod.renderModeOf(config.getConfig().renderMode));",
+  "  return { mode: renderModeIntentMode, seq: renderModeSeq };"
+);
+const loseCorrectionMetadata = (source) => source.replace(
+  "  renderModeCorrectionMeta = { seq: request.seq, sourceMode: decision.sourceMode };",
+  "  renderModeCorrectionMeta = null;"
+);
+const addCorrectionConfigWrite = (source) => source.replace(
+  "  // correction 只重新发起正式 GIF intent；config/settings/tray 仍由正式 outcome 单一收敛。",
+  "  config.saveConfig({ renderMode: \"gif\" });\n  // correction 只重新发起正式 GIF intent；config/settings/tray 仍由正式 outcome 单一收敛。"
+);
+expectMutationToFail("MUT-1", removePostGetStateReconciliation, assertPostGetStateReconciliation);
+expectMutationToFail("MUT-2", removeOwnerLoop, assertReconciliationHelperWiring);
+expectMutationToFail("MUT-3", removePostAwaitMainSeqGuard, assertReconciliationHelperWiring);
+expectMutationToFail("MUT-4", removeActiveFormalModeGuard, assertStableFormalOwnerGuard);
+expectMutationToFail("MUT-5", revertSpineEnteringToConfig, assertSpineEnteringUsesIntent);
+expectMutationToFail("MUT-6", removeSpineModeGuard, assertSpineModeGuard);
 
 const sitFractional = createSitOnTaskbarHarness({ gap: 19.5 });
 sitFractional.run();

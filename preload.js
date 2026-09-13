@@ -39,6 +39,9 @@ contextBridge.exposeInMainWorld("petAPI", {
   walkingEngineStop: () => ipcRenderer.send("pet:walking-engine-stop"),
   onWalking: (cb) => ipcRenderer.on("pet:walking", (_e, s) => cb(s)),
   onRenderModeChanged: (cb) => ipcRenderer.on("pet:render-mode-changed", (_e, m) => cb(m)),
+  reportRenderModeOutcome: (outcome) => ipcRenderer.send("pet:render-mode-outcome", outcome),
+  reportRenderModeCorrection: (correction) => ipcRenderer.send("pet:render-mode-correction", correction),
+  onRenderModeOutcome: (cb) => ipcRenderer.on("pet:render-mode-outcome", (_e, outcome) => cb(outcome)),
   setUiLang: (lang) => ipcRenderer.invoke("pet:set-ui-lang", lang),
   getI18n: () => ipcRenderer.invoke("pet:get-i18n"),
   onUiLangChanged: (cb) => ipcRenderer.on("pet:ui-lang-changed", (_e, lang) => cb(lang)),
@@ -162,6 +165,7 @@ contextBridge.exposeInMainWorld("petAPI", {
   onTtsPart: (cb) => ipcRenderer.on("pet:tts-part", (_e, part) => cb(part)), // v2.5.5 逐句流式
   setSkinWindowWidth: (px) => ipcRenderer.send("pet:set-skin-window-width", px),
   playback: (msg) => ipcRenderer.send("pet:tts-playback", msg),
+  onCursorRecovery: (cb) => ipcRenderer.on("pet:cursor-recovery", (_e, p) => cb(p)), // native cursor 恢复推送（穿透期间 main 轮询系统光标 → viewport 坐标）
 
   // 设置窗口
   getSettings: () => ipcRenderer.invoke("pet:get-settings"),

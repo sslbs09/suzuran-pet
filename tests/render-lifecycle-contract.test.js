@@ -4,8 +4,9 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs");
 const vm = require("node:vm");
+const renderMode = require("../src/render-mode");
 
-const renderer = fs.readFileSync(require.resolve("../renderer/pet.js"), "utf8");
+const renderer = fs.readFileSync(require.resolve("../renderer/pet.js"), "utf8").replace(/\r\n/g, "\n"); // EOL 鲁棒性：字面量/mutation 匹配不再依赖检出端 CRLF/LF
 const live2d = fs.readFileSync(require.resolve("../renderer/live2d-runtime.js"), "utf8");
 const index = fs.readFileSync(require.resolve("../renderer/index.html"), "utf8");
 const css = fs.readFileSync(require.resolve("../renderer/pet.css"), "utf8");
@@ -32,7 +33,7 @@ function wait(ms = 10) {
 
 function createPetLifecycleHarness() {
   const handlers = {};
-  const calls = { sizes: [], clickable: [], playback: [], fetches: 0 };
+  const calls = { sizes: [], clickable: [], playback: [], outcomes: [], corrections: [], fetches: 0 };
   const elements = new Map();
   const nativeSetTimeout = setTimeout;
   const nativeClearTimeout = clearTimeout;
@@ -259,6 +260,8 @@ function createPetLifecycleHarness() {
     live2dList: async () => [{ id: "builtin/test", name: "test", url: "test.model3.json" }],
     setSize(w, h, source) { calls.sizes.push(source ? [w, h, source] : [w, h]); },
     setClickable(value) { calls.clickable.push(!!value); },
+    reportRenderModeOutcome(outcome) { calls.outcomes.push({ ...outcome }); },
+    reportRenderModeCorrection(correction) { calls.corrections.push({ ...correction }); },
     playback(message) { calls.playback.push(String(message)); },
     setGroundGap() {}, setCharInset() {}, setHasSit() {}, setSleeping() {}, walkingEngineStop() {},
     walkingPause() {}, moveWindow() {}, hideWindow() {}, reloadRenderer() {}, pat() {}, throwPet() {},
@@ -317,6 +320,7 @@ function createPetLifecycleHarness() {
     agPsd: { readPsd: () => ({ layers: [] }) },
     Live2DCubismCore: {},
     Live2DRuntime: liveRuntime,
+    PetClickability: require("../src/clickability"), // 穿透纯逻辑核心双端文件（渲染层 <script> 全局的测试替身，sandbox 即 window）
     PIXI: {
       Application: FakeApplication,
       Assets: {
@@ -404,7 +408,7 @@ function assertSpineReadyReplayWiring(source = renderer) {
   const end = source.indexOf("if (window.petAPI.onLive2dChanged)", start);
   assert.ok(start >= 0 && end > start, "render-mode listener block exists");
   const block = source.slice(start, end);
-  const readyStart = block.indexOf("if (isCurrentModeRequest() && (result.status === \"ready\" || result.status === \"noop\") && activeRenderMode === mode)");
+  const readyStart = block.indexOf("if (isCurrentModeRequest() && (result.status === \"ready\" || result.status === \"noop\"))");
   assert.ok(readyStart >= 0, "ready/current owner guard exists");
   const ready = block.slice(readyStart);
   const mood = ready.indexOf('setMood(lastMood || "idle")');
@@ -413,8 +417,10 @@ function assertSpineReadyReplayWiring(source = renderer) {
   assert.ok(replay > mood, "latest walkState replay follows mood restoration");
   assert.match(ready, /mode === "spine" && state\.walkState && activeRenderGeneration === requestGeneration/,
     "replay is limited to current Spine owner generation");
-  assert.match(block, /if \(!result \|\| result\.status === "superseded" \|\| !isCurrentModeRequest\(\)\) return;[\s\S]*const state = await window\.petAPI\.getState\(\)/,
+  assert.match(block, /if \(!isCurrentModeRequest\(\)\) \{[\s\S]*?await reconcileFormalRenderMode\(mode, mainSeq\);[\s\S]*?\}[\s\S]*let state = null;[\s\S]*if \(!result\.fallback\) state = await window\.petAPI\.getState\(\)/,
     "state is read only after the request is current");
+  assert.match(block, /let state = null;[\s\S]*if \(!isCurrentModeRequest\(\)\) \{[\s\S]*?await reconcileFormalRenderMode\(mode, mainSeq\);/,
+    "post-getState supersession enters formal reconciliation");
 }
 
 test("Spine mode-ready replay uses latest state after mood restoration", () => {
@@ -429,20 +435,20 @@ function expectSpineReplayMutationToFail(label, mutate) {
 
 test("Spine mode-ready replay mutation matrix", () => {
   expectSpineReplayMutationToFail("删除 post-commit applyWalkState", (source) => source.replace(
-    '      if (mode === "spine" && state.walkState && activeRenderGeneration === requestGeneration) {\n' +
+    '      if (!result.fallback && mode === "spine" && state.walkState && activeRenderGeneration === requestGeneration) {\n' +
     '        applyWalkState(state.walkState); // 新 owner ready 后重放最新行走状态，收敛 Sit/Rest/Move\n' +
     '      }\n', ""));
   expectSpineReplayMutationToFail("applyWalkState 前置到 setMood 之前", (source) => source.replace(
-    '      setMood(lastMood || "idle"); // 切换后恢复当前情绪\n' +
-    '      if (mode === "spine" && state.walkState && activeRenderGeneration === requestGeneration) {\n' +
+    '      if (activeRenderMode === mode || result.fallback) setMood(lastMood || "idle"); // 切换/回退后恢复当前情绪\n' +
+    '      if (!result.fallback && mode === "spine" && state.walkState && activeRenderGeneration === requestGeneration) {\n' +
     '        applyWalkState(state.walkState); // 新 owner ready 后重放最新行走状态，收敛 Sit/Rest/Move\n' +
     '      }\n',
-    '      if (mode === "spine" && state.walkState && activeRenderGeneration === requestGeneration) {\n' +
+    '      if (!result.fallback && mode === "spine" && state.walkState && activeRenderGeneration === requestGeneration) {\n' +
     '        applyWalkState(state.walkState);\n' +
     '      }\n' +
     '      setMood(lastMood || "idle"); // 切换后恢复当前情绪\n'));
   expectSpineReplayMutationToFail("删除 current-request guard", (source) => source.replace(
-    'if (isCurrentModeRequest() && (result.status === "ready" || result.status === "noop") && activeRenderMode === mode)',
+    'if (isCurrentModeRequest() && (result.status === "ready" || result.status === "noop"))',
     "if (true)"));
   expectSpineReplayMutationToFail("改用旧 cached walkState", (source) => source.replace(
     "applyWalkState(state.walkState)", "applyWalkState(walkState)"));
@@ -570,22 +576,41 @@ test("same mode is a no-op only when ready and same resource", () => {
   assert.match(lifecycle, /options\.force/);
 });
 
-test("startup mode is authoritative over resource ids and Live2D settings mapping is four-state", () => {
-  const init = bodyOf("// 启动只由 renderMode 决定", "// v2.5.24 修复");
-  assert.match(init, /const initialMode = RENDER_MODES\.includes\(state\.renderMode\)/);
+test("startup mode uses the formal main request and Live2D settings mapping is four-state", () => {
+  const init = bodyOf("// 启动与 runtime switch 共用 main 分配的正式 seq", "if (!agreed)");
+  assert.match(init, /const initialRequest = state\.renderModeRequest/);
+  assert.match(init, /const initialMode = RENDER_MODES\.includes\(initialRequest\.mode\)/);
+  assert.match(init, /const initialMainSeq = Number\.isSafeInteger\(initialRequest\.seq\)/);
+  assert.match(init, /mainSeq: initialMainSeq/);
+  assert.match(init, /const initialResult = await switchRenderMode\(initialMode/);
+  assert.match(init, /reportRenderModeOutcome\(initialMainSeq, initialMode, initialResult/);
+  assert.ok(init.indexOf("setClickable(initialResult.status") < init.indexOf("reportRenderModeOutcome(initialMainSeq"),
+    "startup fallback reports after clickable recovery");
   assert.match(init, /resourceId: initialMode === "rig" \? rigSkinId/);
   assert.doesNotMatch(init, /state\.renderMode === "rig" \|\| state\.rigSkinId/);
   assert.match(config, /cfg\.renderMode === "live2d" \? "live2d"/);
 });
 
-test("failure paths report failed/superseded without GIF fallback", () => {
+test("current non-GIF failures fall back through the unified GIF lifecycle", () => {
   const lifecycle = bodyOf("async function switchRenderMode", "/** 主进程广播行走状态");
   assert.match(lifecycle, /renderSwitchStatus = result && result\.status === "superseded" \? "superseded" : "failed"/);
   assert.match(lifecycle, /activeRenderMode = null/);
-  assert.doesNotMatch(lifecycle, /renderMode = "gif"/);
+  assert.match(lifecycle, /mode !== "gif"/);
+  assert.match(lifecycle, /switchRenderMode\("gif", \{ mainSeq: context\.mainSeq \}\)/);
+  assert.match(lifecycle, /requestedMode: mode/);
+  assert.match(renderer, /reportRenderModeOutcome\(mainSeq, mode, result/);
   assert.match(renderer, /cleanupRigOwner\(owner\)/);
   assert.match(renderer, /destroySpineOwner\(owner\)/);
   assert.match(renderer, /destroyLive2d\(context\.token\)/);
+});
+
+test("B-2 fallback guard mutation is caught", () => {
+  const lifecycle = bodyOf("async function switchRenderMode", "/** 主进程广播行走状态");
+  const mutated = lifecycle.replace('mode !== "gif"', "true");
+  assert.throws(() => assert.match(mutated, /mode !== "gif"/), "MUT-A 删除非 GIF fallback guard");
+  assert.match(lifecycle, /mode !== "gif"/, "current GIF failure cannot recurse into GIF fallback");
+  assert.match(lifecycle, /switchRenderMode\("gif", \{ mainSeq: context\.mainSeq \}\)/,
+    "MUT-C direct commit bypass cannot replace the unified fallback request");
 });
 
 test("Live2D stale async owner cannot tear down the newer owner", async () => {
@@ -921,7 +946,7 @@ test("production Rig skin events obey the selected render mode", async () => {
   assert.equal(harness.rigInstances.length, 0);
 });
 
-test("production Rig resource reload stays Rig and clears Rig without GIF fallback", async () => {
+test("production Rig resource reload falls back to GIF when the current resource disappears", async () => {
   const harness = createPetLifecycleHarness();
   await harness.enter("rig", "rig-a");
   const old = harness.rigInstances[0];
@@ -931,9 +956,10 @@ test("production Rig resource reload stays Rig and clears Rig without GIF fallba
   assert.equal(harness.rigInstances.length, 2);
   await harness.handlers.onRigSkinChanged(null);
   const state = harness.lifecycle.getState();
-  assert.equal(state.active, null);
-  assert.equal(state.requested, "rig");
-  assertProductionSurface(harness, "active-null");
+  assert.equal(state.active, "gif");
+  assert.equal(state.requested, "gif");
+  assert.equal(state.status, "ready");
+  assertProductionSurface(harness, "gif");
 });
 
 test("production same mode and same resource is a no-op, changed resource reloads", async () => {
@@ -950,7 +976,7 @@ test("production same mode and same resource is a no-op, changed resource reload
 });
 
 for (const mode of ["spine", "rig", "live2d"]) {
-  test(`production ${mode} failure leaves no committed visual owner`, async () => {
+  test(`production ${mode} failure falls back to a ready GIF owner`, async () => {
     const harness = createPetLifecycleHarness();
     await harness.enter("gif");
     if (mode === "spine") {
@@ -962,13 +988,580 @@ for (const mode of ["spine", "rig", "live2d"]) {
       harness.sandbox.petAPI.live2dList = async () => [];
     }
     const result = await harness.switch(mode, resourceFor(mode));
-    assert.equal(result.status, "failed");
-    assert.equal(harness.lifecycle.getState().active, null);
-    assertProductionSurface(harness, "active-null");
+    assert.equal(result.status, "ready");
+    assert.equal(result.fallback, true);
+    assert.equal(result.requestedMode, mode);
+    assert.equal(result.committedMode, "gif");
+    assert.equal(harness.lifecycle.getState().active, "gif");
+    assert.equal(harness.lifecycle.getState().requested, "gif");
+    assert.equal(harness.lifecycle.getState().status, "ready");
+    assertProductionSurface(harness, "gif");
     assert.equal(harness.lifecycle.getState().rigRuntime, null);
     assert.equal(harness.lifecycle.getState().live2dActive, false);
   });
 }
+
+test("B-2 formal Rig failure reports the current seq after GIF fallback", async () => {
+  const harness = createPetLifecycleHarness();
+  harness.sandbox.Rigger = null;
+  await harness.handlers.onRenderModeChanged({ mode: "rig", seq: 101 });
+  const state = harness.lifecycle.getState();
+  assert.equal(state.active, "gif");
+  assert.equal(state.requested, "gif");
+  assert.equal(state.status, "ready");
+  assert.equal(harness.calls.clickable.at(-1), true);
+  assert.deepEqual(harness.calls.outcomes, [{
+    seq: 101,
+    ok: false,
+    requestedMode: "rig",
+    committedMode: "gif",
+    error: "未选择 Rig 皮肤"
+  }]);
+});
+
+test("B-2 formal Live2D failure reports fallback instead of a false ready target", async () => {
+  const harness = createPetLifecycleHarness();
+  harness.sandbox.petAPI.live2dList = async () => [];
+  await harness.handlers.onRenderModeChanged({ mode: "live2d", seq: 102 });
+  assert.equal(harness.lifecycle.getState().active, "gif");
+  assert.equal(harness.lifecycle.getState().status, "ready");
+  assert.equal(harness.calls.outcomes.length, 1);
+  assert.deepEqual(harness.calls.outcomes[0], {
+    seq: 102,
+    ok: false,
+    requestedMode: "live2d",
+    committedMode: "gif",
+    error: "未找到 Live2D 模型"
+  });
+});
+
+test("B-2 A -> B -> C rejects A delayed failure and reports only current C", async () => {
+  const harness = createPetLifecycleHarness();
+  harness.liveRuntime.immediate = false;
+  const a = harness.handlers.onRenderModeChanged({ mode: "live2d", seq: 201 });
+  await wait(8);
+  await harness.handlers.onRenderModeChanged({ mode: "gif", seq: 202 });
+  const c = harness.handlers.onRenderModeChanged({ mode: "spine", seq: 203 });
+  await c;
+  harness.liveRuntime.pending[0].resolve(false);
+  await a;
+  assert.equal(harness.lifecycle.getState().active, "spine");
+  assert.equal(harness.lifecycle.getState().status, "ready");
+  assert.equal(harness.calls.outcomes.some((o) => o.seq === 201), false);
+  assert.equal(harness.calls.outcomes.at(-1).seq, 203);
+});
+
+test("B-2 A -> B -> A keeps the second A and ignores the first A result", async () => {
+  const harness = createPetLifecycleHarness();
+  harness.liveRuntime.immediate = false;
+  const firstA = harness.handlers.onRenderModeChanged({ mode: "live2d", seq: 301 });
+  await wait(8);
+  await harness.handlers.onRenderModeChanged({ mode: "gif", seq: 302 });
+  const secondA = harness.handlers.onRenderModeChanged({ mode: "live2d", seq: 303 });
+  await wait(8);
+  assert.equal(harness.liveRuntime.pending.length, 2);
+  harness.liveRuntime.pending[0].resolve(true);
+  await firstA;
+  assert.equal(harness.calls.outcomes.some((o) => o.seq === 301), false);
+  harness.liveRuntime.pending[1].resolve(true);
+  await secondA;
+  assert.equal(harness.lifecycle.getState().active, "live2d");
+  assert.deepEqual(harness.calls.outcomes.at(-1), {
+    seq: 303,
+    ok: true,
+    requestedMode: "live2d",
+    committedMode: "live2d",
+    error: undefined
+  });
+});
+
+test("B-2 fallback GIF cannot overwrite a later Spine intent", async () => {
+  const harness = createPetLifecycleHarness();
+  const fallback = await harness.switch("rig", "");
+  assert.equal(fallback.fallback, true);
+  const spine = await harness.switch("spine");
+  assert.equal(spine.status, "ready");
+  assert.equal(harness.lifecycle.getState().active, "spine");
+  assert.equal(harness.lifecycle.getState().status, "ready");
+});
+
+test("B-2 preserves open input draft and bubble while restoring the GIF owner", async () => {
+  const harness = createPetLifecycleHarness();
+  harness.elements.get("input").value = "draft text";
+  harness.elements.get("bubble").style.display = "";
+  harness.sandbox.Rigger = null;
+  await harness.handlers.onRenderModeChanged({ mode: "rig", seq: 401 });
+  assert.equal(harness.elements.get("input").value, "draft text");
+  assert.equal(harness.elements.get("bubble").style.display, "");
+  assertProductionSurface(harness, "gif");
+});
+
+test("B-2 fallback restores pointer semantics used by the existing drag path", async () => {
+  const harness = createPetLifecycleHarness();
+  harness.sandbox.Rigger = null;
+  await harness.handlers.onRenderModeChanged({ mode: "rig", seq: 402 });
+  const pet = harness.elements.get("pet");
+  const sprite = harness.elements.get("sprite");
+  assert.equal(harness.lifecycle.getState().active, "gif");
+  assert.equal(pet.style.pointerEvents, "auto");
+  assert.equal(sprite.style.pointerEvents, "none");
+  assert.equal(harness.calls.clickable.at(-1), true);
+});
+
+test("B-2 internal Rig clear-skin reports an independent correction", async () => {
+  const harness = createPetLifecycleHarness();
+  const initial = await harness.lifecycle.switchRenderMode("rig", { mainSeq: 10, resourceId: "rig-a" });
+  assert.equal(initial.status, "ready");
+  harness.sandbox.Rigger = null;
+  await harness.handlers.onRigSkinChanged("");
+  assert.equal(harness.lifecycle.getState().active, "gif");
+  assert.deepEqual(harness.calls.corrections, [{
+    baseSeq: 10,
+    sourceMode: "rig",
+    committedMode: "gif",
+    error: "未选择 Rig 皮肤"
+  }]);
+});
+
+test("B-2 internal Spine failure reports correction but successful rebuild does not", async () => {
+  const harness = createPetLifecycleHarness();
+  const initial = await harness.lifecycle.switchRenderMode("spine", { mainSeq: 20 });
+  assert.equal(initial.status, "ready");
+  await harness.handlers.onSpineSkinChanged();
+  assert.equal(harness.calls.corrections.length, 0);
+
+  harness.sandbox.PIXI.spine.Spine = null;
+  harness.sandbox.PIXI.Spine = null;
+  await harness.handlers.onSpineSkinChanged();
+  assert.equal(harness.lifecycle.getState().active, "gif");
+  assert.deepEqual(harness.calls.corrections.at(-1), {
+    baseSeq: 20,
+    sourceMode: "spine",
+    committedMode: "gif",
+    error: "Spine 构造器未加载"
+  });
+});
+
+test("B-2 internal Live2D reload reports correction only on fallback", async () => {
+  const harness = createPetLifecycleHarness();
+  const initial = await harness.lifecycle.switchRenderMode("live2d", { mainSeq: 30, resourceId: "live-a" });
+  assert.equal(initial.status, "ready");
+  await harness.handlers.onLive2dChanged("live-b");
+  assert.equal(harness.calls.corrections.length, 0);
+
+  harness.sandbox.petAPI.live2dList = async () => [];
+  await harness.handlers.onLive2dChanged("live-b");
+  assert.equal(harness.lifecycle.getState().active, "gif");
+  assert.deepEqual(harness.calls.corrections.at(-1), {
+    baseSeq: 30,
+    sourceMode: "live2d",
+    committedMode: "gif",
+    error: "未找到 Live2D 模型"
+  });
+});
+
+test("B-2 internal fallback correction is rejected when its baseSeq becomes stale", async () => {
+  const harness = createPetLifecycleHarness();
+  const initial = await harness.lifecycle.switchRenderMode("live2d", { mainSeq: 40, resourceId: "live-a" });
+  assert.equal(initial.status, "ready");
+  harness.sandbox.petAPI.live2dList = async () => [];
+  await harness.handlers.onLive2dChanged("live-b");
+  assert.equal(harness.calls.corrections.length, 1);
+  const decision = renderMode.renderModeCorrectionDecision({
+    currentSeq: 41,
+    currentSourceMode: "live2d",
+    correction: harness.calls.corrections[0]
+  });
+  assert.deepEqual(decision, { accepted: false, reason: "stale" });
+  assert.equal(harness.lifecycle.getState().active, "gif");
+});
+
+test("B-2 formal noop still reports the current seq", async () => {
+  const harness = createPetLifecycleHarness();
+  await harness.lifecycle.switchRenderMode("gif", { mainSeq: 50 });
+  await harness.handlers.onRenderModeChanged({ mode: "gif", seq: 51 });
+  assert.deepEqual(harness.calls.outcomes.at(-1), {
+    seq: 51,
+    ok: true,
+    requestedMode: "gif",
+    committedMode: "gif",
+    error: undefined
+  });
+});
+
+test("B-2 stale formal noop is ignored without an outcome", async () => {
+  const harness = createPetLifecycleHarness();
+  await harness.lifecycle.switchRenderMode("gif", { mainSeq: 60 });
+  await harness.handlers.onRenderModeChanged({ mode: "gif", seq: 59 });
+  assert.equal(harness.calls.outcomes.length, 0);
+  assert.equal(harness.lifecycle.getState().active, "gif");
+});
+
+test("B-2 formal Live2D superseded by successful internal reskin still reports formal success", async () => {
+  const harness = createPetLifecycleHarness();
+  harness.lifecycle.setResourceIds({ live2d: "live-a" });
+  let listCalls = 0;
+  let releaseFormalList;
+  harness.sandbox.petAPI.live2dList = () => {
+    listCalls += 1;
+    if (listCalls === 1) return new Promise((resolve) => { releaseFormalList = resolve; });
+    return Promise.resolve([{ id: "live-b", name: "live-b", url: "live-b.model3.json" }]);
+  };
+  const formal = harness.handlers.onRenderModeChanged({ mode: "live2d", seq: 501 });
+  await wait(8);
+  const reskin = harness.handlers.onLive2dChanged("live-b");
+  await reskin;
+  releaseFormalList([{ id: "live-a", name: "live-a", url: "live-a.model3.json" }]);
+  await formal;
+  assert.deepEqual(harness.calls.corrections, []);
+  assert.deepEqual(harness.calls.outcomes.at(-1), {
+    seq: 501,
+    ok: true,
+    requestedMode: "live2d",
+    committedMode: "live2d",
+    error: undefined
+  });
+  assert.equal(harness.lifecycle.getState().active, "live2d");
+  assert.equal(harness.lifecycle.getState().status, "ready");
+});
+
+test("B-2 formal Rig superseded by successful internal reskin still reports formal success", async () => {
+  const harness = createPetLifecycleHarness();
+  harness.lifecycle.setResourceIds({ rig: "rig-a" });
+  let fetchCalls = 0;
+  let releaseFormalFetch;
+  harness.sandbox.fetch = () => {
+    fetchCalls += 1;
+    if (fetchCalls === 1) return new Promise((resolve) => { releaseFormalFetch = resolve; });
+    return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(64) });
+  };
+  const formal = harness.handlers.onRenderModeChanged({ mode: "rig", seq: 502 });
+  await wait(8);
+  const reskin = harness.handlers.onRigSkinChanged("rig-b");
+  await reskin;
+  releaseFormalFetch({ ok: true, arrayBuffer: async () => new ArrayBuffer(64) });
+  await formal;
+  assert.deepEqual(harness.calls.corrections, []);
+  assert.deepEqual(harness.calls.outcomes.at(-1), {
+    seq: 502,
+    ok: true,
+    requestedMode: "rig",
+    committedMode: "rig",
+    error: undefined
+  });
+  assert.equal(harness.lifecycle.getState().active, "rig");
+  assert.equal(harness.lifecycle.getState().status, "ready");
+});
+
+test("B-2 formal Spine superseded by successful internal rebuild still reports formal success", async () => {
+  const harness = createPetLifecycleHarness();
+  harness.spineQueries.immediate = false;
+  const formal = harness.handlers.onRenderModeChanged({ mode: "spine", seq: 503 });
+  await wait(8);
+  const reskin = harness.handlers.onSpineSkinChanged();
+  await wait(8);
+  assert.equal(harness.spineQueries.pending.length, 2);
+  harness.spineQueries.pending[1].resolve({ list: [], current: "builtin" });
+  await reskin;
+  harness.spineQueries.pending[0].resolve({ list: [], current: "builtin" });
+  await formal;
+  assert.deepEqual(harness.calls.corrections, []);
+  assert.deepEqual(harness.calls.outcomes.at(-1), {
+    seq: 503,
+    ok: true,
+    requestedMode: "spine",
+    committedMode: "spine",
+    error: undefined
+  });
+  assert.equal(harness.lifecycle.getState().active, "spine");
+  assert.equal(harness.lifecycle.getState().status, "ready");
+});
+
+test("B-2 formal superseded by internal fallback reports correction without target success", async () => {
+  const harness = createPetLifecycleHarness();
+  harness.lifecycle.setResourceIds({ live2d: "live-a" });
+  let listCalls = 0;
+  let releaseFormalList;
+  harness.sandbox.petAPI.live2dList = () => {
+    listCalls += 1;
+    if (listCalls === 1) return new Promise((resolve) => { releaseFormalList = resolve; });
+    return Promise.resolve([]);
+  };
+  const formal = harness.handlers.onRenderModeChanged({ mode: "live2d", seq: 504 });
+  await wait(8);
+  const reskin = harness.handlers.onLive2dChanged("live-b");
+  await reskin;
+  releaseFormalList([{ id: "live-a", name: "live-a", url: "live-a.model3.json" }]);
+  await formal;
+  assert.equal(harness.calls.outcomes.some((outcome) => outcome.seq === 504), false);
+  assert.deepEqual(harness.calls.corrections, [{
+    baseSeq: 504,
+    sourceMode: "live2d",
+    committedMode: "gif",
+    error: "未找到 Live2D 模型"
+  }]);
+  assert.equal(harness.lifecycle.getState().active, "gif");
+  assert.equal(harness.lifecycle.getState().status, "ready");
+});
+
+test("B-2 newer main seq suppresses old formal reconciliation", async () => {
+  const harness = createPetLifecycleHarness();
+  harness.lifecycle.setResourceIds({ live2d: "live-a" });
+  let listCalls = 0;
+  let releaseOldFormalList;
+  harness.sandbox.petAPI.live2dList = () => {
+    listCalls += 1;
+    if (listCalls === 1) return new Promise((resolve) => { releaseOldFormalList = resolve; });
+    return Promise.resolve([{ id: "live-b", name: "live-b", url: "live-b.model3.json" }]);
+  };
+  const oldFormal = harness.handlers.onRenderModeChanged({ mode: "live2d", seq: 505 });
+  await wait(8);
+  await harness.handlers.onLive2dChanged("live-b");
+  const newerFormal = harness.handlers.onRenderModeChanged({ mode: "live2d", seq: 506 });
+  await newerFormal;
+  releaseOldFormalList([{ id: "live-a", name: "live-a", url: "live-a.model3.json" }]);
+  await oldFormal;
+  assert.equal(harness.calls.outcomes.some((outcome) => outcome.seq === 505), false);
+  assert.deepEqual(harness.calls.outcomes.at(-1), {
+    seq: 506,
+    ok: true,
+    requestedMode: "live2d",
+    committedMode: "live2d",
+    error: undefined
+  });
+  assert.equal(harness.lifecycle.getState().active, "live2d");
+  assert.equal(harness.lifecycle.getState().status, "ready");
+});
+
+test("B-2 active mode mismatch suppresses formal reconciliation", async () => {
+  const harness = createPetLifecycleHarness();
+  harness.lifecycle.setResourceIds({ live2d: "live-a" });
+  let releaseFormalList;
+  harness.sandbox.petAPI.live2dList = () => new Promise((resolve) => { releaseFormalList = resolve; });
+  const oldFormal = harness.handlers.onRenderModeChanged({ mode: "live2d", seq: 507 });
+  await wait(8);
+  await harness.lifecycle.switchRenderMode("gif");
+  releaseFormalList([{ id: "live-a", name: "live-a", url: "live-a.model3.json" }]);
+  await oldFormal;
+  assert.equal(harness.calls.outcomes.some((outcome) => outcome.seq === 507), false);
+  assert.deepEqual(harness.lifecycle.getState().active, "gif");
+  assert.equal(harness.lifecycle.getState().status, "ready");
+});
+
+test("B-2 post-getState reconciliation closes the Live2D liveness gap", async () => {
+  const harness = createPetLifecycleHarness();
+  harness.lifecycle.setResourceIds({ live2d: "live-a" });
+  harness.sandbox.petAPI.live2dList = async () => [
+    { id: "live-a", name: "live-a", url: "live-a.model3.json" },
+    { id: "live-b", name: "live-b", url: "live-b.model3.json" }
+  ];
+  harness.stateReads.hold = true;
+  const formal = harness.handlers.onRenderModeChanged({ mode: "live2d", seq: 601 });
+  await wait(8);
+  assert.equal(harness.stateReads.pending.length, 1);
+  await harness.handlers.onLive2dChanged("live-b");
+  harness.releaseStateReads();
+  await formal;
+  assert.deepEqual(harness.calls.outcomes.at(-1), {
+    seq: 601,
+    ok: true,
+    requestedMode: "live2d",
+    committedMode: "live2d",
+    error: undefined
+  });
+  assert.equal(harness.lifecycle.getState().active, "live2d");
+  assert.equal(harness.lifecycle.getState().status, "ready");
+});
+
+test("B-2 post-getState reconciliation closes the Rig liveness gap", async () => {
+  const harness = createPetLifecycleHarness();
+  harness.lifecycle.setResourceIds({ rig: "rig-a" });
+  harness.stateReads.hold = true;
+  const formal = harness.handlers.onRenderModeChanged({ mode: "rig", seq: 602 });
+  await wait(8);
+  assert.equal(harness.stateReads.pending.length, 1);
+  await harness.handlers.onRigSkinChanged("rig-b");
+  harness.releaseStateReads();
+  await formal;
+  assert.deepEqual(harness.calls.outcomes.at(-1), {
+    seq: 602,
+    ok: true,
+    requestedMode: "rig",
+    committedMode: "rig",
+    error: undefined
+  });
+  assert.equal(harness.lifecycle.getState().active, "rig");
+  assert.equal(harness.lifecycle.getState().status, "ready");
+});
+
+test("B-2 formal reconciliation follows R1 -> R2 owner succession", async () => {
+  const harness = createPetLifecycleHarness();
+  harness.lifecycle.setResourceIds({ live2d: "live-a" });
+  harness.sandbox.petAPI.live2dList = async () => [
+    { id: "live-a", name: "live-a", url: "live-a.model3.json" },
+    { id: "live-b", name: "live-b", url: "live-b.model3.json" },
+    { id: "live-c", name: "live-c", url: "live-c.model3.json" }
+  ];
+  harness.stateReads.hold = true;
+  const formal = harness.handlers.onRenderModeChanged({ mode: "live2d", seq: 603 });
+  await wait(8);
+  harness.liveRuntime.immediate = false;
+  const r1 = harness.handlers.onLive2dChanged("live-b");
+  await wait(8);
+  assert.equal(harness.liveRuntime.pending.length, 1, "R1 reskin remains pending");
+  harness.releaseStateReads();
+  await wait(8);
+
+  harness.liveRuntime.immediate = true;
+  const r2 = harness.handlers.onLive2dChanged("live-c");
+  await r2;
+  const staleR1 = harness.liveRuntime.pending.shift();
+  assert.ok(staleR1, "R1 pending owner is retained until it settles");
+  staleR1.resolve(true);
+  await Promise.all([r1, formal]);
+  assert.deepEqual(harness.calls.outcomes.filter((outcome) => outcome.seq === 603), [{
+    seq: 603,
+    ok: true,
+    requestedMode: "live2d",
+    committedMode: "live2d",
+    error: undefined
+  }]);
+  assert.equal(harness.lifecycle.getState().active, "live2d");
+  assert.equal(harness.lifecycle.getState().status, "ready");
+});
+
+test("B-2 formal reconciliation follows R1 -> R2 -> R3 owner succession once", async () => {
+  const harness = createPetLifecycleHarness();
+  harness.lifecycle.setResourceIds({ live2d: "live-a" });
+  harness.sandbox.petAPI.live2dList = async () => [
+    { id: "live-a", name: "live-a", url: "live-a.model3.json" },
+    { id: "live-b", name: "live-b", url: "live-b.model3.json" },
+    { id: "live-c", name: "live-c", url: "live-c.model3.json" },
+    { id: "live-d", name: "live-d", url: "live-d.model3.json" }
+  ];
+  harness.stateReads.hold = true;
+  const formal = harness.handlers.onRenderModeChanged({ mode: "live2d", seq: 604 });
+  await wait(8);
+  harness.liveRuntime.immediate = false;
+  const r1 = harness.handlers.onLive2dChanged("live-b");
+  await wait(8);
+  harness.releaseStateReads();
+  await wait(8);
+  const r2 = harness.handlers.onLive2dChanged("live-c");
+  await wait(8);
+  const staleR1 = harness.liveRuntime.pending.shift();
+  assert.ok(staleR1, "R1 pending owner is retained until it settles");
+  staleR1.resolve(true);
+  await wait(8);
+
+  harness.liveRuntime.immediate = true;
+  const r3 = harness.handlers.onLive2dChanged("live-d");
+  await r3;
+  for (const pending of harness.liveRuntime.pending.splice(0)) pending.resolve(true);
+  await Promise.all([r1, r2, r3, formal]);
+  assert.deepEqual(harness.calls.outcomes.filter((outcome) => outcome.seq === 604), [{
+    seq: 604,
+    ok: true,
+    requestedMode: "live2d",
+    committedMode: "live2d",
+    error: undefined
+  }]);
+  assert.equal(harness.lifecycle.getState().active, "live2d");
+  assert.equal(harness.lifecycle.getState().status, "ready");
+});
+
+test("B-2 fallback owner succession never reconciles the formal target", async () => {
+  const harness = createPetLifecycleHarness();
+  harness.lifecycle.setResourceIds({ live2d: "live-a" });
+  let listCalls = 0;
+  harness.sandbox.petAPI.live2dList = async () => {
+    listCalls += 1;
+    return listCalls === 1 ? [{ id: "live-a", name: "live-a", url: "live-a.model3.json" }] : [];
+  };
+  harness.stateReads.hold = true;
+  const formal = harness.handlers.onRenderModeChanged({ mode: "live2d", seq: 605 });
+  await wait(8);
+  const r1 = harness.handlers.onLive2dChanged("live-b");
+  await r1;
+  harness.releaseStateReads();
+  await formal;
+  assert.equal(harness.calls.outcomes.some((outcome) => outcome.seq === 605), false);
+  assert.equal(harness.calls.corrections.length, 1);
+  assert.equal(harness.lifecycle.getState().active, "gif");
+  assert.equal(harness.lifecycle.getState().status, "ready");
+});
+
+test("B-2 newer main seq suppresses a post-getState old formal", async () => {
+  const harness = createPetLifecycleHarness();
+  harness.lifecycle.setResourceIds({ live2d: "live-a" });
+  harness.sandbox.petAPI.live2dList = async () => [{ id: "live-a", name: "live-a", url: "live-a.model3.json" }];
+  harness.stateReads.hold = true;
+  const oldFormal = harness.handlers.onRenderModeChanged({ mode: "live2d", seq: 606 });
+  await wait(8);
+  harness.stateReads.hold = false;
+  const newerFormal = harness.handlers.onRenderModeChanged({ mode: "gif", seq: 607 });
+  await newerFormal;
+  harness.releaseStateReads();
+  await oldFormal;
+  assert.equal(harness.calls.outcomes.some((outcome) => outcome.seq === 606), false);
+  assert.deepEqual(harness.calls.outcomes.at(-1), {
+    seq: 607,
+    ok: true,
+    requestedMode: "gif",
+    committedMode: "gif",
+    error: undefined
+  });
+});
+
+test("B-2 resource correction re-switch superseded by internal reskin still reconciles", async () => {
+  const harness = createPetLifecycleHarness();
+  harness.lifecycle.setResourceIds({ live2d: "live-a" });
+  let listCalls = 0;
+  harness.sandbox.petAPI.live2dList = async () => {
+    listCalls += 1;
+    const id = listCalls === 1 ? "live-a" : listCalls === 2 ? "live-b" : "live-c";
+    return [{ id, name: id, url: id + ".model3.json" }];
+  };
+  let releaseState;
+  harness.sandbox.petAPI.getState = () => new Promise((resolve) => {
+    releaseState = () => resolve({ renderMode: "gif", rigSkinId: "", live2dSkinId: "live-b" });
+  });
+  const formal = harness.handlers.onRenderModeChanged({ mode: "live2d", seq: 608 });
+  await wait(8);
+  harness.liveRuntime.immediate = false;
+  releaseState();
+  await wait(8);
+  assert.equal(harness.liveRuntime.pending.length, 1, "formal resource correction re-switch remains pending");
+
+  harness.liveRuntime.immediate = true;
+  const internal = harness.handlers.onLive2dChanged("live-c");
+  await internal;
+  const staleCorrectionReswitch = harness.liveRuntime.pending.shift();
+  assert.ok(staleCorrectionReswitch, "superseded formal re-switch owner is retained");
+  staleCorrectionReswitch.resolve(true);
+  await formal;
+  assert.deepEqual(harness.calls.outcomes.filter((outcome) => outcome.seq === 608), [{
+    seq: 608,
+    ok: true,
+    requestedMode: "live2d",
+    committedMode: "live2d",
+    error: undefined
+  }]);
+  assert.deepEqual(harness.calls.corrections, []);
+  assert.equal(harness.lifecycle.getState().active, "live2d");
+  assert.equal(harness.lifecycle.getState().status, "ready");
+});
+
+test("B-2 Spine skin event outside Spine does not start an internal rebuild", async () => {
+  const harness = createPetLifecycleHarness();
+  const spineQueriesBefore = harness.spineQueries.calls;
+  const appsBefore = harness.apps.length;
+  await harness.handlers.onSpineSkinChanged();
+  assert.equal(harness.spineQueries.calls, spineQueriesBefore);
+  assert.equal(harness.apps.length, appsBefore);
+  assert.equal(harness.lifecycle.getState().active, null);
+  assert.equal(harness.lifecycle.getState().requested, "gif");
+});
 
 test("production GIF/Spine commits restore base window and appearance size", async () => {
   const harness = createPetLifecycleHarness();
@@ -1028,7 +1621,7 @@ test("production Spine ABA A -> Live2D B -> Spine C leaves only C", async () => 
   assert.equal(harness.apps[0].destroyed, true);
 });
 
-test("production pointer semantics cover GIF, Spine, Rig, Live2D and active-null", async () => {
+test("production pointer semantics cover GIF, Spine, Rig, Live2D and fallback GIF", async () => {
   const harness = createPetLifecycleHarness();
   await harness.enter("gif");
   assertProductionSurface(harness, "gif");
@@ -1039,7 +1632,7 @@ test("production pointer semantics cover GIF, Spine, Rig, Live2D and active-null
   await harness.enter("live2d", "live-a");
   assertProductionSurface(harness, "live2d");
   await harness.switch("rig", "");
-  assertProductionSurface(harness, "active-null");
+  assertProductionSurface(harness, "gif");
 });
 
 test("no unused legacy lifecycle implementation remains", () => {
