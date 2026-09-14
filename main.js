@@ -13,7 +13,10 @@ try {
   const __dl = (m) => { try { require("fs").appendFileSync(__dlp, new Date().toISOString() + " " + m + "\n"); } catch { /* 忽略 */ } };
   __dl("boot main.js");
   process.on("exit", (c) => __dl("EXIT code=" + c + " quitting=" + (typeof quitting !== "undefined" ? quitting : "?")));
-  process.on("uncaughtException", (e) => { __dl("UNCAUGHT: " + (e && e.stack || e)); throw e; });
+  // 只记不抛（H1 修复）：uncaughtException 监听器内再 throw 会让 Node 直接终止进程、
+  // 且阻断后续监听器——本文件后段的"只记日志"兜底 handler 将永远轮不到，
+  // 崩溃时退出清理半途而废（Genie/GSV 引擎进程孤儿化驻留）。诊断职责只是留痕。
+  process.on("uncaughtException", (e) => { try { __dl("UNCAUGHT: " + (e && e.stack || e)); } catch { /* 忽略 */ } });
 } catch { /* 忽略 */ }
 
 const { app, protocol, safeStorage, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, screen, dialog, Notification, powerMonitor, nativeTheme, session } = require("electron");
@@ -74,6 +77,7 @@ const memory = require("./src/memory");
 const bond = require("./src/bond");
 const { randInt, easeImpact, clampScale, runPowerShell } = require("./src/utils");
 const walkGeo = require("./src/walk-geo"); // 行走几何纯函数（2026-08-27 收敛）
+const { replayCrashRecovery } = require("./src/crash-recovery"); // 崩溃恢复重放的窗口身份守卫纯函数（H1，可单测）
 const walkState = require("./src/walk-state"); // 行走几何决策纯函数（v2.5.26 收敛①）
 const focusWatch = require("./src/focus-watch"); // 专注/离开状态机纯函数（v2.5.26 收敛②）
 const updater = require("./src/updater"); // asar-swap 自动更新（v2.5.26 ③）
@@ -396,9 +400,15 @@ function createWindow() {
     try {
       bumpRenderModeIntentForRecovery();
       win.reload();
+      const recoveryWindow = win; // 捕获本次 recovery 的窗口身份：3s 后旧窗已销毁/已重建时不得错误作用（H1）
       setTimeout(() => {
-        if (walk.active) walkBroadcast();
-        updateUiEdgeCompactFromBounds(win.getBounds(), walkGeo.workAreaOf(screen, win.getBounds()));
+        replayCrashRecovery(recoveryWindow, {
+          getWindow: () => win,
+          isWalkActive: () => walk.active,
+          walkBroadcast: () => walkBroadcast(),
+          updateUiEdgeCompact: (b, wa) => updateUiEdgeCompactFromBounds(b, wa),
+          getWorkArea: (b) => walkGeo.workAreaOf(screen, b)
+        });
       }, 3000);
     } catch (e2) { logTts("render", "自动重载失败: " + (e2 && e2.message || e2)); }
   });
