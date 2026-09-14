@@ -78,6 +78,7 @@ const bond = require("./src/bond");
 const { randInt, easeImpact, clampScale, runPowerShell } = require("./src/utils");
 const walkGeo = require("./src/walk-geo"); // 行走几何纯函数（2026-08-27 收敛）
 const { replayCrashRecovery } = require("./src/crash-recovery"); // 崩溃恢复重放的窗口身份守卫纯函数（H1，可单测）
+const { createCrashBudget } = require("./src/crash-budget"); // crash 自愈预算按逻辑窗口分桶（H2，可单测）
 const walkState = require("./src/walk-state"); // 行走几何决策纯函数（v2.5.26 收敛①）
 const focusWatch = require("./src/focus-watch"); // 专注/离开状态机纯函数（v2.5.26 收敛②）
 const updater = require("./src/updater"); // asar-swap 自动更新（v2.5.26 ③）
@@ -157,8 +158,10 @@ const ASK_COALESCE_MS = 300;              // 连续快速发送的合并窗口�
 let forcedMode = "auto"; // auto | chat | zcode
 let personaCache = config.getPersonaText();
 let quitting = false;
-let renderCrashCount = 0;      // 渲染进程崩溃自动重载计数（60s 内连崩 3 次停止自愈）
-let renderCrashWindowAt = 0;
+/* crash 自愈预算（H2）：按逻辑窗口 domain 分桶的 3 次/60s 限流——修复原全局单桶跨窗串扰
+   （辅助窗崩溃消耗主 pet 自愈额度 → pet 首崩即限流永久消失）。domain：主 pet 固定 "pet"，
+   辅助窗用各自硬编码 label；同种窗口 destroy/recreate 共享桶（对象身份换不掉额度），语义/阈值/时间窗与原实现一致。 */
+const crashBudget = createCrashBudget({ limit: 3, windowMs: 60000 });
 // render-mode 跨 IPC 唯一 identity；renderer generation 只在 renderer 内部使用。
 let renderModeSeq = 0;
 let renderModeIntentMode = null;
@@ -204,13 +207,12 @@ function attachCrashDiag(w, label) {
   w.__crashDiag = true;
   w.webContents.on("render-process-gone", (_e, d) => {
     const now = Date.now();
-    if (now - renderCrashWindowAt > 60000) { renderCrashWindowAt = now; renderCrashCount = 0; }
-    renderCrashCount += 1;
+    const budget = crashBudget.record(label, now); // 按 label 分桶（H2）：别的窗口崩溃不消耗本窗额度
     logTts("render", "渲染进程异常退出 窗口=" + label +
       " reason=" + (d && d.reason || "?") + " exitCode=" + (d && d.exitCode) +
       " 状态=" + (config.getConfig().renderMode || "gif") + (walk.active ? "/走" : "/停") +
-      " 第" + renderCrashCount + "次（60s内），自动重载");
-    if (renderCrashCount >= 3) { logTts("render", "渲染进程连续崩溃，停止自动重载（可手动重启桌宠）"); return; }
+      " 第" + budget.count + "次（60s内），自动重载");
+    if (budget.limited) { logTts("render", "渲染进程连续崩溃，停止自动重载（可手动重启桌宠）"); return; }
     try { w.reload(); } catch { /* 窗口已销毁 */ }
   });
 }
@@ -388,15 +390,14 @@ function createWindow() {
   win.webContents.on("render-process-gone", (_e, details) => {
     clearDragPause("renderer-crash");
     const now = Date.now();
-    if (now - renderCrashWindowAt > 60000) { renderCrashWindowAt = now; renderCrashCount = 0; }
-    renderCrashCount += 1;
+    const budget = crashBudget.record("pet", now); // 主 pet 独立预算域（H2）：辅助窗崩溃不再吃掉 pet 的自愈额度
     // 全量崩溃详情（exitCode/reason/内存），minidump 在 userData 下由 crashReporter 收集
     const d = details || {};
     logTts("render", "渲染进程异常退出 窗口=main(" + require("path").basename(win.webContents.getURL() || "") + ")" +
       " reason=" + (d.reason || "?") + " exitCode=" + d.exitCode +
       " 状态=" + (config.getConfig().renderMode || "gif") + (walk.active ? "/走" : "/停") +
-      " 第" + renderCrashCount + "次（60s内），自动重载");
-    if (renderCrashCount >= 3) { logTts("render", "渲染进程连续崩溃，停止自动重载（可手动重启桌宠）"); return; }
+      " 第" + budget.count + "次（60s内），自动重载");
+    if (budget.limited) { logTts("render", "渲染进程连续崩溃，停止自动重载（可手动重启桌宠）"); return; }
     try {
       bumpRenderModeIntentForRecovery();
       win.reload();
