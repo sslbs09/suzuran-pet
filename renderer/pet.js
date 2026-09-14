@@ -45,6 +45,7 @@ let activeRenderMode = null;
 let activeRenderGeneration = 0;
 let renderSwitchGeneration = 0;
 let gifGeometryRevision = 0;
+let petDocEpoch = 0; // F6：本文档启动时刻的 main renderModeSeq（文档身份）。与 renderGeneration/geometryRevision 是不同概念：跨 reload 单调增、文档生命周期内恒定
 let renderSwitchStatus = "idle"; // idle | switching | ready | failed | superseded
 let renderRuntimeReady = false;
 let renderRuntimeResource = "";
@@ -488,7 +489,8 @@ function reportGroundGap(context = null) {
       : Math.max(0, Math.min(80, Math.round(((document.documentElement.clientHeight || 0) - ((Number(petEl.offsetTop) || 0) + (Number(petEl.offsetHeight) || 0)) + visibleCanvasGap))));
     const reportMeta = {
       sourceMode: activeRenderMode,
-      renderGeneration: activeRenderGeneration
+      renderGeneration: activeRenderGeneration,
+      docEpoch: petDocEpoch // F6：main 侧据此跨文档换代（旧纪元晚到包拒收、新纪元首包必收）
     };
     if (activeRenderMode === "gif") reportMeta.geometryRevision = gifGeometryRevision;
     window.petAPI.setGroundGap(gap, reportMeta);
@@ -3176,6 +3178,7 @@ if (!window.__renderLifecycleTestMode) (async function init() {
   const initialMode = RENDER_MODES.includes(initialRequest.mode) ? initialRequest.mode : "gif";
   const initialMainSeq = Number.isSafeInteger(initialRequest.seq) ? initialRequest.seq : null;
   if (initialMainSeq !== null) currentMainRenderModeSeq = initialMainSeq;
+  petDocEpoch = initialMainSeq === null ? 0 : initialMainSeq; // F6：捕获文档纪元（main 在每次换代 reload 前均 bump seq，故新文档 epoch 严格大于旧文档）
   const initialResult = await switchRenderMode(initialMode, {
     mainSeq: initialMainSeq,
     resourceId: initialMode === "rig" ? rigSkinId : initialMode === "live2d" ? live2dSkinId : undefined

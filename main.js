@@ -385,6 +385,7 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.on("will-navigate", (event) => event.preventDefault());
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  groundGapDocFloor = renderModeSeq; // F6：新窗=新文档纪元下限（更早文档的迟到包不得为新窗建立基准）
   win.loadFile(path.join(config.APP_DIR, "renderer", "index.html"));
   // 渲染进程异常退出（崩溃/OOM/被系统回收）：自动重载恢复，防桌宠无声消失；60s 内连续 3 次则停止自愈
   win.webContents.on("render-process-gone", (_e, details) => {
@@ -411,6 +412,7 @@ function createWindow() {
           getWorkArea: (b) => walkGeo.workAreaOf(screen, b)
         });
       }, 3000);
+      groundGapDocFloor = renderModeSeq; // F6：文档换代——晚到旧包拒收（与 reload 同一同步块，早于一切新 IPC）
     } catch (e2) { logTts("render", "自动重载失败: " + (e2 && e2.message || e2)); }
   });
   // 初始即开启点击穿透（透明区域不挡下层应用），由渲染层按需放行
@@ -1034,6 +1036,7 @@ ipcMain.handle("pet:reload-renderer", () => { // WebGL 上下文丢失等场景�
   clearDragPause("renderer-reload");
   logTts("render", "渲染层自愈：webContents.reload（WebGL 上下文丢失/渲染异常）");
   bumpRenderModeIntentForRecovery();
+  groundGapDocFloor = renderModeSeq; // F6：文档换代（自愈 reload）——旧纪元晚到包拒收
   win.webContents.reload();
   return true;
 });
@@ -3197,6 +3200,10 @@ function dragSeatUpdate(final = false) {
 const walk = walkCore.createWalkState(); // 行走状态（walk-core 提供，纯数据）
 let gifVisualGroundGap = 0; // GIF 可见脚底到窗口底的视觉 gap；独立于 Spine walk.groundGap
 const lastGroundGapReports = { spine: null, gif: null };
+// F6：ground-gap 文档纪元下限。renderer 文档每次重新生成（崩溃 reload / 自愈 reload / 新窗）时
+// 抬到 bump 后的 renderModeSeq：旧文档晚到包（epoch < floor）不得再建立/污染基准；
+// 正式模式切换不推进 floor（同一文档 epoch 不变，同纪元内仍按 renderGeneration/geometryRevision 防乱序）。
+let groundGapDocFloor = 0;
 let skinHasSit = true; // 当前皮肤是否有可播的坐下动画（渲染层皮肤加载后上报；false 时坐姿不做下沉，修复"站着脚陷进任务栏"）
 const WALK_TICK_MS = 40;
 const WALK_SPEED = 1.2;                        // 每 tick 像素 ≈ 30px/s
@@ -4478,6 +4485,8 @@ ipcMain.on("pet:set-ground-gap", (_e, px, meta = {}) => {
     standSinkOffset: standSinkOffset(),
     geometryRevision: meta && meta.geometryRevision,
     renderGeneration: meta && meta.renderGeneration,
+    docEpoch: meta && meta.docEpoch,
+    epochFloor: groundGapDocFloor,
     lastReport: lastGroundGapReports[mode]
   });
   if (!report.accepted) return;

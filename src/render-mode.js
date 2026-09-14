@@ -129,6 +129,12 @@ function createResizeRevision() {
 /**
  * 校验并归类 renderer 的 ground-gap report。
  * GIF report 需要自己的 visual gap 与单调 identity；不能写入 Spine groundGap。
+ * F6：docEpoch = 该 renderer 文档启动时刻的 main renderModeSeq（文档身份；与文档内部的
+ * renderGeneration / geometryRevision 是三个不同概念，互不混用）。
+ *  - epoch < epochFloor：文档重新生成（crash reload/自愈 reload/新窗）后的旧文档晚到包 → 拒；
+ *  - epoch > lastReport.epoch：新文档首包 → 无条件接受并换代（旧文档的高 gen/rev 不再误拒它）；
+ *  - epoch 相同：维持原 revision/generation 单调防乱序语义；
+ *  - 全部参数缺省（0）时行为与旧版逐分支一致（向后兼容既有调用/测试）。
  */
 function groundGapReportDecision({
   mode,
@@ -139,6 +145,8 @@ function groundGapReportDecision({
   standSinkOffset = 0,
   geometryRevision,
   renderGeneration,
+  docEpoch = 0,
+  epochFloor = 0,
   lastReport = null
 }) {
   if (sourceMode !== mode || (mode !== "spine" && mode !== "gif")) {
@@ -151,15 +159,26 @@ function groundGapReportDecision({
   if (!Number.isFinite(Number(renderGeneration))) {
     return { accepted: false, value: mode === "gif" ? gifCurrent : current, target: mode };
   }
+  const epoch = Number(docEpoch) || 0;
+  if (epoch < (Number(epochFloor) || 0)) {
+    return { accepted: false, value: mode === "gif" ? gifCurrent : current, target: mode, stale: true, staleDoc: true };
+  }
   if (mode === "gif") {
     if (!Number.isFinite(Number(geometryRevision))) {
       return { accepted: false, value: gifCurrent, target: "gif" };
     }
-    if (lastReport && (
-      Number(geometryRevision) <= Number(lastReport.geometryRevision) ||
-      Number(renderGeneration) < Number(lastReport.renderGeneration)
-    )) {
-      return { accepted: false, value: gifCurrent, target: "gif", stale: true };
+    if (lastReport) {
+      const lastEpoch = Number(lastReport.docEpoch) || 0;
+      if (epoch < lastEpoch) {
+        return { accepted: false, value: gifCurrent, target: "gif", stale: true };
+      }
+      if (epoch === lastEpoch && (
+        Number(geometryRevision) <= Number(lastReport.geometryRevision) ||
+        Number(renderGeneration) < Number(lastReport.renderGeneration)
+      )) {
+        return { accepted: false, value: gifCurrent, target: "gif", stale: true };
+      }
+      // epoch > lastEpoch：新文档首包，换代接受（旧桶的 gen/rev 基准作废）
     }
     const raw = Math.max(0, Math.min(80, v));
     const next = Math.round(raw * 100) / 100;
@@ -168,11 +187,18 @@ function groundGapReportDecision({
       changed: next !== Number(gifCurrent),
       value: next,
       target: "gif",
-      identity: { geometryRevision: Number(geometryRevision), renderGeneration: Number(renderGeneration) }
+      identity: { geometryRevision: Number(geometryRevision), renderGeneration: Number(renderGeneration), docEpoch: epoch }
     };
   }
-  if (lastReport && Number(renderGeneration) < Number(lastReport.renderGeneration)) {
-    return { accepted: false, value: current, target: "spine", stale: true };
+  if (lastReport) {
+    const lastEpoch = Number(lastReport.docEpoch) || 0;
+    if (epoch < lastEpoch) {
+      return { accepted: false, value: current, target: "spine", stale: true };
+    }
+    if (epoch === lastEpoch && Number(renderGeneration) < Number(lastReport.renderGeneration)) {
+      return { accepted: false, value: current, target: "spine", stale: true };
+    }
+    // epoch > lastEpoch：新文档首包，换代接受
   }
   const raw = Math.max(0, Math.min(80, Math.round(v)));
   const next = Math.max(0, Math.min(80, raw + standSinkOffset));
@@ -181,7 +207,7 @@ function groundGapReportDecision({
     changed: next !== Number(current),
     value: next,
     target: "spine",
-    identity: { renderGeneration: Number(renderGeneration) }
+    identity: { renderGeneration: Number(renderGeneration), docEpoch: epoch }
   };
 }
 
