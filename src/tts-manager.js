@@ -47,6 +47,13 @@ let gsvDeviceCache = null; // 检测结果缓存（null=未检测）
 
 let gsvCrashRecoveryAt = 0;    // 上次崩溃自愈时刻（60s 节流，防连环重启）
 
+// F5（Core Stable）：shutdown 单一状态源——main.js quitLifecycle.onStart 在任何 cleanup kill 步骤之前置 true。
+// 职责：只拦截"拉起/复活引擎"（ensure/restart）；kill 类（killGsvProcesses/shutdownGenieServer/killPortListener）
+// 永不被本标志阻断——cleanup 正需要在 shuttingDown=true 后杀进程。非 quitting 下自愈/重试/健康检查行为原样不变。
+let shuttingDown = false;
+function setShuttingDown(v) { shuttingDown = !!v; }
+function isShuttingDown() { return shuttingDown; }
+
 /** 重置 Genie 服务器状态标志（不杀进程）：下次 ensureGenieServer 会重新探活/拉起 */
 function resetGenieServer() {
   genieServerChecked = false;
@@ -369,6 +376,7 @@ function applyBundledVoice() {
 }
 
 async function ensureGenieServer(q) {
+  if (shuttingDown) { logTts("genie", "退出清理中：拒绝拉起 Genie（shutdown 后引擎不得复活）"); return false; }
   if ((config.getConfig().tts || {}).fixedOnly) {
     logTts("genie", "固定台词离线模式：阻止 Genie 启动");
     return false;
@@ -418,6 +426,7 @@ async function ensureGenieServer(q) {
   const deadline = Date.now() + (q.startTimeout || 240000); // 模型加载最长 ~4 分钟
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 3000));
+    if (shuttingDown) { logTts("genie", "退出清理中：放弃就绪等待"); return false; } // 晚到循环不得在清理后继续复活
     if (await health()) { genieServerUp = true; logTts("genie", "服务器就绪"); return true; }
   }
   logTts("genie", "等待超时（150s 未就绪）");
@@ -477,6 +486,7 @@ async function genieTts(q, clean) {
 }
 
 function ensureGsvServer(g) {
+  if (shuttingDown) { logTts("gsv", "退出清理中：拒绝拉起 GSV（shutdown 后引擎不得复活）"); return Promise.resolve(false); }
   if ((config.getConfig().tts || {}).fixedOnly) {
     logTts("gsv", "固定台词离线模式：阻止 GSV 启动");
     return Promise.resolve(false);
@@ -549,6 +559,7 @@ async function ensureGsvServerImpl(g) {
   const deadline = Date.now() + (g.startTimeout || 240000);
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 3000));
+    if (shuttingDown) { logTts("gsv", "退出清理中：放弃就绪等待"); return false; } // 晚到循环不得在清理后继续复活
     if (await alive()) {
       gsvServerUp = true;
       logTts("gsv", "服务器就绪");
@@ -650,6 +661,7 @@ async function gsvTtsJa(g, text, emoRef) {
     const msg = String(e && e.message || e);
     logTts("gsv", "请求失败: " + msg);
     if (!/fetch failed|ECONNREFUSED|aborted|timeout/i.test(msg)) return ""; // 非连接类错误不走重启
+    if (shuttingDown) { logTts("gsv", "退出清理中：放弃崩溃自愈（引擎刚被 cleanup 杀掉，失败≠复活信号）"); return ""; } // F5 显式断点：ECONNREFUSED 恰是 shutdown kill 的晚到回声
     // 连接被拒/超时：服务器很可能已死或挂死——若只重置缓存等下一句，本句会丢失/变中文音色。
     // 改为当场杀进程→重拉→预热→重试本句一次；60s 节流防止连环崩溃时反复重启。
     if (gsvAutoRestarting || gsvWarmingUp) return "";
@@ -681,6 +693,7 @@ async function gsvTtsJa(g, text, emoRef) {
 }
 
 async function restartGsvEngine(g) {
+  if (shuttingDown) { logTts("gsv", "退出清理中：拒绝自愈重启 GSV（cleanup 杀掉的引擎不得复活）"); return false; }
   const g2 = g || config.getConfig().ttsGsv || {};
   const base = String(g2.server || "").replace(/\/+$/, "");
   let port = 9880;
@@ -1110,5 +1123,6 @@ module.exports = {
   setPartSender, setJaFallbackCb,
   ttsCloneImpl, queueTts, ensureGenieServer, ensureGsvServer, restartGsvEngine,
   shutdownGenieServer, genieTts, gsvTtsJa, warmupGsv, resetGenieServer, killGsvProcesses, portAlive, killPortListener,
+  setShuttingDown, isShuttingDown,
   emotionAudition, missingEnginePath, stripSpeechTail, FIXED_ONLY_MISS
 };

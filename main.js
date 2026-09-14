@@ -5097,7 +5097,12 @@ const quitLifecycle = createQuitLifecycle({
   isCleanupDone: () => engineCleanupDone,
   isCleanupStarted: () => cleanupStarted,
   markCleanupStarted: () => { cleanupStarted = true; },
-  onStart: () => { quitting = true; },
+  onStart: () => {
+    quitting = true;
+    // F5：shutdown 状态先行——quit-lifecycle 保证 onStart 早于任何 cleanup kill 步骤，
+    // 之后 cleanup 杀掉 GSV/Genie 造成的在途请求 ECONNREFUSED 不再触发自愈重启复活引擎。
+    tts.setShuttingDown(true);
+  },
   cleanup: () => runCleanupSteps([
     { name: "drag pause", run: () => clearDragPause("app-quit") },
     { name: "schedules.stop", run: () => schedules.stop() },
