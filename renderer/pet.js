@@ -34,6 +34,8 @@ const SPRITE_BASE = "pet-user://sprites/user/";
 /* ---------- Spine 渲染系统（可切换 GIF/Spine；支持桌面行走） ---------- */
 let spineApp = null;         // PixiJS Application
 let spineObj = null;         // PIXI Spine 对象
+let spineTrackRevision = 0;
+let pokeFeedbackGen = 0;
 let spineRuntimeOwner = null;
 let spinePendingOwner = null;
 const seatLifecycle = { ticker: null, owner: null, lastSafe: null };
@@ -254,6 +256,7 @@ function setSpineAnim(name, loop, reason = "") {
   if (!spineObj) return;
   const beforeName = spineObj.state.getCurrent(0)?.animation?.name || "";
   const isSit = name === sitAnimName();
+  if (isSit) releaseSeatExitY("seat-entry"); // 所有动画入口统一交还 containment；不补写旧 target。
   if (isSit && beforeName !== name) {
     const visibleScale = Math.abs(Number(spineObj.scale?.y));
     seatEpisode.owner = spineObj;
@@ -264,9 +267,15 @@ function setSpineAnim(name, loop, reason = "") {
     seatEpisode.pendingFit = false;
   } else if (!isSit && beforeName === sitAnimName()) {
     seatEpisode.active = false;
-    seatEpisode.pendingFit = false;
+    if ((window.SeatFit ? window.SeatFit.seatReleaseShouldRefit(seatEpisode) : seatEpisode.pendingFit)) {
+      seatEpisode.pendingFit = false;
+      scheduleFitSpine({}); // A-v2：hold 期间的 pass 只标了 pendingFit，释放时兑现欠账——重新锚定完整窗口补回采样
+    } else {
+      seatEpisode.pendingFit = false;
+    }
   }
   const entry = spineObj.state.setAnimation(0, name, loop);
+  spineTrackRevision += 1; // entry 池可能复用同名对象，显式设置也必须使旧 final confirmation 失效。
   // 坐姿的可见脚底要在混合窗口内尽快落位：站→坐的长混合帧会把下半身带出 120px 条带
   // （“坐时掉脚”），而完全零混合（0.14 时期 9-3 的修复）又让站→坐过渡帧整段消失（“坐下生硬”）。
   // 2026-09-04 折中：短混合 0.12s + 早期 fit（80/160/300ms）兜底终态——掉脚窗口压缩到混合
@@ -286,6 +295,19 @@ let spineFitGeneration = 0;
 let spineFitStableHits = 0;
 let spineFitOwnerGeneration = 0;
 let spineFitOwner = null;
+/* A-v2.1 pre-visible bootstrap：冷启动/re-entry/reload 的 Spine 在 fit 收敛（autoScale 确立或
+ * 判定无需放大/manual 权威已定）之前保持画布不可见——首次可见即最终尺寸，杜绝 0.205→0.275 跳变。
+ * 正常路径由 fit pass 事件驱动释放；bounded fallback（8 pass / 5s）只兜异常模型，防永久隐身。 */
+let spineBootstrapPending = false;
+let spineBootstrapDeferredWalk = null; // A-v2.2：staged（latest-wins 单槽）——bootstrap 期 incoming 只进这里，绝不提交共享 walkState
+let spineBootstrapLastRelease = null;  // 最近一次 release 记录（诊断/测试观察点）
+let spineBootstrapPassCount = 0;
+let spineBootstrapFailSafeTimer = null;
+let spineBootstrapOwner = null; // A-v2.3：本 bootstrap 归属的 Spine owner——每一个新 owner（cold-start/GIF→Spine/皮肤重载/reload 后 initSpine）都走同一套 bootstrap，杜绝 re-entry 走旧 gate 假象
+let spineBootstrapDone = Promise.resolve(); // A-v2.3：owner bootstrap 首见完成信号；render-mode ready 上报必须 await 它（ready 不再早于 visible）
+let spineBootstrapDoneResolve = null;
+let spineBootstrapOwnerReset = null; // A24：owner-boundary 记录 {carry, applied, ownerGen}（staged 初值来源与新 owner neutral applied 的证据链）
+
 function scheduleFitSpine(opts = {}) {
   spineFitGeneration += 1;
   spineFitStableHits = 0;
@@ -306,18 +328,640 @@ let spineManual = false;   // 该皮肤是否手动调过 boostTable（true 则�
 let spineAutoScaled = false; // 本次加载是否已做过像素级自动放大（只做一次，防反复放大）
 let spineFitKeepScale = false; // 自动适配后跳过宽度守卫（宽包围盒皮肤防被每帧贴合缩回）
 let spineFigLeftCss = 0; // 自动适配皮肤：角色可见左缘在窗口内的 CSS 位置（画布加宽后行走对齐用）
-function fitSpinePose(generation = spineFitGeneration, ownerGeneration = spineFitOwnerGeneration, owner = spineFitOwner) {
+/* ===== EDGEDIAG（碰壁折返闪现临时诊断；SUSSURRO_EDGE_DIAG=1 开启，默认关=零输出零行为差；定位后整体删除） ===== */
+const EDGE_DIAG = !!(window.petAPI && window.petAPI.edgeDiag);
+let lastFaceFlipAt = 0; // 最近一次 spineFaceDir scale.x 翻转时刻（FIT 探针的短窗基准）
+let lastSeatExitAt = 0; // EDGEDIAG：seated/perched→false 边沿时刻——FIT 短窗扩展至 seat-exit（Sit→Move 无 face 翻转也可见 recenter 数据）
+/* EDGEDIAG correlation 生命周期（诊断专属，不参与任何生产决策）：
+ * tagged 广播建立 activeEdge；untagged 广播不清（相位到期/catToy/抓宠暂停等 untagged 源
+ * 可在 FACE→首拍FIT 的 150ms 窗口内插播，立即清零会丢归因）；首个 FIT 消费后清除（独占）；
+ * 500ms 窄窗超时自清；新 turnId 覆盖旧值。 */
+let diagActiveEdge = null; // {turnId, faceTs, expiresAt}
+function diagEdgeFaceId() {
+  if (!diagActiveEdge || Date.now() > diagActiveEdge.expiresAt) { diagActiveEdge = null; return null; }
+  diagActiveEdge.faceTs = Date.now();
+  return diagActiveEdge.turnId;
+}
+function diagEdgeFitId() {
+  if (!diagActiveEdge || Date.now() > diagActiveEdge.expiresAt) { diagActiveEdge = null; return null; }
+  const id = diagActiveEdge.turnId;
+  diagActiveEdge = null; // 首拍 FIT 独占：消费即清（后续 pass/其它源的 FIT 归 null，绝不误挂）
+  return id;
+}
+function sdRawBounds() { // EDGEDIAG-only 读工具：与 fit 同源的 spineObj.getBounds() 世界坐标，绝不触碰 position 归零等有副作用的 fit API
   try {
-    if (!spineObj || !spineApp || activeRenderMode !== "spine" || spineRuntimeOwner !== owner || generation !== spineFitGeneration || ownerGeneration !== activeRenderGeneration) return;
+    const b = spineObj.getBounds();
+    return { x: Number(b.x.toFixed(1)), y: Number(b.y.toFixed(1)), w: Number(b.width.toFixed(1)), h: Number(b.height.toFixed(1)), right: Number((b.x + b.width).toFixed(1)), bottom: Number((b.y + b.height).toFixed(1)) };
+  } catch { return null; }
+}
+/* ===== E1：Sit→Move / stand-beat forensic（diagnostics-only，默认无采样/无 timer） ===== */
+const SEAT_EXIT_FORENSIC = !!(window.petAPI && window.petAPI.seatExitForensic);
+const STANDBEAT_POSE_ENABLED = !!(window.petAPI && window.petAPI.standBeatPose);
+const SEAT_EXIT_FORENSIC_WINDOW_MS = 1100;
+const SEAT_EXIT_FORENSIC_MAX_RECORDS = 256;
+let seatExitForensicOrdinal = 0;
+let seatExitForensicSession = null;
+function seatExitForensicRound(v, digits = 3) { return Number.isFinite(v) ? Number(v.toFixed(digits)) : null; }
+function seatExitForensicNormalizeBoneName(name) { return String(name || "").toLowerCase().replace(/[\s_-]/g, ""); }
+function seatExitForensicBones() {
+  const bones = Array.isArray(spineObj?.skeleton?.bones) ? spineObj.skeleton.bones : [];
+  const names = bones.map((b) => String(b?.data?.name || b?.name || "")).filter(Boolean);
+  const exact = {
+    hip: ["hip"], chest: ["chest"],
+    leftFoot: ["leftfoot", "footl"], rightFoot: ["rightfoot", "footr"]
+  };
+  const out = { availableNames: names };
+  for (const [key, aliases] of Object.entries(exact)) {
+    const found = bones.find((b) => aliases.includes(seatExitForensicNormalizeBoneName(b?.data?.name || b?.name)));
+    out[key] = found ? { name: String(found?.data?.name || found?.name || ""), worldY: Number.isFinite(found.worldY) ? found.worldY : "UNKNOWN" } : "unavailable";
+  }
+  return out;
+}
+function seatExitForensicTrack() {
+  try {
+    const cur = spineObj?.state?.getCurrent ? spineObj.state.getCurrent(0) : null;
+    return {
+      current: cur?.animation?.name || null,
+      next: cur?.next?.animation?.name || null,
+      loop: cur ? !!cur.loop : null,
+      trackTime: cur && Number.isFinite(cur.trackTime) ? cur.trackTime : null,
+      mixingFrom: cur?.mixingFrom?.animation?.name || null,
+      mixTime: cur && Number.isFinite(cur.mixTime) ? cur.mixTime : null,
+      mixDuration: cur && Number.isFinite(cur.mixDuration) ? cur.mixDuration : null
+    };
+  } catch { return { current: null, next: null, loop: null, trackTime: null, mixingFrom: null, mixTime: null, mixDuration: null }; }
+}
+function seatExitForensicPose() {
+  let bbox = null;
+  try {
+    if (spineObj && typeof spineObj.getBounds === "function") {
+      const b = spineObj.getBounds();
+      if (b && Number.isFinite(b.y) && Number.isFinite(b.height)) bbox = {
+        y: seatExitForensicRound(b.y), height: seatExitForensicRound(b.height),
+        bottom: seatExitForensicRound(b.y + b.height),
+        bottomRelativeToObject: seatExitForensicRound(b.y + b.height - spineObj.y)
+      };
+    }
+  } catch { /* cheap bbox unavailable is explicit null */ }
+  return { bbox, bones: seatExitForensicBones() };
+}
+function seatExitForensicAsset() {
+  let zoom = "UNKNOWN";
+  try {
+    const vv = window.visualViewport;
+    if (vv && Number.isFinite(vv.scale)) zoom = vv.scale;
+  } catch { /* UNKNOWN */ }
+  return {
+    renderMode: activeRenderMode || "UNKNOWN",
+    atlasPath: spinePaths?.atlas || "UNKNOWN",
+    skelPath: spinePaths?.skel || "UNKNOWN",
+    assetIdentity: renderRuntimeResource || "UNKNOWN",
+    renderGeneration: activeRenderGeneration || "UNKNOWN",
+    ownerGeneration: spineRuntimeOwner?.context?.generation || "UNKNOWN",
+    scale: spineObj?.scale ? { x: spineObj.scale.x, y: spineObj.scale.y } : "UNKNOWN",
+    keepScale: typeof spineFitKeepScale === "boolean" ? spineFitKeepScale : "UNKNOWN",
+    manualScale: typeof spineManual === "boolean" ? spineManual : "UNKNOWN",
+    baseScaleX: Number.isFinite(spineBaseScaleX) ? spineBaseScaleX : "UNKNOWN",
+    seatSink: "UNKNOWN",
+    devicePixelRatio: Number.isFinite(window.devicePixelRatio) ? window.devicePixelRatio : "UNKNOWN",
+    rendererResolution: spineApp?.renderer?.resolution ?? "UNKNOWN",
+    zoom,
+    poseAtStart: seatExitForensicPose()
+  };
+}
+function seatExitForensicOrderedRecords(s) {
+  if (!s || !s.records.length) return [];
+  if (s.records.length < SEAT_EXIT_FORENSIC_MAX_RECORDS || s.next === 0) return s.records.slice();
+  return s.records.slice(s.next).concat(s.records.slice(0, s.next));
+}
+function seatExitForensicFlush(reason) {
+  const s = seatExitForensicSession;
+  if (!SEAT_EXIT_FORENSIC || !s) return;
+  seatExitForensicSession = null;
+  try {
+    window.petAPI.playback("[SEATFORENSIC] " + JSON.stringify({
+      sessionId: s.mainSessionId,
+      renderSessionId: s.renderSessionId,
+      side: "renderer",
+      closeReason: reason,
+      startedAt: { monoMs: s.startedMonoMs, dateNow: s.startedDateNow },
+      endedAt: { monoMs: performance.now(), dateNow: Date.now() },
+      maxRecords: SEAT_EXIT_FORENSIC_MAX_RECORDS,
+      droppedRecords: s.dropped,
+      asset: s.asset,
+      records: seatExitForensicOrderedRecords(s)
+    }));
+  } catch { /* 诊断发射失败忽略 */ }
+}
+function seatExitForensicPush(record) {
+  const s = seatExitForensicSession;
+  if (s.records.length < SEAT_EXIT_FORENSIC_MAX_RECORDS) s.records.push(record);
+  else { s.records[s.next] = record; s.next = (s.next + 1) % SEAT_EXIT_FORENSIC_MAX_RECORDS; s.dropped += 1; }
+}
+function seatExitForensicRecord(ev, extra = {}) {
+  const s = seatExitForensicSession;
+  if (!SEAT_EXIT_FORENSIC || !s) return false;
+  const monoMs = performance.now();
+  if (monoMs - s.startedMonoMs >= SEAT_EXIT_FORENSIC_WINDOW_MS) { seatExitForensicFlush("window-elapsed"); return false; }
+  if (s.owner && (s.owner !== spineObj || (s.ownerGen && s.ownerGen !== activeRenderGeneration))) return false;
+  const token = seatExitY;
+  const track = seatExitForensicTrack();
+  const scale = spineObj?.scale ? { x: spineObj.scale.x, y: spineObj.scale.y } : null;
+  const objectY = spineObj && Number.isFinite(spineObj.y) ? spineObj.y : null;
+  const targetY = token && token.hasTarget && Number.isFinite(token.targetY) ? token.targetY : null;
+  seatExitForensicPush(Object.assign({
+    side: "renderer",
+    sessionId: s.mainSessionId,
+    renderSessionId: s.renderSessionId,
+    localSeq: ++s.localSeq,
+    frameIndex: s.frameIndex,
+    monoMs,
+    dateNow: Date.now(),
+    ev,
+    rendererGeneration: activeRenderGeneration,
+    ownerGeneration: s.ownerGen || activeRenderGeneration,
+    track,
+    walkState: {
+      active: !!walkState.active, resting: !!walkState.resting, seated: !!walkState.seated,
+      paused: !!walkState.paused, sleeping: !!walkState.sleeping, perched: !!walkState.perched
+    },
+    seatEpisode: { active: !!seatEpisode.active, owner: seatEpisode.owner === spineObj, pendingFit: !!seatEpisode.pendingFit },
+    seatExitY: token ? {
+      owns: seatExitYOwnsY(), ownerGeneration: token.ownerGen, sourceName: token.sourceName, targetName: token.targetName,
+      targetY, visibleCorrectionY: token.visibleCorrectionY, fastBaseY: token.fastBaseY,
+      finalAuthorityValid: !!token.finalAuthorityValid, freeze: !!token.finalAuthorityValid,
+      sawFinalReaim: !!token.sawFinalReaim, needsMeasure: !!token.needsMeasure
+    } : { owns: false, token: "unavailable" },
+    objectY: seatExitForensicRound(objectY),
+    scale,
+    fit: { generation: spineFitGeneration, ownerGeneration: spineFitOwnerGeneration, keepScale: !!spineFitKeepScale, manualScale: !!spineManual, baseScaleX: spineBaseScaleX },
+    pose: seatExitForensicPose(),
+    targetY: seatExitForensicRound(targetY),
+    visibleCorrectionY: token && Number.isFinite(token.visibleCorrectionY) ? seatExitForensicRound(token.visibleCorrectionY) : null,
+    final: token ? !!token.finalAuthorityValid : false,
+    freeze: token ? !!token.finalAuthorityValid : false,
+    release: null
+  }, extra));
+  return true;
+}
+function seatExitForensicReceive(meta, incoming) {
+  if (!SEAT_EXIT_FORENSIC || !meta || !meta.sessionId) return;
+  const owner = spineRuntimeOwner?.obj || spineObj || null;
+  const old = seatExitForensicSession;
+  if (old && (old.mainSessionId !== meta.sessionId || (old.owner && owner && old.owner !== owner))) {
+    seatExitForensicFlush(old.mainSessionId === meta.sessionId ? "owner-changed" : "new-main-session");
+  }
+  if (!seatExitForensicSession) {
+    seatExitForensicOrdinal += 1;
+    seatExitForensicSession = {
+      mainSessionId: meta.sessionId,
+      renderSessionId: meta.sessionId + "/r" + seatExitForensicOrdinal,
+      startedMonoMs: performance.now(), startedDateNow: Date.now(),
+      owner, ownerGen: activeRenderGeneration || 0, localSeq: 0, frameIndex: 0,
+      records: [], next: 0, dropped: 0, asset: seatExitForensicAsset(),
+      standBeatPoseIntentReceived: false, standBeatPoseRequested: null, standBeatPoseApplied: false, standBeatPoseMoveRequested: false
+    };
+    seatExitForensicRecord("session-start", { mainEventSeq: meta.eventSeq, mainMonoMs: meta.mainMonoMs, mainDateNow: meta.mainDateNow, incomingState: incoming || null });
+  }
+  seatExitForensicRecord("receive", { mainEventSeq: meta.eventSeq, mainMonoMs: meta.mainMonoMs, mainDateNow: meta.mainDateNow, incomingState: incoming || null });
+  if (incoming?.standBeatPoseIntent === "stand" && !seatExitForensicSession.standBeatPoseIntentReceived) {
+    seatExitForensicSession.standBeatPoseIntentReceived = true;
+    seatExitForensicRecord("stand-beat-pose-intent-receive", { standBeatPoseIntent: "stand" });
+  }
+}
+function seatExitForensicBeforeFrame() {
+  if (!SEAT_EXIT_FORENSIC || !seatExitForensicSession || !spineObj) return null;
+  if (!seatExitForensicSession.owner) {
+    seatExitForensicSession.owner = spineObj;
+    seatExitForensicSession.ownerGen = activeRenderGeneration;
+  }
+  const t = seatExitY;
+  return {
+    objectY: Number.isFinite(spineObj.y) ? spineObj.y : null,
+    fastBaselineY: t && Number.isFinite(t.fastBaseY) ? t.fastBaseY : null,
+    residual: t && t.hasTarget && Number.isFinite(t.targetY) ? t.targetY - spineObj.y : null
+  };
+}
+function seatExitForensicAfterFrame(dtSec, before) {
+  if (!SEAT_EXIT_FORENSIC || !seatExitForensicSession || !spineObj) return;
+  const session = seatExitForensicSession;
+  const t = seatExitY;
+  session.frameIndex += 1;
+  seatExitForensicRecord("frame", {
+    dtSec: seatExitForensicRound(dtSec, 5),
+    frameIndex: session.frameIndex,
+    objectYBefore: seatExitForensicRound(before?.objectY),
+    objectYAfter: seatExitForensicRound(spineObj.y),
+    fastBaselineYBefore: seatExitForensicRound(before?.fastBaselineY),
+    fastBaselineYAfter: seatExitForensicRound(t && t.fastBaseY),
+    residualBefore: seatExitForensicRound(before?.residual),
+    residualAfter: seatExitForensicRound(t && t.hasTarget && Number.isFinite(t.targetY) ? t.targetY - spineObj.y : null)
+  });
+  if (session === seatExitForensicSession && session.standBeatPoseRequested && !session.standBeatPoseApplied) {
+    const track = seatExitForensicTrack();
+    if (track.current === session.standBeatPoseRequested.targetName && track.loop) {
+      session.standBeatPoseApplied = true;
+      seatExitForensicRecord("stand-beat-pose-applied", {
+        standBeatPoseIntent: "stand",
+        targetName: session.standBeatPoseRequested.targetName,
+        appliedFrame: session.frameIndex
+      });
+    }
+  }
+}
+function seatExitForensicFitEvent(branch = "invoke") {
+  if (SEAT_EXIT_FORENSIC) seatExitForensicRecord("fit", { fitEvent: branch });
+}
+
+function reliableStandBeatIdleAnim() {
+  const target = spineAnimForMood("idle");
+  if (!target || !spineHas(target) || isSitClassAnim(target) || isStaticFallbackAnim(target)) return null;
+  return target;
+}
+function admitStandBeatPoseIntent() {
+  if (!STANDBEAT_POSE_ENABLED || !spineObj || activeRenderMode !== "spine") return false;
+  const owner = spineRuntimeOwner;
+  if (!owner || owner.obj !== spineObj || spinePendingOwner || spineBootstrapPending || activeRenderGeneration <= 0 ||
+      owner.context?.generation !== activeRenderGeneration) return false;
+  if (!walkState.active || !walkState.resting || walkState.seated || walkState.perched || walkState.iconRest || walkState.paused ||
+      walkState.sleeping || busy || dragState || Date.now() < animDemoUntil) return false;
+  const cur = spineObj.state?.getCurrent ? spineObj.state.getCurrent(0) : null;
+  const sit = sitAnimName();
+  if (!cur?.animation || !sit || cur.animation.name !== sit || cur.loop !== true || cur.next) return false;
+  if (!seatEpisode.active || seatEpisode.owner !== spineObj) return false;
+  const target = reliableStandBeatIdleAnim();
+  if (!target) {
+    if (SEAT_EXIT_FORENSIC) seatExitForensicRecord("stand-beat-pose-fallback", { standBeatPoseIntent: "stand", reason: "no-reliable-idle" });
+    return false;
+  }
+  if (SEAT_EXIT_FORENSIC && seatExitForensicSession) {
+    seatExitForensicSession.standBeatPoseRequested = { targetName: target, fromName: cur.animation.name, owner, ownerGeneration: activeRenderGeneration };
+    seatExitForensicRecord("stand-beat-pose-request", { standBeatPoseIntent: "stand", fromName: cur.animation.name, targetName: target });
+  }
+  setSpineAnim(target, true, "stand-beat-pose");
+  scheduleFitSpine({});
+  return true;
+}
+function seatExitForensicNoteMoveRequest() {
+  const session = seatExitForensicSession;
+  const requested = session && session.standBeatPoseRequested;
+  if (!SEAT_EXIT_FORENSIC || !requested || session.standBeatPoseMoveRequested || !walkState.active || walkState.resting ||
+      walkState.seated || walkState.perched || walkState.iconRest || walkState.paused || walkState.sleeping || isSleeping) return;
+  const cur = spineObj?.state?.getCurrent ? spineObj.state.getCurrent(0) : null;
+  const target = spinePhaseAnim();
+  if (!cur?.animation || !target || cur.animation.name !== requested.targetName || target === requested.targetName) return;
+  session.standBeatPoseMoveRequested = true;
+  seatExitForensicRecord("stand-beat-move-request", { fromName: requested.targetName, targetName: target });
+}
+/* ===== OFFSETDIAG（diagnostics-only，SUSSURRO_EDGE_DIAG 同一 gate）：keepScale 皮肤
+ * Sitd→Move / Sitd→Sleep 混合期 visibleBottomOffset(t) 采样器。
+ * 唯一符号约定：visibleBottomOffset = visBottom − bboxBottom（两量同帧同位置快照）。
+ * 输出字段用 sampledMaxDeviation（离散 9 桶采样的最大偏差），不是连续上界。
+ * 关闭态：零采样、零 RenderTexture、零 ticker 额外工作（offsetDiagTick 首行短路）。 ===== */
+let offsetDiagSeq = 0;
+let offsetDiagTransition = null; // {id, from, to, buckets:Set, offsets:[], sourceSteadyOffset, sourceSteadyFresh, maxCost, sumCost, t0}
+let offsetDiagSitSteady = null;  // {offset, ts}：Sitd 稳态节流快照（0% 端点真值来源）
+let offsetDiagLastSnapAt = 0;
+function offsetDiagSampleVis() { // 与 fit 同一几何提取（step/thr 同参数），但只取底边一行极值
+  const t0 = performance.now();
+  try {
+    const W = Math.ceil(spineApp.screen.width), Hh = Math.ceil(spineApp.screen.height);
+    const rt = PIXI.RenderTexture.create({ width: W, height: Hh });
+    spineApp.renderer.render(spineObj, { renderTexture: rt, clear: true });
+    const px = spineApp.renderer.extract.pixels(rt);
+    const pw = rt.width, ph = rt.height, fy = spineApp.screen.height / ph, step = 4, thr = 32;
+    let y1 = -1;
+    for (let y = 0; y < ph; y += step) { for (let x = 0; x < pw; x += step) { if (px[(y * pw + x) * 4 + 3] > thr) { if (y > y1) y1 = y; break; } } }
+    rt.destroy(true);
+    return { visBottom: y1 >= 0 ? Number(((y1 + step) * fy).toFixed(2)) : null, costMs: Number((performance.now() - t0).toFixed(3)) };
+  } catch { return { visBottom: null, costMs: Number((performance.now() - t0).toFixed(3)) }; }
+}
+function offsetDiagLine(obj) { try { window.petAPI.playback("[OFFSETDIAG] " + JSON.stringify(obj)); } catch { /* 忽略 */ } }
+function offsetDiagClose(reason) {
+  const t = offsetDiagTransition;
+  if (!t) return;
+  offsetDiagTransition = null;
+  const offs = t.offsets; // 仅 mixed（0..7 桶）；target steady 单独记录，绝不混入
+  const steadyOffset = t.targetSteady && Number.isFinite(t.targetSteady.offset) ? t.targetSteady.offset : null;
+  let dev = null;
+  if (steadyOffset !== null) {
+    const devs = offs.map((o) => Math.abs(o - steadyOffset));
+    if (t.sourceSteadyFresh && Number.isFinite(t.sourceSteadyOffset)) devs.push(Math.abs(t.sourceSteadyOffset - steadyOffset));
+    dev = devs.length ? Number(Math.max(...devs).toFixed(2)) : 0; // 只在 target steady 已取得后计算；离散采样最大偏差，非连续上界
+  }
+  const costCount = offs.length + (t.targetSteady ? 1 : 0);
+  offsetDiagLine({
+    ts: Date.now(), ev: "SUMMARY", transitionId: t.id, from: t.from, to: t.to, closedReason: reason,
+    sourceSteadyOffset: t.sourceSteadyFresh ? t.sourceSteadyOffset : null,
+    sourceSteadyKind: t.sourceSteadyFresh ? "steadySit" : "firstMixedSample", // 与 bucket0 完全独立（bucket0 是混合首帧样本，永不冒充 source steady）
+    targetSteadyRecorded: !!t.targetSteady,
+    targetSteadyOffset: steadyOffset, // 未取得 → null（timeout/target-changed/no-current 绝不拿 mixed 末位冒充）
+    targetSteadyTs: t.targetSteady ? t.targetSteady.ts : null,
+    targetSteadyBBoxBottom: t.targetSteady ? t.targetSteady.bboxBottom : null,
+    targetSteadyVisBottom: t.targetSteady ? t.targetSteady.visBottom : null,
+    targetSteadySampleCostMs: t.targetSteady ? t.targetSteady.costMs : null,
+    sampledMinOffset: offs.length ? Number(Math.min(...offs).toFixed(2)) : null,
+    sampledMaxOffset: offs.length ? Number(Math.max(...offs).toFixed(2)) : null,
+    sampledMaxDeviationFromTarget: dev,
+    maxSampleCostMs: Number(t.maxCost.toFixed(2)),
+    avgSampleCostMs: costCount ? Number((t.sumCost / costCount).toFixed(2)) : null,
+    sampleCount: offs.length
+  });
+}
+function offsetDiagTick() {
+  if (!EDGE_DIAG || !spineObj || !spineApp || !spineFitKeepScale) return; // keepScale 专项；normal 皮肤不在本测量范围
+  try {
+    const cur = spineObj.state ? spineObj.state.getCurrent(0) : null;
+    if (!cur) { offsetDiagClose("no-current"); return; }
+    const name = cur.animation ? cur.animation.name : null;
+    if (!offsetDiagTransition) {
+      const sit = sitAnimName();
+      const fromEntry = cur.mixingFrom;
+      if (fromEntry && sit && fromEntry.animation && fromEntry.animation.name === sit) {
+        const moveTgt = spinePhaseAnim();
+        const sleepTgt = spineAnimForMood("sleep");
+        if (name && (name === moveTgt || (sleepTgt && name === sleepTgt))) { // 精确门：只此两种目标混合
+          offsetDiagTransition = { id: ++offsetDiagSeq, from: sit, to: name, buckets: new Set(), offsets: [], targetSteady: null,
+            sourceSteadyFresh: !!(offsetDiagSitSteady && Date.now() - offsetDiagSitSteady.ts <= 2000),
+            sourceSteadyOffset: (offsetDiagSitSteady && Date.now() - offsetDiagSitSteady.ts <= 2000) ? offsetDiagSitSteady.offset : null,
+            maxCost: 0, sumCost: 0, t0: Date.now() };
+        }
+        return;
+      }
+      if (!fromEntry && sit && name === sit && Date.now() - offsetDiagLastSnapAt >= 500) { // Sitd 稳态 0% 快照（节流 500ms）
+        offsetDiagLastSnapAt = Date.now();
+        const vis = offsetDiagSampleVis();
+        if (vis.visBottom != null) { const b = spineObj.getBounds(); offsetDiagSitSteady = { offset: Number((vis.visBottom - (b.y + b.height)).toFixed(2)), ts: Date.now() }; }
+      }
+      return;
+    }
+    const t = offsetDiagTransition;
+    const dur = Number.isFinite(cur.mixDuration) && cur.mixDuration > 0 ? cur.mixDuration : 0.2;
+    const progress = Math.max(0, Math.min(1, Number.isFinite(cur.mixTime) ? cur.mixTime / dur : 1));
+    if (cur.mixingFrom) {
+      if (name && name !== t.to) { offsetDiagClose("target-changed"); return; }
+      if ((cur.mixingFrom.animation || {}).name !== t.from) { offsetDiagClose("source-changed"); return; }
+      const bucket = Math.min(7, Math.round(progress / 0.125)); // 混合桶只到 7（≈87.5%+）；96% 也归 7，不产生"100% steady"
+      if (!t.buckets.has(bucket)) {
+        t.buckets.add(bucket);
+        const vis = offsetDiagSampleVis();
+        const b = spineObj.getBounds();
+        const bboxBottom = Number((b.y + b.height).toFixed(2));
+        const offset = vis.visBottom !== null ? Number((vis.visBottom - bboxBottom).toFixed(2)) : null;
+        t.maxCost = Math.max(t.maxCost, vis.costMs); t.sumCost += vis.costMs;
+        if (offset !== null) t.offsets.push(offset);
+        offsetDiagLine({ ts: Date.now(), ev: "SAMPLE", role: "mixed", transitionId: t.id, from: t.from, to: name || t.to,
+          progressBucket: bucket, progressPct: bucket * 12.5,
+          mixTime: Number.isFinite(cur.mixTime) ? Number(cur.mixTime.toFixed(3)) : null, mixDuration: Number(cur.mixDuration).toFixed ? Number((Number.isFinite(cur.mixDuration) ? cur.mixDuration : dur).toFixed(3)) : dur,
+          bboxBottom, visBottom: vis.visBottom, visibleBottomOffset: offset, // 唯一符号：visBottom − bboxBottom
+          sampleCostMs: vis.costMs, spineLocalY: Number(spineObj.y.toFixed(2)), keepScale: true,
+          generation: spineFitGeneration, ownerGeneration: spineFitOwnerGeneration });
+      }
+      if (Date.now() - t.t0 > 1500) offsetDiagClose("timeout");
+      return;
+    }
+    // mixingFrom 已清除：target steady 只在"目标动画名未变"的下一拍【重新同帧采样】，绝不复用 mixed 末样本
+    if (name && name !== t.to) { offsetDiagClose("target-changed"); return; }
+    if (Date.now() - t.t0 > 1500 && !t.targetSteady) { offsetDiagClose("timeout"); return; }
+    {
+      const vis = offsetDiagSampleVis();
+      const b = spineObj.getBounds();
+      const bboxBottom = Number((b.y + b.height).toFixed(2));
+      const offset = vis.visBottom !== null ? Number((vis.visBottom - bboxBottom).toFixed(2)) : null;
+      t.maxCost = Math.max(t.maxCost, vis.costMs); t.sumCost += vis.costMs;
+      t.targetSteady = { ts: Date.now(), bboxBottom, visBottom: vis.visBottom, offset, costMs: vis.costMs };
+      offsetDiagLine({ ts: Date.now(), ev: "TARGET_STEADY", transitionId: t.id, from: t.from, to: t.to,
+        bboxBottom, visBottom: vis.visBottom, visibleBottomOffset: offset, sampleCostMs: vis.costMs,
+        spineLocalY: Number(spineObj.y.toFixed(2)), keepScale: true, generation: spineFitGeneration, ownerGeneration: spineFitOwnerGeneration });
+    }
+    offsetDiagClose("mix-complete");
+  } catch { /* 诊断绝不外溢 */ }
+}
+/* ===== SPEECHDIAG（说话时定身 T3 专项诊断；SUSSURRO_SPEECH_DIAG=1 开启；默认关：无 interval/无日志/零行为差；定位后整体删除） =====
+ * 会话模型：refcount 式多 session（proactive/tts/thinking 允许重叠——任一 END 只关自己，最后一个到期才停采样）。
+ * 采样窗口 = 生命周期 + 结束后 3s（T3 常现于语音末/刚末）。推进权双心跳：
+ *   A=diagTickerCallbackSeq（ticker 回调最顶、任何守卫前）——不涨 ⇒ ticker 本身没在 tick；
+ *   B=diagSpineAdvanceSeq（过 owner 守卫、真正执行 spineObj.update 前）——A涨B不涨+ownerMatch=false ⇒ lifecycle owner 错位实锤。 */
+const SPEECH_DIAG = !!(window.petAPI && window.petAPI.speechDiag);
+let diagTickerCallbackSeq = 0, diagLastTickerCallbackAt = 0;
+let diagSpineAdvanceSeq = 0, diagLastSpineAdvanceAt = 0;
+let diagThinkingId = 0;
+let speechDiagSeq = 0;
+const speechDiagSessions = new Map(); // diagId → {reason, startTs, endAt(0=活跃)}
+let speechDiagTimer = null;
+let speechDiagLastTrackTime = null;
+function speechDiagEmit(obj) { try { window.petAPI.playback("[SPEECHDIAG] " + JSON.stringify(obj)); } catch { /* 诊断发射失败忽略 */ } }
+function speechDiagLog(ev, diagId, extra) { if (!SPEECH_DIAG) return; try { speechDiagEmit({ ts: Date.now(), ev, diagId, reason: (speechDiagSessions.get(diagId) || {}).reason || extra || null }); } catch { /* 忽略 */ } }
+function speechDiagArm() { if (!SPEECH_DIAG || speechDiagTimer) return; speechDiagTimer = setInterval(speechDiagTick, 300); } // 沙箱 setInterval 可为 no-op——tick 由测试 seam 手动驱动
+function speechDiagStart(reason) {
+  if (!SPEECH_DIAG) return 0;
+  const diagId = ++speechDiagSeq;
+  speechDiagSessions.set(diagId, { reason, startTs: Date.now(), endAt: 0 });
+  speechDiagLog("START", diagId, reason);
+  speechDiagArm();
+  return diagId;
+}
+function speechDiagEnd(diagId) {
+  if (!SPEECH_DIAG) return;
+  const s = speechDiagSessions.get(diagId);
+  if (!s || s.endAt) return;
+  s.endAt = Date.now() + 3000; // 结束后续采 3s
+  speechDiagLog("END", diagId);
+}
+function speechDiagPruneAndCount() {
+  const now = Date.now();
+  for (const [id, s] of speechDiagSessions) if (s.endAt && now >= s.endAt) speechDiagSessions.delete(id);
+  if (speechDiagSessions.size === 0) { if (speechDiagTimer && typeof clearInterval === "function") clearInterval(speechDiagTimer); speechDiagTimer = null; speechDiagLastTrackTime = null; }
+  return speechDiagSessions.size;
+}
+const sdNum = (v) => (typeof v === "number" && Number.isFinite(v) ? Number(v.toFixed(3)) : (v === undefined ? "undef" : null));
+function speechDiagTick() {
+  try {
+    if (speechDiagPruneAndCount() === 0) return;
+    const now = Date.now();
+    const reasons = []; const ids = [];
+    for (const [id, s] of speechDiagSessions) { ids.push(id); reasons.push(s.reason); }
+    const cur = spineObj && spineObj.state ? spineObj.state.getCurrent(0) : null;
+    const nx = cur ? cur.next : null;
+    const mf = cur ? cur.mixingFrom : null;
+    const tick = spineApp ? spineApp.ticker : null;
+    const prev = speechDiagLastTrackTime;
+    const dtt = cur && prev !== null && typeof cur.trackTime === "number" ? cur.trackTime - prev : null;
+    speechDiagLastTrackTime = cur && typeof cur.trackTime === "number" ? cur.trackTime : null;
+    speechDiagEmit({
+      ts: now, ev: "SAMPLE", ids: ids.join(","), reasons: reasons.join(","),
+      track: cur ? { name: (cur.animation || {}).name || null, loop: cur.loop, trackTime: sdNum(cur.trackTime), animationStart: sdNum(cur.animationStart), animationEnd: sdNum(cur.animationEnd), trackLast: sdNum(cur.trackLast) } : null,
+      next: nx ? { name: (nx.animation || {}).name || null, loop: nx.loop, delay: nx.delay === undefined ? "undef" : sdNum(nx.delay), delayFinite: Number.isFinite(nx.delay) } : null,
+      hasNext: !!nx,
+      mixingFrom: mf ? { name: (mf.animation || {}).name || null, trackTime: sdNum(mf.trackTime) } : null,
+      trackTimeDelta: sdNum(dtt), trackTimeAdvance: dtt === null ? null : dtt > 1e-6,
+      autoUpdate: spineObj ? spineObj.autoUpdate : null,
+      tickerStarted: tick ? !!tick.started : null, tickerMaxFPS: tick ? tick.maxFPS : null,
+      tickerCallbackSeq: diagTickerCallbackSeq, tickerCallbackAgeMs: diagLastTickerCallbackAt ? Math.round(performance.now() - diagLastTickerCallbackAt) : null,
+      spineAdvanceSeq: diagSpineAdvanceSeq, spineAdvanceAgeMs: diagLastSpineAdvanceAt ? Math.round(performance.now() - diagLastSpineAdvanceAt) : null,
+      ownerMatch: !!(seatLifecycle.owner && seatLifecycle.owner === spineObj),
+      stateTimeScale: spineObj && spineObj.state ? spineObj.state.timeScale : null,
+      walk: [walkState.active, walkState.resting, walkState.seated, walkState.perched, walkState.paused, walkState.sleeping].map(Boolean).join(""),
+      busy: !!busy,
+      moodRemainMs: Math.max(0, Date.now() < moodAnimUntil ? moodAnimUntil - Date.now() : 0),
+      demoRemainMs: Math.max(0, Date.now() < animDemoUntil ? animDemoUntil - Date.now() : 0),
+      vis: document.visibilityState || null
+    });
+  } catch { /* 诊断绝不外溢影响生产 */ }
+}
+function settleSpineBootstrapDone() { const r = spineBootstrapDoneResolve; if (r) { spineBootstrapDoneResolve = null; r(); } } // 防任何 waiter 悬挂（release/abandon 双路径必须结算）
+function releaseSpineBootstrap(why) { // A-v2.2 严格顺序：停延后 → 取 staged → replay → scale/anim 稳定 → 最后解除隐藏 → visible-release
+  if (!spineBootstrapPending) return;
+  if (spineBootstrapOwner && spineRuntimeOwner !== spineBootstrapOwner) { return; } // A24-T10：stale 触发器对“当前 owner 的单槽 gate”零可变——pending/owner/done/failsafe/staged 全属新 owner，旧释放只能静默退场
+  const bootstrapOwner = spineBootstrapOwner; // A26.1：production owner token 在此捕获（mismatch 检查之后，release/settle 全程同一身份）
+  spineBootstrapPending = false; // B. 先停延后：replay 内部的 applyWalkState/setSpineAnim 不再走 staged 分支
+  if (spineBootstrapFailSafeTimer) { clearTimeout(spineBootstrapFailSafeTimer); spineBootstrapFailSafeTimer = null; }
+  const replay = spineBootstrapDeferredWalk; // C. latest-wins 单份
+  spineBootstrapDeferredWalk = null;        // D. 清槽防重复 replay
+  const before = spineObj ? { anim: (spineObj.state.getCurrent(0)?.animation || {}).name || null, sy: spineObj.scale.y } : null;
+  if (replay) applyWalkState(replay); // E. 此刻才进入真实角色（Sit 快照 entryScale=fitted scale，v2 ratchet/keepScale 保证不回卷）
+  settleBootstrapFinalPose(bootstrapOwner); // A26：bootstrap final-state 语义——恢复"应当已处于"的最终业务态（hidden 下消灭 Relax→Sit mix + containment 收敛过程）；owner 走 production token
+  const after = spineObj ? { anim: (spineObj.state.getCurrent(0)?.animation || {}).name || null, sy: spineObj.scale.y } : null;
+  spineBootstrapLastRelease = { why, hadReplay: !!replay, animBefore: before && before.anim, animAfter: after && after.anim, scaleBefore: before && Number(before.sy.toFixed(5)), scaleAfter: after && Number(after.sy.toFixed(5)), replayBeforeVisible: true };
+  if (spineApp && spineApp.view) { // H. 最后才可见
+    spineApp.view.classList.remove("hidden");
+    spineApp.view.style.display = "";
+    spineApp.view.style.visibility = "";
+  }
+  settleSpineBootstrapDone(); // A-v2.3：首见完成 → 解锁 render-mode ready 上报
+}
+function settleBootstrapFinalPose(owner) { // A26.1：production owner token 由 release 从 bootstrap 生命周期捕获并显式传入——settle 的行为执行不依赖诊断层状态
+  if (!owner || spineRuntimeOwner !== owner) return; // owner-bound：旧 owner 的迟到 settle 不得移动新 owner
+  if (!spineObj || !spineApp) return;
+  const sit = sitAnimName();
+  const cur = spineObj.state ? spineObj.state.getCurrent(0) : null;
+  if (!sit || !cur || !cur.animation || cur.animation.name !== sit) return; // T6：非坐姿 final state 不进入 settle，现有 Relax/Move/Sleep 语义不变
+  if (!seatEpisode.active || seatEpisode.owner !== spineObj) return;
+  try { cur.mixDuration = 0; } catch { /* 旧 runtime 不可写：下方 0 时长求值仍取得 Sit 起点全姿势（runtime: mixDuration==0 ⇒ alpha=1） */ }
+  const bx0 = spineObj.x, by0 = spineObj.y;
+  let iterations = 0;
+  let lastX = bx0, lastY = by0;
+  for (; iterations < 4; iterations += 1) { // bounded convergence：≤4 次硬上限，亚像素即停
+    try { spineObj.update(0); spineObj.updateTransform(); } catch { break; } // 与 ticker 等价的 pose apply（不推进 animation time）
+    try { seatContainmentCommit(); } catch { break; }
+    const moved = Math.hypot(spineObj.x - lastX, spineObj.y - lastY);
+    lastX = spineObj.x; lastY = spineObj.y;
+    if (moved < 0.5) break; // 亚像素停止条件
+  }
+}
+function fitBootstrapCheck(ready) {
+  if (!spineBootstrapPending) return;
+  if (spineBootstrapOwner && spineRuntimeOwner !== spineBootstrapOwner) return; // A23-T8：非本 bootstrap owner 的 pass 既不推进计数也不释放（防旧窗口残留计时把新 owner 提前放行/污染计数）
+  if (ready) { releaseSpineBootstrap("ready"); return; }
+  spineBootstrapPassCount += 1;
+  if (spineBootstrapPassCount >= 8) releaseSpineBootstrap("pass-fallback"); // ≈两个完整窗口仍未决断：异常模型兜底，宁可见旧尺不永久隐身
+}
+// 在虚拟定位/缩放下采样。projection transform 不修改对象的 x/y/scale 或 geometry bookkeeping。
+function sampleSpineFitAt(W, H, pose) {
+  let rt = null;
+  try {
+    const ax = pose.sx / spineObj.scale.x, ay = pose.sy / spineObj.scale.y;
+    const transform = new PIXI.Matrix(ax, 0, 0, ay, pose.x - ax * spineObj.x, pose.y - ay * spineObj.y);
+    rt = PIXI.RenderTexture.create({ width: Math.ceil(W), height: Math.ceil(H) });
+    spineApp.renderer.render(spineObj, { renderTexture: rt, clear: true, transform });
+    const px = spineApp.renderer.extract.pixels(rt);
+    const pw = rt.width, ph = rt.height, fx = W / pw, fy = H / ph, step = 4;
+    let x0 = Infinity, y0 = Infinity, x1 = -1, y1 = -1;
+    for (let y = 0; y < ph; y += step) for (let x = 0; x < pw; x += step) {
+      if (px[(y * pw + x) * 4 + 3] > 32) {
+        x0 = Math.min(x0, x); x1 = Math.max(x1, x);
+        y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+      }
+    }
+    return x1 >= 0 ? { x0: x0 * fx, x1: (x1 + step) * fx, y0: y0 * fy, y1: (y1 + step) * fy } : null;
+  } finally {
+    if (rt) rt.destroy(true);
+  }
+}
+function spineFitBoundsAtScale(sx, sy) {
+  const b = spineObj.getBounds();
+  const ax = sx / spineObj.scale.x, ay = sy / spineObj.scale.y;
+  const x0 = (b.x - spineObj.x) * ax, x1 = (b.x + b.width - spineObj.x) * ax;
+  const y0 = (b.y - spineObj.y) * ay, y1 = (b.y + b.height - spineObj.y) * ay;
+  if (![x0, x1, y0, y1].every(Number.isFinite) || b.width <= 0 || b.height <= 0) return null;
+  return { x: Math.min(x0, x1), y: Math.min(y0, y1), width: Math.abs(x1 - x0), height: Math.abs(y1 - y0) };
+}
+// ordinary fit 和 seat-exit 共用同一 would-be placement；只读实际对象。
+// keepScale 从固定 bbox 起点重放既有 push/visible-anchor 算法，采样网格不随 limiter 进度漂移。
+function measureSpineFitPlacement(keepScale = spineFitKeepScale) {
+  const W = spineApp.screen.width, H = spineApp.screen.height;
+  const baseline = Math.abs(spineBaseScaleX), flip = walkState.face === -1 ? -1 : 1;
+  const b = spineFitBoundsAtScale(baseline * flip, baseline);
+  if (!b) return null;
+  const k = keepScale ? 1 : Math.min(1, (W * 1.12 - 8) / b.width, (H - 8) / b.height);
+  if (!(k > 0)) return null;
+  const pose = { x: (W - b.width * k) / 2 - b.x * k, y: H - (b.y + b.height) * k,
+    sx: baseline * k * flip, sy: baseline * k, k, vis: null, kind: keepScale ? "keepScale" : "bbox" };
+  if (!keepScale) {
+    pose.x += spineXoff * b.width * k * flip;
+    return pose;
+  }
+  for (let iter = 0; iter < 10; iter += 1) {
+    const s = sampleSpineFitAt(W, H, pose);
+    if (!s) break; // 无可见像素：与 ordinary keepScale 同源的 bbox/push 终点。
+    const m = 2;
+    let moved = false;
+    if (s.x0 <= m) { pose.x += (m - s.x0) + 6; moved = true; }
+    else if (s.x1 >= W - m) { pose.x -= (s.x1 - (W - m)) + 6; moved = true; }
+    if (s.y0 <= m) { pose.y += (m - s.y0) + 6; moved = true; }
+    else if (s.y1 >= H - m) { pose.y -= (s.y1 - (H - m)) + 6; moved = true; }
+    if (!moved) {
+      pose.vis = s;
+      pose.x += W / 2 - (s.x0 + s.x1) / 2;
+      pose.y += H - s.y1;
+      break;
+    }
+  }
+  return pose;
+}
+
+function fitSpinePose(generation = spineFitGeneration, ownerGeneration = spineFitOwnerGeneration, owner = spineFitOwner) {
+  seatExitForensicFitEvent("invoke");
+  /* PROBE 3（EDGEDIAG）：仅打印紧跟一次 FACE 翻转（≤1500ms 短窗）的 fit；bbox 用原始 getBounds（不做 position 归零，零诊断副作用） */
+  const diagEventAt = Math.max(lastFaceFlipAt, lastSeatExitAt); // face 翻转或 seat-exit 边沿任一（diagnostics-only 扩窗）
+  const diagWin = EDGE_DIAG && diagEventAt > 0 && Date.now() - diagEventAt <= 1500
+    ? { at: Date.now(), x: spineObj ? spineObj.x : null, y: spineObj ? spineObj.y : null,
+      sx: spineObj ? spineObj.scale.x : null, sy: spineObj ? spineObj.scale.y : null, fig: Number(spineFigLeftCss.toFixed(1)) } : null;
+  const emitFitDiag = (branch, extra) => {
+    if (!diagWin) return;
+    try {
+      const c = spineObj && spineObj.state ? spineObj.state.getCurrent(0) : null;
+      const bb = spineObj ? spineObj.getBounds() : null;
+      window.petAPI.playback("[EDGEDIAG] FIT " + JSON.stringify(Object.assign({
+        ts: Date.now(), turnId: diagEdgeFitId(), deltaMsFromFace: Date.now() - diagEventAt, eventKind: lastSeatExitAt > lastFaceFlipAt ? "seatExit" : "face", branch,
+        generation, ownerMatch: spineRuntimeOwner === owner,
+        xBefore: diagWin.x, yBefore: diagWin.y, scaleXBefore: diagWin.sx, scaleYBefore: diagWin.sy,
+        xAfter: spineObj ? Number(spineObj.x.toFixed(2)) : null, yAfter: spineObj ? Number(spineObj.y.toFixed(2)) : null,
+        spineLocalXBefore: diagWin.x, spineLocalYBefore: diagWin.y, spineLocalXAfter: spineObj ? Number(spineObj.x.toFixed(2)) : null, spineLocalYAfter: spineObj ? Number(spineObj.y.toFixed(2)) : null, // 容器局部坐标显式别名（窗口坐标仅出现在 main 的 TURN 行）
+        recenterDx: spineObj && Number.isFinite(diagWin.x) ? Number((spineObj.x - diagWin.x).toFixed(2)) : null,
+        recenterDy: spineObj && Number.isFinite(diagWin.y) ? Number((spineObj.y - diagWin.y).toFixed(2)) : null,
+        figLeftCssAtFitStart: diagWin.fig, figLeftCssAtFitEnd: Number(spineFigLeftCss.toFixed(1)), // 可见左缘 CSS 位置：fit 前后的回中直接读数
+        scaleXAfter: spineObj ? Number(spineObj.scale.x.toFixed(5)) : null, scaleYAfter: spineObj ? Number(spineObj.scale.y.toFixed(5)) : null,
+        bbox: bb ? { x: Number(bb.x.toFixed(1)), y: Number(bb.y.toFixed(1)), w: Number(bb.width.toFixed(1)), h: Number(bb.height.toFixed(1)) } : null,
+        visibleCanvasGap, anim: c && c.animation ? c.animation.name : "?",
+        trackTime: c && Number.isFinite(c.trackTime) ? Number(c.trackTime.toFixed(3)) : null
+      }, extra || {})));
+    } catch { /* 诊断发射失败忽略 */ }
+  };
+  try {
+    if (!spineObj || !spineApp || activeRenderMode !== "spine" || spineRuntimeOwner !== owner || generation !== spineFitGeneration || ownerGeneration !== activeRenderGeneration) { fitBootstrapCheck(false); emitFitDiag("abort-guard"); return; }
     if (seatEpisode.active && seatEpisode.owner === spineObj && seatTrackActive()) {
       seatEpisode.pendingFit = true;
+      fitBootstrapCheck(false);
+      emitFitDiag("hold-seat");
       return;
     }
     let W = spineApp.screen.width, H = spineApp.screen.height;
-    const safe = 4;
     const flip = walkState.face === -1 ? -1 : 1;
     const baseline = Math.abs(spineBaseScaleX);
-    const bboxBounds = () => { spineObj.position.set(0, 0); spineObj.updateTransform(); return spineObj.getBounds(); };
+    // active 期不临时清零 actual Y；任何 invalid-bounds/throw 都不能绕过 limiter。
+    const seatYActive = seatExitYOwnsY();
+    const bboxBounds = () => spineFitBoundsAtScale(spineObj.scale.x, spineObj.scale.y);
     // 像素采样：可见轮廓（在给定定位状态下）
     const sample = () => {
       try {
@@ -339,38 +983,29 @@ function fitSpinePose(generation = spineFitGeneration, ownerGeneration = spineFi
     // 包围盒粗定位（居中+贴地），返回当前可见轮廓
     const bboxPosition = () => {
       const b = bboxBounds();
-      if (!(b.width > 0) || !(b.height > 0)) return null;
-      spineObj.x += (W - b.width) / 2 - b.x;
-      spineObj.y += H - (b.y + b.height);
+      if (!b) return null;
+      spineObj.x = (W - b.width) / 2 - b.x;
+      if (!seatYActive) spineObj.y = H - (b.y + b.height);
       spineObj.updateTransform();
       return b;
     };
 
     // ---- 自动适配过的皮肤：固定缩放 + 可见轮廓定位 ----
     if (spineFitKeepScale) {
-      // 迭代平移使可见轮廓整体入画布 → 采样不被裁剪 → 按可见中心/底边精定位（贴地留 5% 边距）
-      spineObj.scale.set(baseline * flip, baseline);
-      bboxPosition();
-      let vis = null;
-      for (let iter = 0; iter < 10 && !vis; iter++) {
-        const s = sample();
-        if (!s) break;
-        const m = 2;
-        let moved = false;
-        if (s.x0 <= m) { spineObj.x += (m - s.x0) + 6; moved = true; }
-        else if (s.x1 >= W - m) { spineObj.x -= (s.x1 - (W - m)) + 6; moved = true; }
-        if (s.y0 <= m) { spineObj.y += (m - s.y0) + 6; moved = true; }
-        else if (s.y1 >= H - m) { spineObj.y -= (s.y1 - (H - m)) + 6; moved = true; }
-        if (!moved) vis = s;
-        else spineObj.updateTransform();
+      const placement = measureSpineFitPlacement(true);
+      if (!placement) { fitBootstrapCheck(false); emitFitDiag("invalid-bbox"); return; }
+      spineObj.scale.set(placement.sx, placement.sy);
+      spineObj.x = placement.x;
+      if (!seatYActive) spineObj.y = placement.y;
+      const vis = placement.vis;
+      spineFigLeftCss = vis && petEl ? petEl.offsetLeft + vis.x0 * (petEl.clientWidth / Math.max(1, W)) : (petEl ? petEl.offsetLeft : 0);
+      if (seatYActive) seatYMeasureTarget("fit-keepScale", placement);
+      let keepDiag = null; // FIT keepScale 稳态 offset 读数：只用本拍已算好的 vis，零新增 sample
+      if (EDGE_DIAG && vis) {
+        try { const pb = spineObj.getBounds(); keepDiag = { visBottom: Number(vis.y1.toFixed(2)), bboxBottomPreAnchor: Number((pb.y + pb.height).toFixed(2)), visibleBottomOffset: Number((vis.y1 - (pb.y + pb.height)).toFixed(2)) }; } catch { /* 忽略 */ }
       }
-      if (vis) {
-        spineObj.x += W / 2 - (vis.x0 + vis.x1) / 2;
-        spineObj.y += H - vis.y1; // 贴画布底边（layoutGap 由主进程统一补偿，不再加边距避免悬浮）
-        spineFigLeftCss = petEl ? petEl.offsetLeft + vis.x0 * (petEl.clientWidth / Math.max(1, W)) : 0;
-      } else {
-        spineFigLeftCss = petEl ? petEl.offsetLeft : 0;
-      }
+      emitFitDiag("keepScale", Object.assign({ k: null, base: Number(spineBaseScaleX.toFixed(5)) }, keepDiag || {}));
+      fitBootstrapCheck(true); // keepScale 权威基线已写回并定位：可以首见
       reportGroundGap();
       scheduleGeometryReport();
       return;
@@ -396,6 +1031,12 @@ function fitSpinePose(generation = spineFitGeneration, ownerGeneration = spineFi
           spineBaseScaleX *= kk;
           spineAutoScaled = true;
           spineFitKeepScale = true;
+          // A-v2：新权威 baseline 落地即同步活跃的坐姿棘轮快照，
+          // 防 seatContainmentCommit（只降不升的 min(previousScale,entryScale) 上限）把放大到位的 scale 拉回旧 baseline。
+          if (seatEpisode.active && seatEpisode.owner === spineObj) {
+            if (window.SeatFit) window.SeatFit.seatRatchetSync(seatEpisode, spineBaseScaleX);
+            else { seatEpisode.entryScale = Math.abs(spineBaseScaleX); seatEpisode.previousScale = seatEpisode.entryScale; }
+          }
           try { window.petAPI.playback && window.petAPI.playback(`[spine] 自动适配 vis=${Math.round(visH)}px → ×${kk.toFixed(2)} (aspect=${aspect.toFixed(2)}) dir=${relDirOf()}`); } catch { /* 忽略 */ }
           fitSpinePose(generation, ownerGeneration, owner);
           return;
@@ -405,12 +1046,11 @@ function fitSpinePose(generation = spineFitGeneration, ownerGeneration = spineFi
 
     // ---- 常规显示（未适配/无需适配）：包围盒守卫缩放 + 定位 + 贴地空隙 ----
     {
-      spineObj.scale.set(baseline * flip, baseline);
-      const b = bboxBounds();
-      if (!(b.width > 0) || !(b.height > 0)) { reportGroundGap(); scheduleGeometryReport(); return; }
+      const placement = measureSpineFitPlacement(false);
+      if (!placement) { fitBootstrapCheck(false); emitFitDiag("invalid-bbox"); return; }
       // §14 追加 105：宽度约束放宽 12% 余量（高度仍严格）——坐姿/Relax 等姿势包围盒略超宽（实测 125 > 120）
       // 时不会被整体缩小 10%；可见主体居中的模型横向透明区足以容纳，日常站姿（bbox 更窄）完全不受影响。
-      const k = Math.min(1, (W * 1.12 - safe * 2) / b.width, (H - safe * 2) / b.height);
+      const k = placement.k;
       // §14 追加 105 诊断（限频）：守卫发生缩小（k<1）时记录姿势/包围盒，定位"坐下缩小"问题
       if (k < 0.97) {
         const _now = Date.now();
@@ -418,16 +1058,14 @@ function fitSpinePose(generation = spineFitGeneration, ownerGeneration = spineFi
           window.__spineGuardLogAt = _now;
           let _anim = "?";
           try { _anim = typeof spinePhaseAnim === "function" ? spinePhaseAnim() : "?"; } catch { /* 忽略 */ }
-          try { window.petAPI.playback && window.petAPI.playback(`[spine] guard k=${k.toFixed(3)} base=${baseline.toFixed(3)} anim=${_anim} bbox=${Math.round(b.width)}x${Math.round(b.height)} W=${W} H=${H}`); } catch { /* 忽略 */ }
+          try { window.petAPI.playback && window.petAPI.playback(`[spine] guard k=${k.toFixed(3)} base=${baseline.toFixed(3)} anim=${_anim} W=${W} H=${H}`); } catch { /* 忽略 */ }
         }
       }
-      spineObj.scale.set(baseline * k * flip, baseline * k);
-      spineObj.position.set(0, 0);
-      spineObj.updateTransform();
-      spineObj.x += (W - spineObj.getBounds().width) / 2 - spineObj.getBounds().x;
+      spineObj.scale.set(placement.sx, placement.sy);
+      spineObj.x = placement.x;
+      if (!seatYActive) spineObj.y = placement.y;
+      if (seatYActive) seatYMeasureTarget("fit-normal", placement);
       const b2 = spineObj.getBounds();
-      if (spineXoff) spineObj.x += spineXoff * b2.width * flip;
-      spineObj.y += H - (b2.y + b2.height);
       // v2.5.22c 诊断（低频）：睡觉时确认贴底值——排查"睡眠悬浮/陷入"（isSleeping 时记录）
       if (isSleeping && Date.now() - (window.__sleepFitLogAt || 0) > 2000) {
         window.__sleepFitLogAt = Date.now();
@@ -445,6 +1083,8 @@ function fitSpinePose(generation = spineFitGeneration, ownerGeneration = spineFi
           if (visibleCanvasGapHits >= 2) visibleCanvasGap = visibleCanvasGapCandidate;
         } else { visibleCanvasGapHits = 0; }
       }
+      emitFitDiag("normal", { k: Number(k.toFixed(5)), guardShrank: k < 0.999 });
+      fitBootstrapCheck(spineManual || (v2 ? ((v2.y1 - v2.y0) >= H * 0.75) : false)); // manual/已够高的皮肤 guard pass 完成即可首见；短轮廓等待 autoScale 决断
     }
   } catch { /* 测量失败不影响渲染 */ }
   reportGroundGap();
@@ -517,13 +1157,55 @@ function scheduleGeometryReport() {
 /** 行走朝向：face=-1 时镜像翻转（假设模型原始朝右；若实际相反改此处符号即可）
  *  注意：fitSpinePose 可能已按姿势 containment 缩小 scale（mag < spineBaseScaleX），
  *  翻转必须保持等比——以当前 scale.y 的绝对值为基准，只改符号，否则会左右拉伸。 */
+/** EDGEDIAG 主因修复：scale.x 镜像的同帧轻量 recenter。
+ *  镜像使骨骼包围盒相对物体原点左右翻转（bbox.x 变、宽不变），fit 首拍（~150ms）前出现
+ *  约 2×|bbox 偏心|（实测 17~22px）的视觉跳变。此处只做 normal 分支同款 bbox 水平居中
+ *  一步：不重算 k/scale、不动 y/scale、不采样、不发 reportGroundGap、不排 timer、不碰
+ *  generation——150/500/1000ms 的 scheduleFitSpine 窗口照旧完成可见主体（vis/spineXoff）
+ *  精居中，本函数只消灭第一帧的错位。 */
+function mirrorRecentreImmediate() {
+  try {
+    if (!spineApp || !spineObj) return;
+    spineObj.updateTransform(); // scale 已翻转：先同步世界矩阵，再读镜像后的 bbox（raw getBounds，无 fit 副作用）
+    const W = spineApp.screen.width;
+    const b = spineObj.getBounds();
+    if (!(b.width > 0) || !(b.height > 0)) return;
+    const nx = spineObj.x + (W - b.width) / 2 - b.x; // 与 fit normal 分支同一 bbox 居中公式（对当前 x 平移不变）
+    if (Number.isFinite(nx) && Math.abs(nx - spineObj.x) > 0.01) {
+      spineObj.x = nx;
+      spineObj.updateTransform();
+    }
+  } catch { /* 立即 recenter 失败无碍：后续 fit 窗口照旧收敛（原行为） */ }
+}
 function spineFaceDir(face) {
   if (!spineObj) return;
   const sy = Math.abs(spineObj.scale.y);
   const sx = sy * (face === -1 ? -1 : 1);
   if (spineObj.scale.x !== sx) {
+    const oldSign = spineObj.scale.x < 0 ? -1 : 1;
+    const diagBoundsBefore = EDGE_DIAG ? sdRawBounds() : null;
     spineObj.scale.x = sx;
-    scheduleFitSpine(); // 翻转后包围盒镜像，主体偏移方向也跟着反，需重新居中
+    mirrorRecentreImmediate(); // 镜像同帧 bbox 回中（EDGEDIAG TOP 修复；bounds 快照仍记录纯镜像位移供诊断）
+    if (EDGE_DIAG) { // PROBE 2：face 确实翻转（scale.x 符号变）才打；记录翻转后、scheduleFitSpine 前的 spine-local x/y（非窗口坐标）
+      lastFaceFlipAt = Date.now();
+      try {
+        const c = spineObj.state ? spineObj.state.getCurrent(0) : null;
+        const bb = sdRawBounds();
+        window.petAPI.playback("[EDGEDIAG] FACE " + JSON.stringify({
+          ts: lastFaceFlipAt, turnId: diagEdgeFaceId(), oldFace: oldSign, newFace: face,
+          spineLocalX: Number(spineObj.x.toFixed(2)), spineLocalY: Number(spineObj.y.toFixed(2)),
+          x: Number(spineObj.x.toFixed(2)), y: Number(spineObj.y.toFixed(2)), // 兼容别名：spineObj.x/y=容器局部坐标（窗口坐标只在 TURN 行的 windowX/bounds* 出现）
+          immediateRecentre: true, // 本行 spineLocalX 已是"镜像+立即 bbox 回中"后的读数；mirrorShiftX（修复前跳变量）=mirrorBoundsAfter.x−mirrorBoundsBefore.x
+          scaleXBefore: Number((sy * oldSign).toFixed(5)), scaleXAfter: Number(spineObj.scale.x.toFixed(5)),
+          scaleY: Number(sy.toFixed(5)), spineXoff: Number(spineXoff.toFixed(4)),
+          keepScale: !!spineFitKeepScale,
+          xoffPx: bb ? Number((spineXoff * bb.width).toFixed(2)) : null, // xoff 项镜像偏移量（预测跳变=2×此值+vis 中心偏移，离线计算）
+          mirrorBoundsBefore: diagBoundsBefore, mirrorBoundsAfter: bb, // 同空间 raw getBounds 前后快照：mirrorShiftX=After.x-Before.x（纯"只翻转不 recenter"的直接读数——bb 为回中后 bbox，其 x 差仍含立即回中量；诊断对照 FIT recenterDx≈0 即证修复生效）
+          anim: c && c.animation ? c.animation.name : "?", trackTime: c && Number.isFinite(c.trackTime) ? Number(c.trackTime.toFixed(3)) : null
+        }));
+      } catch { /* 诊断发射失败忽略 */ }
+    }
+    scheduleFitSpine({}); // 翻转后包围盒镜像，主体偏移方向也跟着反，需重新居中
   }
 }
 
@@ -563,6 +1245,30 @@ function spinePhaseAnim() {
     if (cls && cls.move && cls.move[0]) return cls.move[0];
   }
   return spineAnimForMood("idle");
+}
+
+/** talking-slide invariant 谓词：live locomotion=行走引擎主动位移相位（走动中，非休息/坐姿/窗顶/暂停）。
+ *  live locomotion 时 Spine track0 归行走相位机所有（spinePhaseAnim 唯一来源），普通 mood
+ *  不得把 track0 抢成非 locomotion 动画——否则出现"站立/说话姿势+窗口继续平移"=滑步。 */
+function isLiveLocomotion() {
+  return walkState.active && !walkState.resting && !walkState.seated && !walkState.perched && !walkState.paused && !walkState.sleeping; // sleeping 计入（真机回归：main walkTick `resting||sleeping` 停位移；漏判会把睡姿锁死在 Move 空走）
+}
+
+/** T3 判据①：locomotion 生命周期 = 行走引擎仍持有 track0 生命周期（含临时暂停/原地立定）。
+ *  active=true 的一切相位（走动/chat-pause/poke-pause/stop-idle 立定）都算；
+ *  引擎停止后（active=false）或坐/窗顶/睡→不属于 locomotion，mood 语义完全照旧。 */
+function isLocomotionLifecycle() {
+  return walkState.active && !walkState.seated && !walkState.perched && !walkState.sleeping;
+}
+/** T3 判据②：候选动画是否"静态兜底"——恰好等于 spineData.animations[0] 且其解析后 duration≤0
+ *  （bundled sussurro 资产 bytes：animationCount=0x06 后首名 "Default"，len+1 变体 0x08、
+ *   单条 type5、frame time 0x00000000 ⇒ duration 0 = setup 静态姿势）。
+ *  runtime 未提供 duration（老数据/异常）按"非静态"放行——只挡实证冻结形态，不做名字特判。 */
+function isStaticFallbackAnim(name) {
+  if (!spineObj || !spineObj.spineData || !name) return false;
+  const first = spineObj.spineData.animations && spineObj.spineData.animations[0];
+  if (!first || first.name !== name) return false;
+  return typeof first.duration === "number" && Number.isFinite(first.duration) ? first.duration <= 0 : false;
 }
 
 /* ---------- 动画名自动分类（借鉴 Ark-Pets AnimType）：未知模型也能选对动画 ---------- */
@@ -631,6 +1337,7 @@ function seatTrackActive() {
   return !!sit && !!cur && !!cur.animation && cur.animation.name === sit;
 }
 function seatContainmentCommit() {
+  if (seatExitYOwnsY()) return false; // 最后一道单 writer 守卫；正常 Sit entry 已先 handoff。
   if (!spineObj || !spineApp || !seatTrackActive() || !seatEpisode.active || seatEpisode.owner !== spineObj) return false;
   const W = spineApp.screen.width, H = spineApp.screen.height;
   let b = spineObj.getBounds();
@@ -658,15 +1365,228 @@ function seatContainmentCommit() {
   seatEpisode.previousScale = candidateScale;
   return true;
 }
+/* ===== Phase 2：seat-exit local-Y ownership（Y 唯一 writer=limiter；fit 只发现/重瞄 target；X 即时照旧） =====
+ * 不变量：
+ *  1) token active 时，任何 fit/poke/watchdog 路径都不得对 spineObj.y 单帧大步锚定；只有 ticker
+ *     的 limiter 按限速步长推进（长帧双保险：dt clamp + 每帧硬帽）。
+ *  2) token 绑定 spineObj owner + activeRenderGeneration；owner 重建/mode 切换 hard-drop（场景重建）。
+ *  3) 正常释放 = 当前 entry 的 final authority 有效且连续收敛；TTL 只复测，不交出 residual。
+ *  4) ARM 只允许真实 Sit source → live Move 或有资源的 Sleep，诊断开关不参与决策。 */
+const SEAT_EXIT_Y_SPEED = 150;
+const SEAT_EXIT_Y_MAX_DT = 0.05;
+const SEAT_EXIT_Y_STEP_CAP = 6;
+const SEAT_EXIT_Y_EPS = 0.4;
+const SEAT_EXIT_Y_VIS_EPS = 4; // keepScale 的一个采样网格；normal 仍保持 subpixel bbox 容差。仅用于 RT/authority 量化稳定判断。
+const SEAT_EXIT_Y_HANDOFF_EPS = 0.25; // 严格交接阈（≈0.25 DIP）：FAST 每帧更新绕开 MEASURE_EPS，但 release 只认这个
+const SEAT_EXIT_Y_CONVERGE_FRAMES = 3;
+const SEAT_EXIT_Y_TTL_MS = 1200; // watchdog 周期，不是 release permission。
+const SEAT_EXIT_Y_RETRY_MS = 150; // ticker 上的失败重试节流，不创建 timer/逐帧 RT。
+let seatExitY = null;
+const seatExitYOwnsY = () => !!(seatExitY && seatExitY.owner === spineObj && seatExitY.ownerGen === activeRenderGeneration);
+function isSeatExitMoveTarget(cur, state) {
+  if (!state.active || state.seated || state.perched || state.resting || state.paused || state.sleeping) return false;
+  const move = spineHas("Move") ? "Move" : ensureAnimClasses()?.move?.[0];
+  return !!move && cur?.animation?.name === move;
+}
+function isSeatExitSleepTarget(cur) {
+  const name = cur?.animation?.name;
+  return walkState.sleeping === true && !!name && !!ensureAnimClasses()?.sleep?.includes(name) &&
+    name === spineAnimForMood("sleep");
+}
+function seatYDiag(ev, extra) {
+  if (!EDGE_DIAG) return;
+  try {
+    const t = seatExitY;
+    window.petAPI.playback("[SEATYDIAG] " + JSON.stringify(Object.assign({
+      ts: Date.now(), ev, ownerGen: activeRenderGeneration,
+      sourceAnim: t ? t.sourceName : null, targetAnim: t ? t.targetName : null,
+      currentY: spineObj ? Number(spineObj.y.toFixed(2)) : null,
+      targetY: t && t.hasTarget && Number.isFinite(t.targetY) ? Number(t.targetY.toFixed(2)) : null,
+      deltaY: t && t.hasTarget && spineObj && Number.isFinite(t.targetY) ? Number((t.targetY - spineObj.y).toFixed(2)) : null
+    }, extra || {})));
+  } catch { /* 诊断忽略 */ }
+}
+/* FAST per-frame pose target（cheap、零 RenderTexture）：复用 spineFitBoundsAtScale 的只读坐标权威。
+ * 以"姿势内底边偏移" poseBottomRel = bboxBottom − y（平移不变）定义锚：anchor = H − poseBottomRel。
+ * 与 measureSpineFitPlacement 的 bbox 分支同一坐标体系，不自行猜 worldBounds.bottom−y。 */
+function fastPoseTargetY() {
+  if (!spineObj || !spineApp) return null;
+  const t0 = performance.now();
+  try {
+    const b = spineFitBoundsAtScale(spineObj.scale.x, spineObj.scale.y); // 原点相对 bbox（spineFitBoundsAtScale 的既有坐标约定）
+    if (!b || !(b.height > 0) || !(b.width > 0)) return null;
+    const bottomLocal = b.y + b.height; // 平移不变：不含 spineObj.y
+    if (!Number.isFinite(bottomLocal)) return null;
+    const cost = performance.now() - t0;
+    if (seatExitY) { seatExitY.perfMs += cost; seatExitY.perfN += 1; seatExitY.perfMaxMs = Math.max(seatExitY.perfMaxMs, cost); }
+    return spineApp.screen.height - bottomLocal;
+  } catch { return null; }
+}
+function releaseSeatExitY(reason) {
+  const t = seatExitY;
+  if (!t) return;
+  if (SEAT_EXIT_FORENSIC) seatExitForensicRecord("release", {
+    releaseReason: reason,
+    releaseResidual: t.hasTarget && Number.isFinite(t.owner?.y) ? t.targetY - t.owner.y : null,
+    finalAuthorityY: Number.isFinite(t.finalAuthorityY) ? t.finalAuthorityY : null
+  });
+  const y = t.owner?.y;
+  seatYDiag("RELEASE", { reason, residual: t.hasTarget && Number.isFinite(y) ? t.targetY - y : null });
+  seatYDiag("PERF_SUMMARY", { boundsSamples: t.perfN, boundsAvgMs: t.perfN ? Number((t.perfMs / t.perfN).toFixed(3)) : null, boundsMaxMs: Number(t.perfMaxMs.toFixed(3)) });
+  seatExitY = null; // handoff 从不 finish-to-target。
+  applyEcoFps("release"); // 释放即按真实业务状态复判 FPS（不硬编码 24/12）
+}
+function seatYSyncEntry(t, cur) {
+  const changed = t.entry !== cur || t.animation !== cur?.animation || t.targetName !== cur?.animation?.name ||
+    t.revision !== spineTrackRevision || (cur && cur.trackTime < t.trackTime);
+  if (changed) {
+    t.entry = cur; t.animation = cur?.animation; t.targetName = cur?.animation?.name || null;
+    t.revision = spineTrackRevision; t.prevMixing = !!cur?.mixingFrom;
+    t.awaitingPose = cur?.nextTrackLast === -1;
+    // 冻结的 final authority 绝不跨到新动画；fast baseline/correction 随姿势体系作废重建
+    t.finalAuthorityValid = false; t.finalAuthorityY = null; t.visibleCorrectionY = null; t.fastBaseY = null;
+    t.sawFinalReaim = false; t.needsMeasure = true; t.converged = 0;
+  }
+  t.trackTime = cur?.trackTime;
+  return changed;
+}
+// 成功返回前才确认 final；失败保留旧 target，同时撤销 release permission。
+// placement 可复用 fit 已求出的同源 authority，避免同一 pass 重复 RT。
+function seatYMeasureTarget(kind, placement = null) {
+  if (!seatExitYOwnsY() || !spineApp) return false;
+  const t = seatExitY, cur = spineObj.state.getCurrent(0);
+  seatYSyncEntry(t, cur);
+  t.lastMeasureAt = Date.now();
+  try {
+    if (!cur || cur.nextTrackLast === -1) throw new Error("unapplied-entry");
+    const p = placement || measureSpineFitPlacement();
+    if (!p || !Number.isFinite(p.y)) throw new Error("invalid-fit-authority");
+    const epsilon = p.kind === "keepScale" ? SEAT_EXIT_Y_VIS_EPS : SEAT_EXIT_Y_EPS;
+    const fast = fastPoseTargetY();
+    let newTarget = p.y;
+    if (p.kind === "keepScale" && fast !== null) {
+      const corr = p.y - fast; // visibleCorrectionY：同姿势下 RT authority 与 cheap bbox 快基线的小差
+      t.visibleCorrectionY = corr;
+      seatYDiag("VIS_CORRECTION", { kind, correction: Number(corr.toFixed(2)) });
+      newTarget = fast + corr; // 当前姿势等价 p.y；此后只 fast 动、corr 保留（FAST-6）
+    } else if (p.kind === "bbox") {
+      t.visibleCorrectionY = 0; // normal：bbox 即 fast 权威，correction 恒 0，无需 RT
+    }
+    if (!t.hasTarget || Math.abs(t.targetY - newTarget) > epsilon) t.converged = 0;
+    t.targetY = newTarget; t.epsilon = epsilon; t.hasTarget = true; t.needsMeasure = false;
+    if (t.fastBaseY === null && fast !== null) t.fastBaseY = fast;
+    if (!cur.mixingFrom) {
+      // mix 已结束：freeze final authority——fast 停止跟踪 pose（Move 循环腿摆/尾巴不得被误补偿，§八）
+      const firstFreeze = !t.finalAuthorityValid;
+      t.finalAuthorityValid = true; t.finalAuthorityY = newTarget;
+      if (firstFreeze) seatYDiag("FINAL_FREEZE", { kind, authority: Number(newTarget.toFixed(2)) });
+      if (!t.sawFinalReaim) { t.sawFinalReaim = true; t.converged = 0; seatYDiag("MIX_END_REAIM", { kind }); }
+    } else {
+      t.finalAuthorityValid = false; t.finalAuthorityY = null; t.sawFinalReaim = false;
+    }
+    seatYDiag("TARGET", { kind, measurementKind: p.kind });
+    return true;
+  } catch {
+    t.needsMeasure = true; t.sawFinalReaim = false; t.converged = 0;
+    seatYDiag("MEASURE_FAIL", { kind });
+    return false;
+  }
+}
+function seatExitYTick(dtSec) {
+  if (seatExitY && !seatExitYOwnsY()) {
+    seatYDiag("HARD_DROP", { reason: "owner-or-generation-changed" });
+    releaseSeatExitY("owner-or-generation-changed");
+  }
+  if (!spineObj || !spineObj.state) return;
+  const cur = spineObj.state.getCurrent(0);
+  const to = cur?.animation?.name;
+  const mixingNow = !!cur?.mixingFrom;
+  if (seatExitY && to === sitAnimName()) { releaseSeatExitY("seat-entry"); return; }
+  if (!seatExitY) {
+    const sit = sitAnimName();
+    if (!mixingNow || !sit || cur.mixingFrom.animation?.name !== sit ||
+        (!isSeatExitMoveTarget(cur, walkState) && !isSeatExitSleepTarget(cur))) return;
+    pokeFeedbackGen += 1; // arm 前已排队的绝对 Y 回调永久失效，release 后也不复活。
+    seatExitY = { owner: spineObj, ownerGen: activeRenderGeneration, sourceName: sit, targetY: spineObj.y,
+      hasTarget: false, sawFinalReaim: false, converged: 0, watchdogAt: Date.now(), lastDiagAt: 0,
+      fastBaseY: null, visibleCorrectionY: null, finalAuthorityValid: false, finalAuthorityY: null,
+      fastDiagAt: 0, perfMs: 0, perfN: 0, perfMaxMs: 0 };
+    seatYDiag("ARM", {});
+    seatYMeasureTarget("arm");
+    applyEcoFps("arm"); // ownership 生效即抬 60fps（不等 4s 巡检），提高 fast 补偿的时间采样密度
+    return;
+  }
+  const t = seatExitY, now = Date.now();
+  const changed = seatYSyncEntry(t, cur);
+  if (changed) seatYMeasureTarget("entry-change");
+  else if (t.awaitingPose && cur?.nextTrackLast !== -1) {
+    t.awaitingPose = false;
+    seatYMeasureTarget("entry-applied");
+  }
+  else if (t.prevMixing && !mixingNow) seatYMeasureTarget("mix-end");
+  else if (t.needsMeasure && now - t.lastMeasureAt >= SEAT_EXIT_Y_RETRY_MS) seatYMeasureTarget("retry");
+  t.prevMixing = mixingNow;
+  if (now - t.watchdogAt >= SEAT_EXIT_Y_TTL_MS) {
+    t.watchdogAt = now;
+    seatYDiag("TTL_RESIDUAL", { residual: t.hasTarget ? t.targetY - spineObj.y : null });
+    if (now !== t.lastMeasureAt) seatYMeasureTarget("watchdog");
+  }
+  if (!t.hasTarget) return;
+  // FAST：final 未冻结前每帧 cheap bbox；fastDelta 同帧补偿（不经 MEASURE_EPS、不占 residual cap），
+  // residual = y − fastBase 不因基线平移被清空（§四）。冻结后 fast 停止——Move 循环动作不再被"补偿"。
+  if (!t.finalAuthorityValid) {
+    const fastY = fastPoseTargetY();
+    if (fastY !== null) {
+      if (t.fastBaseY === null) t.fastBaseY = fastY;
+      const fastDelta = fastY - t.fastBaseY;
+      if (fastDelta !== 0) spineObj.y += fastDelta;
+      t.fastBaseY = fastY;
+      if (t.visibleCorrectionY !== null) t.targetY = fastY + t.visibleCorrectionY; // composed last-wins
+      if (EDGE_DIAG && now - t.fastDiagAt >= 50) { t.fastDiagAt = now;
+        seatYDiag("FAST", { fastBaselineY: Number(fastY.toFixed(2)), visibleCorrectionY: t.visibleCorrectionY === null ? null : Number(t.visibleCorrectionY.toFixed(2)), composedTargetY: Number(t.targetY.toFixed(2)), dt: Number((dtSec || 0).toFixed(4)), boundsCostMs: t.perfN ? Number((t.perfMs / t.perfN).toFixed(3)) : null }); }
+    }
+  }
+  const delta = t.targetY - spineObj.y;
+  if (Math.abs(delta) <= SEAT_EXIT_Y_HANDOFF_EPS) { // 严格交接：3.55px 级残差绝不允许 release（FAST-8）
+    const finalCurrent = cur && !mixingNow && t.entry === cur && t.finalAuthorityValid && t.sawFinalReaim && !t.needsMeasure;
+    t.converged = finalCurrent ? t.converged + 1 : 0;
+    if (t.converged >= SEAT_EXIT_Y_CONVERGE_FRAMES && now - (t.lastReleaseCheckAt || 0) >= SEAT_EXIT_Y_RETRY_MS) {
+      // 交接边沿再做一次 branch-equivalent authority 复测，而非仅相信几帧前的样本
+      t.lastReleaseCheckAt = now;
+      const ok = seatYMeasureTarget("release-check");
+      const within = ok && Number.isFinite(t.finalAuthorityY) && Math.abs(t.finalAuthorityY - spineObj.y) <= SEAT_EXIT_Y_HANDOFF_EPS;
+      seatYDiag("HANDOFF_CHECK", { pass: within, authorityY: Number.isFinite(t.finalAuthorityY) ? Number(t.finalAuthorityY.toFixed(2)) : null, handoffEps: SEAT_EXIT_Y_HANDOFF_EPS });
+      if (within) { seatYDiag("CONVERGED", {}); releaseSeatExitY("converged"); }
+      else t.converged = 0;
+    }
+    return;
+  }
+  t.converged = 0;
+  const dt = Math.max(0, Math.min(dtSec > 0 ? dtSec : 1 / 60, SEAT_EXIT_Y_MAX_DT));
+  const step = Math.min(Math.abs(delta), SEAT_EXIT_Y_SPEED * dt, SEAT_EXIT_Y_STEP_CAP); // residual 只管 correction/终测小差
+  if (step > 0.001) {
+    spineObj.y += (delta > 0 ? 1 : -1) * step;
+    if (EDGE_DIAG && now - t.lastDiagAt >= 100) { t.lastDiagAt = now; seatYDiag("STEP", { stepY: Number(step.toFixed(2)), dt: Number(dt.toFixed(4)), speed: SEAT_EXIT_Y_SPEED }); }
+  }
+}
+
 function installSeatLifecycle() {
   if (!spineApp || !spineObj || seatLifecycle.ticker) return;
-  seatLifecycle.owner = spineObj;
+  const owner = spineObj;
+  seatLifecycle.owner = owner;
   const ticker = (delta) => {
-    if (seatLifecycle.owner !== spineObj || !spineObj) return;
+    if (SPEECH_DIAG) { diagTickerCallbackSeq += 1; diagLastTickerCallbackAt = performance.now(); } // 心跳A：任何守卫之前
+    if (owner !== spineObj || seatLifecycle.ticker !== ticker || !spineObj) return;
     try {
       const dt = typeof delta === "number" ? delta / 60 : (Number.isFinite(delta?.deltaMS) ? delta.deltaMS / 1000 : 1 / 60);
+      const forensicBefore = seatExitForensicBeforeFrame();
+      if (SPEECH_DIAG) { diagSpineAdvanceSeq += 1; diagLastSpineAdvanceAt = performance.now(); } // 心跳B：过守卫、真正推进 spineObj.update 之前
       spineObj.update(dt);
+      if (seatExitYOwnsY() && seatTrackActive()) releaseSeatExitY("seat-entry"); // 包括排队动画自动晋升。
       seatContainmentCommit();
+      seatExitYTick(dt); // Phase2：Y limiter（update/containment 之后；token 不 active 时纯只读短路）
+      seatExitForensicAfterFrame(dt, forensicBefore);
+      if (EDGE_DIAG) offsetDiagTick(); // OFFSETDIAG：update 之后采，读的是本帧最终态
     } catch { /* 保持 Pixi 原有渲染链路 */ }
   };
   seatLifecycle.ticker = ticker;
@@ -677,6 +1597,8 @@ function uninstallSeatLifecycle() {
   if (seatLifecycle.ticker && spineApp?.ticker) spineApp.ticker.remove(seatLifecycle.ticker, spineApp.ticker);
   seatLifecycle.ticker = null; seatLifecycle.owner = null; seatLifecycle.lastSafe = null;
   seatEpisode.owner = null; seatEpisode.active = false; seatEpisode.entryScale = 0; seatEpisode.previousScale = 0; seatEpisode.finalFitDone = false; seatEpisode.pendingFit = false;
+  if (seatExitY) releaseSeatExitY("lifecycle-teardown"); // token 随 owner 终结（内部已含 applyEcoFps 复判）
+  applyEcoFps("uninstall"); // 对 spineApp=null 安全（helper 首行守卫）
 }
 
 function clearSpineLifecycleTimers() {
@@ -689,6 +1611,11 @@ function clearSpineLifecycleTimers() {
   scheduleGeometryReport.raf = 0;
   clearTimeout(geometryReportTimer);
   geometryReportTimer = null;
+  spineBootstrapDeferredWalk = null; // A-v2.2：owner 拆除即弃 staged（跨 owner 不污染）；re-entry 由 initSpine 重新 arm
+  spineBootstrapPending = false;
+  spineBootstrapOwner = null;
+  if (spineBootstrapFailSafeTimer) { clearTimeout(spineBootstrapFailSafeTimer); spineBootstrapFailSafeTimer = null; }
+  settleSpineBootstrapDone(); // A-v2.3：abandon 同样结算 done——旧 handler 的 ready await 绝不悬挂（其 superseded 复查会自行哑火）
 }
 
 function destroySpineOwner(owner) {
@@ -696,6 +1623,9 @@ function destroySpineOwner(owner) {
   const committed = spineRuntimeOwner === owner || spineApp === owner.app || spineObj === owner.obj;
   const pending = spinePendingOwner === owner;
   if (committed) {
+    if (seatExitY?.owner === owner.obj) releaseSeatExitY("owner-destroyed");
+    if (SEAT_EXIT_FORENSIC && seatExitForensicSession && (!seatExitForensicSession.owner || seatExitForensicSession.owner === owner.obj)) seatExitForensicFlush("owner-teardown");
+    pokeFeedbackGen += 1; // 在移除 ticker / destroy 之前失效 delayed local-Y callbacks。
     clearSpineLifecycleTimers();
     uninstallSeatLifecycle();
     if (spineObj === owner.obj) spineObj = null;
@@ -842,11 +1772,34 @@ async function initSpine(context) {
     spineFitKeepScale = false;
     spineBaseScaleX = scale * boost;
     installSeatLifecycle();
-    const animName = spineAnimForMood("idle");
-    if (animName) {
-      setSpineAnim(animName, true, "init");
-      scheduleFitSpine();
+    // A24 owner-boundary：上一生命周期 applied 的 walkState（真机 bootstrap-arm 时 walk=…seated:true）
+    // 不得成为新 Spine owner 的 effective 状态——业务真相转入 carry（staged 初值，可被更新 incoming 覆盖），
+    // 新 owner applied 重置为 neutral（这具新骨架此刻确实只应用了 Relax）。
+    // 由此 bootstrap 期所有 walkState 读取者（setSpineMood/reconcile/spinePhaseAnim/fit flip）看到 neutral，
+    // 杜绝真机链「re-entry → setMood(idle) 读到 stale seated → seat-guard 播 Sit → 6×seat-hold/hits=0 → failsafe 暴露 0.205」。
+    spineBootstrapDeferredWalk = null;
+    spineBootstrapOwnerReset = null;
+    const bootstrapCarry = Object.assign({}, walkState);
+    if (bootstrapCarry.active || bootstrapCarry.seated || bootstrapCarry.perched || bootstrapCarry.paused || bootstrapCarry.sleeping) {
+      spineBootstrapDeferredWalk = bootstrapCarry;
+      walkState = Object.assign({}, bootstrapCarry, { active: false, resting: true, seated: false, perched: false, paused: false, sleeping: false, face: 1 });
+      spineBootstrapOwnerReset = { carry: bootstrapCarry, applied: Object.assign({}, walkState), ownerGen: context.generation };
     }
+    const animName = spineAnimForMood("idle");
+    if (animName) setSpineAnim(animName, true, "init");
+    scheduleFitSpine({}); // A 修复：owner 就绪即无条件布置 fit 收敛窗口——animName 为空时整窗曾被跳过，角色带着 setup-pose 小尺寸一直等到第一次走动/相位事件才纠正
+    // A-v2.1：以 idle 稳定姿势做 pre-visible bootstrap——fit 收敛前画布保持 hidden（commit 不解除），
+    // 首次可见即最终尺寸；5s 有界兜底防异常模型永久隐身。
+    // A-v2.3：arm 唯一绑定在 owner 创建（initSpine）——cold-start / GIF→Spine / 皮肤重载 / renderer 恢复
+    // 全部走同一套 bootstrap 生命周期，re-entry 不再复用旧 gate 或被 ready 抢跑。
+    spineBootstrapPending = true;
+    spineBootstrapOwner = owner;
+    // A24：staged 初值已由上方 owner-boundary carry 设置（无 carry 时为 null），arm 不再触碰
+    spineBootstrapPassCount = 0;
+    settleSpineBootstrapDone(); // 理论上不应有未结算旧 promise（release/abandon 已结算）；防御性兜住，防 waiter 悬挂
+    spineBootstrapDone = new Promise((r) => { spineBootstrapDoneResolve = r; });
+    if (spineBootstrapFailSafeTimer) clearTimeout(spineBootstrapFailSafeTimer);
+    spineBootstrapFailSafeTimer = setTimeout(() => releaseSpineBootstrap("failsafe"), 5000);
     reportHasSit();
     window.petAPI.playback && window.petAPI.playback("[spine] ok boost=" + boost + " scale=" + scale.toFixed(4) + " final=" + (scale * boost).toFixed(4) + " skel=" + paths.skel);
     return { status: "ready", resource: paths.atlas + "|" + paths.skel };
@@ -941,12 +1894,13 @@ function commitRenderMode(context, result) {
     window.petAPI.setSize(winSize.width || 260, winSize.height || 200, "render-mode");
     applyBubbleSize();
     if (appearanceCfg) applyAppearance(appearanceCfg);
-    if (spineApp && spineApp.view) {
+    if (spineApp && spineApp.view && !spineBootstrapPending) { // A-v2.1：bootstrap pending 时不解除隐藏——释放由 releaseSpineBootstrap 统一执行（fit 收敛事件驱动）
       spineApp.view.classList.remove("hidden");
       spineApp.view.style.display = "";
       spineApp.view.style.visibility = "";
       spineApp.view.style.pointerEvents = "none";
     }
+    scheduleFitSpine({}); // A 修复：commit 后（画布恢复可见、窗口尺寸已按 render-mode 重设）重新锚定 fit 收敛窗口；后布置者接管（旧代次计时被 generation 守卫作废）
     return true;
   }
   if (mode === "rig") {
@@ -1121,10 +2075,22 @@ function reconcileSpineAnimation(reason = "reconcile") {
   return true;
 }
 function applyWalkState(s) {
+  if (SEAT_EXIT_FORENSIC && s && s.seatExitForensic) seatExitForensicReceive(s.seatExitForensic, s);
+  const standBeatPoseIntent = STANDBEAT_POSE_ENABLED && s?.standBeatPoseIntent === "stand";
+  if (window.SeatFit ? window.SeatFit.bootstrapShouldDeferWalk(spineBootstrapPending) : spineBootstrapPending) {
+    // A-v2.2：defer 在状态提交之前——incoming 只 stage（latest-wins 单槽），共享 walkState 保持 neutral，
+    // setMood/setSpineMood/reconcile 等独立读取者不会在 bootstrap 期看到未生效的 seated=true。
+    spineBootstrapDeferredWalk = Object.assign({}, s || walkState);
+    return;
+  }
+  if (EDGE_DIAG && s && s.edgeDiagTurnId !== undefined) diagActiveEdge = { turnId: s.edgeDiagTurnId, faceTs: 0, expiresAt: Date.now() + 500 }; // correlation 建立/覆盖（纯赋值；untagged 广播不清——见 diagActiveEdge 注释）
   const wasActive = walkState.active;
+  const wasSeatedSnap = !!(walkState.seated || walkState.perched);
   const wasSleeping = walkState.sleeping;
   const wasResting = !!(walkState.seated || walkState.perched || walkState.sleeping);
   walkState = s || walkState;
+  if (EDGE_DIAG && wasSeatedSnap && !walkState.seated && !walkState.perched && !walkState.sleeping) lastSeatExitAt = Date.now(); // diagnostics-only 时间戳；不改任何控制流
+  if (seatExitY && (walkState.seated || walkState.perched)) releaseSeatExitY("seat-reentry"); // handoff：containment/seat-fit 接管；release 绝不 finish-snap
   // 自主坐下/上窗顶/入睡的瞬间收起聊天栏：输入栏悬浮在窗口底部，坐姿正好压在栏上
   // （视觉=坐在自己的输入条上）。单击打开会顺带聚焦输入框且焦点会一直留着，
   // 焦点本身不代表在用，故只认 60s 内的真实打字；有草稿或生成中也不动。
@@ -1150,6 +2116,10 @@ function applyWalkState(s) {
   if (isSleeping) return;                 // 睡觉中：不被行走动画打断
   spineFaceDir(walkState.face);
   if (Date.now() < animDemoUntil) return; // 演示中，不打断
+  if (standBeatPoseIntent) {
+    admitStandBeatPoseIntent();
+    return; // intent 是一次性、窄范围 admission；拒绝时也不让普通 resting/pause 分支替它强行抢轨
+  }
   // 坐下（任务栏上沿/桌面图标顶/窗顶）：Sit 循环，优先级高于行走相位
   if (walkState.seated || walkState.perched) {
     const sit = sitAnimName();
@@ -1168,7 +2138,7 @@ function applyWalkState(s) {
       if (idle && spineObj.state.getCurrent(0)?.animation?.name !== idle) {
         setSpineAnim(idle, true, "stop-idle");
         logPhaseSwitch("stop-idle", idle);
-        scheduleFitSpine();
+        scheduleFitSpine({});
       }
     }
     return;
@@ -1180,12 +2150,13 @@ function applyWalkState(s) {
     if (idle && spineObj.state.getCurrent(0)?.animation?.name !== idle) {
       setSpineAnim(idle, true, "paused-idle");
       logPhaseSwitch("paused-idle", idle);
-      scheduleFitSpine();
+      scheduleFitSpine({});
     }
     return;
   }
   const target = spinePhaseAnim();
   const cur = spineObj.state.getCurrent(0);
+  if (STANDBEAT_POSE_ENABLED) seatExitForensicNoteMoveRequest();
   const decision = window.AnimationWatch ? window.AnimationWatch.trackDecision({
     currentName: cur && cur.animation ? cur.animation.name : "",
     targetName: target,
@@ -1202,11 +2173,17 @@ function applyWalkState(s) {
     seated: walkState.seated,
     perched: walkState.perched
   }) : "restart";
-  if (decision === "defer") return;
+  if (decision === "defer") {
+    // defer 的唯一"状态已 live 但轨道被排队 successor 占用"形态：刷新 stale 队尾（见函数注释）。
+    // 其余 defer 原因（resting/paused/睡眠等）语义下 successor 名与实时 target 一致或分支提前返回，
+    // refresh 内部按名比对自动落空——不产生任何写。
+    refreshStaleQueuedSuccessor(cur, target);
+    return;
+  }
   if (target && spineObj.state.getCurrent(0)?.animation?.name !== target) {
     setSpineAnim(target, true, "walk-phase");
     logPhaseSwitch("walk-phase", target);
-    scheduleFitSpine();
+    scheduleFitSpine({});
   }
 }
 
@@ -1216,17 +2193,56 @@ function pokeFeedback() { // 点击反馈（v2.5.1）：缩放脉冲 + 原声切
   const now = Date.now();
   if (now - pokeFeedbackAt < 600) return; // 连点限流
   pokeFeedbackAt = now;
-  // 跳一下：模型上跳 16px 再落回（250ms，视觉明显的点击反馈）
+  // Phase2 spec-10（隔离方案 A）：seat-exit local-Y ownership 期间禁用 Y bounce；
+  // 延迟 callback 执行时二次校验（gen / owner / token）——arm 之前已排队的旧回调也不得回写绝对旧 Y。
+  pokeFeedbackGen += 1;
+  const pokeGen = pokeFeedbackGen;
+  const pokeOwner = spineObj;
+  let bounceBaseY = 0;
   try {
-    if (spineObj) {
-      const baseY = spineObj.y;
-      spineObj.y = baseY - 16;
-      setTimeout(() => { try { spineObj.y = baseY - 6; } catch { /* 忽略 */ } }, 120);
-      setTimeout(() => { try { spineObj.y = baseY; } catch { /* 忽略 */ } }, 250);
+    if (spineObj && !seatExitYOwnsY()) {
+      bounceBaseY = spineObj.y;
+      spineObj.y = bounceBaseY - 16;
+      setTimeout(() => { try { if (pokeGen === pokeFeedbackGen && spineObj === pokeOwner && !seatExitYOwnsY()) pokeOwner.y = bounceBaseY - 6; } catch { /* 忽略 */ } }, 120);
+      setTimeout(() => { try { if (pokeGen === pokeFeedbackGen && spineObj === pokeOwner && !seatExitYOwnsY()) pokeOwner.y = bounceBaseY; } catch { /* 忽略 */ } }, 250);
     }
   } catch { /* 忽略 */ }
   // 原声切片（随包苏苏洛游戏语音）：语音开着才出声，随机一条
   try { if (ttsConfig.enabled) playPresetVoice(); } catch { /* 忽略 */ }
+}
+
+/** stale queued-successor refresh（talking-slide 根因修复，T2 rework）：
+ *  poke/互动用"当时"的 spinePhaseAnim() 快照排队 successor——暂停期排队即冻结为 Relax。
+ *  resume 广播到达时 Interact 还在播，trackDecision 依 queuedSuccessor 正确 defer（不打断互动），
+ *  但若不处理，Interact 播完后 stale Relax 自动上轨 = "站着滑行"，直到 watchdog ≤2s 对账才收敛。
+ *  T2 铁律（打包 pixi-spine 3.8 源码实据）：
+ *   - 摘链必须走 AnimationState.disposeNext(cur)（setAnimationWith/clearTrack 内部同款官方例程）：
+ *     对 cur.next 链逐个 queue.dispose → drain 时 listener.dispose + trackEntryPool.free 归还对象池，
+ *     并置 cur.next=null——业务代码不再裸写 next，杜绝"事件残留/池泄漏"不受控摘链；
+ *   - 入队必须 addAnimation(0, target, true, 0) 传满 4 参：runtime 的 i<=0 分支把 delay=0 换算成
+ *     绝对晋升时刻 Math.max(dur, r.trackTime) - getMix(r, target)；漏传（undefined）→ 晋升门
+ *     trackLast - delay = NaN 恒假 → successor 永不晋升 + queuedSuccessor 恒真把 watchdog 一起
+ *     短路到 defer（15:35 真机定身事故的直接成因）。
+ *  目标名只来自 spinePhaseAnim() 实时解析（Relax/Sitd/Sleepd 都可能），不硬编码动画名；
+ *  目标与 successor 一致（合法 idle 排队）不做无意义替换；多段链不碰；无 disposeNext 的 runtime
+ *  降级为手动摘链（排队 entry 在 setCurrent 前从不接线 listener/mixing——打包源码 setCurrent
+ *  才做 mixing 配对，queue.start 只在 head 附加路径触发，摘除未晋升 entry 无事件/监听残留）。 */
+function refreshStaleQueuedSuccessor(cur, target) {
+  if (!spineObj || !spineObj.state || typeof spineObj.state.addAnimation !== "function") return;
+  if (!cur || cur.loop !== false || !target) return;   // 只处理"一次性互动+排队恢复"形态（poke-resume）
+  const stale = cur.next;
+  if (!stale || stale.next) return;                    // 仅单 successor；复杂链交回 watchdog
+  if (stale.animation && stale.animation.name === target) return; // 目标=现行 live 相位：无需替换
+  let officiallyDropped = false;
+  try {
+    if (typeof spineObj.state.disposeNext === "function") { spineObj.state.disposeNext(cur); officiallyDropped = true; }
+    else cur.next = null;                              // 降级：摘链后 orphan entry 等 GC（无事件接线，见注释）
+    spineObj.state.addAnimation(0, target, true, 0);   // Interact 播完直接进最新相位（delay 经 runtime 换算为有限值）
+  } catch {
+    // 入队失败：仅在 stale 未被官方 dispose（无待归还池事件）时还原旧链，让 watchdog 按旧语义兜底；
+    // 已 dispose 的 stale 绝不重新挂链（它即将被 drain 归还对象池）。
+    if (!officiallyDropped) cur.next = stale;
+  }
 }
 
 function playSpineInteract() {
@@ -1250,7 +2266,7 @@ function playSpineInteract() {
   spineObj.state.clearTrack(0);
   setSpineAnim(inter, false, "poke");
   addSpineAnim(next, true, "poke-resume");
-  scheduleFitSpine();
+  scheduleFitSpine({});
 }
 
 /** 在 Spine 模式下播放对应情绪的动画 */
@@ -1273,24 +2289,33 @@ function setSpineMood(mood) {
     }
     return;
   }
-  // 行走相位中回落待机 → 保持走路动画不中断（非 idle 情绪照常显示）。
-  // 2026-09-03 修「移动丢失走路动画」②：原实现写死 spineHas("Move")，动画名不是精确
-  // "Move" 的皮肤（未知模型走 cls.move 归类）会漏恢复 → 站姿滑行；改用 spinePhaseAnim()
-  // 与相位机同一来源。paused 时站姿才是正确相位，交给下方常规分支。
-  if (walkState.active && !walkState.resting && !walkState.paused && !busy && mood === "idle") {
+  // talking-slide 修复（track0 ownership invariant）：live locomotion 时普通 mood 一律不得把
+  // track0 从 locomotion 相位动画抢走——"温柔/happy/…"（含 spineAnimForMood 未命中兜底）都保持
+  // 行走姿势；mood 字段/dataset/bubble/TTS 照常，苏苏洛可以边走边说（修复不走"暂停移动"路线）。
+  // mood==="idle" 时与旧 walk-mood 分支行为一致；非 idle 情绪在走动中不再上轨（旧行为=滑步根因）。
+  // 不再需要 !busy 门：聊天期间 main chatPauseWalk 已置 paused，isLiveLocomotion 自然为 false。
+  // 2026-09-03 教训保留：相位来源必须用 spinePhaseAnim()（与相位机同源，认识 cls.move 变体），
+  // 不硬编码 "Move"。seated/perched 已在上方 seat-guard 早退，此处谓词是全量定义（显式防回归）。
+  if (isLiveLocomotion()) {
     const move = spinePhaseAnim();
     if (move && spineObj.state.getCurrent(0)?.animation?.name !== move) {
       spineFaceDir(walkState.face);
       setSpineAnim(move, true, "walk-mood");
-      scheduleFitSpine();
+      scheduleFitSpine({});
     }
     return;
   }
   const animName = spineAnimForMood(mood === "idle" ? "idle" : mood);
   if (animName && spineObj.state.getCurrent(0)?.animation?.name !== animName) {
+    // T3（02:48:23 真机链）：locomotion 生命周期内（含 chat/poke 临时暂停）mood 解析成
+    // 静态兜底动画（Default duration=0）时不得写 track0——"站着不动但引擎活着/窗口在走"=说话定身。
+    // 只挡 duration≤0 的兜底形态：think→Relax、sleep→Sleepd 等真实映射动画照常上轨（聊天思考不破坏）；
+    // 非生命周期（引擎停止/坐/窗顶/睡）完全旧语义（active=false 时 Default 合法）；
+    // mood 字段/dataset/bubble/TTS 均已先行提交，暂停结束后 walk-phase/paused-idle 分支照常恢复正确相位。
+    if (isLocomotionLifecycle() && isStaticFallbackAnim(animName)) return;
     setSpineAnim(animName, true, "mood:" + mood);
     moodAnimUntil = Date.now() + 6500; // 情绪动画展示窗口：期间相位对账不抢，过期由对账兜底回收
-    scheduleFitSpine();
+    scheduleFitSpine({});
   }
 }
 
@@ -1781,6 +2806,8 @@ async function speak(text, emotion, lineId, fixedLine = false) {
   const speakRate = (ttsConfig.rate || 0.9) * (ev.rate || 1.0);
   const speakPitch = (ttsConfig.pitch || 1.1) * (ev.pitch || 1.0);
   speakActive = true; // v2.5.5 流式接收窗口
+  const sdTts = SPEECH_DIAG ? speechDiagStart("tts") : 0; // SPEECHDIAG：实际语音开始（早退路径不占 session）
+  if (SPEECH_DIAG) speechDiagLog("TTS_START", sdTts);
   try {
   // 优先克隆语音链路（Genie / GPT-SoVITS 日语 / Cosy / edge，主进程内部选择）
   if (ttsCloudOn) {
@@ -1848,6 +2875,7 @@ async function speak(text, emotion, lineId, fixedLine = false) {
   window.petAPI.playback("语音引擎不可用 → 回退系统语音");
   speakSystem(clean);
   } finally {
+    if (SPEECH_DIAG) { speechDiagLog("TTS_END", sdTts); speechDiagEnd(sdTts); }
     if (mySession === speakSession) {
       speakActive = false; // 只由最新会话收口流式接收窗口
       reconcileSpineAnimation("speech-end");
@@ -1992,6 +3020,11 @@ window.petAPI.onThinking(({ mode }) => {
   replyBuffer = "";
   // 任务模式 → 打字工作表情；聊天 → 思考
   setMood(mode === "zcode" ? "work" : "think");
+  if (SPEECH_DIAG) {
+    if (diagThinkingId) speechDiagEnd(diagThinkingId); // 理论不重叠；保险先关旧再开新
+    diagThinkingId = speechDiagStart("thinking");
+    speechDiagLog("THINKING_START", diagThinkingId, mode);
+  }
 });
 
 window.petAPI.onChunk(({ id, mode, text }) => {
@@ -2027,6 +3060,7 @@ function renderSwipeBar() {
 window.petAPI.onDone(({ mode, full, emotion, swipes, swipeIndex }) => {
   hideThinking();
   busy = false;
+  if (SPEECH_DIAG && diagThinkingId) { speechDiagLog("THINKING_END", diagThinkingId, mode); speechDiagEnd(diagThinkingId); diagThinkingId = 0; }
   maybeFlushPendingSend(); // 生成防抖：回合结束，补发等待中的新消息
   const emoLabel = emotion ? String(emotion).trim() : "";
   if (mode === "zcode") {
@@ -2053,6 +3087,7 @@ window.petAPI.onDone(({ mode, full, emotion, swipes, swipeIndex }) => {
 
 window.petAPI.onError(({ message }) => {
   showError(message);
+  if (SPEECH_DIAG && diagThinkingId) { speechDiagLog("THINKING_END", diagThinkingId, "error"); speechDiagEnd(diagThinkingId); diagThinkingId = 0; } // 错误路径同样收口 thinking session
   maybeFlushPendingSend(); // 防抖：错误后补发等待中的消息（用户想说的还是会被回答）
   speak("唔……出错了。");
   setTimeout(flushPendingAmbient, 250);
@@ -2064,6 +3099,7 @@ if (window.petAPI.onStopped) {
     stopTts();
     clearPendingSend(); // 用户要静默：不补发缓冲中的消息
     busy = false;
+    if (SPEECH_DIAG && diagThinkingId) { speechDiagLog("THINKING_END", diagThinkingId, "stopped"); speechDiagEnd(diagThinkingId); diagThinkingId = 0; }
     updateControls();
     hideThinking();
     reconcileSpineAnimation("speech-end");
@@ -2132,10 +3168,16 @@ window.petAPI.onDropped(() => {
 function renderModeErrorText(error) {
   return error ? String(error && (error.message || error) || error).slice(0, 300) : undefined;
 }
-function reportRenderModeOutcome(mainSeq, requestedMode, result, isCurrent) {
+async function reportRenderModeOutcome(mainSeq, requestedMode, result, isCurrent) {
   if (!Number.isSafeInteger(mainSeq) || !isCurrent() || !result ||
       (result.status !== "ready" && result.status !== "noop") ||
       !RENDER_MODES.includes(result.committedMode)) return;
+  if (result.committedMode === "spine") {
+    // A-v2.3 ready 语义：对 Spine 而言，“ready”必须= owner bootstrap 首见完成（TARGET/fitted decision + replay + visible）；
+    // 事件驱动 await，不新增计时器（done 必被 release/abandon 结算，failsafe 保证有界）。
+    try { await spineBootstrapDone; } catch { /* done 永不 reject；防御 */ }
+    if (!isCurrent()) return; // 等首见期间被更新 request 取代：该 ready 已失效，绝不上报旧世代
+  }
   try {
     window.petAPI.reportRenderModeOutcome && window.petAPI.reportRenderModeOutcome({
       seq: mainSeq,
@@ -2355,7 +3397,7 @@ if (window.petAPI.onPlayAnim) {
     if (!spineObj || activeRenderMode !== "spine" || !spineHas(name)) return;
     animDemoUntil = Date.now() + 15000; // 播 15 秒，期间行走相位不抢动画
     setSpineAnim(name, true, "demo");
-    scheduleFitSpine();
+    scheduleFitSpine({});
   });
 }
 
@@ -2539,7 +3581,10 @@ function flushPendingAmbient() {
   showBubble();
   bubbleText.textContent = next.text;
   if (!isSleeping || next.force) setMood(next.emotion || "idle");
-  speak(next.text, next.emotion, next.lineId, !!next.fixedLine);
+  const sdFlush = SPEECH_DIAG ? speechDiagStart("proactive-flush") : 0;
+  if (SPEECH_DIAG) speechDiagLog("PROACTIVE", sdFlush);
+  const spFlush = speak(next.text, next.emotion, next.lineId, !!next.fixedLine);
+  if (SPEECH_DIAG && spFlush && typeof spFlush.then === "function") spFlush.then(() => speechDiagEnd(sdFlush), () => speechDiagEnd(sdFlush));
   scheduleBubbleHide(30000);
 }
 
@@ -2559,7 +3604,10 @@ if (window.petAPI && window.petAPI.onProactive) {
     showBubble();
     bubbleText.textContent = text;
     if (!isSleeping || force) setMood(emotion || "idle");
-    speak(text, emotion, lineId, !!fixedLine);
+    const sdPro = SPEECH_DIAG ? speechDiagStart("proactive") : 0;
+    if (SPEECH_DIAG) speechDiagLog("PROACTIVE", sdPro);
+    const spPro = speak(text, emotion, lineId, !!fixedLine);
+    if (SPEECH_DIAG && spPro && typeof spPro.then === "function") spPro.then(() => speechDiagEnd(sdPro), () => speechDiagEnd(sdPro));
     scheduleBubbleHide(30000); // 主动消息显示 30s（用户反馈 15s 偏短）
     // v2.5.25b 修复：说话后恢复行走/待机动画——与聊天回复(onDone)同款延迟回 idle。
     // 此前主动搭话说完后情绪动画一直挂着，走路动作不再回来（用户反馈"说话时没走路动作"）
@@ -2732,12 +3780,20 @@ function applyDim(v) { petEl.style.opacity = v ? "0.75" : ""; }
 if (window.petAPI.onSetDim) window.petAPI.onSetDim(applyDim);
 
 /* ---------- 省电降帧（借鉴 Ark-Pets eco_mode）：静止/睡觉时降低渲染帧率 ---------- */
-setInterval(() => {
-  if (!spineApp) return;
+/* 单一判定源（FPS-6：4s 巡检与各生命周期点主动调用共用同一函数，绝不出现两套互相打架的判定）。
+ * 优先级：seat-exit Y ownership active → 60（过渡期 fast 补偿需要时间采样密度，正确性组件）
+ *        > moving → 60 > sleeping → 12 > 其余 24。release/hard-drop/teardown 后按真实状态立即复判。 */
+function applyEcoFps(reason) {
+  if (!spineApp || !spineApp.ticker) return null; // owner teardown 后安全（FPS-7）
+  const seatOwns = seatExitYOwnsY();
   const moving = busy || !!dragState || (walkState.active && !walkState.resting);
-  const target = moving ? 60 : (isSleeping ? 12 : 24);
-  if (spineApp.ticker.maxFPS !== target) spineApp.ticker.maxFPS = target;
-}, 4000);
+  const target = (seatOwns || moving) ? 60 : (isSleeping ? 12 : 24);
+  const before = spineApp.ticker.maxFPS;
+  if (before !== target) spineApp.ticker.maxFPS = target;
+  if (reason && EDGE_DIAG) seatYDiag("FPS", { reason, beforeFPS: before, afterFPS: target, seatOwnership: !!seatOwns, moving: !!moving, sleeping: !!isSleeping });
+  return target;
+}
+setInterval(() => { applyEcoFps(); }, 4000);
 
 /* ---------- 动画轨道看门狗（每 2s 检查：相位名称 + trackTime + ticker）----------
  * 6s 低频巡检。原版只修「轨道为空」的定格；但还存在「轨道挂着错误循环动画」的滑行态：
@@ -2931,7 +3987,7 @@ function finishDrag(reason = "cancel") {
     }
     // 戳一戳/摸头时原地站定：等互动动作播完再继续散步
     clearTimeout(pokeResumeTimer);
-    pokeResumeTimer = setTimeout(() => { if (!dragState) window.petAPI.walkingPause(false); }, 2600);
+    pokeResumeTimer = setTimeout(() => { if (!dragState) window.petAPI.walkingPause(false, "interact"); }, 2600); // "interact"=非拖拽恢复：main 只对显式 drag 做落点定格；不得省略（preload 会把 undefined 归一化成 "drag"）
   } else if (velocity && speed > THROW_MIN_SPEED) {
     try {
       window.petAPI.throwPet(velocity.vx, velocity.vy);
@@ -3064,7 +4120,7 @@ setInterval(() => {
     if (!(sx > 1e-6) || !(sy > 1e-6)) return;
     if (Math.abs(sx / sy - 1) <= 0.02) return;
     spineObj.scale.x = (spineObj.scale.x < 0 ? -1 : 1) * sy; // 保持朝向与当前 fit 高度缩放，恢复等比
-    scheduleFitSpine(); // 缩放变了，重新居中/贴底
+    scheduleFitSpine({}); // 缩放变了，重新居中/贴底
   } catch { /* 忽略 */ }
 }, 200);
 
@@ -3106,6 +4162,39 @@ if (window.__renderLifecycleTestMode) {
     switchRenderMode,
     teardownAll,
     resetVisualState,
+    bootstrapRelease: (why) => releaseSpineBootstrap(why), // 测试专用：模拟有界兜底触发（生产路径仍由事件/计时器驱动）
+    poke: () => playSpineInteract(), // 测试专用：摸头/单击互动入口（与 finishDrag !wasDrag 分支同函数）
+    fitPassForTest: () => fitSpinePose(spineFitGeneration, spineFitOwnerGeneration, spineRuntimeOwner), // 测试专用：以"当前原窗口同一 generation"手动补一拍 fit（FIT-M4 模拟混合自然结束后的原窗口 pass；不 bump、不重排程）
+    seatYForTest: { // 测试专用：Phase2 seat-exit Y ownership 驱动/观察（不改变任何生产语义）
+      tick: (dt) => seatExitYTick(dt),
+      owns: () => seatExitYOwnsY(),
+      state: () => (seatExitY ? { sourceName: seatExitY.sourceName, targetName: seatExitY.targetName, hasTarget: seatExitY.hasTarget, targetY: seatExitY.targetY, sawFinalReaim: seatExitY.sawFinalReaim, converged: seatExitY.converged, fastBaseY: seatExitY.fastBaseY, visibleCorrectionY: seatExitY.visibleCorrectionY, finalAuthorityValid: seatExitY.finalAuthorityValid, finalAuthorityY: seatExitY.finalAuthorityY, perfN: seatExitY.perfN } : null),
+      measure: (kind) => seatYMeasureTarget(kind),
+      fastY: () => fastPoseTargetY(),
+      poke: () => pokeFeedback(),
+      eco: () => applyEcoFps("seam"),
+      set: (k, v) => { if (seatExitY && k in seatExitY) seatExitY[k] = v; }
+    },
+    offsetDiagTickForTest: () => offsetDiagTick(), // 测试专用：手动驱动 OFFSETDIAG 采样拍（真实环境由 seat ticker 每帧调用）
+    speechDiagCtl: SPEECH_DIAG ? { // 测试专用：SPEECHDIAG 生命周期手动驱动（沙箱 setInterval 为 no-op）
+      start: (r) => speechDiagStart(r),
+      end: (id) => speechDiagEnd(id),
+      tick: () => speechDiagTick(),
+      expire: (id) => { const s = speechDiagSessions.get(id); if (s) s.endAt = Date.now() - 1; },
+      size: () => speechDiagSessions.size,
+      hasTimer: () => !!speechDiagTimer,
+      hearts: () => ({ cb: diagTickerCallbackSeq, adv: diagSpineAdvanceSeq })
+    } : null,
+    seatExitForensicCtl: SEAT_EXIT_FORENSIC ? { // 测试专用：验证 bounded flush/owner 隔离，不进入生产路径
+      flush: (reason) => seatExitForensicFlush(reason || "test"),
+      session: () => seatExitForensicSession ? {
+        mainSessionId: seatExitForensicSession.mainSessionId,
+        renderSessionId: seatExitForensicSession.renderSessionId,
+        ownerGeneration: seatExitForensicSession.ownerGen,
+        recordCount: seatExitForensicSession.records.length,
+        dropped: seatExitForensicSession.dropped
+      } : null
+    } : null,
     scheduleMoodReset,
     setMood,
     setMoods: (moods) => { MOODS = Array.isArray(moods) ? moods : []; },
@@ -3127,7 +4216,11 @@ if (window.__renderLifecycleTestMode) {
       rigRuntime,
       live2dActive,
       dragState,
-      moodTimer
+      moodTimer,
+      fit: { generation: spineFitGeneration, stableHits: spineFitStableHits, keepScale: spineFitKeepScale, autoScaled: spineAutoScaled, base: spineBaseScaleX },
+      seatEpisode,
+      bootstrap: { pending: spineBootstrapPending, passes: spineBootstrapPassCount, walkDeferred: !!spineBootstrapDeferredWalk, staged: spineBootstrapDeferredWalk ? Object.assign({}, spineBootstrapDeferredWalk) : null, last: spineBootstrapLastRelease, reset: spineBootstrapOwnerReset },
+      walkStateSnapshot: Object.assign({}, walkState)
     })
   };
 }

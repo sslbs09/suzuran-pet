@@ -198,7 +198,7 @@ function assertDragSeatNativeWiring(source = mainSource) {
 
 function expectMutationToFail(name, mutate, check) {
   let failedAsExpected = false;
-  try { check(mutate()); } catch { failedAsExpected = true; }
+  try { check(mutate(mainSource)); } catch { failedAsExpected = true; } // 修复：mutate lambda 签名是 (source)，必须注入 mainSource——旧写法 mutate() 传 undefined，TypeError 被 catch 吞掉，全部 MUT 空转
   assert.equal(failedAsExpected, true, `${name} mutation 应使测试失败`);
   console.log("PASS", name, "mutation 被测试抓住");
 }
@@ -641,7 +641,8 @@ assert.match(mainSource, /lastReport: lastGroundGapReports\[mode\]/, "ground-gap
 assert.match(mainSource, /gifVisualGroundGap = report\.value/, "GIF report 不写入 Spine walk.groundGap");
 assert.match(mainSource, /if \(report\.changed && wasGrounded\) repositionAfterWindowSizeChange\(false, true\)/, "GIF grounded gap 更新后立即 reanchor");
 assert.match(mainSource, /if \(decision\.type === "seat"\) \{\s*applySeatPosition\(\);/, "Spine 坐姿尺寸提交调用 applySeatPosition");
-assert.match(mainSource, /const targetY = walk\.seated \? baseY \+ effectiveSeatSink\(\) : baseY/, "坐姿仍保留 seatSink");
+assert.match(mainSource, /const rawTargetY = walk\.seated \? baseY \+ effectiveSeatSink\(\) : baseY/, "坐姿仍保留 seatSink（Phase1 改名为 rawTargetY，sink 语义不变）");
+assert.match(mainSource, /const targetY = seatExit \? rawTargetY \+ seatExitOffsetY\(\) : rawTargetY;/, "seatExit 期 applySeatPosition 走瞬态偏移叠加（M-P1）");
 assert.match(preloadSource, /setSize: \(w, h, source\) => ipcRenderer\.send\("pet:set-size", w, h, source\)/, "现有 preload bridge 透传可选 resize source");
 const commitStart = rendererSource.indexOf("function commitRenderMode");
 const commitEnd = rendererSource.indexOf("async function switchRenderMode", commitStart);
@@ -1085,7 +1086,7 @@ expectMutationToFail("MUT-K", (source) => mutateBlock(source, "function setScale
 expectMutationToFail("MUT-L", (source) => mutateBlock(source, "function setScale(scale)", "function setWalkSpeed", removeScaleResizableRestore), assertSetScaleWiring);
 expectMutationToFail("MUT-M", (source) => mutateBlock(source, "function setScale(scale)", "function setWalkSpeed", moveScaleNotificationBeforeSetSize), assertSetScaleWiring);
 expectMutationToFail("MUT-N", (source) => mutateBlock(source, "function setScale(scale)", "function setWalkSpeed", replaceScaleTargetWithOldSize), assertSetScaleWiring);
-expectMutationToFail("MUT-G", (source) => mutateBlock(source, "function sitOnTaskbar", 'ipcMain.handle("pet:sit-taskbar"', (block) => block.replace("wa.y + wa.height + groundGap - b.height", "wa.y + wa.height + walk.groundGap - b.height")), assertSitOnTaskbarWiring);
+expectMutationToFail("MUT-G", (source) => mutateBlock(source, "function sitOnTaskbar", 'ipcMain.handle("pet:sit-taskbar"', (block) => block.replace("const targetY = renderModeMod.groundAlign(b, wa, groundGap).y || 0;", "const targetY = wa.y + wa.height + walk.groundGap - b.height;")), assertSitOnTaskbarWiring);
 expectMutationToFail("MUT-H", (source) => mutateBlock(source, "function outOfScreenGuard", "function walkTick", (block) => block.replace(") + groundGap;", ") + (walk.groundGap || 0);")), assertOutOfScreenGuardWiring);
 expectMutationToFail("MUT-O", (source) => mutateBlock(source, "function sitOnTaskbar", 'ipcMain.handle("pet:sit-taskbar"', removeSitPositionNormalization), assertSitOnTaskbarWiring);
 expectMutationToFail("MUT-P", (source) => mutateBlock(source, "function outOfScreenGuard", "function walkTick", removeOutOfScreenNormalization), assertOutOfScreenGuardWiring);
@@ -1114,6 +1115,469 @@ const delayedA = () => {
 revision.next(); // render-mode B event；模拟没有 B set-size 到达
 delayedA();
 assertEq("A delayed callback 在 B mode event 后 no-op", delayedPositionWrites, 0);
+
+/* ========== A27：render-mode resume 与 fresh start 分离（main 侧行走引擎重启不再随机覆盖业务姿态） ========== */
+function createWalkEngineFixture({ skinHasSit = true, random = 0.99, walking = true, renderMode = "spine" } = {}) {
+  const broadcasts = [];
+  const logs = [];
+  const walk = { active: false, paused: false, dragPaused: false, chatPaused: false, zoomPaused: false, sleeping: false, face: 1, resting: true, perched: false, iconRest: false, iconTarget: false, seated: false, groundGap: 24, charInset: 0, edgeLeft: false, uiEdgeCompact: false, sunk: false, gotoPerch: false, returning: false, freeStand: false, pausedAt: 0, flight: null, jump: null, timer: null, phaseTimer: null };
+  const api = new Function(
+    "walk", "skinHasSit", "config", "win", "screen", "walkGeo", "applySeatPosition", "walkBroadcast", "walkSchedulePhase",
+    "applyLayer", "logTts", "randInt", "setInterval", "clearInterval", "clearTimeout", "walkTick", "cancelFlight", "cancelWalkJump", "enterRestPose", "WALK_TICK_MS", "Math",
+    `${sourceBlock(mainSource, "function startWalkingEngine", "/* 行走状态变化诊断", "walkEngine")}; return { startWalkingEngine, stopWalkingEngine, syncWalkingEngine };`
+  )(
+    walk, skinHasSit,
+    { getConfig: () => ({ renderMode, walking, window: { width: 260, height: 200 } }) },
+    { setSize() {}, getBounds: () => ({ x: 100, y: 900, width: 260, height: 200 }) },
+    {}, { workAreaOf: () => ({ x: 0, y: 0, width: 1920, height: 1040 }) },
+    () => {},
+    () => broadcasts.push({ active: walk.active, resting: walk.resting, seated: walk.seated, face: walk.face, paused: walk.paused, sleeping: walk.sleeping, perched: walk.perched }),
+    () => {}, () => {},
+    (tag, msg) => logs.push(msg), () => 9000, () => 555, () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, 40,
+    { random: () => random }
+  );
+  return { api, walk, broadcasts, logs };
+}
+
+{ // T1/T6：fresh start（无参）保持原初始化语义：随机方向 + seated=skinHasSit + resting=true
+  const f = createWalkEngineFixture({ skinHasSit: false, random: 0.99 });
+  Object.assign(f.walk, { face: -1, seated: true, resting: false });
+  f.api.syncWalkingEngine(); // 设置/托盘/启动路径 = fresh
+  const b = f.broadcasts.at(-1);
+  assertEq("A27-T1/T6 fresh 仍随机化 face（random=0.99→+1）", b.face, 1);
+  assertEq("A27-T1/T6 fresh 仍强制 seated=skinHasSit（false 覆盖 true）", b.seated, false);
+  assertEq("A27-T6 fresh 仍强制 resting=true", b.resting, true);
+  assertEq("A27-T6 fresh 日志文案不变", f.logs.includes("桌面行走开启"), true);
+}
+{ // T2：stop（render mode 切走）保留 face/seated 原值，仅 active=false
+  const f = createWalkEngineFixture({ random: 0 });
+  f.api.startWalkingEngine(); // fresh → face=-1, seated=true(skinHasSit)
+  f.api.stopWalkingEngine();
+  assertEq("A27-T2 stop 保留 face", f.walk.face, -1);
+  assertEq("A27-T2 stop 保留 seated", f.walk.seated, true);
+  assertEq("A27-T2 stop 后 active=false", f.walk.active, false);
+  assertEq("A27-T2 stop 广播仍带原姿态", f.broadcasts.at(-1).face, -1);
+}
+{ // T3/T5：render-mode resume 第一份 broadcast = active=true + 停止前业务姿态；绝不执行 fresh-only 初始化
+  const f = createWalkEngineFixture({ skinHasSit: false, random: 0.99 }); // 若误走 fresh：face→+1、seated→false、resting→true
+  Object.assign(f.walk, { face: -1, seated: true, resting: false });
+  f.api.syncWalkingEngine({ resumeFromRenderMode: true });
+  const b = f.broadcasts.at(-1);
+  assertEq("A27-T3 resume 首播 face 保留 -1（不随机）", b.face, -1);
+  assertEq("A27-T3 resume 首播 seated 保留 true（不 skinHasSit 覆盖）", b.seated, true);
+  assertEq("A27-T5 resume 保留 resting=false", b.resting, false);
+  assertEq("A27-T3 resume 仅 active 翻真", b.active, true);
+  assertEq("A27-T3 resume 走独立日志分支（可观测区分）", f.logs.includes("桌面行走恢复（render-mode resume）"), true);
+  assertEq("A27-T5 resume 重建 runtime timer", f.walk.timer, 555);
+}
+{ // T4：face=+1 对称——stop 前 +1，resume 后仍 +1
+  const f = createWalkEngineFixture({ random: 0 });
+  Object.assign(f.walk, { face: 1, seated: true });
+  f.api.syncWalkingEngine({ resumeFromRenderMode: true });
+  assertEq("A27-T4 face=+1 对称保留", f.broadcasts.at(-1).face, 1);
+}
+{ // T8/T9：A26 全链路时序（fresh→stop→resume→stop→resume）+ 多轮循环 face 恒 -1
+  const f = createWalkEngineFixture({ skinHasSit: true, random: 0 });
+  f.api.startWalkingEngine();
+  assertEq("A27-T8 fresh(random=0) face=-1", f.walk.face, -1);
+  for (let cycle = 0; cycle < 3; cycle += 1) {
+    f.api.stopWalkingEngine();
+    f.api.syncWalkingEngine({ resumeFromRenderMode: true });
+    assertEq(`A27-T9 第 ${cycle + 1} 轮 resume 后 face 仍 -1`, f.broadcasts.at(-1).face, -1);
+  }
+}
+{ // T7：wiring——resume 语义只来自 render-mode outcome 一个调用点；renderer 零参与
+  assertEq("A27-T7 outcome 显式 resume 恰 1 处", (mainSource.match(/syncWalkingEngine\(\{ resumeFromRenderMode: true \}\)/g) || []).length, 1);
+  assertEq("A27-T7 其余 syncWalkingEngine 调用保持 fresh（2 处无参）", (mainSource.match(/syncWalkingEngine\(\)/g) || []).length, 2);
+  assert.match(mainSource, /startWalkingEngine\(\{ resume: !!opts\.resumeFromRenderMode \}\)/);
+  assert.doesNotMatch(mainSource, /walk\.face = walk\.face|preserveFace\b/, "无隐式 resume 启发式（仅显式参数）");
+  assert.doesNotMatch(rendererSource, /resumeFromRenderMode/, "renderer 不参与 resume 语义（applyWalkState 继续忠实应用广播）");
+}
+
+/* ========== SEAT-SNAP v2：真实 drag 的 final 定格只由 source==="drag" 触发 ==========
+ * 根因修复在调用语义而非几何算法：poke/互动 resume 发 walkingPause(false)（无 source），
+ * 旧 handler 无条件重放 dragSeatUpdate(true) → 已坐姿角色被零位移重放：任务栏磁吸带 ±12 <
+ * sink 30 判 miss → 估算网格写非权威 y（事故 752 vs canonical 768）。
+ * 事故复刻几何（两版共用）：waBottom=1040，groundGap=8，窗口高 310，sink=30 →
+ * canonical 坐 y=768、站 y=738；坐姿 feet=1070 距任务栏沿 30 → 磁吸拒 →
+ * 估算网格（pd.y=36 → oy=42，rowTop=42+11×92=1054，|1070-1054|=16≤44）写出 752。 */
+function createDragSeatFixture({ x = 100, y = 768, seated = true, layer = "always-on-top", iconMode = false, icons = [] } = {}) {
+  const bounds = { x, y, width: 260, height: 310 };
+  const posWrites = [];
+  const broadcasts = [];
+  const walk = { seated, resting: true, active: true, paused: false, perched: false, iconRest: false, iconTarget: false,
+    gotoPerch: false, returning: false, freeStand: false, sunk: seated, sleeping: false, flight: null, jump: null,
+    taskbarHang: false, groundGap: 8, phaseTimer: null, dir: 1, chatPaused: false, zoomPaused: false, dragPaused: false, pausedAt: 0 };
+  const win = {
+    isDestroyed: () => false,
+    getBounds: () => ({ ...bounds }),
+    setPosition: (px, py) => { bounds.x = px; bounds.y = py; posWrites.push({ x: px, y: py }); }
+  };
+  const api = new Function(
+    "win", "walk", "config", "screen", "walkGeo", "renderModeMod", "effectiveSeatSink", "desktopIconMode", "desktopIconCache",
+    "walkSetPosition", "walkBroadcast", "applyLayer", "walkSchedulePhase", "clearTimeout", "randInt", "walkMinX", "PET_LOCAL_X", "gifVisualGroundGap",
+    `${/* 本夹具只测 seat 落位几何，不测 transition：注入恒零 seatExit 上下文（applySeatPosition 的 offset 层自然短路） */ ""}
+     let seatExit = null; const seatExitOffsetY = () => 0;
+     ${sourceBlock(mainSource, "function dragSeatUpdate", "/* ---------- 桌面行走 v2", "dragSeatUpdate")};
+     ${sourceBlock(mainSource, "function applySeatPosition", "function resizeTransientActive", "applySeatPosition")};
+     return { dragSeatUpdate, applySeatPosition };`
+  )(
+    win, walk,
+    { getConfig: () => ({ layer, renderMode: "spine" }) },
+    { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 36, width: 1920, height: 1004 } }) },
+    { workAreaOf: () => ({ x: 0, y: 0, width: 1920, height: 1040 }) },
+    { effectiveGroundGap: (_mode, g) => g },
+    () => 30,
+    () => iconMode,
+    { list: icons },
+    (px, py) => { bounds.x = px; bounds.y = py; posWrites.push({ x: px, y: py, via: "walkSetPosition" }); },
+    () => broadcasts.push({ seated: walk.seated, resting: walk.resting }),
+    () => {}, () => {}, () => {}, () => 7000, () => 0, 138, 0
+  );
+  return { api, walk, bounds, posWrites, broadcasts };
+}
+
+/** pet:walking-pause handler 行为夹具：复用同一套几何/状态对象，
+ *  dragSeatUpdate 注入计数代理（内部仍是真函数），clearDragPause 用等效应桩
+ *  （真实语义：清 dragPaused + pausedAt + 重算 paused；广播由 handler 自己做）。 */
+function createWalkPauseFixture(opts = {}) {
+  const { layer = "always-on-top", iconMode = false, icons = [], dragPaused = true, chatPaused = false, zoomPaused = false } = opts;
+  const seat = createDragSeatFixture({ layer, iconMode, icons, ...opts });
+  Object.assign(seat.walk, { paused: dragPaused || chatPaused || zoomPaused, dragPaused, chatPaused, zoomPaused, pausedAt: 999 });
+  const seatCalls = [];
+  const bc = [];
+  const handler = new Function(
+    "walk", "win", "dragSeatUpdate", "desktopIconMode", "clearDragPause", "cancelFlight", "cancelWalkJump",
+    "maybePersonify", "walkBroadcast", "walkSchedulePhase", "clearTimeout", "randInt",
+    `let __h = null; const ipcMain = { on: (ch, fn) => { __h = fn; } };
+     ${sourceBlock(mainSource, 'ipcMain.on("pet:walking-pause"', 'ipcMain.on("pet:throw"', "walking-pause handler")};
+     return __h;`
+  )(
+    seat.walk,
+    { isDestroyed: () => false, getBounds: () => ({ ...seat.bounds }), setPosition: (px, py) => { seat.bounds.x = px; seat.bounds.y = py; seat.posWrites.push({ x: px, y: py }); } },
+    (final) => { seatCalls.push(final); return seat.api.dragSeatUpdate(final); },
+    () => iconMode,
+    () => { seat.walk.dragPaused = false; if (!chatPaused && !zoomPaused) seat.walk.pausedAt = 0; seat.walk.paused = seat.walk.chatPaused || seat.walk.zoomPaused; },
+    () => {}, () => {}, () => {},
+    () => bc.push({ seated: seat.walk.seated, paused: seat.walk.paused }),
+    () => {}, () => {}, () => 7000
+  );
+  return { handler, seat, walk: seat.walk, bounds: seat.bounds, posWrites: seat.posWrites, seatCalls, bc };
+}
+
+/* ---------- 几何语义回归：dragSeatUpdate 本体与 HEAD 完全一致（v1 final&&seated 收口已撤销） ---------- */
+{ // G1 真机事故几何（uppermost 层 replay true→true）：函数本体保持原始网格语义（y=752 原样返回）——
+  // 修复点已上移到 handler 的 source 门控；本用例锁定几何算法不被再次塞进 canonicalize。
+  const f = createDragSeatFixture({ seated: true });
+  const sat = f.api.dragSeatUpdate(true);
+  assertEq("SEAT-G1 replay 判定仍坐姿", sat, true);
+  assertEq("SEAT-G1 网格写出非权威 752 且函数不再收口（语义归 handler 门控）", f.bounds.y, 752);
+  assertEq("SEAT-G1 changed=false 无广播", f.broadcasts.length, 0);
+}
+{ // G2 false→true 任务栏磁吸边沿：原行为完整
+  const f = createDragSeatFixture({ y: 738, seated: false });
+  const sat = f.api.dragSeatUpdate(true);
+  assertEq("SEAT-G2 磁吸判定坐姿", sat, true);
+  assertEq("SEAT-G2 落位 y=768（带 sink canonical）", f.bounds.y, 768);
+  assertEq("SEAT-G2 边沿广播一次", f.broadcasts.length, 1);
+}
+{ // G3 true→false 拖离：离坐边沿站姿自愈原样（非本修复对象）
+  const f = createDragSeatFixture({ x: 1000, y: 400, seated: true });
+  const sat = f.api.dragSeatUpdate(true);
+  assertEq("SEAT-G3 判定离坐", sat, false);
+  assertEq("SEAT-G3 站姿自愈=738", f.bounds.y, 738);
+  assertEq("SEAT-G3 768 从未被写出（无坐姿回吸）", f.posWrites.some((w) => w.y === 768), false);
+}
+{ // G4 final=false 拖动逐 tick：零写入零广播（原行为）
+  const f = createDragSeatFixture({ x: 1000, y: 400, seated: false });
+  const sat = f.api.dragSeatUpdate(false);
+  assertEq("SEAT-G4 拖动 tick 不吸附", sat, false);
+  assertEq("SEAT-G4 零写入", f.posWrites.length, 0);
+}
+
+/* ---------- handler source 门控行为（本修复的落点） ---------- */
+{ // A：source="drag" 真实松手 → dragSeatUpdate(true) 恰好一次
+  const f = createWalkPauseFixture({ dragPaused: true });
+  f.handler({}, false, "drag");
+  assertEq("SEAT-A drag resume 触发 final 定格一次", f.seatCalls, [true]);
+  assertEq("SEAT-A 暂停已清", f.walk.dragPaused, false);
+  assertEq("SEAT-A 恢复广播发生", f.bc.length >= 1, true);
+}
+{ // B：source="interact"（poke resume 经 preload 契约后的真实值）→ clear 正常、定格零调用
+  const f = createWalkPauseFixture({ dragPaused: true });
+  f.handler({}, false, "interact");
+  assertEq("SEAT-B interact resume 不重放 final 定格", f.seatCalls.length, 0);
+  assertEq("SEAT-B interact resume 仍清 dragPaused", f.walk.dragPaused, false);
+  assertEq("SEAT-B interact resume 仍恢复 walk.paused", f.walk.paused, false);
+  assertEq("SEAT-B interact resume 仍广播恢复", f.bc.length >= 1, true);
+}
+{ // B'：防御层——任何未知/缺失 source 都不得触发定格（preload "drag" 归一化被 renderer 显式源绕过后的最后保障）
+  for (const s of [undefined, null, "", "something-else"]) {
+    const f = createWalkPauseFixture({ dragPaused: true });
+    f.handler({}, false, s);
+    assertEq("SEAT-B' 未知 source 永不定格 s=" + JSON.stringify(s), f.seatCalls.length, 0);
+    assertEq("SEAT-B' 未知 source 仍清暂停 s=" + JSON.stringify(s), f.walk.dragPaused, false);
+  }
+}
+{ // C：source="zoom" → 不触发定格
+  const f = createWalkPauseFixture({ dragPaused: false, zoomPaused: true });
+  f.handler({}, false, "zoom");
+  assertEq("SEAT-C zoom resume 不重放 final 定格", f.seatCalls.length, 0);
+  assertEq("SEAT-C zoomPaused 释放", f.walk.zoomPaused, false);
+  assertEq("SEAT-C 无 chat 残留时恢复 walk", f.walk.paused, false);
+}
+{ // D：poke resume（uppermost）初始 seated=true/y=768 → interact resume 后 y 仍 768，不经过网格 752
+  const f = createWalkPauseFixture({ dragPaused: true, seated: true, y: 768 });
+  f.handler({}, false, "interact");
+  assertEq("SEAT-D poke 后 y 保持 canonical 768", f.bounds.y, 768);
+  assertEq("SEAT-D 全程零位置写入（无 752 中间落位）", f.posWrites.length, 0);
+}
+{ // D2：poke resume（desktop 层，匿名复现的漏网路径）同样不得重放
+  const f = createWalkPauseFixture({ layer: "desktop", dragPaused: true, seated: true, y: 768 });
+  f.handler({}, false, "interact");
+  assertEq("SEAT-D2 desktop poke 后 y=768 不变", f.bounds.y, 768);
+  assertEq("SEAT-D2 定格零调用", f.seatCalls.length, 0);
+}
+{ // E：desktop 层真实 drag（source="drag"，icons 关）：估算网格 seated y=752 是合法坐面，不被任务栏覆盖
+  const f = createWalkPauseFixture({ layer: "desktop", dragPaused: true, seated: true, y: 768 });
+  f.handler({}, false, "drag");
+  assertEq("SEAT-E 真实 drag 定格一次", f.seatCalls, [true]);
+  assertEq("SEAT-E 网格坐面 y=752 保留（freeDragMode 设计语义）", f.bounds.y, 752);
+  assertEq("SEAT-E 无任务栏 canonical 覆盖写", f.posWrites.length, 1);
+}
+{ // F：production-reachable 图标磁吸（layer=desktop + features.desktopIcons + spine）：图标顶坐面保留
+  const f = createWalkPauseFixture({ layer: "desktop", iconMode: true, icons: [{ x: 350, y: 1075 }], dragPaused: true, seated: true, y: 768 });
+  f.handler({}, false, "drag");
+  assertEq("SEAT-F 图标顶吸附落点 y=803（图标顶+gap-H+sink）", f.bounds.y, 803);
+  assertEq("SEAT-F x 对齐图标列 nx=152", f.bounds.x, 152);
+  assertEq("SEAT-F 单次落位无覆盖写", f.posWrites.length, 1);
+}
+
+function assertWalkPauseDragGateWiring(source = mainSource) {
+  const block = sourceBlock(source, 'ipcMain.on("pet:walking-pause"', 'ipcMain.on("pet:throw"', "assertWalkPauseDragGateWiring");
+  assert.match(block, /if \(source === "drag"\) \{[\s\S]{0,80}const sat = dragSeatUpdate\(true\);/, "final 定格只由真实 drag resume 触发");
+  assert.equal((block.match(/dragSeatUpdate\(true\)/g) || []).length, 1, "handler 内 dragSeatUpdate(true) 单一调用点");
+  assert.match(block, /\} else if \(!p\) \{\s*clearDragPause\("walking-pause", false\);/, "非 zoom 恢复（含 interact/drag）仍走 clearDragPause（暂停解除不受定格门控影响）");
+}
+assertWalkPauseDragGateWiring();
+assert.doesNotMatch(mainSource, /final && seated && magnet !== "icon" && !freeDragMode/, "v1 的 final&&seated 收口块已撤销：dragSeatUpdate 几何语义回归 HEAD");
+
+/* preload/renderer 契约层（v1 测试盲区：undefined source 被 preload 归一化成 "drag"） */
+function assertPokeInteractWiring(rendererSrc = rendererSource, preloadSrc = preloadSource) {
+  assert.match(preloadSrc, /walkingPause: \(b, source\) => ipcRenderer\.send\("pet:walking-pause", !!b, source \|\| "drag"\)/, "preload 契约不变：无 source 归一化为 \"drag\"——renderer 必须显式区分 interact");
+  assert.match(rendererSrc, /pokeResumeTimer = setTimeout\(\(\) => \{ if \(!dragState\) window\.petAPI\.walkingPause\(false, "interact"\); \}, 2600\);/, "poke/单击互动 resume 显式 source=\"interact\"（不得退回无 source）");
+  assert.doesNotMatch(rendererSrc, /walkingPause\(false\)[;,)]/, "renderer 不再存在任何无 source 的 walkingPause(false) 调用");
+}
+assertPokeInteractWiring();
+
+expectMutationToFail("MUT-S", (source) => mutateBlock(source, 'ipcMain.on("pet:walking-pause"', 'ipcMain.on("pet:throw"',
+  (block) => block.replace('if (source === "drag") {', "if (true) {")), assertWalkPauseDragGateWiring);
+expectMutationToFail("MUT-T", () => rendererSource.replace('walkingPause(false, "interact")', "walkingPause(false)"),
+  (mutatedRenderer) => assertPokeInteractWiring(mutatedRenderer, preloadSource));
+
+/* ========== EDGE-C：EDGEDIAG turnId/量化字段的主进程侧契约（本探针轮未触碰 TDZ/时序/防抖的锁） ========== */
+function assertEdgeDiagWiring(source = mainSource) {
+  assert.match(source, /const EDGE_DIAG = !!process\.env\.SUSSURRO_EDGE_DIAG;/, "开关 env 门控单一来源");
+  assert.match(source, /let edgeDiagTurnSeq = 0;[\s\S]{0,160}let edgeDiagTurnPendingId = 0;/, "turnId 状态为模块级（不入 walk 状态位）");
+  const turnAt = source.indexOf("edgeDiagTurnPendingId = edgeDiagTurnSeq;");
+  const faceAt = source.indexOf("walkUpdateFace(walk.dir);                       // 折返");
+  assert.ok(turnAt > 0 && faceAt > turnAt, "turnId 生成先于 face 广播 → 同一折返的 pet:walking payload 携带 id");
+  assert.match(source, /\.\.\.\(edgeDiagTurnPendingId \? \{ edgeDiagTurnId: edgeDiagTurnPendingId \} : \{\}\)/, "walkBroadcast：pending=0（含关闭态）payload 零新增字段");
+  assert.match(source, /faceUpdateAllowed: walk\.face !== faceBefore/, "记录真实门控结果（执行后对比），未重新推导 150ms 表达式");
+  assert.match(source, /lastFaceFlipAgeMs: walk\._lastFaceFlip \? Date\.now\(\) - walk\._lastFaceFlip : null/, "lastFaceFlipAgeMs 读取真实状态");
+  assert.match(source, /updateUiEdgeCompactFromBounds\(eb, wa\);/, "wa TDZ 原样保留（本轮禁修——修复另案）");
+}
+assertEdgeDiagWiring();
+assert.match(rendererSource, /if \(EDGE_DIAG && s && s\.edgeDiagTurnId !== undefined\) diagActiveEdge = \{ turnId: s\.edgeDiagTurnId, faceTs: 0, expiresAt: Date\.now\(\) \+ 500 \};/, "renderer 消费点：tagged 建立/覆盖、untagged 不清（生存性）——纯赋值不参与决策");
+assert.match(rendererSource, /function diagEdgeFitId\(\) \{[\s\S]{0,240}diagActiveEdge = null; \/\/ 首拍 FIT 独占/, "FIT 首拍独占消费（防误挂的清除语义）");
+assert.match(rendererSource, /mirrorBoundsBefore: diagBoundsBefore, mirrorBoundsAfter: bb/, "FACE raw-bounds 前后快照（同一 getBounds，无 fit 副作用）");
+assert.match(rendererSource, /recenterDx: spineObj && Number\.isFinite\(diagWin\.x\)/, "FIT 回中量化字段");
+expectMutationToFail("MUT-U", (source) => source.replace("...(edgeDiagTurnPendingId ? { edgeDiagTurnId: edgeDiagTurnPendingId } : {})", "edgeDiagTurnId: edgeDiagTurnPendingId"), assertEdgeDiagWiring);
+expectMutationToFail("MUT-V", (source) => source.replace("faceUpdateAllowed: walk.face !== faceBefore", "faceUpdateAllowed: (Date.now() - (walk._lastFaceFlip || 0)) > 150"), assertEdgeDiagWiring);
+
+/* ========== M-P1：seat-exit transient Y offset 状态机（从 main 提取真实函数块测试，非复刻） ========== */
+function createSeatExitFixture({ y = 768, x = 100, height = 300, width = 260, gap = 0, sleepLift = 0, sleeping = false, edgeDiag = false } = {}) {
+  const bounds = { x, y, width, height };
+  const posWrites = [];
+  const logs = [];
+  const walk = { groundGap: gap, seated: false, sleeping, paused: false, dragPaused: false };
+  const win = { isDestroyed: () => false, getBounds: () => ({ ...bounds }), setPosition: (px, py) => { bounds.x = px; bounds.y = py; posWrites.push({ x: px, y: py }); } };
+  const api = new Function("win", "walk", "walkGeo", "screen", "config", "EDGE_DIAG", "logTts",
+    `${sourceBlock(mainSource, "const SEAT_EXIT_MS = 200;", "const WALK_SPEED = 1.2;", "seatExit block")}; return __seatExitTestHook;`)(
+    win, walk,
+    { workAreaOf: () => ({ x: 0, y: 0, width: 1920, height: 1040 }), groundLine: (wa, h, g) => wa.y + wa.height + (g || 0) - h },
+    {}, { getConfig: () => ({ walk: { sleepLift } }) }, edgeDiag, (ev, msg) => logs.push(`${ev} ${msg}`));
+  return { api, bounds, posWrites, logs, walk };
+}
+
+{ // M-P1-1：arm 由实际 Y−live 目标线（此处 28 非 30——反硬编码证明）；arm 自身零位置写入
+  const fx = createSeatExitFixture({ y: 768 });
+  fx.api("arm", "move");
+  assertEq("M-P1-1 arm 不写位置（t0 无跳变）", fx.posWrites.length, 0);
+  const st = fx.api("get");
+  assertEq("M-P1-1 fromOffsetY = actual(768) − liveStand(740) = 28，不是硬编码 30", st && st.fromOffsetY, 28);
+  assertEq("M-P1-1 t0 目标公式回写实际 Y（writer no-op 条件）", fx.api("targetY", 740), 768);
+  const fxd = createSeatExitFixture({ y: 768, edgeDiag: true });
+  fxd.api("arm", "move");
+  assert.ok(fxd.logs.some((l) => l.includes("ARM") && l.includes('"fromOffsetY":28') && l.includes('"windowYBefore":768') && l.includes('"windowYAfter":768')), "SEATEXITDIAG ARM 行（EDGE gate 内）");
+  // 已在目标线上 → 不开 transition
+  const fxz = createSeatExitFixture({ y: 740 });
+  fxz.api("arm", "move");
+  assertEq("M-P1-1 Δ≤0.5 不 arm（无残差空转）", fxz.api("get"), null);
+}
+{ // M-P1-2：offset 随时间单调趋 0；到期精确落 live 目标；只写 Y 不动 x
+  const fx = createSeatExitFixture({ y: 768 });
+  const now = Date.now();
+  const ys = [];
+  for (const el of [60, 140, 210]) {
+    fx.api("set", { startTs: now, durationMs: 200, fromOffsetY: 28, reason: "move", source: "test" });
+    fx.api("offsetY"); // 推进读取前的基准
+    // 用注入 now 的纯函数路径验证公式，再用 step 验证写入：
+    fx.api("set", { startTs: now - el, durationMs: 200, fromOffsetY: 28, reason: "move", source: "test" });
+    fx.api("step", "test");
+    ys.push(fx.bounds.y);
+  }
+  assert.ok(Math.abs(ys[0] - 760) <= 2, "M-P1-2 ~60ms: y≈round(740+28·0.7)（±2px 时钟粒度容差）");
+  assert.ok(Math.abs(ys[1] - 748) <= 2, "M-P1-2 ~140ms: y≈round(740+28·0.3)");
+  assertEq("M-P1-2 到期拍：精确落 live 目标 740", ys[2], 740);
+  assert.ok(ys[0] >= ys[1] && ys[1] >= ys[2], "单调趋零，不反向");
+  assertEq("M-P1-2 到期后 state 自清", fx.api("get"), null);
+  assert.ok(fx.posWrites.every((w) => w.x === 100), "只写 Y，x 恒等");
+}
+{ // M-P1-3：transition 中 groundGap live——改 gap 下一拍即用新线，结束无二次 snap
+  const fx = createSeatExitFixture({ y: 768 });
+  fx.api("set", { startTs: Date.now() - 100, durationMs: 200, fromOffsetY: 28, reason: "move", source: "test" });
+  fx.api("step", "test");
+  const midY = fx.bounds.y; // 740+14=754
+  assertEq("M-P1-3 中途位", midY, 754);
+  fx.walk.groundGap = 10; // live 目标线整体 +10 → 750
+  fx.api("set", { startTs: Date.now() - 210, durationMs: 200, fromOffsetY: 28, reason: "move", source: "test" });
+  fx.api("step", "test");
+  assertEq("M-P1-3 到期直接落新 gap 目标 750（无 post-transition snap）", fx.bounds.y, 750);
+  const w = fx.posWrites.length;
+  fx.api("step", "test");
+  assertEq("M-P1-3 完成后 step 不再写（无第二次移动）", fx.posWrites.length, w);
+}
+{ // M-P1-4/5：sleeping y-only + 非零 sleepLift 精确终值
+  const fx = createSeatExitFixture({ y: 768, sleeping: true });
+  fx.api("set", { startTs: Date.now() - 210, durationMs: 200, fromOffsetY: 28, reason: "sleep", source: "test" });
+  fx.api("step", "sleepTick");
+  assertEq("M-P1-4 sleep 到期精确落 sleepY=740", fx.bounds.y, 740);
+  assertEq("M-P1-4 只写 Y", fx.bounds.x, 100);
+  assertEq("M-P1-4 sleeping 不被改动（无 walking 语义参与）", fx.walk.sleeping, true);
+  const f5 = createSeatExitFixture({ y: 768, height: 300, sleepLift: 0.1, sleeping: true }); // step 按 walk.sleeping live 选基线（与生产 set-sleeping 时序一致）
+  f5.api("arm", "sleep");
+  assertEq("M-P1-5 sleepLift=0.1：liveSleepTargetY=740−30=710 → fromOffset=58", f5.api("get").fromOffsetY, 58);
+  assertEq("M-P1-5 t0 公式回写实际 Y（不瞬跳）", f5.api("targetY", 710), 768);
+  f5.api("set", { startTs: Date.now() - 210, durationMs: 200, fromOffsetY: 58, reason: "sleep", source: "test" });
+  f5.api("step", "sleepTick");
+  assertEq("M-P1-5 平滑终值=standY−liftPx=710（无 fallback 瞬跳，一步到位）", f5.bounds.y, 710);
+}
+{ // M-P1-6：cancel 语义——不 finalize、不写位置
+  const fx = createSeatExitFixture({ y: 760 });
+  fx.api("set", { startTs: Date.now() - 50, durationMs: 200, fromOffsetY: 20, reason: "move", source: "test" });
+  fx.api("cancel", "drag");
+  assertEq("M-P1-6 cancel 清空 state", fx.api("get"), null);
+  assertEq("M-P1-6 cancel 零位置写入（防制造 15~30px 新跳）", fx.posWrites.length, 0);
+}
+{ // M-P1-8：零新增 timer / 常量与接线合同
+  const block = sourceBlock(mainSource, "const SEAT_EXIT_MS = 200;", "const WALK_SPEED = 1.2;", "M-P1-8 block");
+  assert.doesNotMatch(block, /setInterval\(|setTimeout\(/, "seatExit 块内不得创建任何 timer（Phase1 由 walkTick 驱动）");
+  assert.match(mainSource, /const WALK_TICK_MS = 40;/, "WALK_TICK_MS 不变");
+  assert.match(mainSource, /const px = Math\.round\(nx\), py = sePre \? seatExitTargetY\(groundY\) : Math\.round\(groundY\);/, "movement py 走统一公式");
+  assert.match(mainSource, /const targetY = seatExit \? rawTargetY \+ seatExitOffsetY\(\) : rawTargetY;/, "applySeatPosition offset-aware");
+  assert.match(mainSource, /if \(walk\.seated\) armSeatExit\("move", "phase"\);/, "stand 真实边沿 arm");
+  assert.match(mainSource, /wasSeatedBeforeSleep && v[\s\S]{0,400}armSeatExit\("sleep", "set-sleeping"\);/, "入睡坐→睡经 transition，不再单帧 standY");
+  assert.match(mainSource, /walk\.dragPaused = true;\s*\n\s*cancelSeatExit\("drag"\);/, "drag 暂停：cancel 不 finalize");
+  assert.match(mainSource, /if \(p\) cancelSeatExit\("zoom"\);/, "zoom：cancel 交回 reposition 链");
+  assert.match(mainSource, /decision\.position\.y \+ seatExitOffsetY\(\)/, "resize ground 重锚共用瞬态公式（无未含 offset 的旁路写）");
+  assert.match(mainSource, /if \(seatExit && \(walk\.paused \|\| walk\.sleeping \|\| !win\.isVisible\(\)\)\)/, "pause/sleep/hidden y-only 驱动拍存在且先于移动段");
+  assert.match(rendererSource, /timers = opts\.seatPhase \? \[80, 160, 300, 600, 1200, 2400\] : \[150, 500, 1000, 1800, 2800, 4200\];|const timers = opts\.seatPhase \? \[80, 160, 300, 600, 1200, 2400\] : \[150, 500, 1000, 1800, 2800, 4200\];/, "scheduleFitSpine timer 表未动");
+}
+
+// B7: execute the actual sleeping IPC handler and Phase1 driver with an explicit clock.
+for (const [height, gap, lift] of [[300, 0, 0], [300, 0, 0.1], [420, 7, 0.15]]) {
+  let now = 1000, sleepingHandler = null;
+  const area = { x: 0, y: 0, width: 1920, height: 1038 };
+  const stand = G.groundLine(area, height, gap);
+  const bounds = { x: 100, y: stand + 30, width: 260, height };
+  const writes = [];
+  const context = vm.createContext({
+    Date: { now: () => now }, EDGE_DIAG: false, screen: {},
+    walk: { sleeping: false, seated: true, groundGap: gap },
+    config: { getConfig: () => ({ renderMode: "spine", walk: { sleepLift: lift } }) },
+    win: { isDestroyed: () => false, getBounds: () => ({ ...bounds }),
+      setPosition: (x, y) => { bounds.x = x; bounds.y = y; writes.push(y); } },
+    walkGeo: { workAreaOf: () => area, groundLine: G.groundLine },
+    ipcMain: { on: (_name, fn) => { sleepingHandler = fn; } },
+    cancelFlight() {}, cancelWalkJump() {}, applySeatPosition() {}, walkBroadcast() {},
+    transitionSleep: () => null, maybePersonify() {}, logTts() {},
+    setTimeout() { throw new Error("No new timer allowed"); },
+    setInterval() { throw new Error("No new timer allowed"); }
+  });
+  vm.runInContext(sourceBlock(mainSource, "const SEAT_EXIT_MS = 200;", "const WALK_SPEED = 1.2;", "Phase1"), context);
+  vm.runInContext(sourceBlock(mainSource, 'ipcMain.on("pet:set-sleeping",', 'ipcMain.on("pet:set-has-sit",', "sleep IPC"), context);
+  sleepingHandler(null, true);
+  const started = vm.runInContext("({ startTs: seatExit.startTs, durationMs: seatExit.durationMs })", context);
+  now += 70; vm.runInContext('seatExitStep("sleepTick")', context);
+  const mid = bounds.y;
+  sleepingHandler(null, false);
+  assert.ok(Math.abs(bounds.y - mid) <= 1, "Wake cannot jump to standY while offset is active");
+  assert.equal(vm.runInContext("seatExit.startTs", context), started.startTs);
+  assert.equal(vm.runInContext("seatExit.durationMs", context), started.durationMs);
+  now += 20; vm.runInContext('seatExitStep("wakeTick")', context);
+  assert.ok(bounds.y >= Math.min(mid, stand) - 1 && bounds.y <= Math.max(mid, stand) + 1, "next tick stays on remaining path");
+  now = 1210; vm.runInContext('seatExitStep("wakeTick")', context);
+  assert.equal(bounds.y, stand, "same original deadline, live stand base");
+  assert.equal(vm.runInContext("seatExit", context), null);
+  // No active transition: preserve the existing immediate Wake behavior.
+  // FAST-15（记录性合同，不改行为）：wake 从真实睡眠线起跳时，跳幅恰为 liftPx——
+  // REMAINING_SOURCE_BLOCKERS 中"wake 未复用 seatExit 二次渐变"的量化留档；未来实现 wake ramp 时此断言应收紧而非放宽。
+  const liftRatio = lift >= 0 && lift <= 0.5 ? lift : 0;
+  const yWake0 = stand - Math.round(height * liftRatio);
+  const wWake0 = writes.length;
+  bounds.y = yWake0; context.walk.sleeping = true;
+  sleepingHandler(null, false);
+  assert.equal(bounds.y, stand, "FAST-15a：无 active transition 的 wake 落点=standY（现行为保持）");
+  assert.equal(writes.length, wWake0 + (yWake0 !== stand ? 1 : 0), "FAST-15b：单帧一次写入（lift=0 时已在目标线，零写入）");
+  assert.equal(stand - yWake0, Math.round(height * liftRatio), `FAST-15c：已知 wake 跳幅=liftPx=${Math.round(height * liftRatio)}（向上回地面线）`);
+  console.log("PASS WAKE_DURING_ACTIVE_SEATEXIT", { height, gap, lift, mid, writes });
+}
+
+/* ---------- E2：main intent gate / unchanged timing ---------- */
+function runStandBeatBroadcastFixture(env) {
+  const messages = [];
+  const context = vm.createContext({
+    process: { env },
+    walk: { active: true, resting: true, perched: false, seated: false, face: 1, paused: false, sleeping: false },
+    edgeDiagTurnPendingId: 0,
+    sendToRenderer: (_channel, payload) => messages.push(payload)
+  });
+  const block = sourceBlock(mainSource, "const STANDBEAT_ENABLED", "function walkSchedulePhase", "E2 broadcast");
+  const broadcast = vm.runInContext(`${block}\nwalkBroadcast`, context);
+  return { broadcast, messages };
+}
+{
+  const off = runStandBeatBroadcastFixture({ SUSSURRO_STANDBEAT: "1", SUSSURRO_STANDBEAT_POSE: "0" });
+  off.broadcast({ standBeatPoseIntent: "stand" });
+  assert.equal("standBeatPoseIntent" in off.messages[0], false, "E2 flag OFF 不向 renderer 增加 intent 字段");
+  const on = runStandBeatBroadcastFixture({ SUSSURRO_STANDBEAT: "1", SUSSURRO_STANDBEAT_POSE: "1" });
+  on.broadcast({ standBeatPoseIntent: "stand" });
+  assert.equal(on.messages[0].standBeatPoseIntent, "stand", "E2 flag ON 才发送窄 intent");
+  const standBeatOff = runStandBeatBroadcastFixture({ SUSSURRO_STANDBEAT: "0", SUSSURRO_STANDBEAT_POSE: "1" });
+  standBeatOff.broadcast({ standBeatPoseIntent: "stand" });
+  assert.equal("standBeatPoseIntent" in standBeatOff.messages[0], false, "stand-beat OFF 时 E2 仍关闭");
+}
+{
+  const beat = sourceBlock(mainSource, "if (STANDBEAT_ENABLED && Number(walk.standingUpUntil) > 0)", "/* —— 地面状态 —— */", "E2 deadline");
+  assert.match(mainSource, /const STANDBEAT_POSE_ENABLED = process\.env\.SUSSURRO_STANDBEAT_POSE === "1";/, "E2 独立 flag");
+  assert.match(mainSource, /const STANDBEAT_MS = 260;/, "260ms 不变");
+  assert.match(mainSource, /const SEAT_EXIT_MS = 200;/, "200ms 不变");
+  assert.match(rendererSource, /owner\.obj\.state\.data\.defaultMix = 0\.20;/, "Spine default mix 不变");
+  assert.match(beat, /walk\.standingUpUntil = 0;\s*walk\.resting = false;\s*walkBroadcast\(\);/, "deadline 仍由 main 清 beat 后广播 Move");
+  assert.doesNotMatch(beat, /setTimeout\(|setInterval\(/, "E2 deadline block 不创建 walking timer");
+}
+
 
 console.log(failed ? `\n${failed} 项失败` : "\nrender-mode 全部通过 ✅");
 process.exit(failed ? 1 : 0);

@@ -2504,7 +2504,7 @@ ipcMain.on("pet:render-mode-outcome", (event, outcome) => {
     if (before.renderMode !== decision.committedMode) config.saveConfig({ renderMode: decision.committedMode });
     renderModeIntentMode = decision.committedMode;
     refreshTrayMenu();
-    syncWalkingEngine();
+    syncWalkingEngine({ resumeFromRenderMode: true }); // A27：render-mode 收敛后的引擎恢复 = resume（保留 face/seated 等业务姿态，不再随机方向覆盖 renderer 刚 bootstrap 好的最终姿势）
     if (settingsWin && !settingsWin.isDestroyed()) {
       settingsWin.webContents.send("pet:render-mode-outcome", correctionMeta
         ? { ...decision, correctionSourceMode: correctionMeta.sourceMode } : decision);
@@ -2826,6 +2826,7 @@ function setCatToy(on) {
   config.saveConfig({ catToy: !!on });
   refreshTrayMenu();
   walk.catToy = !!on;
+  if (walk.catToy && walk.standingUpUntil) walk.standingUpUntil = 0; // P0：仅逗猫棒真正接管运动权时作废起身节拍；幂等 false 不得误取消（beat 需正常完成）
   if (on) {
     startMouseTrack(); // 需要鼠标位置（与全局鼠标跟踪共用轮询）
     if (config.getConfig().renderMode === "spine" && !walk.active) startWalkingEngine();
@@ -3206,6 +3207,250 @@ const lastGroundGapReports = { spine: null, gif: null };
 let groundGapDocFloor = 0;
 let skinHasSit = true; // 当前皮肤是否有可播的坐下动画（渲染层皮肤加载后上报；false 时坐姿不做下沉，修复"站着脚陷进任务栏"）
 const WALK_TICK_MS = 40;
+/* P0 stand-beat v0（A/B 实验，默认关=零行为差）：seated→walk 起身期间冻结水平位移——
+ * resting 保持 true；默认 renderer watcher 仍 defer，E2 才通过一次显式 pose intent 准入 Relax；
+ * seatExit Y 过渡由 walkTick stand-beat 拍继续推进。STANDBEAT_MS=260 只是实验初值，不是调参结论。
+ * 计时唯一 authority=walk.standingUpUntil 时间戳（walkTick 对表），零新增 timer。 */
+const STANDBEAT_ENABLED = process.env.SUSSURRO_STANDBEAT === "1";
+const STANDBEAT_POSE_ENABLED = process.env.SUSSURRO_STANDBEAT_POSE === "1";
+const STANDBEAT_MS = 260;
+const EDGE_DIAG = !!process.env.SUSSURRO_EDGE_DIAG; // TEMPORARY 碰壁折返闪现诊断（默认关=零输出零行为差；定位后整体删除）
+let edgeDiagTurnSeq = 0;          // EDGEDIAG correlation：每次 edge collision 单调 turnId
+let edgeDiagTurnPendingId = 0;    // 随 walkBroadcast payload 透传给 renderer（0=无挂起；关闭时永远 0 → 字段不出现）
+/* ===== OPTION M Phase1：seat-exit transient Y offset（现有 walkTick 驱动，零新增 timer/interval） =====
+ * arm 以【实际窗口 Y − live 目标线】计 fromOffsetY（不硬编码 sink，不快照终值）；
+ * 每一拍 targetY = liveBaseY(now) + fromOffsetY·remainingProgress(now)（线性，时长对齐实测 mixDuration 0.20）；
+ * 所有 seat-exit 相关 writer（walkTick movement / applySeatPosition / set-sleeping / resize-reposition）
+ * 共用 seatExitTargetY / seatExitOffsetY → transition 中 groundGap/高度变化逐拍 live，结束后无二次 snap；
+ * 到期由读取侧自清 + 写侧（seatExitStep / movement py）当拍精确落终值。cancel 一律不写位置。 */
+const SEAT_EXIT_MS = 200;
+/* ===== E1：Sit→Move / stand-beat 同步只读取证（默认关闭） =====
+ * 诊断只在真实 seated→move 的 arm 上建立一个约 1.1s 的 bounded session。
+ * 采样字段绝不参与位置、动画、timer、FPS、lifecycle 或 ownership 判定；
+ * 关闭态也不创建 timer、不调用日志、不取窗口/屏幕额外状态。 */
+const SEAT_EXIT_FORENSIC = typeof process !== "undefined" && process.env.SUSSURRO_SEAT_EXIT_FORENSIC === "1";
+const SEAT_EXIT_FORENSIC_WINDOW_MS = 1100;
+const SEAT_EXIT_FORENSIC_MAX_RECORDS = 256;
+let seatExitForensicSeq = 0;
+let seatExitForensic = null;
+
+function seatExitForensicMonoMs() {
+  try {
+    if (typeof process !== "undefined" && process.hrtime && process.hrtime.bigint) return Number(process.hrtime.bigint()) / 1e6;
+  } catch { /* fallback below */ }
+  return Date.now();
+}
+function seatExitForensicRound(v, digits = 3) {
+  return Number.isFinite(v) ? Number(v.toFixed(digits)) : null;
+}
+function seatExitForensicPhase(now = Date.now()) {
+  if (Number(walk.standingUpUntil) > now) return "stand-beat";
+  if (walk.sleeping) return "sleep";
+  if (walk.paused) return "paused";
+  if (walk.seated) return "seated";
+  if (walk.resting) return "resting";
+  return "move";
+}
+function seatExitForensicMainContext() {
+  let b = null, displayScaleFactor = "UNKNOWN";
+  try {
+    b = win && !win.isDestroyed() ? win.getBounds() : null;
+    const d = b && screen && typeof screen.getDisplayNearestPoint === "function"
+      ? screen.getDisplayNearestPoint({ x: b.x, y: b.y }) : null;
+    if (d && Number.isFinite(d.scaleFactor)) displayScaleFactor = d.scaleFactor;
+  } catch { /* 诊断上下文不可读则明确 UNKNOWN */ }
+  let cfg = {};
+  try { cfg = config.getConfig() || {}; } catch { /* UNKNOWN fields below */ }
+  return {
+    renderMode: cfg.renderMode || "UNKNOWN",
+    skinId: cfg.spineSkinId || "builtin",
+    windowScale: Number.isFinite(cfg.window?.scale) ? cfg.window.scale : "UNKNOWN",
+    seatSink: typeof effectiveSeatSink === "function" ? effectiveSeatSink() : "UNKNOWN",
+    skinHasSit: typeof skinHasSit === "boolean" ? skinHasSit : "UNKNOWN",
+    displayScaleFactor,
+    zoom: "UNKNOWN",
+    window: b ? { x: b.x, y: b.y, width: b.width, height: b.height } : null
+  };
+}
+function seatExitForensicRecordsInOrder(s) {
+  if (!s || !s.records.length) return [];
+  if (s.records.length < SEAT_EXIT_FORENSIC_MAX_RECORDS || s.next === 0) return s.records.slice();
+  return s.records.slice(s.next).concat(s.records.slice(0, s.next));
+}
+function seatExitForensicFlush(reason) {
+  const s = seatExitForensic;
+  if (!SEAT_EXIT_FORENSIC || !s) return;
+  seatExitForensic = null;
+  try {
+    logTts("walk", "[SEATFORENSIC] " + JSON.stringify({
+      sessionId: s.sessionId,
+      side: "main",
+      closeReason: reason,
+      startedAt: { monoMs: s.startedMonoMs, dateNow: s.startedDateNow },
+      endedAt: { monoMs: seatExitForensicMonoMs(), dateNow: Date.now() },
+      maxRecords: SEAT_EXIT_FORENSIC_MAX_RECORDS,
+      droppedRecords: s.dropped,
+      records: seatExitForensicRecordsInOrder(s)
+    }));
+  } catch { /* 诊断失败不能影响主流程 */ }
+}
+function seatExitForensicPush(record) {
+  const s = seatExitForensic;
+  if (s.records.length < SEAT_EXIT_FORENSIC_MAX_RECORDS) s.records.push(record);
+  else { s.records[s.next] = record; s.next = (s.next + 1) % SEAT_EXIT_FORENSIC_MAX_RECORDS; s.dropped += 1; }
+}
+function seatExitForensicSnapshot(ev, extra = {}) {
+  if (!SEAT_EXIT_FORENSIC || !seatExitForensic) return false;
+  const now = Date.now();
+  if (now >= seatExitForensic.endDateNow) { seatExitForensicFlush("window-elapsed"); return false; }
+  let b = null, wa = null;
+  try {
+    b = win && !win.isDestroyed() ? win.getBounds() : null;
+    wa = b ? walkGeo.workAreaOf(screen, b) : null;
+  } catch { /* bounded diagnostic keeps UNKNOWN/null */ }
+  const currentSeatExit = seatExit;
+  const liveBaseY = b ? (walk.sleeping ? liveSleepTargetY(b) : liveStandTargetY(b)) : null;
+  const elapsed = currentSeatExit ? Math.max(0, now - currentSeatExit.startTs) : null;
+  const progress = currentSeatExit ? Math.min(1, elapsed / currentSeatExit.durationMs) : null;
+  seatExitForensicPush(Object.assign({
+    side: "main",
+    sessionId: seatExitForensic.sessionId,
+    localSeq: ++seatExitForensic.localSeq,
+    monoMs: seatExitForensicMonoMs(),
+    dateNow: now,
+    ev,
+    phase: seatExitForensicPhase(now),
+    walk: {
+      active: !!walk.active, resting: !!walk.resting, seated: !!walk.seated,
+      paused: !!walk.paused, sleeping: !!walk.sleeping, perched: !!walk.perched,
+      face: walk.face, dir: walk.dir
+    },
+    standBeat: {
+      enabled: STANDBEAT_ENABLED,
+      poseEnabled: STANDBEAT_POSE_ENABLED,
+      active: Number(walk.standingUpUntil) > now,
+      standingUpUntil: Number(walk.standingUpUntil) || 0,
+      beatDeadline: Number(walk.standingUpUntil) || 0
+    },
+    bounds: b ? { x: b.x, y: b.y, width: b.width, height: b.height } : null,
+    workArea: wa ? { x: wa.x, y: wa.y, width: wa.width, height: wa.height } : null,
+    windowY: b ? b.y : null,
+    liveStandingBaseY: Number.isFinite(liveBaseY) ? Math.round(liveBaseY) : null,
+    groundGap: walk.groundGap,
+    height: b ? b.height : null,
+    seatExit: currentSeatExit ? {
+      owns: true, tokenStartDateNow: currentSeatExit.startTs, reason: currentSeatExit.reason,
+      source: currentSeatExit.source, fromOffsetY: currentSeatExit.fromOffsetY,
+      elapsedMs: elapsed, progress: seatExitForensicRound(progress), complete: false
+    } : { owns: false, complete: ev === "seatExit-complete" },
+    xMovementFirstStart: seatExitForensic.xMovementFirstStart
+  }, extra));
+  return true;
+}
+function seatExitForensicStart(reason, source, b, fromOffsetY, liveBaseY) {
+  if (!SEAT_EXIT_FORENSIC) return;
+  if (seatExitForensic) seatExitForensicFlush("replaced-by-new-exit");
+  const now = Date.now();
+  seatExitForensic = {
+    sessionId: "e1-" + process.pid + "-" + now.toString(36) + "-" + (++seatExitForensicSeq).toString(36),
+    startedMonoMs: seatExitForensicMonoMs(), startedDateNow: now, endDateNow: now + SEAT_EXIT_FORENSIC_WINDOW_MS,
+    localSeq: 0, broadcastSeq: 0, xMovementFirstStart: null, records: [], next: 0, dropped: 0
+  };
+  seatExitForensicSnapshot("session-start", {
+    trigger: { reason, source, fromOffsetY, liveStandingBaseY: Math.round(liveBaseY) },
+    assetMain: seatExitForensicMainContext(),
+    windowAtStart: b ? { x: b.x, y: b.y, width: b.width, height: b.height } : null
+  });
+}
+function seatExitForensicBroadcastMeta() {
+  if (!SEAT_EXIT_FORENSIC || !seatExitForensic) return null;
+  const eventSeq = ++seatExitForensic.broadcastSeq;
+  seatExitForensicSnapshot("walkBroadcast", { broadcastSeq: eventSeq });
+  if (!seatExitForensic) return null;
+  const last = seatExitForensic.records[seatExitForensic.records.length - 1];
+  return { sessionId: seatExitForensic.sessionId, eventSeq, mainMonoMs: last ? last.monoMs : null, mainDateNow: Date.now() };
+}
+function seatExitForensicNoteXMovement(before, after) {
+  if (!SEAT_EXIT_FORENSIC || !seatExitForensic || seatExitForensic.xMovementFirstStart || !before || !after || before.x === after.x) return;
+  seatExitForensic.xMovementFirstStart = { monoMs: seatExitForensicMonoMs(), dateNow: Date.now(), beforeX: before.x, afterX: after.x };
+  seatExitForensicSnapshot("x-movement-first", { xMovementFirstStart: seatExitForensic.xMovementFirstStart });
+}
+let seatExit = null; // {startTs, durationMs, fromOffsetY, reason:"move"|"sleep", source}
+function seatExitOffsetY(now = Date.now()) {
+  if (!seatExit) return 0;
+  const p = (now - seatExit.startTs) / seatExit.durationMs;
+  if (p >= 1) { seatExit = null; return 0; }
+  return seatExit.fromOffsetY * (1 - p);
+}
+function seatExitTargetY(baseY) { return Math.round(baseY + seatExitOffsetY()); }
+function liveStandTargetY(b) { return walkGeo.groundLine(walkGeo.workAreaOf(screen, b), b.height, walk.groundGap); }
+function liveSleepTargetY(b) { // 与 set-sleeping 原 sleepY 同式，支持非零 sleepLift 配置
+  const standY = liveStandTargetY(b);
+  const lift = Number((config.getConfig().walk || {}).sleepLift);
+  const ratio = Number.isFinite(lift) && lift >= 0 && lift <= 0.5 ? lift : 0;
+  return standY - Math.round(b.height * ratio);
+}
+function armSeatExit(reason, source) {
+  if (!win || win.isDestroyed()) return;
+  const b = win.getBounds();
+  const liveBase = reason === "sleep" ? liveSleepTargetY(b) : liveStandTargetY(b);
+  const fromOffsetY = b.y - liveBase; // 实测差值：arm 本身零位移；本就在目标线上（Δ≤0.5）不开 transition
+  if (reason === "move" && source === "phase" && walk.seated) seatExitForensicStart(reason, source, b, fromOffsetY, liveBase);
+  diagSeat("ARM", { reason, source, windowYBefore: b.y, windowYAfter: b.y, liveBaseY: Math.round(liveBase), fromOffsetY, currentOffsetY: fromOffsetY, progress: 0, groundGap: walk.groundGap, sleepLiftPx: Math.round(liveStandTargetY(b) - liveSleepTargetY(b)) });
+  seatExitForensicSnapshot("seatExit-arm", { reason, source, windowYBefore: b.y, windowYAfter: b.y, liveStandingBaseY: Math.round(liveBase), fromOffsetY, progress: 0, beatArm: true });
+  if (Math.abs(fromOffsetY) <= 0.5) { seatExit = null; return; }
+  seatExit = { startTs: Date.now(), durationMs: SEAT_EXIT_MS, fromOffsetY, reason, source };
+}
+function cancelSeatExit(reason) {
+  if (!seatExit) return;
+  const b = win && !win.isDestroyed() ? win.getBounds() : null;
+  diagSeat("CANCEL", { reason, source: seatExit.reason, windowYBefore: b ? b.y : null, windowYAfter: null, liveBaseY: null, fromOffsetY: seatExit.fromOffsetY, currentOffsetY: null, progress: null, groundGap: walk.groundGap, sleepLiftPx: null });
+  seatExit = null; // cancel≠finalize：不写位置——finalize 会重新制造 15~30px 单帧跳
+}
+/* 共享 y-only 驱动拍：常规步 |Δ|>1px 才写（DWM 防抖）；到期步以 |Δ|>0.01 强制精确终值。
+ * 只写 Y——绝不触碰 x/face/phase/jump/flight/targetX/动画。 */
+function seatExitStep(caller) {
+  if (!seatExit || !win || win.isDestroyed()) return;
+  const before = win.getBounds();
+  const baseY = walk.sleeping ? liveSleepTargetY(before) : liveStandTargetY(before);
+  const preActive = seatExit;
+  const y = seatExitTargetY(baseY);
+  const complete = !seatExit; // seatExitOffsetY 到期自清
+  const eps = complete ? 0.01 : 1;
+  if (Math.abs(before.y - y) > eps) {
+    try { win.setPosition(before.x, y); } catch { /* 窗口销毁忽略 */ }
+  }
+  diagSeat(complete ? "COMPLETE" : "STEP", {
+    reason: preActive.reason, source: caller,
+    windowYBefore: before.y, windowYAfter: y, liveBaseY: Math.round(baseY),
+    fromOffsetY: preActive.fromOffsetY, currentOffsetY: complete ? 0 : y - Math.round(baseY),
+    progress: complete ? 1 : Number(Math.min(1, (Date.now() - preActive.startTs) / preActive.durationMs).toFixed(3)),
+    groundGap: walk.groundGap, sleepLiftPx: walk.sleeping ? Math.round(liveStandTargetY(before) - liveSleepTargetY(before)) : 0
+  });
+  seatExitForensicSnapshot(complete ? "seatExit-complete" : "seatExit-step", {
+    caller, windowYBefore: before.y, windowYAfter: y, liveStandingBaseY: Math.round(baseY),
+    fromOffsetY: preActive.fromOffsetY, elapsedMs: complete ? preActive.durationMs : Date.now() - preActive.startTs,
+    progress: complete ? 1 : Number(Math.min(1, (Date.now() - preActive.startTs) / preActive.durationMs).toFixed(3)),
+    seatExitComplete: complete
+  });
+}
+function diagSeat(ev, o) {
+  if (!EDGE_DIAG) return;
+  try { logTts("walk", "[SEATEXITDIAG] " + JSON.stringify(Object.assign({ ts: Date.now(), ev }, o))); } catch { /* 诊断忽略 */ }
+}
+// 测试专用纯访问器（无行为；M-P1 状态机合同测试用）
+function __seatExitTestHook(op, arg) {
+  if (op === "get") return seatExit;
+  if (op === "set") { seatExit = arg; return seatExit; }
+  if (op === "offsetY") return seatExitOffsetY(arg);
+  if (op === "targetY") return seatExitTargetY(arg);
+  if (op === "standY") return liveStandTargetY(arg);
+  if (op === "sleepY") return liveSleepTargetY(arg);
+  if (op === "step") return seatExitStep(arg);
+  if (op === "arm") return armSeatExit(arg, "test");
+  if (op === "cancel") return cancelSeatExit(arg);
+  return null;
+}
 const WALK_SPEED = 1.2;                        // 每 tick 像素 ≈ 30px/s
 const PET_LOCAL_X = 138;                       // 标准 Spine 260×200 窗口的唯一角色锚点
 
@@ -3250,10 +3495,17 @@ function walkSetPosition(x, y, where) {
   }
 }
 
-function walkBroadcast() {
+function walkBroadcast(options = {}) {
+  const standBeatPoseIntent = STANDBEAT_ENABLED && STANDBEAT_POSE_ENABLED && options.standBeatPoseIntent === "stand"
+    ? "stand" : null;
+  const forensic = typeof seatExitForensicBroadcastMeta === "function" ? seatExitForensicBroadcastMeta() : null;
+  if (standBeatPoseIntent) seatExitForensicSnapshot("stand-beat-pose-intent", { standBeatPoseIntent });
   sendToRenderer("pet:walking", {
     active: walk.active, resting: walk.resting, perched: walk.perched, seated: walk.seated, face: walk.face,
-    paused: walk.paused, sleeping: walk.sleeping // 暂停/睡眠都广播：渲染层切待机/睡眠动画
+    paused: walk.paused, sleeping: walk.sleeping, // 暂停/睡眠都广播：渲染层切待机/睡眠动画
+    ...(edgeDiagTurnPendingId ? { edgeDiagTurnId: edgeDiagTurnPendingId } : {}), // EDGEDIAG-only（pending=0 时零差异）；renderer 只读打标，不参与任何决策
+    ...(forensic ? { seatExitForensic: forensic } : {}), // E1-only；renderer 只读关联，不参与任何决策
+    ...(standBeatPoseIntent ? { standBeatPoseIntent } : {})
   });
 }
 
@@ -3301,6 +3553,7 @@ function startFlight(vx, vy) {
   walk.returning = false;
   walk.targetX = null;
   walk.flight = { vx: vx * limit, vy: vy * limit, bounces: 0 };
+  if (walk.standingUpUntil) walk.standingUpUntil = 0; // P0：抛掷夺走运动所有权，落地后按 rest 状态机走，不得被旧 beat 劫持成散步
   walkBroadcast();
   applyLayer();
   logTts("walk", `抛掷: vx=${Math.round(vx * limit)} vy=${Math.round(vy * limit)}`);
@@ -3431,7 +3684,8 @@ function applySeatPosition() {
   const b = win.getBounds();
   const wa = walkGeo.workAreaOf(screen, b);
   const baseY = wa.y + wa.height + walk.groundGap - b.height;   // 站立贴地
-  const targetY = walk.seated ? baseY + effectiveSeatSink() : baseY;  // 坐姿下沉（按尺寸档位；无坐下动画皮肤不下沉）
+  const rawTargetY = walk.seated ? baseY + effectiveSeatSink() : baseY;  // 坐姿下沉（按尺寸档位；无坐下动画皮肤不下沉）
+  const targetY = seatExit ? rawTargetY + seatExitOffsetY() : rawTargetY; // seat-exit transition：目标线+瞬态偏移（t0=实际 Y，不产生跳动）
   walk.sunk = walk.seated;
   if (Math.abs(b.y - targetY) > 1) win.setPosition(b.x, Math.round(targetY));
   applyLayer(walk.seated || walk.active); // 接触任务栏表面时保证在任务栏之上
@@ -3493,9 +3747,10 @@ function repositionAfterWindowSizeChange(renderModeCommit = false, wasGroundAnch
     wasGroundAnchored
   });
   if (decision.type === "seat") {
-    applySeatPosition();
+    applySeatPosition(); // 内部 offset-aware（seatExit 期写过渡 Y）
   } else if (decision.type === "ground") {
-    win.setPosition(decision.position.x, decision.position.y);
+    // seatExit 期间 ground 重锚也必须走同一瞬态偏移公式——否则 resize 会在过渡中途写不含 offset 的最终线（二次 snap）
+    win.setPosition(decision.position.x, seatExit ? Math.round(decision.position.y + seatExitOffsetY()) : decision.position.y);
   }
 }
 
@@ -3572,9 +3827,30 @@ async function walkOnPhaseEnd() {
       walkSchedulePhase(sitPhaseMs());
       return;
     }
+    /* P0 stand-beat 入口（A/B，只在真实 seated=true 且行为决定散步时）：先起身站住，本相位冻结 X。
+     * 计时不新增 authority：入口用现有相位 timer 立即排一个占位 fallback（walkSchedulePhase 先 clear
+     * 后 schedule，全程恒一把）；正常到拍由 walkTick 的 walkSchedulePhase(walkPhaseMs()) clear/替换，
+     * beat 被 drag/sleep/catToy 等提前取消时仍有真实未来的相位回调——fire 时 standingUpUntil 已为 0，
+     * walkOnPhaseEnd 按既有分支（paused 续排/sleeping 续排/resting&&!seated 走 _standLoops）继续运转，
+     * 不会留下 resting=true + 死 id + 无回调的无限 Relax 站桩。
+     * renderer 收到 seated=false+resting=true；默认保持 watcher defer，E2 才附加一次窄 pose intent。 */
+    if (STANDBEAT_ENABLED && walk.seated) {
+      armSeatExit("move", "phase");        // Y 过渡照常起坡（t0=实际 Y 零位移），beat 拍继续推进
+      walk.seated = false;
+      walk.resting = true;
+      applySeatPosition();                 // offset-aware：t0 写回实际 Y，不移动
+      walk.dir = Math.random() < 0.5 ? -1 : 1;
+      walk.standingUpUntil = Date.now() + STANDBEAT_MS;
+      walkSchedulePhase(STANDBEAT_MS + walkPhaseMs()); // 占位 fallback：到拍替换；最早 fire 也在 beat 结束后 ≥walkPhaseMs 下限
+      if (STANDBEAT_POSE_ENABLED) walkBroadcast({ standBeatPoseIntent: "stand" });
+      else walkBroadcast();
+      if (desktopIconMode()) listDesktopIcons(); // 预取图标缓存，供行走引导判断
+      return;
+    }
     walk.resting = false;                   // 开始散步
+    if (walk.seated) armSeatExit("move", "phase"); // seated=true→false 真实边沿：先按实际 Y 与 live 目标线建瞬态偏移
     walk.seated = false;
-    applySeatPosition();                    // 起身：腿从任务栏里收回来
+    applySeatPosition();                    // 起身：腿从任务栏里收回来（transition 期 offset-aware：t0 写回实际 Y，不移动）
     walk.dir = Math.random() < 0.5 ? -1 : 1;
     walkBroadcast();
     if (desktopIconMode()) listDesktopIcons(); // 预取图标缓存，供行走引导判断
@@ -4008,6 +4284,7 @@ function outOfScreenGuard() {
 
 function walkTick() {
   if (!win || win.isDestroyed()) return;
+  if (typeof seatExitForensicSnapshot === "function") seatExitForensicSnapshot("walkTick");
   // 左缘翻边判定（坐下/静止在左缘也要切；拖拽/飞行/跳跃中不切防干扰）
   // 用「角色条带左缘」判断而非窗口 x：切边/切回时窗口被平移 ±276，用窗口 x 会立即再次触发形成左右横跳
   if (!walk.paused && !walk.sleeping && !walk.flight && !walk.jump) {
@@ -4150,6 +4427,13 @@ function walkTick() {
     }
     return;
   }
+  /* OPTION M Phase1：seatExit 的 y-only 驱动拍——pause/sleep 早退路径没有 movement writer，
+   * 在这里补过渡（只写 Y；dragPaused=用户直接拥有窗口几何 → cancel 不写位置，绝不 finalize）。 */
+  if (seatExit && (walk.paused || walk.sleeping || !win.isVisible())) {
+    if (!win.isVisible()) cancelSeatExit("hidden");
+    else if (walk.dragPaused) cancelSeatExit("drag");
+    else seatExitStep(walk.sleeping ? "sleepTick" : "pauseTick");
+  }
   if (walk.paused || walk.seated || !win.isVisible()) return; // 拖拽中/坐下/隐藏到托盘时不移动
   // 自愈②：相位定时器丢失（不在任何过渡流程却无人排程）→ 自动重启循环，防永久静止
   if (!walk.paused && !walk.sleeping && !walk.phaseTimer &&
@@ -4203,6 +4487,26 @@ function walkTick() {
     return;
   }
 
+  /* P0 stand-beat 拍：起身 260ms 内保持 Relax、禁止普通 X 位移，但 seatExit Y 仍必须逐拍推进
+   * （movement writer 在 resting 下早退，上方 y-only 拍只覆盖 pause/sleep/hidden 三种早退路径）。
+   * 到拍清标记后不 return——直接同拍落入下方常规 movement：Move 广播与第一拍 X 位移同帧发生。
+   * sleeping 抢占（意图已改为睡）→ 作废本拍，不劫持唤醒后的状态机；
+   * paused/seated/隐藏已在上方 return，poke/对话暂停恢复后由本拍继续原散步意图；
+   * 拖拽/抛掷/逗猫棒/引擎重建各有 standingUpUntil 清理点，防旧 deadline 泄漏。 */
+  if (STANDBEAT_ENABLED && Number(walk.standingUpUntil) > 0) {
+    if (walk.sleeping) walk.standingUpUntil = 0;
+    else if (Date.now() < walk.standingUpUntil) {
+      if (seatExit) seatExitStep("standBeat");
+      return;
+    } else {
+      const beatDeadline = walk.standingUpUntil;
+      if (typeof seatExitForensicSnapshot === "function") seatExitForensicSnapshot("beat-end", { beatEnd: true, beatDeadline });
+      walk.standingUpUntil = 0;
+      walk.resting = false;
+      walkBroadcast();
+      walkSchedulePhase(walkPhaseMs()); // 散步时长从真正开走这一拍起算
+    }
+  }
   /* —— 地面状态 —— */
   if (walk.resting || walk.sleeping) return;        // 放松/睡觉：站着不动
   if (xRange.collapsed) {
@@ -4216,16 +4520,30 @@ function walkTick() {
   }
 
   let nx = x + walk.dir * walkSpeed();
+  let edgeTurnDiag = null; // PROBE 1（EDGEDIAG）：只在命中折返分支时记录，非每 tick
   if (nx <= minX || nx >= maxX) {                   // 到屏幕边折返（左侧已按角色条带补偿）
+    const dirBefore = walk.dir;
+    const faceBefore = walk.face;
+    if (EDGE_DIAG) { edgeDiagTurnSeq += 1; edgeDiagTurnPendingId = edgeDiagTurnSeq; } // turnId 先于 face 广播生成 → 同帧 payload 携带
     walk.dir *= -1;
     nx = Math.min(Math.max(nx, minX), maxX);
     walkUpdateFace(walk.dir);                       // 折返：立即用新方向同步朝向（原来翻转前调旧 dir、下一帧才翻，贴边连续折返时角色左右镜像闪现）
+    if (EDGE_DIAG) {
+      edgeTurnDiag = { ts: Date.now(), turnId: edgeDiagTurnPendingId, x, nx, dirBefore, dirAfter: walk.dir, faceBefore, faceAfter: walk.face,
+        faceUpdateAllowed: walk.face !== faceBefore,           // 真实门控结果（walkUpdateFace 执行后 face 是否真的变了）——非重新推导的猜测表达式
+        lastFaceFlipAgeMs: walk._lastFaceFlip ? Date.now() - walk._lastFaceFlip : null,
+        minX, maxX, groundGap: walk.groundGap, windowX: b.x, windowY: b.y,
+        boundsBefore: { x: b.x, y: b.y, width: b.width, height: b.height } };
+    }
   } else {
     walkUpdateFace(walk.dir);                       // 朝向跟随实际位移方向
   }
   /* 桌面图标缓存仅用于跳图标目标；缓存缺口不应打断普通地面行走。 */
-  /* 桌面图标缓存仅用于跳图标目标；缓存缺口不应打断普通地面行走。 */
-  const px = Math.round(nx), py = Math.round(groundY);
+  const sePre = seatExit; // movement 也是 seatExit 驱动拍：y = live groundY + 瞬态 offset（到期当拍精确落终值）
+  const px = Math.round(nx), py = sePre ? seatExitTargetY(groundY) : Math.round(groundY);
+  if (EDGE_DIAG && sePre && !seatExit) {
+    diagSeat("COMPLETE", { reason: sePre.reason, source: "walkTick", windowYBefore: b.y, windowYAfter: py, liveBaseY: Math.round(groundY), fromOffsetY: sePre.fromOffsetY, currentOffsetY: 0, progress: 1, groundGap: walk.groundGap, sleepLiftPx: 0 });
+  }
   if (!Number.isSafeInteger(px) || !Number.isSafeInteger(py) || Math.abs(px) > 1000000 || Math.abs(py) > 1000000) {
     logTts("walk", "walkTick 坐标越界，跳过本 tick：x=" + px + " y=" + py +
       " dir=" + walk.dir + " speedMul=" + config.getConfig().walkSpeedMul +
@@ -4233,9 +4551,28 @@ function walkTick() {
     return;
   }
   safeSetPosition(px, py, "walkTick");
+  try { if (typeof seatExitForensicNoteXMovement === "function") seatExitForensicNoteXMovement(b, win.getBounds()); } catch { /* 诊断取样失败忽略 */ }
+  if (edgeTurnDiag) { // PROBE 1：折返 tick 实际写回后的 bounds（回答"窗口自身是否瞬跳"）
+    edgeTurnDiag.px = px;
+    edgeTurnDiag.py = py;
+    try {
+      const ab = win.getBounds();
+      edgeTurnDiag.boundsAfter = { x: ab.x, y: ab.y, width: ab.width, height: ab.height };
+    } catch { edgeTurnDiag.boundsAfter = null; }
+    logTts("walk", "[EDGEDIAG] TURN " + JSON.stringify(edgeTurnDiag));
+  }
 }
 
-function startWalkingEngine() {
+/**
+ * 行走引擎启动。
+ * opts.resume=true（A27 render-mode resume，由 render-mode outcome 路径显式传入）：
+ * walking 配置常开、引擎仅因切到非 Spine 模式被临时停止——Spine owner 就绪后只恢复“引擎执行”。
+ * 业务/姿态字段（face/seated/resting/perched/iconRest/iconTarget/freeStand/gotoPerch/returning/sunk、
+ * sleeping/paused 三意图、edgeLeft/uiEdgeCompact、groundGap/charInset 等）全部保留现值；
+ * 禁止执行 fresh-start 初始化（随机方向、seated=skinHasSit、resting 强制 true、pose 清位）。
+ * 默认（无 resume）= fresh start：首次开行走/托盘/设置开启/启动自启，初始化语义与既有一致。
+ */
+function startWalkingEngine(opts = {}) {
   if (walk.active) return true;
   if (config.getConfig().renderMode !== "spine") return false; // GIF 模式不可行走
   // 行走前恢复标准窗口尺寸：气泡加宽的大窗口会让 charInset=宽-122 超上限 → 行走左边界扩到屏幕外（“闪现”/出屏）
@@ -4244,29 +4581,32 @@ function startWalkingEngine() {
     win.setSize(Math.round(wc.width || 260), Math.round(wc.height || 200));
   } catch { /* 忽略 */ }
   walk.active = true;
-  walk.resting = true;
-  walk.perched = false;
-  walk.iconRest = false;
-  walk.iconTarget = false;
-  walk.freeStand = false;
-  walk.gotoPerch = false;
-  walk.returning = false;
-  walk.seated = skinHasSit; // 启动先坐下（无坐下动画皮肤则站立），片刻后起身散步
-  walk.face = Math.random() < 0.5 ? -1 : 1;
-  try { // 已在地面线附近则直接进入下沉坐姿
+  if (!opts.resume) { // fresh start 初始化组；A27：resume 不触碰任何业务姿态字段
+    walk.resting = true;
+    walk.perched = false;
+    walk.iconRest = false;
+    walk.iconTarget = false;
+    walk.freeStand = false;
+    walk.gotoPerch = false;
+    walk.returning = false;
+    walk.seated = skinHasSit; // 启动先坐下（无坐下动画皮肤则站立），片刻后起身散步
+    walk.face = Math.random() < 0.5 ? -1 : 1;
+  }
+  try { // 已在地面线附近则直接进入下沉坐姿（resume 同样执行：对当前坐姿是幂等重断言，非新初始化）
     const b0 = win.getBounds();
     const wa0 = walkGeo.workAreaOf(screen, b0);
     if (Math.abs(b0.y + b0.height - walk.groundGap - (wa0.y + wa0.height)) < 60) applySeatPosition();
   } catch { /* 忽略 */ }
   walk.timer = setInterval(walkTick, WALK_TICK_MS);
-  walkBroadcast();
+  walkBroadcast(); // resume 首播 = active=true + 停止前业务姿态原值（不再出现随机 face 覆盖）
   walkSchedulePhase(randInt(5000, 15000));
   applyLayer(true); // 行走全程贴任务栏，需在任务栏之上
-  logTts("walk", "桌面行走开启");
+  logTts("walk", opts.resume ? "桌面行走恢复（render-mode resume）" : "桌面行走开启");
   return true;
 }
 
 function stopWalkingEngine(silent = false) {
+  if (typeof seatExitForensicFlush === "function") seatExitForensicFlush("walking-engine-stop");
   if (!walk.active) return; // 停止行走保持当前坐姿（seated 不重置，仍坐在任务栏上）
   cancelFlight();
   cancelWalkJump();
@@ -4284,15 +4624,16 @@ function stopWalkingEngine(silent = false) {
   walk.active = false;
   clearInterval(walk.timer); walk.timer = null;
   clearTimeout(walk.phaseTimer); walk.phaseTimer = null;
+  if (walk.standingUpUntil) walk.standingUpUntil = 0; // P0：旧 stand-beat 不得穿越引擎停止/重建
   if (!silent) walkBroadcast();
   logTts("walk", "桌面行走关闭");
 }
 
 /** renderMode/walking 配置变化后同步引擎状态；切回 GIF 时自动停走（walking 记忆保留，回 Spine 后恢复） */
-function syncWalkingEngine() {
+function syncWalkingEngine(opts = {}) {
   const cfg = config.getConfig();
   const shouldRun = cfg.walking === true && cfg.renderMode === "spine";
-  if (shouldRun && !walk.active) startWalkingEngine();
+  if (shouldRun && !walk.active) startWalkingEngine({ resume: !!opts.resumeFromRenderMode }); // A27：仅 render-mode outcome 路径显式 resume；其余调用方（设置/托盘/启动）保持 fresh 语义
   else if (!shouldRun && walk.active) stopWalkingEngine();
 }
 
@@ -4344,11 +4685,14 @@ ipcMain.on("pet:walking-pause", (_e, p, source) => {
   if (p) { cancelFlight(); cancelWalkJump(); walk.taskbarHang = false; } // 鼠标重新抓住时立即停止飞行/跳跃/半挂
   if (source === "zoom") { // 放大聊天框暂停：独立标志，60s 拖拽自愈不得解除（否则大窗口下恢复行走会打乱几何）
     walk.zoomPaused = !!p;
+    if (p) cancelSeatExit("zoom"); // resize/zoom 接管几何：cancel 不 finalize（由 reposition 链重新派生）
     walk.pausedAt = p ? Date.now() : 0;
   } else if (!p) {
     clearDragPause("walking-pause", false);
   } else {
     walk.dragPaused = true;
+    cancelSeatExit("drag"); // 用户直接拥有窗口几何：立即取消过渡且不补写位置
+    if (walk.standingUpUntil) walk.standingUpUntil = 0; // P0：拖拽夺走几何所有权，起身节拍作废（落座/自由放置由 dragSeatUpdate 决策）
     walk.pausedAt = Date.now();
     // 人格化：被抓住/点按时偶尔嘀咕
     maybePersonify("grabbed", { chance: 0.2, cooldownMs: 90000 });
@@ -4370,11 +4714,21 @@ ipcMain.on("pet:walking-pause", (_e, p, source) => {
       clearTimeout(walk.phaseTimer);
       walkBroadcast();
     }
-    // 拖拽落点定格（松手时刻）：贴近任务栏/真实图标则吸附坐下，否则自由放置/恢复正常状态
-    const sat = dragSeatUpdate(true);
-    if (!sat && walk.freeStand && desktopIconMode()) { // 自由放置在桌面：原地站一会儿再回归正常循环
-      clearTimeout(walk.phaseTimer);
-      walkSchedulePhase(randInt(15000, 35000));
+    // 拖拽落点定格（松手时刻）：贴近任务栏/真实图标则吸附坐下，否则自由放置/恢复正常状态。
+    // seat snap 修复（source 门控）：final 定格判定只属于"真实拖拽松手"——renderer 契约：
+    // drag end/cancel/throw-fail 发 walkingPause(false,"drag")；poke/互动 resume 发
+    // walkingPause(false,"interact")（preload 会把无 source 归一化成 "drag"，必须显式区分）；zoom 还原发 ("zoom")。
+    // 旧实现无条件重放该 final 定格，把非拖拽的暂停恢复当成 drag finalization：
+    // 零位移重放到已坐姿角色上，坐姿 sink=30 天然落在任务栏磁吸带 ±12 之外 → 磁吸放弃、
+    // 落估算网格分支写出非权威 y（真机事故 752 vs canonical 768，changed=false 时原
+    // if(changed) canonical 又不会收口）→ 悬坐直到 walkTick 5s 坐姿自愈。
+    // 只收紧"谁来触发"，不改 dragSeatUpdate 几何语义：taskbar/icon/grid/freeDrag 落位设计原样。
+    if (source === "drag") {
+      const sat = dragSeatUpdate(true);
+      if (!sat && walk.freeStand && desktopIconMode()) { // 自由放置在桌面：原地站一会儿再回归正常循环
+        clearTimeout(walk.phaseTimer);
+        walkSchedulePhase(randInt(15000, 35000));
+      }
     }
   }
 });
@@ -4404,6 +4758,7 @@ ipcMain.on("pet:set-sleeping", (_e, v) => {
     return;
   }
   const wasSleeping = walk.sleeping;
+  const wasSeatedBeforeSleep = !!v && !wasSleeping && walk.seated; // 原坐姿入睡真实边沿（幂等 set-sleeping(true) 不重复 arm）
   walk.sleeping = !!v;
   if (walk.sleeping) {
     cancelFlight(); cancelWalkJump();
@@ -4425,8 +4780,21 @@ ipcMain.on("pet:set-sleeping", (_e, v) => {
       const lift = Number((config.getConfig().walk || {}).sleepLift);
       const liftRatio = Number.isFinite(lift) && lift >= 0 && lift <= 0.5 ? lift : 0; // 默认 0：不抬窗口
       const sleepY = standY - Math.round(b.height * liftRatio);
-      const targetY = v ? sleepY : standY;
-      if (Math.abs(b.y - targetY) > 1) {
+      let targetY = v ? sleepY : standY;
+      if (!v && seatExit) {
+        const remaining = 1 - (Date.now() - seatExit.startTs) / seatExit.durationMs;
+        if (remaining > 0) {
+          // Wake 改变 live base（含非零 sleepLift）：从当前实际 Y 重定 offset 幅度，
+          // 保留原 start/duration/progress 和结束时刻，仍由原 Phase1 driver 衰减。
+          seatExit.fromOffsetY = (b.y - targetY) / remaining;
+        }
+        targetY = seatExitTargetY(targetY);
+      }
+      if (wasSeatedBeforeSleep && v) {
+        // OPTION M Phase1：坐姿入睡不再单帧抬 30px——arm 共用 seatExit（liveSleepTargetY 含非零 sleepLift），
+        // Y 过渡由 walkTick 的 sleeping y-only 拍驱动；此处不写位置，t0 天然零位移。
+        armSeatExit("sleep", "set-sleeping");
+      } else if (Math.abs(b.y - targetY) > 1) {
         try {
           win.setPosition(b.x, Math.round(targetY));
         } catch { /* 窗口已销毁或坐标写入失败 */ }

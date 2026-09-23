@@ -165,6 +165,10 @@ contextBridge.exposeInMainWorld("petAPI", {
   onTtsPart: (cb) => ipcRenderer.on("pet:tts-part", (_e, part) => cb(part)), // v2.5.5 逐句流式
   setSkinWindowWidth: (px) => ipcRenderer.send("pet:set-skin-window-width", px),
   playback: (msg) => ipcRenderer.send("pet:tts-playback", msg),
+  edgeDiag: !!process.env.SUSSURRO_EDGE_DIAG, // TEMPORARY 碰壁折返闪现诊断开关（env 门控；未设置=false，行为与生产一致；定位后整体删除）
+  speechDiag: !!process.env.SUSSURRO_SPEECH_DIAG, // TEMPORARY 说话时定身(T3)诊断开关（env 门控；默认关=无 interval/无日志；定位后整体删除）
+  seatExitForensic: process.env.SUSSURRO_SEAT_EXIT_FORENSIC === "1", // E1：Sit→Move 有界取证（默认关）
+  standBeatPose: process.env.SUSSURRO_STANDBEAT === "1" && process.env.SUSSURRO_STANDBEAT_POSE === "1", // E2：仅 stand-beat 的窄 pose admission（默认关）
   onCursorRecovery: (cb) => ipcRenderer.on("pet:cursor-recovery", (_e, p) => cb(p)), // native cursor 恢复推送（穿透期间 main 轮询系统光标 → viewport 坐标）
 
   // 设置窗口
