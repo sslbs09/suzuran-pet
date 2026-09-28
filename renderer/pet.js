@@ -2211,6 +2211,74 @@ function pokeFeedback() { // 点击反馈（v2.5.1）：缩放脉冲 + 原声切
   try { if (ttsConfig.enabled) playPresetVoice(); } catch { /* 忽略 */ }
 }
 
+/* ---------- 摸头/单击的瞬时按压 Q 弹（Spine 模式补齐；GIF 由 pet.css 的 pet-squash keyframes 承担） ----------
+ * 为什么需要它（回归考古结论，非猜测）：
+ *   1) 按压 Q 弹自 fab69cd（v2.5.22d）引入，CSS 选择器首版就带
+ *      `body:not(.spine-mode):not(.rig-mode):not(.live2d-mode)` 门控，但当时全仓库没有任何代码
+ *      设置 spine-mode（门控休眠），且 spine 画布是 #pet 子节点（运行时 insertBefore，沿用至今）
+ *      → #pet 的 squash transform 直接传导到画布，Q 弹在 spine 模式下事实可见（fab69cd..6083542）；
+ *   2) 6083542（render mode 排他生命周期）补上 `body.classList.add("spine-mode")`，休眠门控被
+ *      激活 → spine 的按压/释放 Q 弹自该 commit 起静默消失。这才是回归点：摸头 JS 链路代码
+ *      本身零改动，变的是 CSS 门控的激活状态；
+ *   3) 本应接替的 Spine 侧瞬时反馈 pokeFeedback（2600a04）出生至 HEAD 从未有生产调用点（死
+ *      代码），门控激活后无任何实现接盘 → 摸头只剩 Interact 动作 + ❤ 气泡。GIF 全程不受影响；
+ *      rig/live2d 的 body class 出生即设置，本来就从未有过 squash。
+ * 关键帧镜像 GIF 的 `pet-squash-release`（总时长 0.35s、60% 处过冲 1.06），transform-origin 取
+ * 底部中心：scale 等比（不触发 pet.js 200ms 非等比自愈），x/y 按当帧底部中心补偿 → 脚不离地。
+ * 守卫（绝不与既有 writer 争写）：
+ *   - seat-exit local-Y owner / Sit ratchet（seatContainmentCommit 逐拍写 transform）期间整轮让位；
+ *   - 复用 pokeFeedbackGen：换肤·切模式·销毁·seat-exit arm 都已 bump 它，排队回调随之永久失效；
+ *   - 乐观并发：每帧先读当前 transform，认到"外部写者"（fit pass 等）就以它的值为新基准继续，
+ *     末拍精确还原基准值——动画永远骑在实时姿态上，不会用陈旧绝对值把 fit/seat 拉回去。 */
+let patSquashBase = null;   // 本轮基准 transform（外部 writer 接手时刷新；末拍精确还原）
+let patSquashShadow = null; // 本轮已写出的 transform（用于识别"有没有被别人改过"）
+function headPatSquashBlocked() {
+  return seatExitYOwnsY() || !!(seatEpisode.active && seatEpisode.owner === spineObj);
+}
+function headPatSquash() {
+  if (!spineObj || activeRenderMode !== "spine" || headPatSquashBlocked()) return;
+  try { // 对齐 GIF 侧 backlog-1 契约（pet.css prefers-reduced-motion 禁用 squash）：JS 替代实现须尊重同一系统设置
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  } catch { /* matchMedia 异常按未要求减少动效处理 */ }
+  const gen = ++pokeFeedbackGen; // 新一轮交互使上一轮排队回调永久失效
+  const owner = spineObj;
+  const read = () => ({ x: owner.x, y: owner.y, sx: owner.scale.x, sy: owner.scale.y });
+  const same = (a, b) => !!a && !!b && a.x === b.x && a.y === b.y && a.sx === b.sx && a.sy === b.sy;
+  const writeBase = (t) => { owner.x = t.x; owner.y = t.y; owner.scale.set(t.sx, t.sy); };
+  const keyframe = (k) => {
+    if (gen !== pokeFeedbackGen || owner !== spineObj || activeRenderMode !== "spine") return;
+    if (headPatSquashBlocked()) return;
+    const cur = read();
+    // 认到外部写者（fit pass / 行走对齐等）：以它的值为新基准继续，绝不用陈旧绝对值把它拉回去
+    if (!same(cur, patSquashShadow) && !same(cur, patSquashBase)) patSquashBase = cur;
+    if (k === 1) { // 末拍：精确还原基准，动画自然收尾
+      const t = patSquashBase;
+      patSquashBase = null;
+      patSquashShadow = null;
+      if (t) writeBase(t);
+      return;
+    }
+    let b = null;
+    try { b = owner.getBounds(); } catch { /* 忽略 */ }
+    if (!b || !Number.isFinite(b.x) || !Number.isFinite(b.y) || !(b.width > 0) || !(b.height > 0)) return;
+    if (!patSquashBase) patSquashBase = cur;
+    const src = patSquashBase;
+    const cx = b.x + b.width / 2, bottom = b.y + b.height; // 底部中心 = CSS transform-origin: 50% 100%
+    owner.scale.set(src.sx * k, src.sy * k);
+    owner.x = cx - (cx - src.x) * k;
+    owner.y = bottom - (bottom - src.y) * k;
+    patSquashShadow = read();
+  };
+  // 上一轮被新交互打断：先还原到基准再重新起手，对齐 GIF「移除 class 后重放 keyframes」语义，
+  // 否则连点会把压缩量叠乘（0.9 → 0.81 → …，角色逐次变小）。
+  if (patSquashShadow && same(read(), patSquashShadow) && patSquashBase) writeBase(patSquashBase);
+  patSquashBase = read();
+  patSquashShadow = null;
+  keyframe(0.9);
+  setTimeout(() => keyframe(1.05), 210);
+  setTimeout(() => keyframe(1), 350);
+}
+
 /** stale queued-successor refresh（talking-slide 根因修复，T2 rework）：
  *  poke/互动用"当时"的 spinePhaseAnim() 快照排队 successor——暂停期排队即冻结为 Relax。
  *  resume 广播到达时 Interact 还在播，trackDecision 依 queuedSuccessor 正确 defer（不打断互动），
@@ -3965,6 +4033,7 @@ function finishDrag(reason = "cancel") {
 
   if (!wasDrag) {
     try { window.petAPI.playback("[ui] click 未拖动 count=" + ((patSeq && patSeq.count) || 0)); } catch { /* 忽略 */ }
+    headPatSquash(); // 摸头/单击的瞬时 Q 弹：GIF 由上面的 pet-squash-release class 承担，Spine 在此补齐（非 spine 模式为 no-op）
     const now = Date.now();
     if (!patSeq || now - patSeq.at > 2000) patSeq = { at: now, count: 0, barOpenedByFirst: false };
     patSeq.count += 1;
@@ -4164,6 +4233,7 @@ if (window.__renderLifecycleTestMode) {
     resetVisualState,
     bootstrapRelease: (why) => releaseSpineBootstrap(why), // 测试专用：模拟有界兜底触发（生产路径仍由事件/计时器驱动）
     poke: () => playSpineInteract(), // 测试专用：摸头/单击互动入口（与 finishDrag !wasDrag 分支同函数）
+    headPatSquash: () => headPatSquash(), // 测试专用：摸头/单击瞬时 Q 弹入口（与 finishDrag !wasDrag 分支同函数）
     fitPassForTest: () => fitSpinePose(spineFitGeneration, spineFitOwnerGeneration, spineRuntimeOwner), // 测试专用：以"当前原窗口同一 generation"手动补一拍 fit（FIT-M4 模拟混合自然结束后的原窗口 pass；不 bump、不重排程）
     seatYForTest: { // 测试专用：Phase2 seat-exit Y ownership 驱动/观察（不改变任何生产语义）
       tick: (dt) => seatExitYTick(dt),

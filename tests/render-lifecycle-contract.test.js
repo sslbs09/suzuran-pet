@@ -345,6 +345,9 @@ function createPetLifecycleHarness(opts = {}) {
     }
   });
 
+  // HPAT-9/10：捕获 window 级监听器（生产 pointerup/pointermove 驱动 finishDrag），按需派发；
+  // 捕获本身惰性，不派发则与旧 no-op 零差别。
+  const windowListeners = new Map();
   const sandbox = {
     console,
     window: null,
@@ -372,8 +375,8 @@ function createPetLifecycleHarness(opts = {}) {
     clearTimeout: timers.clearTimeout,
     setInterval: () => 0,
     clearInterval: () => {},
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener(type, fn) { const arr = windowListeners.get(type); if (arr) arr.push(fn); else windowListeners.set(type, [fn]); },
+    removeEventListener(type, fn) { const arr = windowListeners.get(type); if (arr) windowListeners.set(type, arr.filter((f) => f !== fn)); },
     getComputedStyle: () => ({ zoom: "1" }),
     matchMedia: () => ({ addEventListener() {} }),
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
@@ -429,6 +432,12 @@ function createPetLifecycleHarness(opts = {}) {
     handlers,
     calls,
     elements,
+    dispatchWindow(type, event) { // HPAT-9/10：向生产 window 监听器派发事件（pointerup/pointermove 等）
+      const arr = windowListeners.get(type);
+      if (!arr) return false;
+      for (const fn of [...arr]) fn(event);
+      return true;
+    },
     assets,
     spineQueries,
     stateReads,
@@ -3675,6 +3684,190 @@ test("E2-6: deadline 后仍由普通广播请求 Move，E2 只记录 Relax→Mov
   assert.ok(events.includes("stand-beat-pose-request"), "forensic 能辨认 Sit→Relax request");
   assert.ok(events.includes("stand-beat-pose-applied"), "forensic 能辨认 Relax 首个 applied frame");
   assert.ok(events.includes("stand-beat-move-request"), "forensic 能辨认 Relax→Move request");
+});
+
+/* ---------- HPAT：摸头/单击的瞬时 Q 弹（Spine 模式补齐 GIF 的 pet-squash 语义） ----------
+ * 回归背景：fab69cd 的 squash CSS 自带 body:not(.spine-mode) 门控，但当时无人设置该 class
+ * （门控休眠）且 spine 画布是 #pet 子节点 → Q 弹在 spine 模式事实可见；6083542 补上
+ * body.classList.add("spine-mode") 激活门控 → spine 的按压/释放 Q 弹静默消失（回归点）；
+ * 本应接替的 pokeFeedback（2600a04）出生至 HEAD 从无生产调用点（死代码），无实现接盘。
+ * 这组测试同时锁住"行为"与"接线"：历史上正是"定义了但没接线"才让回归静默通过。 */
+async function hpatHarness() {
+  const h = await seatRuntimeHarness();
+  h.clock.advance(5000); // 排空 bootstrap/fit 尾拍：本组只观察 Q 弹自身，不与 fit pass 抢写
+  h.obj.scale.set(1.2); h.obj.x = 130; h.obj.y = 160;
+  return h;
+}
+const hpatBottom = (h) => { const b = h.obj.getBounds(); return { cx: b.x + b.width / 2, bottom: b.y + b.height }; };
+const hpatPose = (h) => ({ x: h.obj.x, y: h.obj.y, sx: h.obj.scale.x, sy: h.obj.scale.y });
+
+test("HPAT-1: 摸头/单击立即产生等比压缩，底部中心锚定，末拍精确还原", async () => {
+  const h = await hpatHarness();
+  const before = hpatBottom(h), pose = hpatPose(h);
+  h.lifecycle.headPatSquash();
+  const mid = hpatBottom(h);
+  assert.ok(Math.abs(h.obj.scale.y - pose.sy * 0.9) < 1e-9, "按下即压缩到 0.9");
+  assert.ok(Math.abs(h.obj.scale.x - pose.sx * 0.9) < 1e-9, "x 同步压缩（保留翻面符号）");
+  assert.ok(Math.abs(h.obj.scale.x / h.obj.scale.y - 1) < 1e-9, "严格等比：不触发 pet.js 200ms 非等比自愈");
+  assert.ok(Math.abs(mid.cx - before.cx) < 1e-6, "水平中心锚定（transform-origin 50%）");
+  assert.ok(Math.abs(mid.bottom - before.bottom) < 1e-6, "脚底锚定：压缩时脚不离地");
+  h.clock.advance(210);
+  const over = hpatBottom(h);
+  assert.ok(h.obj.scale.y > pose.sy, "松手过冲回弹（Q 弹上沿）");
+  assert.ok(Math.abs(over.bottom - before.bottom) < 1e-6, "回弹相位脚底同样锚定");
+  h.clock.advance(140);
+  assert.deepEqual(hpatPose(h), pose, "末拍精确还原基准 transform（状态可恢复）");
+});
+
+test("HPAT-2: 外部写者（fit pass）中途接手时以其为新基准，绝不回写陈旧绝对值", async () => {
+  const h = await hpatHarness();
+  h.lifecycle.headPatSquash();
+  h.clock.advance(100);
+  h.obj.scale.set(1.5); h.obj.y = 123; // 模拟 fitSpinePose 在 150ms 拍写回的权威姿态
+  h.clock.advance(110);
+  assert.ok(h.obj.scale.y > 1.5, "过冲建立在外部写者的值之上");
+  h.clock.advance(140);
+  assert.equal(h.obj.scale.y, 1.5, "末拍还原的是外部写者的值");
+  assert.equal(h.obj.y, 123, "不会把 fit 的 y 拉回旧基准");
+});
+
+test("HPAT-3: 连点重触发不叠乘压缩量（对齐 GIF 重放 keyframes 语义）", async () => {
+  const h = await hpatHarness();
+  const pose = hpatPose(h);
+  h.lifecycle.headPatSquash();
+  h.clock.advance(80);
+  h.lifecycle.headPatSquash(); // 摸头第二击落在上一轮压缩期内
+  assert.ok(Math.abs(h.obj.scale.y - pose.sy * 0.9) < 1e-9, "重新起手先还原基准，不叠乘成 0.81");
+  h.clock.advance(400);
+  assert.deepEqual(hpatPose(h), pose, "新一轮收尾同样精确还原");
+});
+
+test("HPAT-4: Sit ratchet 与 seat-exit local-Y owner 期间整轮让位", async () => {
+  const h = await hpatHarness();
+  let pose = hpatPose(h);
+  h.setAnim("Sitd"); // production 入口：setSpineAnim(Sit) 激活 seatEpisode（containment 逐拍写 transform）
+  h.lifecycle.headPatSquash();
+  assert.deepEqual(hpatPose(h), pose, "Sit ratchet 期间同步首拍即被拦下");
+  h.clock.advance(400);
+  assert.deepEqual(hpatPose(h), pose, "Sit ratchet 期间排队回调同样不写入");
+  h.arm(); // production 入口：Sit→Move 触发 seat-exit local-Y ownership
+  assert.equal(h.lifecycle.seatYForTest.owns(), true, "seat-exit Y owner 已生效");
+  pose = hpatPose(h);
+  h.lifecycle.headPatSquash();
+  assert.deepEqual(hpatPose(h), pose, "seat-exit Y owner 期间同步首拍零写入");
+  h.clock.advance(400);
+  assert.ok(Math.abs(h.obj.scale.y - pose.sy * 0.9) > 1e-9, "seat-exit Y owner 期间绝不落压缩量");
+});
+
+test("HPAT-5: owner 销毁/模式切换后排队回调不得复活", async () => {
+  const h = await hpatHarness();
+  const old = h.obj;
+  h.lifecycle.headPatSquash();
+  old.scale.set(7); // 哨兵：若旧回调复活，这里会被改写
+  await h.switch("gif"); await h.switch("spine"); h.clock.advance(1200);
+  assert.notEqual(h.lifecycle.getState().spineRuntimeOwner.obj, old, "新 owner 已建立");
+  assert.equal(old.scale.x, 7, "旧 owner 的 210/350ms 回调永久失效");
+  assert.equal(old.scale.y, 7);
+});
+
+test("HPAT-6: 非 spine 模式为 no-op，且 Q 弹不触碰动画轨道", async () => {
+  const h = await hpatHarness();
+  h.setAnim("Relax"); h.obj.update(1 / 60);
+  const cur = h.obj.state.getCurrent(0).animation.name;
+  h.lifecycle.headPatSquash();
+  h.frame();
+  assert.equal(h.obj.state.getCurrent(0).animation.name, cur, "Q 弹只写 transform，不动 track0");
+  await h.switch("gif");
+  assert.doesNotThrow(() => h.lifecycle.headPatSquash(), "gif 模式无 spineObj：安全 no-op");
+});
+
+test("HPAT-7: 接线契约——非拖拽释放（摸头/单击）必须触发 Q 弹", () => {
+  const start = renderer.indexOf("  if (!wasDrag) {");
+  const end = renderer.indexOf("  } else if (velocity", start);
+  assert.ok(start >= 0 && end > start, "finishDrag 的非拖拽分支可定位");
+  const branch = renderer.slice(start, end);
+  const at = branch.indexOf("headPatSquash();");
+  assert.ok(at >= 0, "非拖拽释放路径必须调用 headPatSquash（历史回归正是'定义了没接线'）");
+  assert.ok(at < branch.indexOf("playSpineInteract();"), "Q 弹与互动动作同拍触发，不被延后");
+  const finishDrag = renderer.slice(renderer.indexOf("function finishDrag"), renderer.indexOf("function onDragStart"));
+  assert.doesNotMatch(finishDrag, /pokeFeedback\(/, "不得接线带原声切片+600ms 节流的 pokeFeedback：那会额外打开未被请求的随机原声声道，并吃掉摸头第二击");
+});
+
+test("HPAT-8: GIF 路径零改动（CSS 门控与 class 时机保持原样）", () => {
+  assert.match(css, /body:not\(\.spine-mode\):not\(\.rig-mode\):not\(\.live2d-mode\) \.pet\.pet-squash \{/,
+    "GIF 按压 class 门控保持不变（本修复只在 Spine 侧补实现，不动 GIF 语义）");
+  assert.match(renderer, /petEl\.classList\.add\("pet-squash"\);/, "GIF 按压 class 仍在 pointerdown 添加");
+  assert.match(renderer, /petEl\.classList\.add\("pet-squash-release"\);/, "GIF 松手 class 仍在 pointerup 添加");
+});
+
+/* HPAT-9/10：端到端行为契约——不经测试钩子，走生产监听器链
+ * （petEl pointerdown → window pointerup → finishDrag 分类 → headPatSquash / 拖拽分支）。
+ * HPAT-1..8 锁函数语义，这两个锁"用户真实操作能到达它"：6083542 型回归（链路完好但
+ * 反馈被门控静默吃掉）只有端到端才能暴露。 */
+const hpatPointerEvent = (petEl, over = {}) => ({
+  pointerType: "mouse", isPrimary: true, button: 0, buttons: 1, pointerId: 1,
+  screenX: 100, screenY: 100, clientX: 50, clientY: 50,
+  currentTarget: petEl, target: petEl, ...over
+});
+
+test("HPAT-9: 端到端——spine 模式真实单击链（pointerdown→pointerup）触发瞬时 Q 弹", async () => {
+  const h = await hpatHarness();
+  const petEl = h.elements.get("pet");
+  const before = hpatBottom(h), pose = hpatPose(h);
+  petEl.dispatchEvent({ type: "pointerdown", ...hpatPointerEvent(petEl) });
+  assert.ok(h.calls.playback.some((line) => line.startsWith("[ui] dragStart")), "生产 pointerdown 监听器已接收");
+  assert.ok(h.dispatchWindow("pointerup", { type: "pointerup", pointerId: 1, clientX: 50, clientY: 50 }),
+    "生产 pointerup 监听器注册在 window 上");
+  // finishDrag(!wasDrag) 同步首拍：Q 弹必须已落在 spineObj 上（用户可见的摸头反馈本体）
+  assert.ok(h.calls.playback.some((line) => line.startsWith("[ui] click 未拖动")), "生产链路分类为单击而非拖拽");
+  assert.ok(Math.abs(h.obj.scale.y - pose.sy * 0.9) < 1e-9, "单击释放立即压缩到 0.9");
+  assert.ok(Math.abs(h.obj.scale.x - pose.sx * 0.9) < 1e-9, "x 同步压缩（严格等比）");
+  const mid = hpatBottom(h);
+  assert.ok(Math.abs(mid.bottom - before.bottom) < 1e-6, "脚底锚定：单击压缩脚不离地");
+  // 后续拍与 playSpineInteract 排程的 fit pass 并发（乐观并发语义已由 HPAT-2 锁定）：
+  // 这里只锁终态契约——收敛到有限、等比、稳定的姿态，无残留压缩/回调。
+  h.clock.advance(5000);
+  const settled = hpatPose(h);
+  assert.ok(Number.isFinite(settled.sx) && Number.isFinite(settled.sy) && settled.sy > 0, "收敛姿态有限且为正");
+  assert.ok(Math.abs(settled.sx / settled.sy - 1) < 1e-9, "收敛姿态等比：无残留压缩/过冲");
+  h.clock.advance(500);
+  assert.deepEqual(hpatPose(h), settled, "收敛后无残留 Q 弹回调：状态可恢复");
+});
+
+test("HPAT-10: 端到端——拖拽（位移>3px）释放不触发 Q 弹，走拖动分支", async () => {
+  const h = await hpatHarness();
+  const petEl = h.elements.get("pet");
+  const pose = hpatPose(h);
+  petEl.dispatchEvent({ type: "pointerdown", ...hpatPointerEvent(petEl) });
+  assert.ok(h.dispatchWindow("pointermove", { type: "pointermove", ...hpatPointerEvent(petEl, { screenX: 106, clientX: 56 }) }));
+  h.clock.advance(100);
+  assert.ok(h.dispatchWindow("pointermove", { type: "pointermove", ...hpatPointerEvent(petEl, { screenX: 112, clientX: 62 }) }));
+  assert.ok(h.calls.playback.some((line) => line.startsWith("[ui] 判定为拖动")), "生产链路分类为拖动");
+  h.clock.advance(500); // 样本窗（80ms）过期后释放：velocity=null，不进 throw 分支
+  h.dispatchWindow("pointerup", { type: "pointerup", pointerId: 1, clientX: 62, clientY: 50 });
+  assert.ok(!h.calls.playback.some((line) => line.startsWith("[ui] click 未拖动")), "拖动释放不得走单击分支");
+  assert.deepEqual(hpatPose(h), pose, "拖动释放零 transform 写入：Q 弹绝不误触发");
+  h.clock.advance(400); // 排空 dragReleaseTimer 等收尾
+  assert.deepEqual(hpatPose(h), pose, "收尾后仍零写入（无排队回调）");
+});
+
+test("HPAT-11: prefers-reduced-motion 下 JS Q 弹整轮让位（对齐 GIF 侧 CSS backlog-1 契约）", async () => {
+  const h = await hpatHarness();
+  const pose = hpatPose(h);
+  const original = h.sandbox.matchMedia;
+  h.sandbox.matchMedia = (q) => ({ matches: String(q).includes("prefers-reduced-motion"), addEventListener() {} });
+  try {
+    h.lifecycle.headPatSquash();
+    assert.deepEqual(hpatPose(h), pose, "reduced-motion：同步首拍零写入");
+    h.clock.advance(400);
+    assert.deepEqual(hpatPose(h), pose, "reduced-motion：排队拍同样零写入");
+  } finally {
+    h.sandbox.matchMedia = original;
+  }
+  h.lifecycle.headPatSquash();
+  assert.ok(Math.abs(h.obj.scale.y - pose.sy * 0.9) < 1e-9, "系统设置恢复后 Q 弹照常：守卫不泄漏到正常路径");
+  h.clock.advance(400);
+  assert.deepEqual(hpatPose(h), pose, "正常一轮的收尾还原不受守卫影响");
 });
 
 console.log("render lifecycle contract 全部通过");
