@@ -207,7 +207,7 @@ async function chatOpenAI(cfg, messages, opts) {
     },
     body: JSON.stringify(body0),
     signal: opts.signal
-  }, { allowLoopback: isLocalUrl(url), credentialOrigin: originOf(url) }); // F-01：已存凭据不跨 origin 重定向
+  }, { allowLoopback: isLocalUrl(url), credentialOrigin: originOf(url), allowFakeIpTransport: true }); // F-01 凭据绑定 + P02 fake-ip 运输令牌
   if (!resp.ok) {
     const errBody = await resp.text().catch(() => "");
     throw new Error(`API ${resp.status}: ${errBody.slice(0, 300)}`);
@@ -238,7 +238,7 @@ async function chatAnthropic(cfg, system, history, opts) {
     },
     body: JSON.stringify(bodyA),
     signal: opts.signal
-  }, { credentialOrigin: originOf(url) }); // F-01：已存凭据不跨 origin 重定向
+  }, { credentialOrigin: originOf(url), allowFakeIpTransport: true }); // F-01：已存凭据不跨 origin 重定向
   if (!resp.ok) {
     const errBody = await resp.text().catch(() => "");
     throw new Error(`API ${resp.status}: ${errBody.slice(0, 300)}`);
@@ -348,7 +348,7 @@ async function testConnection(overrides = {}, cfg0) {
         headers: { "Content-Type": "application/json", "x-api-key": o.apiKey, "anthropic-version": "2023-06-01" },
         body: JSON.stringify({ model: o.model, max_tokens: 8, messages: [{ role: "user", content: "ping" }] }),
         signal: AbortSignal.timeout(30000)
-      }, { credentialOrigin: originOf(url) });
+      }, { credentialOrigin: originOf(url), allowFakeIpTransport: true });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
       return "ok";
     }
@@ -367,7 +367,7 @@ async function testConnection(overrides = {}, cfg0) {
         stream: false, temperature: o.temperature, max_tokens: 8
       }),
       signal: AbortSignal.timeout(30000)
-    }, { allowLoopback: isLocalUrl(url), credentialOrigin: originOf(url) });
+    }, { allowLoopback: isLocalUrl(url), credentialOrigin: originOf(url), allowFakeIpTransport: true });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
     return "ok";
   })();
@@ -430,7 +430,7 @@ async function listModels(overrides = {}, cfg) {
           "anthropic-version": "2023-06-01"
         },
         signal: AbortSignal.timeout(20000)
-      }, { credentialOrigin: originOf(url) });
+      }, { credentialOrigin: originOf(url), allowFakeIpTransport: true });
       return await readModelList(resp);
     }
     const url = normalizeOpenAIBase(baseUrl) + "/models";
@@ -445,7 +445,7 @@ async function listModels(overrides = {}, cfg) {
         ...(apiKey ? { Authorization: "Bearer " + apiKey } : {})
       },
       signal: AbortSignal.timeout(20000)
-    }, { allowLoopback: isLocalUrl(url), credentialOrigin: originOf(url) });
+    }, { allowLoopback: isLocalUrl(url), credentialOrigin: originOf(url), allowFakeIpTransport: true });
     return await readModelList(resp);
   } catch (e) {
     return { ok: false, message: String(e.message || e) };
