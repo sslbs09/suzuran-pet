@@ -987,11 +987,13 @@ ipcMain.handle("pet:regenerate", async () => { // Swipes：重新生成最后一
   const task = conversation.start({ kind: "regenerate" });
   if (!task.ok) { logTts("chat", "regenerate 跳过: " + task.code); return null; }
   sendToRenderer("pet:thinking", { mode: "chat" });
+  const genAtRegen = history.generation(); // F-03：清史后迟到的重生成管线不得写回向量库
   try {
     const r = await chatClient.chat({
       persona: personaCache || config.getPersonaText(), history: hist, text,
       state: petStateNote(),
       signal: task.signal,
+      genGate: () => history.generation() === genAtRegen,
       onChunk: (d) => { if (task.isCurrent()) sendToRenderer("pet:chunk", { mode: "chat", text: d }); }
     });
     let newFull = r.text || "";
@@ -1586,6 +1588,7 @@ function startAgentApi() {
       }
       if (!text) { send(400, { ok: false, error: "text 不能为空" }); return; }
       // 任务按 id 管理：/stop 可同时取消正在执行和排队请求
+      const genAtAsk = history.generation(); // F-03 竞态护栏基线
       const enq = agentTaskQueue.enqueue(({ id, signal }) => {
         agentApiAbort = new AbortController();
         signal.addEventListener("abort", () => agentApiAbort.abort(), { once: true });
@@ -1595,6 +1598,7 @@ function startAgentApi() {
           text,
           state: petStateNote(),
           signal: agentApiAbort.signal,
+          genGate: () => history.generation() === genAtAsk, // F-03：清史后迟到的 Agent 任务不得写回向量库
           onChunk: () => {},
         });
       });
@@ -1604,8 +1608,13 @@ function startAgentApi() {
       }
       try {
         const r = await enq.done;
-        history.append({ ts: Date.now(), mode: "chat", role: "user", content: text });
-        history.append({ ts: Date.now(), mode: "chat", role: "assistant", content: r.text });
+        // F-03 竞态护栏：任务在途期间发生过 clear-history → 结果不写回（HTTP 响应照常返回调用方）
+        if (history.generation() === genAtAsk) {
+          history.append({ ts: Date.now(), mode: "chat", role: "user", content: text });
+          history.append({ ts: Date.now(), mode: "chat", role: "assistant", content: r.text });
+        } else {
+          logTts("history", "清除历史竞态: Agent API 在途结果不写回（代次已变更）");
+        }
         send(200, { ok: true, taskId: enq.id, reply: r.text, emotion: r.emotion || "" });
         maybeWorkflowComment(); // 观察 AI 工作流：外部 AI/脚本通过 Agent 接口找她时偶尔嘀咕
       } catch (e) {
@@ -2141,6 +2150,11 @@ function chatPauseWalk(p) {
   logTts("walk", p ? "对话暂停散步" : "对话结束恢复散步");
 }
 async function handleAsk(sender, payload) {
+  // F-03（实机验收）：受理时刻的清史代次随消息走——防抖缓冲/锁释放导致的迟到重发
+  // 据此识别并丢弃，防止被清除对话经延迟管线重新写入 history/向量库/记忆
+  if (payload && typeof payload === "object" && typeof payload.askGen !== "number") {
+    payload.askGen = history.generation();
+  }
   chatPauseWalk(true);
   try {
     await handleAskInner(sender, payload);
@@ -2148,7 +2162,11 @@ async function handleAsk(sender, payload) {
     chatPauseWalk(false);
   }
 }
-async function handleAskInner(sender, { id, text }) {
+async function handleAskInner(sender, { id, text, askGen }) {
+  if (typeof askGen === "number" && askGen !== history.generation()) {
+    logTts("history", "清除历史竞态: 清前消息迟到重发已丢弃（代次已变更）");
+    return;
+  }
   if (!isConsentAccepted(config.getConfig())) {
     sender.send("pet:error", { id, message: "请先阅读并同意《使用条款与隐私政策》后使用" });
     return;
@@ -2223,6 +2241,7 @@ async function handleAskInner(sender, { id, text }) {
     return;
   }
   const isCurrent = () => task.isCurrent();
+  const genAtStart = history.generation(); // F-03 竞态护栏：清除历史后，本次在途回复不得写回
   history.append({ ts: Date.now(), mode, role: "user", content: clean });
   // 长期记忆（v2.5）：规则式提取事实（称谓/喜好/生日/健康/近期安排），仅本机存储
   if (config.getConfig().features && config.getConfig().features.longTermMemory) {
@@ -2283,6 +2302,7 @@ async function handleAskInner(sender, { id, text }) {
         text: clean,
         state: petStateNote(), // v2.3 此刻状态注：时段/位置，驱动情绪与台词一致
         signal: task.signal,
+        genGate: () => history.generation() === genAtStart, // F-03：清史后迟到的管线不得把清前文本写回向量库
         onChunk: (d) => { if (isCurrent()) sender.send("pet:chunk", { id, mode, text: d }); }
       });
       full = r.text;
@@ -2290,8 +2310,12 @@ async function handleAskInner(sender, { id, text }) {
       if (emotion) lastReplyEmotion = emotion; // 情绪衔接（B2）
     }
     const isChat = mode === "chat";
-    history.append(Object.assign({ ts: Date.now(), mode, role: "assistant", content: full },
-      isChat ? { swipes: [full], swipeIndex: 0 } : {}));
+    if (history.generation() === genAtStart) {
+      history.append(Object.assign({ ts: Date.now(), mode, role: "assistant", content: full },
+        isChat ? { swipes: [full], swipeIndex: 0 } : {}));
+    } else {
+      logTts("history", "清除历史竞态: 在途回复不写回（代次已变更）"); // F-03：气泡照常展示，但不落盘
+    }
     if (isCurrent()) sender.send("pet:done", Object.assign({ id, mode, full, emotion },
       isChat ? { swipes: [full], swipeIndex: 0 } : {}));
 
@@ -2301,8 +2325,9 @@ async function handleAskInner(sender, { id, text }) {
       const turns = history.count("chat"); // P1-5：内存计数替代 recent("chat",999) 全量读盘
       if (turns > 0 && turns % 20 === 0) {
         const recent = history.recent("chat", 20);
+        const genAtSummary = history.generation(); // F-03：摘要在途期间清史 → 回写前复验代次
         features.generateMemorySummary(chatClient, recent).then((summary) => {
-          if (summary) {
+          if (summary && history.generation() === genAtSummary) {
             memory.updateSummary(summary); // v2.5：摘要真正入库，后续轮次注入人设
             logTts("memory", "记忆摘要: " + summary.slice(0, 80));
             sendToRenderer("pet:toast", "🧠 记忆已更新");
@@ -2572,37 +2597,10 @@ ipcMain.handle("pet:clear-secret", (_e, slot) => {
   }
 });
 
-ipcMain.handle("pet:list-models", async (_e, o = {}) => {
-  // 读取 API 端口的可用模型列表（OpenAI 兼容 GET /v1/models；Anthropic GET /v1/models）
-  try {
-    const cfg = config.getConfig();
-    const apiType = o.apiType || cfg.chat.apiType;
-    const baseUrl = o.baseUrl || cfg.chat.baseUrl;
-    const apiKey = o.apiKey || cfg.chat.apiKey;
-    let b = String(baseUrl || "").replace(/\/+$/, "");
-    if (!/\/v\d+$/.test(b)) b += "/v1";
-    const headers = { "Content-Type": "application/json" };
-    if (apiType === "anthropic") {
-      if (!apiKey) return { ok: false, message: "请先填写 API Key" };
-      headers["x-api-key"] = apiKey;
-      headers["anthropic-version"] = "2023-06-01";
-    } else if (apiKey) {
-      headers["Authorization"] = "Bearer " + apiKey;
-    }
-    const resp = await fetch(b + "/models", { headers, signal: AbortSignal.timeout(20000) });
-    if (!resp.ok) {
-      const t = (await resp.text()).slice(0, 200);
-      return { ok: false, message: "HTTP " + resp.status + ": " + t };
-    }
-    const j = await resp.json();
-    const raw = Array.isArray(j.data) ? j.data : Array.isArray(j.models) ? j.models : [];
-    const ids = raw.map((m) => m.id || m.name || m.model).filter(Boolean);
-    const uniq = [...new Set(ids)].sort((a, b) => a.localeCompare(b, "zh"));
-    if (!uniq.length) return { ok: false, message: "端口返回了空模型列表（可能不支持该接口）" };
-    return { ok: true, models: uniq, count: uniq.length };
-  } catch (e) {
-    return { ok: false, message: String(e.message || e) };
-  }
+ipcMain.handle("pet:list-models", (_e, o = {}) => {
+  // 读取 API 端口的可用模型列表；目的地校验/凭据组装统一收敛在 chatClient.listModels
+  // （与 pet:test-chat 同一信任边界，审计 K-EXP-13 F-01，失败 fail closed）
+  return chatClient.listModels(o || {}, config.getConfig());
 });
 ipcMain.handle("pet:fixed-lines-status", () => {
   const st = fixedLinePreloader.status(config.getConfig(), chatVars());
@@ -2651,8 +2649,23 @@ ipcMain.handle("pet:fixed-lines-clear-old", () => {
 
 
 ipcMain.handle("pet:clear-history", () => {
+  // F-03（审计 K-EXP-13）：清史 = 清对话源 + 全部派生检索态，使被删对话无法经已知路径
+  // 再被召回注入上下文。派生态：向量记忆（memory-vector.json + 内存 cache，重启重载源）、
+  // LLM 摘要与规则自动提取事实（经 memory.getText() 注入人设）；手动「记住X」事实属用户
+  // 显式保留意图，不在本操作范围（由「清除记忆」原语覆盖）。竞态：丢弃防抖缓冲（清前
+  // 消息不得在清除后补发写回）；在途回复/摘要由 history.generation() 护栏在写回点丢弃。
+  // 任一原语失败 → 返回 false（fail closed），设置页明确提示未清干净。
   try {
-    return history.clear();
+    if (pendingAskTimer) { clearTimeout(pendingAskTimer); pendingAskTimer = null; }
+    askBuffer.clear();
+    const histOk = history.clear(); // 递增 generation，护栏据此刻判断在途写回
+    let vecOk = true, memOk = true;
+    try { vecOk = require("./src/vector-memory").clear(); } catch (e) { vecOk = false; logTts("history", "向量记忆清除异常: " + String(e && (e.message || e) || e)); }
+    try { memOk = memory.clearDerived(); } catch (e) { memOk = false; logTts("history", "派生记忆清除异常: " + String(e && (e.message || e) || e)); }
+    if (!histOk) logTts("history", "历史文件清除失败（磁盘未变，重启后将保留原记录）");
+    if (!vecOk) logTts("history", "向量记忆清除失败（memory-vector.json 未变，重启后将重载旧向量）");
+    if (!memOk) logTts("history", "派生记忆清除失败（memory.json 未变，重启后将重载旧摘要/事实）");
+    return histOk && vecOk && memOk;
   } catch (e) {
     logTts("history", "清除历史失败: " + String(e && (e.message || e) || e));
     return false;

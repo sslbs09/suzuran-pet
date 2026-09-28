@@ -10,7 +10,7 @@
 const config = require("./config");
 const { activeWorldInfos } = require("./world-info"); // 世界书：按用户消息关键词激活情境块（§14 追加 102）
 const vectorMemory = require("./vector-memory"); // 向量记忆：语义片段回引（§14 追加 102）
-const { safeFetch, isLoopbackHost } = require("./safe-url");
+const { safeFetch, isLoopbackHost, originOf, sameOrigin } = require("./safe-url");
 
 function buildPetRules() {
   const cfg = config.getConfig();
@@ -97,6 +97,17 @@ function normalizeAnthropicBase(base) {
 
 function isLocalUrl(url) {
   try { return isLoopbackHost(new URL(url).hostname); } catch { return false; }
+}
+
+/** F-01 credential binding（审计 residual）：主进程已存密钥（cfg.chat.apiKey）不得发往
+ *  renderer 指定的、与已保存 cfg.chat.baseUrl 不同 origin 的目的地——任意公网 HTTPS origin
+ *  本身能通过 URL safety 检查，故凭据必须绑定到已保存 origin。origin 经规范化比较
+ *  （默认端口省略、hostname 小写、IPv6 方括号归一），path/trailing slash/=/v1 差异不误伤。
+ *  仅当密钥来自已存回退（renderer 未显式提供）时适用；返回 null=放行，否则为拒绝文案。 */
+function storedKeyOriginViolation(storedBaseUrl, requestBaseUrl) {
+  if (!storedBaseUrl) return "尚未保存 API 地址，无法安全使用已保存的密钥；请先保存设置";
+  if (sameOrigin(storedBaseUrl, requestBaseUrl)) return null;
+  return "目的地与已保存的 API 地址不属于同一来源，为防止已保存的密钥外发已阻止；请先保存设置，或在密钥输入框填写该地址的 API Key 后重试";
 }
 
 /** SSRF 防护（优化建议 P0）：baseUrl 目标主机校验——
@@ -196,7 +207,7 @@ async function chatOpenAI(cfg, messages, opts) {
     },
     body: JSON.stringify(body0),
     signal: opts.signal
-  }, { allowLoopback: isLocalUrl(url) });
+  }, { allowLoopback: isLocalUrl(url), credentialOrigin: originOf(url) }); // F-01：已存凭据不跨 origin 重定向
   if (!resp.ok) {
     const errBody = await resp.text().catch(() => "");
     throw new Error(`API ${resp.status}: ${errBody.slice(0, 300)}`);
@@ -227,7 +238,7 @@ async function chatAnthropic(cfg, system, history, opts) {
     },
     body: JSON.stringify(bodyA),
     signal: opts.signal
-  });
+  }, { credentialOrigin: originOf(url) }); // F-01：已存凭据不跨 origin 重定向
   if (!resp.ok) {
     const errBody = await resp.text().catch(() => "");
     throw new Error(`API ${resp.status}: ${errBody.slice(0, 300)}`);
@@ -249,9 +260,13 @@ async function chatAnthropic(cfg, system, history, opts) {
  *   - state: string 可选「此刻状态」注（时段/位置/心情，越贴近用户消息权重越高，驱动情绪与台词一致）
  *   - onChunk: (delta:string)=>void
  *   - signal: AbortSignal
+ *   - genGate: 可选 () => boolean（F-03 实机验收修复）：调用方（main.js 聊天管线）传入
+ *     "消息受理时的清史代次仍然有效" 判定；向量入库发生在 chat() 同步段，管线若在
+ *     clear-history 之后才执行到此处（防抖重排/锁释放延迟），不加闸会把已清除对话
+ *     的用户文本写回向量库并经 search 复活。缺省时行为不变（无 gate 的调用方照旧入库）。
  * @returns {Promise<{text:string, emotion:string}>} 完整回复（已去掉情绪标注）+ 模型选择的情绪词
  */
-async function chat({ persona, history = [], text, state = "", onChunk = () => {}, signal }) {
+async function chat({ persona, history = [], text, state = "", onChunk = () => {}, signal, genGate }) {
   const cfg = config.getConfig();
   const messages = [
     { role: "system", content: buildSystemMessage(persona) },
@@ -273,7 +288,9 @@ async function chat({ persona, history = [], text, state = "", onChunk = () => {
         messages.push({ role: "system", content: "【回忆片段】这些是博士之前提过的相关内容，自然回引（若有契合点）：\n" + block });
       }
     } catch { /* 向量记忆故障不影响对话 */ }
-    try { vectorMemory.add(text); } catch { /* 入库失败忽略 */ }
+    try {
+      if (typeof genGate !== "function" || genGate()) vectorMemory.add(text); // F-03：清史后代次失效 ⇒ 不得把清前文本写回向量库
+    } catch { /* 入库失败忽略 */ }
   }
   // v2.5.22 修复（P1-6）：maxHistoryTurns 是"轮数"（recent() 返回 2N 条 user+assistant），
   // 这里按条数 slice 会把上下文砍半——改为 2N 与 recent 语义一致。
@@ -296,13 +313,15 @@ async function chat({ persona, history = [], text, state = "", onChunk = () => {
 /**
  * 测试连接：发一条极小请求验证 key/地址可用（设置窗口用）
  * @param {Object} overrides 可覆盖 chat 配置（baseUrl/model/apiKey/apiType/temperature/maxTokens）
+ * @param {Object} [cfg0] 主进程当前配置；缺省时读取本模块 config（可测性注入）
  * @returns {Promise<{ok:boolean, ms:number, message:string}>}
  */
-async function testConnection(overrides = {}) {
-  const cfg = config.getConfig();
+async function testConnection(overrides = {}, cfg0) {
+  const cfg = cfg0 || config.getConfig();
   // 属性存在语义：显式传入的 apiKey（包括空串）优先生效，用于测试“已清空 key”的场景；
   // 未传该属性时才回退到已保存的 key。
   const has = (k) => Object.prototype.hasOwnProperty.call(overrides, k) && overrides[k] !== undefined;
+  const storedFallbackKey = !has("apiKey") && !!cfg.chat.apiKey; // F-01：回退已存密钥时适用 credential binding
   const o = {
     apiType: has("apiType") ? overrides.apiType : cfg.chat.apiType,
     baseUrl: has("baseUrl") ? overrides.baseUrl : cfg.chat.baseUrl,
@@ -311,24 +330,32 @@ async function testConnection(overrides = {}) {
     temperature: has("temperature") ? overrides.temperature : cfg.chat.temperature,
     maxTokens: Math.min(16, (has("maxTokens") && overrides.maxTokens) || 16)
   };
+  // 凭据仅在 validateApiBase 通过后组装；已存密钥仅发往与已保存配置同 origin 的目的地
+  const assertCredentialBinding = () => {
+    if (!storedFallbackKey) return;
+    const violation = storedKeyOriginViolation(cfg.chat.baseUrl, o.baseUrl);
+    if (violation) throw new Error(violation);
+  };
   const t0 = Date.now();
   const probe = (async () => {
     if (o.apiType === "anthropic") {
       if (!o.apiKey) throw new Error("未填写 API Key");
       const url = normalizeAnthropicBase(o.baseUrl) + "/messages";
       validateApiBase(url, !!cfg.chat.allowPrivateBaseUrl); // SSRF 防护（优化建议 P0）
+      assertCredentialBinding();
       const resp = await safeFetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": o.apiKey, "anthropic-version": "2023-06-01" },
         body: JSON.stringify({ model: o.model, max_tokens: 8, messages: [{ role: "user", content: "ping" }] }),
         signal: AbortSignal.timeout(30000)
-      });
+      }, { credentialOrigin: originOf(url) });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
       return "ok";
     }
     if (!o.apiKey && !isLocalUrl(normalizeOpenAIBase(o.baseUrl))) throw new Error("未填写 API Key");
     const url = normalizeOpenAIBase(o.baseUrl) + "/chat/completions";
     validateApiBase(url, !!cfg.chat.allowPrivateBaseUrl); // SSRF 防护（优化建议 P0）
+    assertCredentialBinding();
     const resp = await safeFetch(url, {
       method: "POST",
       headers: {
@@ -340,7 +367,7 @@ async function testConnection(overrides = {}) {
         stream: false, temperature: o.temperature, max_tokens: 8
       }),
       signal: AbortSignal.timeout(30000)
-    }, { allowLoopback: isLocalUrl(url) });
+    }, { allowLoopback: isLocalUrl(url), credentialOrigin: originOf(url) });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
     return "ok";
   })();
@@ -352,7 +379,80 @@ async function testConnection(overrides = {}) {
   }
 }
 
-module.exports = { chat, testConnection, buildSystemMessage, parseEmotion, isLocalUrl, validateApiBase, readSSE, normalizeOpenAIBase, normalizeAnthropicBase };
+/** 解析 GET /v1/models 响应并提取去重排序后的模型 id 列表（pet:list-models 专用，格式与原实现一致） */
+async function readModelList(resp) {
+  if (!resp.ok) {
+    const t = (await resp.text()).slice(0, 200);
+    return { ok: false, message: "HTTP " + resp.status + ": " + t };
+  }
+  const j = await resp.json();
+  const raw = Array.isArray(j.data) ? j.data : Array.isArray(j.models) ? j.models : [];
+  const ids = raw.map((m) => m.id || m.name || m.model).filter(Boolean);
+  const uniq = [...new Set(ids)].sort((a, b) => a.localeCompare(b, "zh"));
+  if (!uniq.length) return { ok: false, message: "端口返回了空模型列表（可能不支持该接口）" };
+  return { ok: true, models: uniq, count: uniq.length };
+}
+
+/**
+ * 读取 API 端口的可用模型列表（OpenAI 兼容 GET /v1/models；Anthropic GET /v1/models）。
+ * 信任边界与 testConnection 完全一致（审计 K-EXP-13 F-01）：目的地必须先过
+ * validateApiBase（http/https 协议白名单 + 内网/链路本地拦截 + allowPrivateBaseUrl 逃生），
+ * 凭据仅在验证通过后组装，请求走 safeFetch（DNS 解析复核 + 重定向逐跳复验）。
+ * Credential binding（F-01 residual）：renderer 未显式提供 key 而回退已存密钥时，
+ * 目的地 origin 必须与已保存 cfg.chat.baseUrl 同 origin（规范化比较），否则拒绝——
+ * 已存密钥不外发到 renderer 任意指定的公网 origin；凭据经 credentialOrigin 绑定，
+ * 跨 origin 重定向一律中断。失败一律 fail closed。
+ * @param {Object} overrides 可覆盖 chat 配置（apiType/baseUrl/apiKey，renderer 不可信输入）
+ * @param {Object} [cfg] 主进程当前配置；缺省时读取本模块 config
+ * @returns {Promise<{ok:boolean, models?:string[], count?:number, message?:string}>}
+ */
+async function listModels(overrides = {}, cfg) {
+  const c = cfg || config.getConfig();
+  try {
+    const apiType = overrides.apiType || c.chat.apiType;
+    const baseUrl = overrides.baseUrl || c.chat.baseUrl;
+    const providedKey = typeof overrides.apiKey === "string" ? overrides.apiKey.trim() : "";
+    const useStoredKey = !providedKey; // 空串/未提供 → 回退已存密钥，适用 credential binding
+    const apiKey = providedKey || c.chat.apiKey;
+    if (!baseUrl) return { ok: false, message: "请先填写 API 地址" };
+    if (apiType === "anthropic") {
+      if (!apiKey) return { ok: false, message: "请先填写 API Key" };
+      const url = normalizeAnthropicBase(baseUrl) + "/models";
+      validateApiBase(url, !!c.chat.allowPrivateBaseUrl); // SSRF 防护（与 testConnection 同界）
+      if (useStoredKey) {
+        const violation = storedKeyOriginViolation(c.chat.baseUrl, baseUrl);
+        if (violation) return { ok: false, message: violation };
+      }
+      const resp = await safeFetch(url, {
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01"
+        },
+        signal: AbortSignal.timeout(20000)
+      }, { credentialOrigin: originOf(url) });
+      return await readModelList(resp);
+    }
+    const url = normalizeOpenAIBase(baseUrl) + "/models";
+    validateApiBase(url, !!c.chat.allowPrivateBaseUrl); // SSRF 防护（与 testConnection 同界）
+    if (useStoredKey && apiKey) {
+      const violation = storedKeyOriginViolation(c.chat.baseUrl, baseUrl);
+      if (violation) return { ok: false, message: violation };
+    }
+    const resp = await safeFetch(url, {
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey ? { Authorization: "Bearer " + apiKey } : {})
+      },
+      signal: AbortSignal.timeout(20000)
+    }, { allowLoopback: isLocalUrl(url), credentialOrigin: originOf(url) });
+    return await readModelList(resp);
+  } catch (e) {
+    return { ok: false, message: String(e.message || e) };
+  }
+}
+
+module.exports = { chat, testConnection, listModels, buildSystemMessage, parseEmotion, isLocalUrl, validateApiBase, readSSE, normalizeOpenAIBase, normalizeAnthropicBase, storedKeyOriginViolation };
 
 // CLI 冒烟测试：node src/chat-client.js --test "你好"
 if (process.argv.includes("--test")) {

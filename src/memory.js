@@ -63,14 +63,17 @@ function load() {
   return cache;
 }
 
-function save() {
+function saveState(state) {
   try {
     fs.mkdirSync(path.dirname(MEMORY_PATH), { recursive: true });
-    const data = JSON.stringify({ facts: cache.facts, summary: cache.summary });
+    const data = JSON.stringify({ facts: state.facts, summary: state.summary });
     const out = enc ? enc.encrypt(data) : data;
     fs.writeFileSync(MEMORY_PATH, out, "utf8");
-  } catch { /* 记忆写失败不影响主流程（内存态仍可用） */ }
+    return true;
+  } catch { return false; /* 记忆写失败不影响主流程（内存态仍可用）；清除类调用方据此上报 */ }
 }
+
+function save() { saveState(cache); }
 
 /** 读取并返回是否发现过损坏/篡改（一次性标记，读取后清除） */
 function wasTampered() {
@@ -182,6 +185,18 @@ function clear() {
   save();
 }
 
+/** 清除对话派生态（F-03，clear-history 调用）：LLM 摘要 + 规则自动提取的事实
+ *  均由被清除对话内容派生且会经 getText() 注入后续上下文，须随清史一并删除；
+ *  手动「记住X」事实（type==="manual"）属用户显式保留意图，不在本操作范围
+ *  （由设置页「清除记忆」原语覆盖）。先写盘后提交内存，失败返回 false。 */
+function clearDerived() {
+  const mem = load();
+  const next = { facts: mem.facts.filter((f) => f && f.type === "manual"), summary: "" };
+  if (!saveState(next)) return false;
+  cache = next;
+  return true;
+}
+
 /** 设置页列表：{id,type,text,anchor}[] */
 function getFactsList() {
   return load().facts.map((f) => ({ id: f.id || "", type: f.type || "", text: f.text, anchor: (f.anchor || anchorOf(f.type || "")) }));
@@ -227,5 +242,5 @@ function getText() {
   return lines.length ? "【苏苏洛记得的事】\n" + lines.join("\n") : "";
 }
 
-module.exports = { load, save, init, wasTampered, extractFacts, addFacts, deleteFact, updateFact, clear, getFactsList, getSummary, updateSummary, getText, hasHealthFact, anchorOf, ANCHOR_LABEL,
+module.exports = { load, save, init, wasTampered, extractFacts, addFacts, deleteFact, updateFact, clear, clearDerived, getFactsList, getSummary, updateSummary, getText, hasHealthFact, anchorOf, ANCHOR_LABEL,
   lastLoadError: () => lastLoadError, lastHadData: () => lastHadData };

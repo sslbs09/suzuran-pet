@@ -91,11 +91,29 @@ async function assertSafeHttpUrl(input, options) {
   return url;
 }
 
+/** 规范化 origin（protocol + hostname 小写 + 有效端口）：默认端口省略（https:443/http:80）、
+ *  IPv6 保留方括号、大小写归一；仅比较 origin，故 path/trailing slash/=/v1 差异不影响同源判定
+ *  （F-01 credential binding 基元）。无效输入抛 TypeError，调用方按 fail closed 处理。 */
+function originOf(input) {
+  return new URL(String(input || "")).origin;
+}
+
+/** 两个 URL 是否同 origin（规范化后比较）；任一无效视为不同源（fail closed） */
+function sameOrigin(a, b) {
+  try { return originOf(a) === originOf(b); } catch { return false; }
+}
+
 async function safeFetch(input, init = {}, options = {}) {
   let current = String(input || "");
   const maxRedirects = Number.isInteger(options.maxRedirects) ? options.maxRedirects : MAX_REDIRECTS;
   for (let redirects = 0; ; redirects++) {
     const url = await assertSafeHttpUrl(current, options);
+    // F-01 凭据绑定（可选）：设置 credentialOrigin 后，任何一跳（含初始请求）落到不同
+    // origin 一律拒绝——凭据头从不离开绑定 origin，跨源 302 不再是凭据外发通道。
+    // 未设置时行为与旧版完全一致（其他调用方零漂移）。
+    if (options.credentialOrigin && originOf(url) !== options.credentialOrigin) {
+      throw new Error("请求被重定向到不同来源，为保护凭据已中断");
+    }
     const response = await fetch(url, { ...init, redirect: "manual" });
     if (!REDIRECT_CODES.has(response.status)) return response;
     if (redirects >= maxRedirects) throw new Error("重定向次数超过限制");
@@ -111,5 +129,7 @@ module.exports = {
   parseHttpUrl,
   validateHttpUrl,
   assertSafeHttpUrl,
-  safeFetch
+  safeFetch,
+  originOf,
+  sameOrigin
 };

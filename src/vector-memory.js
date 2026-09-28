@@ -80,7 +80,8 @@ function save() {
     fs.mkdirSync(path.dirname(VEC_PATH), { recursive: true });
     const data = JSON.stringify({ entries: cache.entries });
     fs.writeFileSync(VEC_PATH, enc ? enc.encrypt(data) : data, "utf8");
-  } catch { /* 记忆写失败不影响主流程 */ }
+    return true;
+  } catch { return false; /* 记忆写失败不影响主流程；调用方可据此上报 */ }
 }
 
 /** 入库一条文本（语义去重 + 封顶）；文本过短跳过；返回是否新增 */
@@ -113,9 +114,16 @@ function search(query, k = 3) {
 
 function getCount() { return load().entries.length; }
 
+/** 清空向量记忆（F-03）：先写空库成功后再提交内存态——写盘失败时内存与磁盘保持一致
+ *  （都保留旧条目）并返回 false，避免"内存已清、磁盘残留"在重启重载后复活被删内容 */
 function clear() {
+  try {
+    fs.mkdirSync(path.dirname(VEC_PATH), { recursive: true });
+    const data = JSON.stringify({ entries: [] });
+    fs.writeFileSync(VEC_PATH, enc ? enc.encrypt(data) : data, "utf8");
+  } catch { return false; }
   cache = { entries: [] };
-  save();
+  return true;
 }
 
 module.exports = { init, hashEmbed, cosine, add, search, getCount, clear, DIM, MAX_ENTRIES, DEDUP_MIN };

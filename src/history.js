@@ -17,6 +17,7 @@ const MAX_ROWS = 4000;     // 滚动窗口上限（≈2000 轮对话，足够长
 const TRIM_TO = 3000;      // 超限后保留条数（留 1000 条余量，避免每轮都重写文件）
 
 let cache = null; // { rows: [], loaded: false } 内存滚动窗口
+let clearGen = 0; // 清史代次（F-03）：clear() 递增；在途异步写回（助手补写/摘要回写）据此丢弃，防清除后旧内容复活
 
 function loadFromDisk() {
   const rows = [];
@@ -62,15 +63,22 @@ function append(entry) {
 }
 
 /** 清空会话历史：同步清内存滚动窗口与磁盘文件，后续读取从空开始。
- *  （v2.5.27 修复：此前设置页只清文件，常驻缓存仍会让 recent() 返回旧对话） */
+ *  （v2.5.27 修复：此前设置页只清文件，常驻缓存仍会让 recent() 返回旧对话）
+ *  （F-03 一致性语义：先写盘后清内存——写盘失败时内存与磁盘保持一致（都保留）并返回 false，
+ *   避免"内存已清、磁盘残留"在重启后复活旧对话；成功时递增 clearGen 供在途写回护栏使用） */
 function clear() {
-  ensureLoaded().rows = [];
+  ensureLoaded();
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(HISTORY_FILE, "", "utf8");
-    return true;
   } catch { return false; }
+  cache.rows = [];
+  clearGen++;
+  return true;
 }
+
+/** 当前清史代次：与请求开始时相比发生变化 ⇒ 期间发生过 clear，在途结果不得写回 */
+function generation() { return clearGen; }
 
 /** 取最近 N 轮的对话（按 mode 过滤，内存过滤替代全量读盘） */
 function recent(mode, maxTurns) {
@@ -103,4 +111,4 @@ function updateLast(mode, role, fn) {
   return null;
 }
 
-module.exports = { load, append, clear, recent, count, updateLast };
+module.exports = { load, append, clear, recent, count, updateLast, generation };
