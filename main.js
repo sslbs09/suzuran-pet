@@ -3220,12 +3220,13 @@ const lastGroundGapReports = { spine: null, gif: null };
 let groundGapDocFloor = 0;
 let skinHasSit = true; // 当前皮肤是否有可播的坐下动画（渲染层皮肤加载后上报；false 时坐姿不做下沉，修复"站着脚陷进任务栏"）
 const WALK_TICK_MS = 40;
-/* P0 stand-beat v0（A/B 实验，默认关=零行为差）：seated→walk 起身期间冻结水平位移——
- * resting 保持 true；默认 renderer watcher 仍 defer，E2 才通过一次显式 pose intent 准入 Relax；
+/* P0 stand-beat + E2 pose admission（实机 A/B 通过后成对默认 ON；各自 env="0" 显式回退关）：
+ * seated→walk 起身期间冻结水平位移——
+ * resting 保持 true；默认 renderer watcher 仍 defer，pose admission 才通过一次显式 intent 准入 Relax；
  * seatExit Y 过渡由 walkTick stand-beat 拍继续推进。STANDBEAT_MS=260 只是实验初值，不是调参结论。
  * 计时唯一 authority=walk.standingUpUntil 时间戳（walkTick 对表），零新增 timer。 */
-const STANDBEAT_ENABLED = process.env.SUSSURRO_STANDBEAT === "1";
-const STANDBEAT_POSE_ENABLED = process.env.SUSSURRO_STANDBEAT_POSE === "1";
+const STANDBEAT_ENABLED = process.env.SUSSURRO_STANDBEAT !== "0";
+const STANDBEAT_POSE_ENABLED = process.env.SUSSURRO_STANDBEAT_POSE !== "0";
 const STANDBEAT_MS = 260;
 const EDGE_DIAG = !!process.env.SUSSURRO_EDGE_DIAG; // TEMPORARY 碰壁折返闪现诊断（默认关=零输出零行为差；定位后整体删除）
 let edgeDiagTurnSeq = 0;          // EDGEDIAG correlation：每次 edge collision 单调 turnId

@@ -1570,7 +1570,7 @@ function runStandBeatBroadcastFixture(env) {
 }
 {
   const beat = sourceBlock(mainSource, "if (STANDBEAT_ENABLED && Number(walk.standingUpUntil) > 0)", "/* —— 地面状态 —— */", "E2 deadline");
-  assert.match(mainSource, /const STANDBEAT_POSE_ENABLED = process\.env\.SUSSURRO_STANDBEAT_POSE === "1";/, "E2 独立 flag");
+  assert.match(mainSource, /const STANDBEAT_POSE_ENABLED = process\.env\.SUSSURRO_STANDBEAT_POSE !== "0";/, "E2 独立 flag（默认 ON，env=0 回退）");
   assert.match(mainSource, /const STANDBEAT_MS = 260;/, "260ms 不变");
   assert.match(mainSource, /const SEAT_EXIT_MS = 200;/, "200ms 不变");
   assert.match(rendererSource, /owner\.obj\.state\.data\.defaultMix = 0\.20;/, "Spine default mix 不变");
