@@ -9,6 +9,7 @@
 const { createMotionAuthority, OWNERS } = require("./motion-authority");
 const { createWindowCommit } = require("./window-commit");
 const { createLocomotionController, PHASES } = require("./locomotion-controller");
+const { createDragSession } = require("./drag-session");
 
 function locomotionGateEnabled(env) {
   const e = env || (typeof process !== "undefined" ? process.env : {});
@@ -20,6 +21,7 @@ module.exports = {
   createMotionAuthority,
   createWindowCommit,
   createLocomotionController,
+  createDragSession,
   OWNERS,
   PHASES
 };

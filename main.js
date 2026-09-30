@@ -3105,6 +3105,15 @@ ipcMain.handle("pet:toggle-feature", (_e, { name, value }) => {
   return true;
 });
 ipcMain.on("pet:move", (_e, dx, dy) => {
+  if (typeof v2Drag !== "undefined" && v2Drag) { // V2 拖拽 ownership：位移必须经 commit point + EXTERNAL 准入
+    if (!win || win.isDestroyed() || !v2Drag.active()) return; // 无活动会话（迟到/无 begin/reload 后旧 pointer）→ 不写、不吸附、不刷新时刻
+    let pos; try { pos = win.getPosition(); } catch { return; }
+    const res = v2Drag.commitMove(pos[0] + (Number(dx) || 0), pos[1] + (Number(dy) || 0), { docEpoch: renderModeSeq });
+    if (!res.ok) return; // 非 EXTERNAL owner / stale token → 拒绝
+    dragSeatUpdate();
+    dbgLastMoveTs = Date.now();
+    return;
+  }
   if (win && !win.isDestroyed()) {
     const [x, y] = win.getPosition();
     win.setPosition(Math.round(x + dx), Math.round(y + dy));
@@ -3488,6 +3497,7 @@ const PET_LOCAL_X = 138;                       // 标准 Spine 260×200 窗口�
 
 /** 清理拖拽暂停；只触碰 dragPaused 及其专属时间状态，保留 chat/zoom 暂停。 */
 function clearDragPause(reason = "drag-cleanup", broadcast = true) {
+  if (typeof v2Drag !== "undefined" && v2Drag && v2Drag.active()) v2Drag.end(reason); // 拖拽会话收口：release EXTERNAL_DRAG → LEGACY（旧 token 失效，不复活旧 attempt；Shadow obsTakeover("drag",false) 在释放链记录）
   const ownsPausedAt = !walk.chatPaused && !walk.zoomPaused;
   const changed = !!walk.dragPaused || (ownsPausedAt && !!walk.pausedAt) ||
     walk.paused !== (walk.chatPaused || walk.zoomPaused);
@@ -3707,6 +3717,25 @@ const v2Locomotion = RUNTIME_V2_LOCOMOTION_ENABLED ? (() => {
     stats: () => controller.stats()
   };
 })() : null;
+// DRAG↔LOCOMOTION 交接：EXTERNAL_DRAG 会话（复用同一 authority + commit point；非第二套、非新 commit manager）
+const v2Drag = RUNTIME_V2_LOCOMOTION_ENABLED ? runtimeV2Module.createDragSession({
+  authority: v2Authority,
+  commit: v2Commit,
+  deps: {
+    now: () => Date.now(),
+    currentRect: () => (win && !win.isDestroyed() ? win.getBounds() : null),
+    onEnd: (startRect, endRect) => { // release 后观察实际 host rect + support/viewport 关系变化才失效 body-dependent 几何
+      try {
+        if (!startRect || !endRect) return;
+        const w0 = walkGeo.workAreaOf(screen, startRect);
+        const w1 = walkGeo.workAreaOf(screen, endRect);
+        if (w0 && w1 && (w0.x !== w1.x || w0.y !== w1.y || w0.width !== w1.width || w0.height !== w1.height)) {
+          if (typeof v2Geo !== "undefined" && v2Geo) v2Geo.workAreaGeneration += 1; // 换了工作区：旧测量不得用于新定位
+        }
+      } catch { /* 观察失败交给逐拍 live 几何兜底 */ }
+    }
+  }
+}) : null;
 
 function cancelFlight() {
   if (!walk.flight) return false;
@@ -4908,7 +4937,10 @@ ipcMain.on("pet:walking-engine-stop", () => { // 运行时停走（不持久化�
 });
 ipcMain.on("pet:walking-pause", (_e, p, source) => {
   if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsTakeover(source === "zoom" ? "zoom" : "drag", !!p);
-  if (p && typeof v2Locomotion !== "undefined" && v2Locomotion) v2Locomotion.interrupt(source === "zoom" ? "zoom-pause" : "drag-pause"); // V2 让位：先释放 ownership，再进 V1 暂停/磁吸逻辑（Shadow 只读接管观察在上一行）
+  if (p && typeof v2Locomotion !== "undefined" && v2Locomotion) v2Locomotion.interrupt(source === "zoom" ? "zoom-pause" : "drag-pause"); // 先 interrupt+release locomotion token（旧 attempt 作废）
+  if (p && source !== "zoom" && typeof v2Drag !== "undefined" && v2Drag) { // 交接：LEGACY → EXTERNAL_DRAG（V2 已释放，绝不并存）
+    v2Drag.begin("drag", { docEpoch: renderModeSeq, senderId: _e.sender && _e.sender.id }); // Shadow 的 obsTakeover("drag",true) 已在上一行记录接管
+  }
   if (p) { cancelFlight(); cancelWalkJump(); walk.taskbarHang = false; } // 鼠标重新抓住时立即停止飞行/跳跃/半挂
   if (source === "zoom") { // 放大聊天框暂停：独立标志，60s 拖拽自愈不得解除（否则大窗口下恢复行走会打乱几何）
     walk.zoomPaused = !!p;

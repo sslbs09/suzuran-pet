@@ -272,7 +272,11 @@ test("A: gate OFF——零 V2 运行时对象、所有 bypass 点 typeof 守卫�
   assert.match(mainSource, /const v2Authority = RUNTIME_V2_LOCOMOTION_ENABLED \? runtimeV2Module\.createMotionAuthority\(\) : null;/);
   assert.match(mainSource, /const v2Commit = RUNTIME_V2_LOCOMOTION_ENABLED \? runtimeV2Module\.createWindowCommit\(\{/);
   assert.match(mainSource, /const v2Locomotion = RUNTIME_V2_LOCOMOTION_ENABLED \? \(\(\) => \{/);
-  assert.match(mainSource, /\}\)\(\) : null;\n\nfunction cancelFlight/, "条件创建闭环：OFF 全为 null");
+  assert.match(mainSource, /const v2Drag = RUNTIME_V2_LOCOMOTION_ENABLED \? runtimeV2Module\.createDragSession\(\{/, "drag 会话条件创建：OFF 全为 null");
+  assert.match(mainSource, /\}\) : null;\n\nfunction cancelFlight/, "v2Drag : null 收尾后接 cancelFlight（OFF 无 V2 运行时对象）");
+  assert.match(mainSource, /const res = v2Drag\.commitMove\(/, "pet:move 经 commit point（EXTERNAL 准入）");
+  assert.match(mainSource, /v2Drag\.begin\("drag", \{ docEpoch: renderModeSeq, senderId: _e\.sender && _e\.sender\.id \}\)/, "drag begin：LEGACY→EXTERNAL_DRAG 显式交接");
+  assert.match(mainSource, /v2Drag\.active\(\)\) v2Drag\.end\(reason\)/, "clearDragPause 统一收口 end");
   assert.match(mainSource, /if \(typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion\.owns\(\)\) \{ v2Locomotion\.tick\(\); return; \}/, "walkTick cutover");
   assert.match(mainSource, /if \(typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion\.deniesLegacy\("walkSetPosition:" \+ where\)\) return false;/);
   assert.match(mainSource, /if \(typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion\.deniesLegacy\("applySeatPosition"\)\) return;/);
@@ -340,7 +344,7 @@ test("authority 语义：acquire 仅从 LEGACY；release 后 token 单调不回�
   assert.equal(a.snapshot().episodeId, "e1");
   a.release("test");
   assert.equal(a.owner(), "legacy");
-  a.externalOccupy("drag");
+  a.externalAcquire("drag");
   assert.equal(a.acquire("e2").ok, false, "external 占用期拒绝 V2 acquire");
   a.externalRelease();
   const r = a.acquire("e2");
