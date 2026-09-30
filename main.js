@@ -354,7 +354,7 @@ let displayClampTimer = null;
 function scheduleDisplayClamp(reason) {
   clearTimeout(displayClampTimer);
   displayClampTimer = setTimeout(() => clampPetToWorkArea(reason), 180);
-  if (typeof shadowBridge !== "undefined") shadowBridge.obsHostChanged(reason); // Shadow 只读观察：display/workArea 上下文变化（gate OFF 零动作；typeof 守卫兼容测试沙箱代码块抽取，与 E1 取证先例同款）
+  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsHostChanged(reason); // Shadow 只读观察：display/workArea 上下文变化（gate OFF 零动作；typeof 守卫兼容测试沙箱代码块抽取，与 E1 取证先例同款）
 }
 
 /* ---------- 窗口 ---------- */
@@ -1381,7 +1381,7 @@ function setScale(scale) {
   const s = clampScale(scale);
   config.saveConfig({ window: { scale: s } });
   // Shadow 只读观察：requested scale 换代（gate OFF 零动作；typeof 守卫兼容测试沙箱代码块抽取）
-  if (typeof shadowBridge !== "undefined") shadowBridge.obsScaleChanged(s);
+  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsScaleChanged(s);
   if (win && !win.isDestroyed()) {
     const resizeRevision = windowSizeRevision.next();
     const wasGrounded = captureResizeAnchor();
@@ -2147,7 +2147,7 @@ function wsScanSignature() {
 function chatPauseWalk(p) {
   if (!walk.active) return;
   walk.chatPaused = !!p;
-  if (typeof shadowBridge !== "undefined") shadowBridge.obsTakeover("chat", !!p); // Shadow 只读观察：对话接管（gate OFF 零动作）
+  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsTakeover("chat", !!p); // Shadow 只读观察：对话接管（gate OFF 零动作）
   if (p) { cancelFlight(); cancelWalkJump(); walk.taskbarHang = false; }
   walk.paused = walk.dragPaused || walk.chatPaused || walk.zoomPaused;
   walk.pausedAt = 0; // 对话暂停不参与拖拽 60s 自愈
@@ -3417,7 +3417,7 @@ function armSeatExit(reason, source) {
   if (reason === "move" && source === "phase" && walk.seated) seatExitForensicStart(reason, source, b, fromOffsetY, liveBase);
   diagSeat("ARM", { reason, source, windowYBefore: b.y, windowYAfter: b.y, liveBaseY: Math.round(liveBase), fromOffsetY, currentOffsetY: fromOffsetY, progress: 0, groundGap: walk.groundGap, sleepLiftPx: Math.round(liveStandTargetY(b) - liveSleepTargetY(b)) });
   seatExitForensicSnapshot("seatExit-arm", { reason, source, windowYBefore: b.y, windowYAfter: b.y, liveStandingBaseY: Math.round(liveBase), fromOffsetY, progress: 0, beatArm: true });
-  if (typeof shadowBridge !== "undefined") shadowBridge.obsSeatExit("arm", { reason, source, fromOffsetY }); // Shadow 只读：seatExit 过渡机 arm 事实
+  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsSeatExit("arm", { reason, source, fromOffsetY }); // Shadow 只读：seatExit 过渡机 arm 事实
   if (Math.abs(fromOffsetY) <= 0.5) { seatExit = null; return; }
   seatExit = { startTs: Date.now(), durationMs: SEAT_EXIT_MS, fromOffsetY, reason, source };
 }
@@ -3425,7 +3425,7 @@ function cancelSeatExit(reason) {
   if (!seatExit) return;
   const b = win && !win.isDestroyed() ? win.getBounds() : null;
   diagSeat("CANCEL", { reason, source: seatExit.reason, windowYBefore: b ? b.y : null, windowYAfter: null, liveBaseY: null, fromOffsetY: seatExit.fromOffsetY, currentOffsetY: null, progress: null, groundGap: walk.groundGap, sleepLiftPx: null });
-  if (typeof shadowBridge !== "undefined") shadowBridge.obsSeatExit("cancel", { reason: reason, source: seatExit.reason, fromOffsetY: seatExit.fromOffsetY }); // Shadow 只读
+  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsSeatExit("cancel", { reason: reason, source: seatExit.reason, fromOffsetY: seatExit.fromOffsetY }); // Shadow 只读
   seatExit = null; // cancel≠finalize：不写位置——finalize 会重新制造 15~30px 单帧跳
 }
 /* 共享 y-only 驱动拍：常规步 |Δ|>1px 才写（DWM 防抖）；到期步以 |Δ|>0.01 强制精确终值。
@@ -3438,8 +3438,9 @@ function seatExitStep(caller) {
   const y = seatExitTargetY(baseY);
   const complete = !seatExit; // seatExitOffsetY 到期自清
   const eps = complete ? 0.01 : 1;
+  let shadowWriteOutcome = "skipped"; // Shadow-only：request/effect 分离（不改变生产行为）
   if (Math.abs(before.y - y) > eps) {
-    try { win.setPosition(before.x, y); } catch { /* 窗口销毁忽略 */ }
+    try { win.setPosition(before.x, y); shadowWriteOutcome = "succeeded"; } catch { shadowWriteOutcome = "failed"; /* 窗口销毁忽略 */ }
   }
   diagSeat(complete ? "COMPLETE" : "STEP", {
     reason: preActive.reason, source: caller,
@@ -3454,7 +3455,7 @@ function seatExitStep(caller) {
     progress: complete ? 1 : Number(Math.min(1, (Date.now() - preActive.startTs) / preActive.durationMs).toFixed(3)),
     seatExitComplete: complete
   });
-  if (typeof shadowBridge !== "undefined") shadowBridge.obsSeatExit(complete ? "step-complete" : "step", { reason: preActive.reason, source: caller, fromOffsetY: preActive.fromOffsetY, complete }); // Shadow 只读
+  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsSeatExit(complete ? "step-complete" : "step", { reason: preActive.reason, source: caller, fromOffsetY: preActive.fromOffsetY, complete, outcome: shadowWriteOutcome }); // Shadow 只读：step=写尝试（arm/cancel=INTENT 无 outcome）
 }
 function diagSeat(ev, o) {
   if (!EDGE_DIAG) return;
@@ -3500,16 +3501,16 @@ function walkSetPosition(x, y, where) {
   const px = Math.round(Number(x)) || 0, py = Math.round(Number(y)) || 0; // ||0 归一化 -0（Electron setPosition(-0) 会 conversion failure）
   if (!Number.isSafeInteger(px) || !Number.isSafeInteger(py) || Math.abs(px) > 1000000 || Math.abs(py) > 1000000) {
     logTts("walk", "拦截非法窗口坐标(" + where + "): x=" + px + " y=" + py);
-    if (typeof shadowBridge !== "undefined") shadowBridge.obsRectWrite(where, px, py, false); // Shadow 只读：守卫拦截也是实际效果证据
+    if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsRectWrite(where, px, py, "rejected"); // Shadow 只读：守卫拦截=REQUEST 级（未尝试写入，不产生 effect divergence）
     return false;
   }
   try {
     win.setPosition(px, py); applyLayerThrottled();
-    if (typeof shadowBridge !== "undefined") shadowBridge.obsRectWrite(where, px, py, true); // Shadow 只读：native rect write 实际效果
+    if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsRectWrite(where, px, py, "succeeded"); // Shadow 只读：WRITE_SUCCEEDED（host rect 另行观测）
     return true;
   }
   catch (e) {
-    if (typeof shadowBridge !== "undefined") shadowBridge.obsRectWrite(where, px, py, false);
+    if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsRectWrite(where, px, py, "failed"); // Shadow 只读：WRITE_FAILED
     let bounds = "";
     try { bounds = " bounds=" + JSON.stringify(win.getBounds()); } catch { /* 忽略 */ }
     if (Date.now() - (walkSetPosition._lastLog || 0) > 5000) { // 节流
@@ -3525,7 +3526,7 @@ function walkBroadcast(options = {}) {
     ? "stand" : null;
   const forensic = typeof seatExitForensicBroadcastMeta === "function" ? seatExitForensicBroadcastMeta() : null;
   if (standBeatPoseIntent) seatExitForensicSnapshot("stand-beat-pose-intent", { standBeatPoseIntent });
-  const shadowMeta = typeof shadowBridge !== "undefined" ? shadowBridge.broadcastMeta() : null; // OFF→null：payload 零差异（镜像 seatExitForensic 先例）
+  const shadowMeta = typeof shadowBridge !== "undefined" && shadowBridge ? shadowBridge.broadcastMeta() : null; // OFF→null：payload 零差异（镜像 seatExitForensic 先例）
   const payload = {
     active: walk.active, resting: walk.resting, perched: walk.perched, seated: walk.seated, face: walk.face,
     paused: walk.paused, sleeping: walk.sleeping, // 暂停/睡眠都广播：渲染层切待机/睡眠动画
@@ -3535,7 +3536,7 @@ function walkBroadcast(options = {}) {
     ...(shadowMeta ? { shadow: shadowMeta } : {}) // Shadow-only；renderer 只读激活/关联，不参与任何决策
   };
   sendToRenderer("pet:walking", payload);
-  if (typeof shadowBridge !== "undefined") shadowBridge.obsBroadcast(payload, shadowMeta); // Shadow 只读：broadcast 事实（OFF 零动作）
+  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsBroadcast(payload, shadowMeta); // Shadow 只读：broadcast 事实（OFF 零动作）
 }
 
 function walkSchedulePhase(ms) {
@@ -3554,16 +3555,16 @@ function shadowGitBaseline() { // 仅 gate ON 时调用一次；打包环境无 
     return execFileSync("git", ["rev-parse", "--short", "HEAD"], { timeout: 2000, cwd: __dirname }).toString().trim() || "unknown";
   } catch { return "unknown"; }
 }
-const shadowSession = runtimeShadow.createShadowSession({
-  enabled: RUNTIME_V2_SHADOW_ENABLED,
+// strict OFF：gate 关闭时不创建任何 Shadow 运行时对象（无 session/evaluator/bridge/deps getter）
+const shadowSession = RUNTIME_V2_SHADOW_ENABLED ? runtimeShadow.createShadowSession({
   deps: {
     log: logTts,
     pid: typeof process !== "undefined" ? process.pid : 0,
-    gitBaseline: RUNTIME_V2_SHADOW_ENABLED ? shadowGitBaseline() : "unknown",
+    gitBaseline: shadowGitBaseline(),
     standBeatEnabled: STANDBEAT_ENABLED
   }
-});
-const shadowBridge = runtimeShadow.createShadowBridge({
+}) : null;
+const shadowBridge = RUNTIME_V2_SHADOW_ENABLED ? runtimeShadow.createShadowBridge({
   session: shadowSession,
   deps: {
     walk: () => walk,
@@ -3588,7 +3589,7 @@ const shadowBridge = runtimeShadow.createShadowBridge({
     sinkTier: () => seatSinkTier(),
     skinHasSit: () => skinHasSit
   }
-});
+}) : null;
 
 function cancelFlight() {
   if (!walk.flight) return false;
@@ -3763,8 +3764,12 @@ function applySeatPosition() {
   const rawTargetY = walk.seated ? baseY + effectiveSeatSink() : baseY;  // 坐姿下沉（按尺寸档位；无坐下动画皮肤不下沉）
   const targetY = seatExit ? rawTargetY + seatExitOffsetY() : rawTargetY; // seat-exit transition：目标线+瞬态偏移（t0=实际 Y，不产生跳动）
   walk.sunk = walk.seated;
-  if (typeof shadowBridge !== "undefined") shadowBridge.obsSeatPosition({ x: b.x, yBefore: b.y, targetY: Math.round(targetY), wrote: Math.abs(b.y - targetY) > 1, seated: walk.seated, sink: effectiveSeatSink(), groundGap: walk.groundGap }); // Shadow 只读：坐姿锚定计算观察
-  if (Math.abs(b.y - targetY) > 1) win.setPosition(b.x, Math.round(targetY));
+  let shadowSeatOutcome = "skipped"; // Shadow-only：request/effect 分离（写后才上报；不改变异常路径）
+  if (Math.abs(b.y - targetY) > 1) {
+    win.setPosition(b.x, Math.round(targetY));
+    shadowSeatOutcome = "succeeded";
+  }
+  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsSeatPosition({ x: b.x, yBefore: b.y, targetY: Math.round(targetY), outcome: shadowSeatOutcome, seated: walk.seated, sink: effectiveSeatSink(), groundGap: walk.groundGap }); // Shadow 只读：坐姿锚定（outcome 区分 skipped/succeeded）
   applyLayer(walk.seated || walk.active); // 接触任务栏表面时保证在任务栏之上
 }
 
@@ -3801,7 +3806,7 @@ function enterRestPose() {
   if (skinHasSit) { walk.seated = true; }
   else { walk.seated = false; walk.sunk = false; }
   applySeatPosition();
-  if (typeof shadowBridge !== "undefined") shadowBridge.obsEnterRestPose(); // Shadow 只读：ENTER_SIT 触发事实（gate OFF 零动作）
+  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsEnterRestPose(); // Shadow 只读：ENTER_SIT 触发事实（gate OFF 零动作）
 }
 
 /** 尺寸提交后的最终定位：只读取提交后的最新 bounds，并按当前姿态决定落点。 */
@@ -3849,7 +3854,7 @@ function standSinkOffset() {
 
 async function walkOnPhaseEnd() {
   if (!walk.active) return;
-  if (typeof shadowBridge !== "undefined") shadowBridge.obsPhaseEnd(); // Shadow 只读：相位回调入口控制事实快照（gate OFF 零动作）
+  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsPhaseEnd(); // Shadow 只读：相位回调入口控制事实快照（gate OFF 零动作）
   if (walk.catToy) { walkSchedulePhase(randInt(400, 900)); return; } // 逗猫棒：相位机让位，由 walkTick 持续追鼠标
   if (walk.paused) {                        // 拖拽中冻结一切相位动作（防 applySeatPosition 把窗口弹回任务栏）
     walkSchedulePhase(randInt(3000, 6000));
@@ -3887,7 +3892,7 @@ async function walkOnPhaseEnd() {
   }
   if (walk.resting) {
     const behavior = chooseWalkBehavior();
-    if (typeof shadowBridge !== "undefined") shadowBridge.obsBehaviorSelected(behavior); // Shadow 只读：V1 已选择的行为（绝不重抽随机数）
+    if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsBehaviorSelected(behavior); // Shadow 只读：V1 已选择的行为（绝不重抽随机数）
     if (behavior === "perch") {
       if (!walk.paused && desktopIconMode()) {
         if (await walkAttemptIconPerch()) return;
@@ -3922,7 +3927,7 @@ async function walkOnPhaseEnd() {
       walk.dir = Math.random() < 0.5 ? -1 : 1;
       walk.standingUpUntil = Date.now() + STANDBEAT_MS;
       walkSchedulePhase(STANDBEAT_MS + walkPhaseMs()); // 占位 fallback：到拍替换；最早 fire 也在 beat 结束后 ≥walkPhaseMs 下限
-      if (typeof shadowBridge !== "undefined") shadowBridge.obsStandUpArm(); // Shadow 只读：STAND_UP 准入事实（beat deadline 由 walk 读出）
+      if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsStandUpArm(); // Shadow 只读：STAND_UP 准入事实（beat deadline 由 walk 读出）
       if (STANDBEAT_POSE_ENABLED) walkBroadcast({ standBeatPoseIntent: "stand" });
       else walkBroadcast();
       if (desktopIconMode()) listDesktopIcons(); // 预取图标缓存，供行走引导判断
@@ -4582,7 +4587,7 @@ function walkTick() {
     } else {
       const beatDeadline = walk.standingUpUntil;
       if (typeof seatExitForensicSnapshot === "function") seatExitForensicSnapshot("beat-end", { beatEnd: true, beatDeadline });
-      if (typeof shadowBridge !== "undefined") shadowBridge.obsBeatEnd(beatDeadline); // Shadow 只读：stand-beat 拍消费事实
+      if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsBeatEnd(beatDeadline); // Shadow 只读：stand-beat 拍消费事实
       walk.standingUpUntil = 0;
       walk.resting = false;
       walkBroadcast();
@@ -4681,7 +4686,7 @@ function startWalkingEngine(opts = {}) {
   } catch { /* 忽略 */ }
   walk.timer = setInterval(walkTick, WALK_TICK_MS);
   walkBroadcast(); // resume 首播 = active=true + 停止前业务姿态原值（不再出现随机 face 覆盖）
-  if (typeof shadowBridge !== "undefined") shadowBridge.obsEngine(true); // Shadow 只读：引擎边界
+  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsEngine(true); // Shadow 只读：引擎边界
   walkSchedulePhase(randInt(5000, 15000));
   applyLayer(true); // 行走全程贴任务栏，需在任务栏之上
   logTts("walk", opts.resume ? "桌面行走恢复（render-mode resume）" : "桌面行走开启");
@@ -4705,13 +4710,13 @@ function stopWalkingEngine(silent = false) {
   }
   applyLayer(walk.seated);
   walk.active = false;
-  if (typeof shadowBridge !== "undefined") shadowBridge.obsEngine(false); // Shadow 只读：引擎边界（episode 由此收尾）
+  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsEngine(false); // Shadow 只读：引擎边界（episode 由此收尾）
   clearInterval(walk.timer); walk.timer = null;
   clearTimeout(walk.phaseTimer); walk.phaseTimer = null;
   if (walk.standingUpUntil) walk.standingUpUntil = 0; // P0：旧 stand-beat 不得穿越引擎停止/重建
   if (!silent) walkBroadcast();
   logTts("walk", "桌面行走关闭");
-  if (typeof shadowSession !== "undefined" && shadowSession.active) shadowSession.flush("walking-engine-stop"); // Shadow：会话收尾摘要（默认关=零动作）
+  if (typeof shadowSession !== "undefined" && shadowSession && shadowSession.active) shadowSession.flush("walking-engine-stop"); // Shadow：会话收尾摘要（默认关=零动作）
 }
 
 /** renderMode/walking 配置变化后同步引擎状态；切回 GIF 时自动停走（walking 记忆保留，回 Spine 后恢复） */
@@ -4767,7 +4772,7 @@ ipcMain.on("pet:walking-engine-stop", () => { // 运行时停走（不持久化�
   stopWalkingEngine();
 });
 ipcMain.on("pet:walking-pause", (_e, p, source) => {
-  if (typeof shadowBridge !== "undefined") shadowBridge.obsTakeover(source === "zoom" ? "zoom" : "drag", !!p); // Shadow 只读：拖拽/放大接管（gate OFF 零动作）
+  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsTakeover(source === "zoom" ? "zoom" : "drag", !!p); // Shadow 只读：拖拽/放大接管（gate OFF 零动作）
   if (p) { cancelFlight(); cancelWalkJump(); walk.taskbarHang = false; } // 鼠标重新抓住时立即停止飞行/跳跃/半挂
   if (source === "zoom") { // 放大聊天框暂停：独立标志，60s 拖拽自愈不得解除（否则大窗口下恢复行走会打乱几何）
     walk.zoomPaused = !!p;
@@ -4825,7 +4830,7 @@ ipcMain.on("pet:throw", (_e, vx, vy) => {
   clearDragPause("throw-rejected");
 });
 ipcMain.on("pet:set-sleeping", (_e, v) => {
-  if (typeof shadowBridge !== "undefined") shadowBridge.obsTakeover("sleep", !!v); // Shadow 只读：入睡接管边界（gate OFF 零动作）
+  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsTakeover("sleep", !!v); // Shadow 只读：入睡接管边界（gate OFF 零动作）
   // 方案 2（2026-09-06，用户拍板）：不在别人窗口顶/图标顶上睡觉——坐窗（perched）或坐图标
   // （iconRest）时收到入睡请求 → 先落回地面（returning 流程），本次入睡请求忽略；
   // 落地坐下后相位机到点会再次请求入睡，届时已在地面上正常睡。窗口关闭时也有
@@ -4898,7 +4903,7 @@ ipcMain.on("pet:set-sleeping", (_e, v) => {
 }); // 睡觉时行走引擎原地待命
 ipcMain.on("pet:set-has-sit", (_e, v) => { // 渲染层皮肤加载后上报：无坐下动画的皮肤不做坐姿下沉
   const next = !!v;
-  if (typeof shadowBridge !== "undefined") shadowBridge.obsHasSit(next); // Shadow 只读：body capability 事实（gate OFF 零动作）
+  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsHasSit(next); // Shadow 只读：body capability 事实（gate OFF 零动作）
   if (next === skinHasSit) return;
   skinHasSit = next;
   logTts("walk", "皮肤坐下动画: " + (next ? "有" : "无（坐姿不下沉）"));
@@ -4945,7 +4950,7 @@ ipcMain.on("pet:set-ground-gap", (_e, px, meta = {}) => {
     epochFloor: groundGapDocFloor,
     lastReport: lastGroundGapReports[mode]
   });
-  if (typeof shadowBridge !== "undefined") shadowBridge.obsGroundGapReport({ px, meta, decision: report }); // Shadow 只读：几何接受点 + 依赖元数据同拍补充（rejected 也记录）
+  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsGroundGapReport({ px, meta, decision: report }); // Shadow 只读：几何接受点 + 依赖元数据同拍补充（rejected 也记录）
   if (!report.accepted) return;
   lastGroundGapReports[mode] = report.identity;
   if (report.target === "spine") {
@@ -4965,9 +4970,14 @@ ipcMain.on("pet:set-char-inset", (_e, px) => { // 渲染层上报：窗口左缘
     walk.charInset = PET_LOCAL_X;
   }
 });
-ipcMain.on("pet:shadow-evidence", (_e, ev) => { // Shadow v0.1（默认关）：渲染层 body 证据上行；gate OFF 时桥全短路，无 session/log
-  if (typeof shadowBridge !== "undefined") shadowBridge.obsRendererEvidence(ev);
-});
+if (RUNTIME_V2_SHADOW_ENABLED) { // strict OFF：gate 关闭时不注册监听（渲染层 shadow 上行无处消费）
+  ipcMain.on("pet:shadow-evidence", (_e, ev) => { // Shadow v0.1：渲染层 body 证据上行（信任边界：只收当前 pet renderer）
+    try {
+      if (!win || win.isDestroyed() || !_e.sender || _e.sender !== win.webContents) return; // 拒绝任意 renderer / 销毁后
+      shadowBridge.obsRendererEvidence(ev);
+    } catch { /* 诊断链路绝不影响主进程 */ }
+  });
+}
 ipcMain.handle("pet:get-walk-timing", () => ({
   sitMaxSec: timingSec("sitMaxSec", 15, 180) || 30,
   walkMaxSec: timingSec("walkMaxSec", 8, 120) || 20,

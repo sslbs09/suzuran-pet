@@ -2,14 +2,17 @@
  * renderer-observer.js — 渲染层 Shadow 证据观察器（双端纯模块：Node 单测 require /
  * 渲染层 <script> 挂 window.RuntimeShadowObs，与 seat-fit.js 同先例）。
  *
- * FREEZE PHASE 4E：body 证据上行——document/body generation、requested/applied 动画、
- * track identity、mixing state、local Y / fit handoff、Sit capability、已有测量。
- *
- * 激活纪律（gate OFF 零开销）：
- * - pet.js 侧所有 hook 以 `if (shadowObs && shadowObs.active)` 守卫；
- * - active 只在收到携带 shadow meta 的 walk broadcast 后为真（main gate ON 才附 meta）；
- * - 收到无 meta 的 broadcast → disarm（引擎停/门关）。
- * - causeRef：仅在能证明因果（该 applied 由对应 broadcast 驱动）时携带，否则 null。
+ * FREEZE PHASE 4E + Blocker Closure：
+ * - 激活纪律（strict OFF）：pet.js 惰性创建 observer——只在收到携带 shadow meta 的 walk broadcast
+ *   后才创建/激活（main gate ON 才附 meta）。gate OFF：无 observer 实例、零 IPC、零开销。
+ *   本模块自身只定义工厂（无全局状态、无 listener、无 observer 实例）——静态 <script> 标签
+ *   必须存在（本渲染层无条件 loader；与 seat-fit.js/animation-watch.js 同先例），但 OFF 时
+ *   工厂不被调用，报告里已说明该 API surface 为何无法字面不存在。
+ * - noteSafely：渲染层故障边界——payload 工厂在 try 内惰性构造，任何异常不进入生产动画逻辑；
+ *   fault 有界聚合（count/suppressed），诊断自身不再抛。
+ * - causeRef：v0.1 无可证明「具体 command → 事件」因果（arm-on-recent-broadcast 属猜测）→ 恒 null。
+ *   宁缺因果，不伪造链条。
+ * - sampledAt：渲染层采样时刻 + 明确 clock domain（renderer-dateNow-ms）。
  */
 /* global window */
 "use strict";
@@ -17,55 +20,56 @@
 function createRendererShadowObserver({ send, nowMs } = {}) {
   let armed = false;
   let seq = 0;
-  let causeRef = null;
-  let meta = null;
   const sendFn = typeof send === "function" ? send : null;
   const now = () => { try { return nowMs ? nowMs() : Date.now(); } catch { return 0; } };
+  const faults = { count: 0, suppressed: 0, lastMessage: null };
 
   const obs = {
     get active() { return armed; },
-    /** main gate ON 的 walk broadcast 附带 meta → 激活（并记录当前 cause） */
-    arm(m) {
+    get faults() { return { count: faults.count, suppressed: faults.suppressed, lastMessage: faults.lastMessage }; },
+    /** main gate ON 的 walk broadcast 附带 meta → 创建后激活（pet.js 保证只在此时调用） */
+    arm() {
       armed = true;
-      meta = m && typeof m === "object" ? { runId: m.runId || null, episodeId: m.episodeId || null, seq: Number.isFinite(Number(m.seq)) ? Number(m.seq) : null } : null;
-      if (meta && meta.seq !== null) causeRef = { source: "main", sourceSeq: meta.seq };
     },
     /** 无 meta broadcast → 停用（gate OFF / 引擎停止路径） */
     disarm() {
       armed = false;
-      causeRef = null;
-      meta = null;
-    },
-    setCause(ref) {
-      causeRef = ref && typeof ref === "object" && Number.isSafeInteger(ref.sourceSeq)
-        ? { source: ref.source || "main", sourceSeq: ref.sourceSeq } : null;
-    },
-    /** 取走当前 cause（证明不了的帧保持 null） */
-    takeCause() {
-      const c = causeRef;
-      causeRef = null;
-      return c;
     },
     /**
-     * 记录一条 body 证据并发往主进程（IPC pet:shadow-evidence）。
-     * armed=false 时零动作（gate OFF 零开销）。
-     * causeRef 只对 anim-applied 可证明（由对应 broadcast 驱动）；其余 kind 一律 null——
-     * 不能证明因果时保持 null，绝不猜（PHASE 3 合同）。
+     * 原始 note：构造并上行一条证据。armed=false 时零动作。
+     * causeRef 恒 null（v0.1 无可证明因果）。
      */
     note(kind, payload) {
       if (!armed || !sendFn || !kind) return null;
       seq += 1;
       const ev = {
-        v: 1,
-        seq,
+        v: 2,
+        seq,                                   // 生产者分配的 sourceSeq（main 原样保留）
         kind: String(kind),
         payload: payload && typeof payload === "object" ? payload : {},
-        docEpoch: payload && Number.isFinite(Number(payload.docEpoch)) ? Number(payload.docEpoch) : null,
-        causeRef: kind === "anim-applied" ? this.takeCause() : null,
-        dateNow: now()
+        docEpoch: payload && payload.docEpoch !== null && payload.docEpoch !== undefined ? payload.docEpoch : null,
+        sampledAt: { clock: "renderer-dateNow-ms", value: now() }, // 采样时刻 + clock domain
+        causeRef: null                          // 宁缺因果，不伪造
       };
       try { sendFn(ev); } catch { /* 诊断发送失败不影响渲染 */ }
       return ev;
+    },
+    /**
+     * 故障边界 note（渲染层 hook 应使用本方法）：payload 工厂在 try 内惰性构造——
+     * 构造抛错（访问奇异 getter 等）绝不打断生产动画逻辑；fault 有界聚合。
+     */
+    noteSafely(kind, makePayload) {
+      if (!armed || !sendFn || !kind) return null;
+      try {
+        const payload = typeof makePayload === "function" ? makePayload() : makePayload;
+        return this.note(kind, payload);
+      } catch (e) {
+        faults.count += 1;
+        const msg = String((e && (e.message || e)) || "unknown").slice(0, 120);
+        if (msg === faults.lastMessage) faults.suppressed += 1;
+        else { faults.lastMessage = msg; }
+        return null;
+      }
     }
   };
   return obs;

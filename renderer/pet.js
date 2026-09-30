@@ -62,14 +62,20 @@ let spineBaseScaleX = 1;     // 初始缩放；朝向翻转时取反
 // 桌面行走状态（主进程广播驱动；明日方舟基建语义：Move=走动 Relax=放松 Sit=坐窗顶 Sleep=睡觉 Interact=点击互动）
 let walkState = { active: false, resting: true, perched: false, seated: false, face: 1 };
 let lastInputAt = 0; // 输入栏最近一次打字时间：自主坐/睡收栏时判断用户是否正在用
-/* Runtime V2 Shadow Slice v0.1（默认关）：body 证据观察器。active 只在收到携带 shadow meta 的
- * walk broadcast 后为真（main gate ON 才附 meta），OFF 时所有 hook 短路、零 IPC、零开销。 */
-const shadowObs = window.RuntimeShadowObs
-  ? window.RuntimeShadowObs.createRendererShadowObserver({
-      send: (ev) => { try { window.petAPI.reportShadowEvidence && window.petAPI.reportShadowEvidence(ev); } catch { /* 诊断发送失败忽略 */ } },
-      nowMs: () => Date.now()
-    })
-  : null;
+/* Runtime V2 Shadow Slice v0.1（默认关）：body 证据观察器——惰性创建（strict OFF：gate 关闭时
+ * 永远不会有 shadow meta 广播 → observer 实例不存在、零 IPC）。active 只在收到携带 shadow meta 的
+ * walk broadcast 后为真。shadowScaleEpoch：renderer 侧 scale identity 计数（采样时 provenance）。 */
+let shadowObs = null;
+let shadowScaleEpoch = 0;
+let shadowGeomSeq = 0;
+function ensureShadowObserver() {
+  if (shadowObs || !window.RuntimeShadowObs) return shadowObs;
+  shadowObs = window.RuntimeShadowObs.createRendererShadowObserver({
+    send: (ev) => { try { window.petAPI.reportShadowEvidence && window.petAPI.reportShadowEvidence(ev); } catch { /* 诊断发送失败忽略 */ } },
+    nowMs: () => Date.now()
+  });
+  return shadowObs;
+}
 
 /* ---------- PSD 2.5D 角色渲染（v2.2，完全独立于 Spine）
  * rigSkinId 非空时 2.5D 独占显示：Spine 不初始化、不参与，互不干扰。 ---------- */
@@ -281,7 +287,7 @@ function setSpineAnim(name, loop, reason = "") {
     } else {
       seatEpisode.pendingFit = false;
     }
-    if (shadowObs && shadowObs.active) shadowObs.note("fit-handoff", { kind: "release-refit" });
+    if (shadowObs && shadowObs.active) shadowObs.noteSafely("fit-handoff", () => ({ kind: "release-refit" }));
   }
   const entry = spineObj.state.setAnimation(0, name, loop);
   spineTrackRevision += 1; // entry 池可能复用同名对象，显式设置也必须使旧 final confirmation 失效。
@@ -292,13 +298,13 @@ function setSpineAnim(name, loop, reason = "") {
   if (reason === "seat-phase") {
     try { if (entry) entry.mixDuration = 0.12; } catch { /* 旧版 Spine TrackEntry 无此字段 */ }
   }
-  if (shadowObs && shadowObs.active) { // Shadow 只读：实际 applied 动画证据（generation/track/mix）
-    shadowObs.note("anim-applied", {
+  if (shadowObs && shadowObs.active) { // Shadow 只读：anim entry 证据（请求 + track entry 被接受；非 pose applied）
+    shadowObs.noteSafely("anim-entry", () => ({
       requested: name, loop: !!loop, reason, track: 0,
       mixDuration: entry && Number.isFinite(Number(entry.mixDuration)) ? Number(entry.mixDuration) : null,
-      docEpoch: petDocEpoch, renderGeneration: activeRenderGeneration,
+      renderGeneration: activeRenderGeneration,
       appliedScale: spineObj.scale ? Math.abs(Number(spineObj.scale.y)) : null
-    });
+    }));
   }
 }
 function addSpineAnim(name, loop) {
@@ -969,7 +975,7 @@ function fitSpinePose(generation = spineFitGeneration, ownerGeneration = spineFi
     if (!spineObj || !spineApp || activeRenderMode !== "spine" || spineRuntimeOwner !== owner || generation !== spineFitGeneration || ownerGeneration !== activeRenderGeneration) { fitBootstrapCheck(false); emitFitDiag("abort-guard"); return; }
     if (seatEpisode.active && seatEpisode.owner === spineObj && seatTrackActive()) {
       seatEpisode.pendingFit = true;
-      if (shadowObs && shadowObs.active) shadowObs.note("fit-handoff", { kind: "hold-seat" });
+      if (shadowObs && shadowObs.active) shadowObs.noteSafely("fit-handoff", () => ({ kind: "hold-seat" }));
       fitBootstrapCheck(false);
       emitFitDiag("hold-seat");
       return;
@@ -1049,7 +1055,7 @@ function fitSpinePose(generation = spineFitGeneration, ownerGeneration = spineFi
           spineBaseScaleX *= kk;
           spineAutoScaled = true;
           spineFitKeepScale = true;
-          if (shadowObs && shadowObs.active) shadowObs.note("fit-handoff", { kind: "autoscale", detail: { kk } });
+          if (shadowObs && shadowObs.active) shadowObs.noteSafely("fit-handoff", () => ({ kind: "autoscale", kk }));
           // A-v2：新权威 baseline 落地即同步活跃的坐姿棘轮快照，
           // 防 seatContainmentCommit（只降不升的 min(previousScale,entryScale) 上限）把放大到位的 scale 拉回旧 baseline。
           if (seatEpisode.active && seatEpisode.owner === spineObj) {
@@ -1152,15 +1158,21 @@ function reportGroundGap(context = null) {
       docEpoch: petDocEpoch // F6：main 侧据此跨文档换代（旧纪元晚到包拒收、新纪元首包必收）
     };
     if (activeRenderMode === "gif") reportMeta.geometryRevision = gifGeometryRevision;
-    if (shadowObs && shadowObs.active) { // Shadow 只读：geometry dependency 元数据同拍补充（OFF 时字段不出现，零差异）
-      reportMeta.shadowGeom = {
-        scaleApplied: spineObj && spineObj.scale ? Math.abs(Number(spineObj.scale.y)) : null,
-        viewport: {
-          width: document.documentElement.clientWidth || 0,
-          height: document.documentElement.clientHeight || 0
-        },
-        layoutBasis: spineFitKeepScale ? "keepScale" : (spineAutoScaled ? "autoScale" : "manual")
-      };
+    if (shadowObs && shadowObs.active) { // Shadow 只读：采样时 provenance（renderer 自带身份；OFF 时字段不出现，零差异）
+      try {
+        shadowGeomSeq += 1;
+        reportMeta.shadowGeom = {
+          seq: shadowGeomSeq, // 本文档内报告单调序（迟到旧报告检测）
+          scaleEpoch: shadowScaleEpoch, // renderer scale identity（不按数值认同一）
+          sampledAt: { clock: "renderer-dateNow-ms", value: Date.now() },
+          scaleApplied: spineObj && spineObj.scale ? Math.abs(Number(spineObj.scale.y)) : null,
+          viewport: {
+            width: document.documentElement.clientWidth || 0,
+            height: document.documentElement.clientHeight || 0
+          },
+          layoutBasis: spineFitKeepScale ? "keepScale" : (spineAutoScaled ? "autoScale" : "manual")
+        };
+      } catch { /* 诊断补充失败不阻断 ground-gap 上报 */ }
     }
     window.petAPI.setGroundGap(gap, reportMeta);
     window.petAPI.setCharInset && window.petAPI.setCharInset(inset);
@@ -1829,13 +1841,13 @@ async function initSpine(context) {
     spineBootstrapDone = new Promise((r) => { spineBootstrapDoneResolve = r; });
     if (spineBootstrapFailSafeTimer) clearTimeout(spineBootstrapFailSafeTimer);
     spineBootstrapFailSafeTimer = setTimeout(() => releaseSpineBootstrap("failsafe"), 5000);
-    reportHasSit();
-    if (shadowObs && shadowObs.active) { // Shadow 只读：body generation 身份（PHASE 13 替换失效的输入）
-      shadowObs.note("body-generation", {
+    if (shadowObs && shadowObs.active) { // Shadow 只读：body generation 身份（真实 owner commit 先于 capability——身份先行）
+      shadowObs.noteSafely("body-generation", () => ({
         docEpoch: petDocEpoch, renderGeneration: activeRenderGeneration,
         skinId: spinePaths.skel || "", baseScale: spineBaseScaleX
-      });
+      }));
     }
+    reportHasSit();
     window.petAPI.playback && window.petAPI.playback("[spine] ok boost=" + boost + " scale=" + scale.toFixed(4) + " final=" + (scale * boost).toFixed(4) + " skel=" + paths.skel);
     return { status: "ready", resource: paths.atlas + "|" + paths.skel };
   } catch (e) {
@@ -2351,7 +2363,7 @@ function refreshStaleQueuedSuccessor(cur, target) {
 function playSpineInteract() {
   try { window.petAPI.playback("[ui] interact入口 spineObj=" + !!spineObj + " mode=" + activeRenderMode + " busy=" + busy); } catch { /* 忽略 */ }
   if (!spineObj || activeRenderMode !== "spine" || busy) return;
-  if (shadowObs && shadowObs.active) shadowObs.note("boundary-takeover", { kind: "headpat" }); // Shadow 只读：渲染层动画接管边界
+  if (shadowObs && shadowObs.active) shadowObs.noteSafely("boundary-takeover", () => ({ kind: "headpat" })); // Shadow 只读：渲染层动画接管边界
   // 睡觉中不互动：否则 Interact→排队恢复 spinePhaseAnim()=Move，主进程 sleeping=true 不位移
   // →「Move 动画播放但不移动」冻结（2026-09-05 用户目击，鼠标靠近感应也会触发本函数）
   if (isSleeping || walkState.sleeping) return;
@@ -3245,9 +3257,10 @@ if (window.petAPI.onNameChanged) {
 /* ---------- 桌面行走 / 渲染模式切换（主进程 → 渲染层） ---------- */
 if (window.petAPI.onWalking) {
   window.petAPI.onWalking((s) => {
-    if (shadowObs) { // Shadow 只读：shadow meta 激活/停用 + broadcast 因果关联（不参与任何决策）
-      if (s && s.shadow) shadowObs.arm(s.shadow);
-      else if (s) shadowObs.disarm();
+    if (s && s.shadow) { // Shadow 只读：shadow meta → 惰性创建/激活 observer（strict OFF 时永不发生）
+      ensureShadowObserver().arm(s.shadow);
+    } else if (shadowObs && s) {
+      shadowObs.disarm();
     }
     applyWalkState(s);
   });
@@ -3429,7 +3442,7 @@ async function rebuildSpine() {
   }
   const baseMainSeq = currentMainRenderModeSeq;
   skinSwitching = true; // 换肤全程吞掉旧 context 销毁触发的 lost（新画布随后重建，不整页 reload）
-  if (shadowObs && shadowObs.active) shadowObs.note("boundary-replacement", { kind: "spine-rebuild" }); // Shadow 只读：body 替换边界
+  if (shadowObs && shadowObs.active) shadowObs.noteSafely("boundary-replacement", () => ({ kind: "spine-rebuild" })); // Shadow 只读：body 替换边界
   visibleCanvasGap = 0;
   visibleCanvasGapCandidate = 0;
   visibleCanvasGapHits = 0;
@@ -3881,6 +3894,7 @@ document.addEventListener("mousemove", (e) => {
 function applyScale(s) {
   const v = Math.max(0.6, Math.min(2.0, parseFloat(s) || 1.0));
   nextGifGeometryRevision();
+  shadowScaleEpoch += 1; // Shadow-only：renderer scale identity 换代（采样时 provenance 用）
   document.body.style.zoom = String(v);
   scheduleGeometryReport();
 }

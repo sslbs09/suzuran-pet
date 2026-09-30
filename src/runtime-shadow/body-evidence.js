@@ -1,13 +1,18 @@
 /**
  * body-evidence.js — Shadow Slice v0.1 Body 证据与 readiness 观察（纯函数状态机，无 I/O）。
  *
- * FREEZE PHASE 8：OBSERVATION ONLY——
- * - readiness 只输出 ready / not-ready / unknown；
- * - 绝不因 not-ready 阻止 V1 Move，绝不因 ready 宣布 StandUp 成功；
- * - 判据只能来自：当前有效 generation、当前 attempt/transition 关联、actual applied target、
- *   mix/transition 证据、local Y / fit handoff 证据；
- * - 仅动画名字相同不够（必须携带 generation 身份 + track + 实际 applied 事件）；
- * - 「当前没有 token」也不够（无事件 ≠ 不 ready，只能 unknown）。
+ * FREEZE PHASE 8 + Blocker Closure 修订：
+ * - 事件语义：renderer 的 state.setAnimation 只是「请求 + track entry 被接受」（anim-entry），
+ *   不是姿态已应用——v0.1 无法证明 pose/fit 完成，就不造 applied；
+ * - readiness 是 OBSERVATION ONLY：只输出 not-ready（显式矛盾）与 unknown（证据不足）；
+ *   v0.1 没有任何可证明「pose ready」的证据级别，因此绝不输出 ready
+ *   （同类动画名不足、generation match 不足、记录了 mixDuration 不等于 mix 已完成、
+ *   no active token 不等于 ready、V1 已 Move 不能反推 ready）；
+ * - readiness 不参与 V1 admission / Shadow action admission / Shadow closure 的控制判断
+ *   （见 evaluator.decideForPhase——只允许冻结重启合同要求的 capability 已知性参与）；
+ * - 身份单调：旧 body-generation 晚到不得回滚当前 identity（A→B→late A 反例）；
+ *   身份按 generation/epoch，不按资源名（skinId 仅诊断信息）；
+ * - replacement：真正使 capability / applied 证据 / fit 证据失效。
  */
 "use strict";
 
@@ -24,79 +29,89 @@ function classifyAnimName(name) {
 
 function createBodyEvidenceState() {
   return {
-    // 当前 body 身份（body-generation 事件；身份推进唯一来源）
-    generation: null,              // {docEpoch, renderGeneration, skinId, observedAt}
+    // 当前 body 身份（body-generation 事件 = 真实 owner commit；身份推进唯一来源，单调）
+    generation: null,              // {docEpoch, renderGeneration, skinId, receivedAt}
     // CAPABILITY
-    capability: null,              // {skinHasSit, observedAt}
-    // 最近一次实际 applied 动画证据（anim-applied 事件）
-    lastApplied: null,             // {requested, requestedClass, loop, reason, track, mixDuration, gen, causeRef, observedAt}
-    // local Y / fit handoff 证据
-    fitHandoff: null,              // {kind, detail, observedAt}
+    capability: null,              // {skinHasSit, receivedAt}
+    // 最近一次 anim entry 证据（anim-entry：请求 + track entry 被接受；非 pose applied）
+    lastAnimEntry: null,           // {requested, requestedClass, loop, reason, track, mixDuration, gen, observedAt}
+    // local Y / fit handoff 观察
+    fitHandoff: null,              // {kind, receivedAt}
     // body 替换观察（PHASE 13 输入）
-    replacedAt: null               // {from, to, observedAt}
+    replacedAt: null               // {from, to, receivedAt}
   };
 }
 
 /**
- * body 身份推进（renderer body-generation）。
- * 返回 {replaced, previous}：docEpoch 变化或 renderGeneration 前进 → 旧 body 生命周期失效。
+ * body 身份推进（renderer body-generation，真实 owner commit 边界）。
+ * 返回 {replaced, stale, previous}：
+ * - replaced：身份真正前进（旧 body 生命周期失效 → capability/entry/fit 全失效）；
+ * - stale：旧代晚到（A→B→late A）→ 不更新身份、不清任何东西（禁止回滚）。
  */
-function noteBodyGeneration(state, { docEpoch, renderGeneration, skinId } = {}, observedAt = null) {
-  const de = Number.isFinite(Number(docEpoch)) ? Number(docEpoch) : null;
-  const rg = Number.isFinite(Number(renderGeneration)) ? Number(renderGeneration) : null;
-  if (de === null && rg === null) return { replaced: false, previous: null };
+function noteBodyGeneration(state, { docEpoch, renderGeneration, skinId } = {}, receivedAt = null) {
+  const de = docEpoch === null || docEpoch === undefined ? null : (Number.isSafeInteger(Number(docEpoch)) ? Number(docEpoch) : null);
+  const rg = renderGeneration === null || renderGeneration === undefined ? null : (Number.isSafeInteger(Number(renderGeneration)) ? Number(renderGeneration) : null);
+  if (de === null && rg === null) return { replaced: false, stale: false, previous: null };
   const prev = state.generation;
+  // 单调性：旧代晚到 → 拒绝（不得回滚当前 identity）
+  if (prev) {
+    if (de !== null && prev.docEpoch !== null && de < prev.docEpoch) return { replaced: false, stale: true, previous: prev };
+    if (de !== null && prev.docEpoch !== null && de === prev.docEpoch &&
+        rg !== null && prev.renderGeneration !== null && rg < prev.renderGeneration) {
+      return { replaced: false, stale: true, previous: prev };
+    }
+  }
   let replaced = false;
   if (prev) {
     if (de !== null && prev.docEpoch !== null && de !== prev.docEpoch) replaced = true;
     else if (rg !== null && prev.renderGeneration !== null && rg !== prev.renderGeneration) replaced = true;
   }
-  state.generation = { docEpoch: de, renderGeneration: rg, skinId: skinId || (prev && prev.skinId) || null, observedAt };
-  if (replaced) state.replacedAt = { from: prev, to: state.generation, observedAt };
-  // 身份换代后，旧 applied 证据与旧 capability 都不能再支撑 readiness（仅名字相同不够；
-  // capability 必须等新 body 的 set-has-sit 重报）
+  state.generation = { docEpoch: de, renderGeneration: rg, skinId: typeof skinId === "string" ? skinId : ((prev && prev.skinId) || null), receivedAt };
   if (replaced) {
-    state.lastApplied = null;
+    state.replacedAt = { from: prev, to: state.generation, receivedAt };
+    // 替换真正失效：旧 applied entry / capability / fit 证据全部作废
+    // （capability 必须等新 body 的 set-has-sit 重报；接线保证 body-generation 先于 capability 上行）
+    state.lastAnimEntry = null;
     state.capability = null;
     state.fitHandoff = null;
   }
-  return { replaced, previous: prev };
+  return { replaced, stale: false, previous: prev };
 }
 
 /** CAPABILITY：skinHasSit（pet:set-has-sit）。 */
-function noteCapability(state, skinHasSit, observedAt = null) {
+function noteCapability(state, skinHasSit, receivedAt = null) {
   if (typeof skinHasSit !== "boolean") return false;
-  state.capability = { skinHasSit, observedAt };
+  state.capability = { skinHasSit, receivedAt };
   return true;
 }
 
 /**
- * 实际 applied 动画证据。ev: {requested, loop, reason, track, mixDuration, docEpoch, renderGeneration, causeRef}
- * 证据必须携带 generation 身份；缺失身份时仍记录但 readiness 不可用它。
+ * anim entry 证据（anim-entry：请求且 track entry 被接受）。
+ * ev: {requested, loop, reason, track, mixDuration, renderGeneration, appliedScale}
+ * 这不是姿态应用证据——只记录「请求了什么、entry 是否被运行时接受」。
  */
-function noteAnimApplied(state, ev = {}, observedAt = null) {
-  const requested = String(ev.requested || "");
-  state.lastApplied = {
+function noteAnimEntry(state, ev = {}, receivedAt = null) {
+  const requested = typeof ev.requested === "string" ? ev.requested : "";
+  state.lastAnimEntry = {
     requested,
     requestedClass: classifyAnimName(requested),
-    loop: !!ev.loop,
-    reason: ev.reason || "",
-    track: Number.isFinite(Number(ev.track)) ? Number(ev.track) : 0,
-    mixDuration: Number.isFinite(Number(ev.mixDuration)) ? Number(ev.mixDuration) : null,
+    loop: ev.loop === true,
+    reason: typeof ev.reason === "string" ? ev.reason.slice(0, 60) : "",
+    track: Number.isSafeInteger(ev.track) ? ev.track : 0,
+    mixDuration: typeof ev.mixDuration === "number" && Number.isFinite(ev.mixDuration) ? ev.mixDuration : null,
     gen: {
-      docEpoch: Number.isFinite(Number(ev.docEpoch)) ? Number(ev.docEpoch) : null,
-      renderGeneration: Number.isFinite(Number(ev.renderGeneration)) ? Number(ev.renderGeneration) : null
+      docEpoch: state.generation ? state.generation.docEpoch : null,
+      renderGeneration: Number.isSafeInteger(ev.renderGeneration) ? ev.renderGeneration : (state.generation ? state.generation.renderGeneration : null)
     },
-    causeRef: ev.causeRef || null,   // 证明不了 → null
-    observedAt
+    observedAt: receivedAt
   };
-  return state.lastApplied;
+  return state.lastAnimEntry;
 }
 
-/** fit handoff 证据（hold-seat / release-refit / autoscale）。 */
-function noteFitHandoff(state, { kind, detail } = {}, observedAt = null) {
-  if (!kind) return false;
-  state.fitHandoff = { kind, detail: detail || null, observedAt };
+/** fit handoff 观察（hold-seat / release-refit / autoscale）——证据记录，非 readiness 充分条件。 */
+function noteFitHandoff(state, { kind } = {}, receivedAt = null) {
+  if (typeof kind !== "string" || !kind) return false;
+  state.fitHandoff = { kind: kind.slice(0, 40), receivedAt };
   return true;
 }
 
@@ -110,9 +125,10 @@ function sameGeneration(state, gen) {
 }
 
 /**
- * readiness 观察（PHASE 8）。
- * @param expectedClass "sit"|"move"|"idle"|"sleep"|null —— 当前 shadow 相位期望的 body 动作类别
- * @returns {readiness:"ready"|"not-ready"|"unknown", reason, evidence}
+ * readiness 观察（PHASE 8，OBSERVATION ONLY）。
+ * @param expectedClass "sit"|"move"|null —— 当前 shadow 相位期望的 body 动作类别
+ * @returns {readiness:"not-ready"|"unknown", reason, evidence?}
+ *   v0.1 绝不输出 "ready"：没有可证明 pose 应用/完成的证据级别。
  */
 function bodyReadiness(state, expectedClass) {
   if (!state.capability) {
@@ -121,14 +137,15 @@ function bodyReadiness(state, expectedClass) {
   if (expectedClass === "sit" && state.capability.skinHasSit === false) {
     return { readiness: "not-ready", reason: "sit-capability-absent" };
   }
-  const la = state.lastApplied;
-  if (!la) return { readiness: "unknown", reason: "no-applied-evidence" };
-  if (!sameGeneration(state, la.gen)) return { readiness: "unknown", reason: "applied-evidence-stale-generation" };
+  const e = state.lastAnimEntry;
+  if (!e) return { readiness: "unknown", reason: "no-entry-evidence" };
+  if (!sameGeneration(state, e.gen)) return { readiness: "unknown", reason: "entry-evidence-stale-generation" };
   if (!expectedClass) return { readiness: "unknown", reason: "no-expected-class" };
-  if (la.requestedClass === expectedClass) {
-    return { readiness: "ready", reason: "applied-matches", evidence: { requested: la.requested, mixDuration: la.mixDuration, causeRef: la.causeRef } };
+  if (e.requestedClass !== expectedClass) {
+    return { readiness: "not-ready", reason: "entry-contradicts", evidence: { requested: e.requested, expectedClass } };
   }
-  return { readiness: "not-ready", reason: "applied-contradicts", evidence: { requested: la.requested, expectedClass } };
+  // 同类 entry + 同代也不足以 ready（mix 未完成 / pose 未验证）→ unknown
+  return { readiness: "unknown", reason: "no-pose-proof-in-v0.1", evidence: { requested: e.requested } };
 }
 
 /** 只读视图（诊断输出用） */
@@ -139,10 +156,9 @@ function bodyEvidenceView(state, expectedClass) {
     reason: r.reason,
     generation: state.generation,
     capability: state.capability,
-    lastApplied: state.lastApplied ? {
-      requested: state.lastApplied.requested, requestedClass: state.lastApplied.requestedClass,
-      reason: state.lastApplied.reason, track: state.lastApplied.track, mixDuration: state.lastApplied.mixDuration,
-      causeRef: state.lastApplied.causeRef
+    lastAnimEntry: state.lastAnimEntry ? {
+      requested: state.lastAnimEntry.requested, requestedClass: state.lastAnimEntry.requestedClass,
+      reason: state.lastAnimEntry.reason, track: state.lastAnimEntry.track, mixDuration: state.lastAnimEntry.mixDuration
     } : null,
     fitHandoff: state.fitHandoff,
     replacedAt: state.replacedAt ? { from: state.replacedAt.from, to: state.replacedAt.to } : null
@@ -154,7 +170,7 @@ module.exports = {
   createBodyEvidenceState,
   noteBodyGeneration,
   noteCapability,
-  noteAnimApplied,
+  noteAnimEntry,
   noteFitHandoff,
   sameGeneration,
   bodyReadiness,

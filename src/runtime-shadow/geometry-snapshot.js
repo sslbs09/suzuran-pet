@@ -1,95 +1,98 @@
 /**
  * geometry-snapshot.js — Shadow Slice v0.1 Geometry Snapshot（纯函数状态机，无 I/O）。
  *
- * FREEZE PHASE 7：字段按六类区分——MEASUREMENT / CAPABILITY / CONFIGURATION·POLICY /
- * HOST OBSERVATION / DERIVED VALUE / DEPENDENCY IDENTITY。只保留 slice 真正消费的字段。
+ * FREEZE PHASE 7 + Blocker Closure 修订（SAMPLE-TIME PROVENANCE）：
+ * measurement 的身份一律来自 renderer 采样时自带的 provenance（meta + shadowGeom）：
+ *   { docEpoch, renderGeneration, scaleApplied, viewport, layoutBasis, seq, scaleEpoch, sampledAt }
+ * main 接收时只能：验证 / 接受 / 拒绝 / 补充「receive-time host observation」（显式分字段，
+ * 绝不伪装成 renderer provenance，也不给旧 measurement 贴当前身份让它变 fresh）。
  *
- * 依赖缺口（FREEZE「Geometry dependency gap」）：V1 Spine groundGap 没有完整 geometry revision，
- * 因此观测桥必须在采样时补充只读依赖元数据（renderer shadowGeom + main 侧 host/config 补充）。
  * 铁律：
- * - 来源证明不了（meta 缺 renderGeneration/docEpoch）→ insufficient，**绝不**用「当前版本」补贴；
- * - 新 scale / viewport 已应用但相应新测量未确认 → 旧 snapshot stale，不得用于新定位判断；
- * - staleness 只由 identity 比较（docEpoch/renderGeneration/scaleGeneration/viewportGeneration/
- *   workAreaGeneration）得出，与事件到达先后无关。
- *
- * validity 输出三态：valid / stale / insufficient。
+ * - 缺失 generation 保持 missing（null）→ insufficient；Number(null)===0 陷阱已封
+ *   （所有身份解析先判 null/undefined，绝不让缺失转 0）；
+ * - 迟到旧报告（同 epoch+generation 内 seq 倒退，或 scaleEpoch 落后）→ 拒绝替换 good measurement，
+ *   记入 lastRejected；
+ * - staleness 只由 identity 比较得出，与到达先后无关；晚收到本身不构成 stale；
+ * - requested scale 换代（main setScale，receive 后）→ captured.receiveGeneration 失配 → stale；
+ * - scaleApplied 与 scaleEpoch 关联 identity，不按数值相同认定同一次变化；
+ * - derivedConsumedGap 只有真实 valid snapshot 可产生。
  */
 "use strict";
 
-const GEOMETRY_SNAPSHOT_FIELDS = {
-  MEASUREMENT: "measurement",                 // groundGap report（含 provenance identity）
-  CAPABILITY: "capability",                   // skinHasSit
-  CONFIGURATION: "configuration",             // scaleRequested / seatSink / standSinkOffset / sinkTier
-  HOST_OBSERVATION: "host",                   // workArea / displayScaleFactor
-  DERIVED_VALUE: "derived",                   // consumedGap / expectedSeatBottomLine
-  DEPENDENCY_IDENTITY: "dependency-identity"  // docEpoch/renderGeneration/scaleGeneration/viewportGeneration
-};
-
 function createGeometrySnapshotState(initial = {}) {
   return {
-    // MEASUREMENT：最近一次 accepted 的 groundGap report（measurement-of-record）
+    // MEASUREMENT：最近一份 accepted 的 groundGap report（measurement-of-record）
     measurement: null,
-    // 最近一次 rejected 报告（stale 证据观察，不覆盖好测量）
+    // 最近一次 rejected/late 报告（证据，绝不覆盖好测量）
     lastRejected: null,
     // CAPABILITY
-    capability: null,                        // {skinHasSit, observedAt}
-    // CONFIGURATION / POLICY
+    capability: null,                        // {skinHasSit, receivedAt}
+    // CONFIGURATION / POLICY（receive-time host 观测，仅诊断）
     configuration: {
       scaleRequested: Number.isFinite(initial.scaleRequested) ? initial.scaleRequested : null,
       seatSink: null,
       standSinkOffset: null,
       sinkTier: null,
-      geometryPolicyIdentity: initial.geometryPolicyIdentity || "groundgap-report+standSinkOffset@shadow-v0.1"
+      geometryPolicyIdentity: initial.geometryPolicyIdentity || "sample-time-provenance@shadow-v0.1"
     },
-    // HOST OBSERVATION
+    // HOST OBSERVATION（receive-time）
     host: {
       workArea: null,
       displayScaleFactor: null,
       workAreaGeneration: 0
     },
-    // DEPENDENCY IDENTITY
+    // DEPENDENCY IDENTITY（当前依赖身份；只由真实 owner commit / main setScale 推进，绝不回卷）
     dependency: {
-      docEpoch: null,                        // renderer 文档纪元（renderModeSeq at doc start）
-      renderGeneration: null,                // spine 模型加载代（文档内）
-      scaleGeneration: 0,                    // requested scale 换代计数（setScale 触发）
-      viewportGeneration: 0                  // viewport 换代计数（renderer 上报 viewport 变化）
-    }
-    // DERIVED VALUE 按需计算（derivedGapFor/derivedSeatBottom），不落存储
+      docEpoch: null,
+      renderGeneration: null,
+      scaleGeneration: 0        // main setScale 换代计数
+    },
+    // renderer 采样身份单调性观测（来自 accepted 报告的 provenance）
+    _maxScaleEpochSeen: null,   // 已见最大 renderer scale epoch
+    _lastAcceptedSeq: null      // 同 epoch+generation 内最近 accepted 报告 seq（迟到检测）
   };
 }
 
-/** requested scale 变化（setScale）：依赖换代。旧 measurement 立即失去效力。 */
+/* ---------- 身份解析：缺失永远保持 missing（null），绝不让 Number(null)===0 蒙混 ---------- */
+
+function parseId(v) {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isSafeInteger(n) && n >= 0 ? n : null;
+}
+
+/**
+ * renderer 文档/模型代推进（body-generation = 真实 owner commit；单调，禁止回卷）。
+ * 返回 {changed, rolledBackAttempt}：旧代晚到 → 不更新身份，rolledBackAttempt=true。
+ */
+function noteDocGeneration(state, { docEpoch, renderGeneration } = {}) {
+  const de = parseId(docEpoch);
+  const rg = parseId(renderGeneration);
+  if (de === null && rg === null) return { changed: false, rolledBackAttempt: false };
+  const cur = state.dependency;
+  // 旧代晚到：docEpoch 更小，或同 epoch 内 renderGeneration 更小 → 拒绝（identity 不回滚）
+  if (de !== null && cur.docEpoch !== null && de < cur.docEpoch) return { changed: false, rolledBackAttempt: true };
+  if (de !== null && cur.docEpoch !== null && de === cur.docEpoch &&
+      rg !== null && cur.renderGeneration !== null && rg < cur.renderGeneration) {
+    return { changed: false, rolledBackAttempt: true };
+  }
+  let changed = false;
+  if (de !== null && cur.docEpoch !== de) { cur.docEpoch = de; changed = true; }
+  if (rg !== null && cur.renderGeneration !== rg) { cur.renderGeneration = rg; changed = true; }
+  return { changed, rolledBackAttempt: false };
+}
+
+/** requested scale 变化（main setScale，main 权威）：依赖换代。 */
 function noteScaleRequested(state, scale) {
   const s = Number(scale);
   if (!Number.isFinite(s)) return false;
-  if (state.configuration.scaleRequested === s) return false; // 同值不换代
+  if (state.configuration.scaleRequested === s) return false;
   state.configuration.scaleRequested = s;
   state.dependency.scaleGeneration += 1;
   return true;
 }
 
-/** renderer 上报 viewport 变化：依赖换代。 */
-function noteViewport(state, viewport) {
-  if (!viewport || !Number.isFinite(viewport.width) || !Number.isFinite(viewport.height)) return false;
-  const prev = state._viewportSeen;
-  const changed = !prev || prev.width !== viewport.width || prev.height !== viewport.height;
-  state._viewportSeen = { width: viewport.width, height: viewport.height };
-  if (!changed) return false;
-  state.dependency.viewportGeneration += 1;
-  return true;
-}
-
-/** renderer 文档/模型代换代（body-generation / geom-report meta）。 */
-function noteDocGeneration(state, { docEpoch, renderGeneration } = {}) {
-  const de = Number.isFinite(Number(docEpoch)) ? Number(docEpoch) : null;
-  const rg = Number.isFinite(Number(renderGeneration)) ? Number(renderGeneration) : null;
-  let changed = false;
-  if (de !== null && state.dependency.docEpoch !== de) { state.dependency.docEpoch = de; changed = true; }
-  if (rg !== null && state.dependency.renderGeneration !== rg) { state.dependency.renderGeneration = rg; changed = true; }
-  return changed;
-}
-
-/** HOST OBSERVATION：workArea / displayScaleFactor。workArea 变化换代。 */
+/** HOST OBSERVATION（receive-time）：workArea / displayScaleFactor。workArea 变化换代。 */
 function noteHost(state, { workArea, displayScaleFactor } = {}) {
   let changed = false;
   if (workArea && typeof workArea === "object" && Number.isFinite(workArea.y)) {
@@ -101,143 +104,161 @@ function noteHost(state, { workArea, displayScaleFactor } = {}) {
       changed = true;
     }
   }
-  if (Number.isFinite(Number(displayScaleFactor))) {
+  if (Number.isFinite(Number(displayScaleFactor)) && displayScaleFactor !== null) {
     const d = Number(displayScaleFactor);
     if (state.host.displayScaleFactor !== d) { state.host.displayScaleFactor = d; changed = true; }
   }
   return changed;
 }
 
-/** CONFIGURATION：坐姿下沉配置（main 侧 effectiveSeatSink/standSinkOffset/sinkTier 观测值）。 */
+/** CONFIGURATION：坐姿下沉配置（receive-time host 观测，诊断用）。 */
 function noteSeatConfiguration(state, { seatSink, standSinkOffset, sinkTier } = {}) {
   const c = state.configuration;
   let changed = false;
-  if (Number.isFinite(Number(seatSink)) && c.seatSink !== Number(seatSink)) { c.seatSink = Number(seatSink); changed = true; }
-  if (Number.isFinite(Number(standSinkOffset)) && c.standSinkOffset !== Number(standSinkOffset)) { c.standSinkOffset = Number(standSinkOffset); changed = true; }
+  if (Number.isFinite(Number(seatSink)) && seatSink !== null && c.seatSink !== Number(seatSink)) { c.seatSink = Number(seatSink); changed = true; }
+  if (Number.isFinite(Number(standSinkOffset)) && standSinkOffset !== null && c.standSinkOffset !== Number(standSinkOffset)) { c.standSinkOffset = Number(standSinkOffset); changed = true; }
   if (sinkTier && c.sinkTier !== sinkTier) { c.sinkTier = sinkTier; changed = true; }
   return changed;
 }
 
 /** CAPABILITY：skinHasSit。 */
-function noteCapability(state, skinHasSit, observedAt = null) {
+function noteCapability(state, skinHasSit, receivedAt = null) {
   if (typeof skinHasSit !== "boolean") return false;
-  state.capability = { skinHasSit, observedAt };
+  state.capability = { skinHasSit, receivedAt };
   return true;
 }
 
 /**
- * MEASUREMENT：groundGap report 采样。
- * @param {Object} args
- *  - px: renderer 原始上报值
- *  - meta: renderer reportMeta（sourceMode/renderGeneration/docEpoch[/geometryRevision]）
- *  - decision: main groundGapReportDecision 结果（accepted/value/target/reason…）
- *  - supplement: 采样时补充的只读依赖元数据（renderer shadowGeom + main host/config 补充）
- *      {scaleApplied, viewport, layoutBasis, scaleRequested, workArea, displayScaleFactor, seatSink, standSinkOffset, sinkTier}
+ * MEASUREMENT 采样入库。
+ * @param args.px        renderer 原始上报值
+ * @param args.meta      renderer reportMeta（sourceMode/renderGeneration/docEpoch）——采样时身份
+ * @param args.decision  main groundGapReportDecision 结果
+ * @param args.shadowGeom  renderer 采样时补充 {scaleApplied, viewport, layoutBasis, seq, scaleEpoch, sampledAt}
+ * @param args.hostAtReceive main 接收时独立 host 观测 {scaleRequested, workArea, displayScaleFactor,
+ *                            seatSink, standSinkOffset, sinkTier}——显式 receive-time，绝不混入 provenance
  *
- * 规则：
- * - accepted 报告才替换 measurement-of-record；rejected 记入 lastRejected（证据），绝不覆盖好测量；
- * - 报告身份只存 provenance，**绝不**回写/回卷当前 dependency identity（身份只由 body-generation 推进，
- *   晚到旧包不得把当前纪元拖回过去——test 14 合同）；
- * - provenance 缺 renderGeneration → insufficientProvenance=true，接受也不得被「当前版本」补贴。
+ * intake 顺序：先做迟到/旧代拒绝检查（对当前 record），再替换 + 更新单调观测。
  */
-function noteMeasurement(state, { px, meta, decision, supplement } = {}, observedAt = null) {
+function noteMeasurement(state, { px, meta, decision, shadowGeom, hostAtReceive } = {}, receivedAt = null) {
   const m = Number(px);
   const metaObj = meta && typeof meta === "object" ? meta : {};
-  const rg = Number.isFinite(Number(metaObj.renderGeneration)) ? Number(metaObj.renderGeneration) : null;
-  const de = Number.isFinite(Number(metaObj.docEpoch)) ? Number(metaObj.docEpoch) : null;
-  const supp = supplement && typeof supplement === "object" ? supplement : {};
+  const geom = shadowGeom && typeof shadowGeom === "object" ? shadowGeom : {};
+  const host = hostAtReceive && typeof hostAtReceive === "object" ? hostAtReceive : {};
   const accepted = !!(decision && decision.accepted);
+  const prov = {
+    // 采样时身份（renderer 自带；缺失保持 null——绝不补贴）
+    renderGeneration: parseId(metaObj.renderGeneration),
+    docEpoch: parseId(metaObj.docEpoch),
+    geometryRevision: parseId(metaObj.geometryRevision),
+    scaleApplied: geom.scaleApplied !== null && geom.scaleApplied !== undefined && typeof geom.scaleApplied === "number" && Number.isFinite(geom.scaleApplied) ? geom.scaleApplied : null,
+    viewport: geom.viewport && Number.isFinite(geom.viewport.width) && Number.isFinite(geom.viewport.height)
+      ? { width: geom.viewport.width, height: geom.viewport.height } : null,
+    layoutBasis: typeof geom.layoutBasis === "string" ? geom.layoutBasis : null,
+    seq: parseId(geom.seq),
+    scaleEpoch: parseId(geom.scaleEpoch),
+    sampledAt: geom.sampledAt && typeof geom.sampledAt === "object" ? geom.sampledAt : null
+  };
   if (!accepted) {
     state.lastRejected = {
       rawPx: Number.isFinite(m) ? m : null,
       reason: decision && (decision.reason || decision.staleReason) ? String(decision.reason || decision.staleReason) : "rejected",
       stale: !!(decision && (decision.stale || decision.staleDoc)),
-      provenance: { renderGeneration: rg, docEpoch: de },
-      observedAt
+      provenance: { renderGeneration: prov.renderGeneration, docEpoch: prov.docEpoch },
+      receivedAt
     };
     return null;
   }
-  // 先应用同拍补充（supplement 是本次测量采样环境的一部分，不是「采样后的变化」），
-  // 再快照 capturedGeneration——否则首个 workArea/viewport 会被误判为 stale。
-  noteHost(state, { workArea: supp.workArea, displayScaleFactor: supp.displayScaleFactor });
-  noteSeatConfiguration(state, { seatSink: supp.seatSink, standSinkOffset: supp.standSinkOffset, sinkTier: supp.sinkTier });
+  // —— 迟到 / 旧代拒绝（对当前依赖身份 + 当前 good record 比较；绝不回滚）——
+  const dep = state.dependency;
+  if (prov.docEpoch !== null && dep.docEpoch !== null && prov.docEpoch < dep.docEpoch) {
+    state.lastRejected = { rawPx: Number.isFinite(m) ? m : null, reason: "stale-doc-epoch", stale: true, provenance: { renderGeneration: prov.renderGeneration, docEpoch: prov.docEpoch }, receivedAt };
+    return null;
+  }
+  if (prov.docEpoch !== null && dep.docEpoch !== null && prov.docEpoch === dep.docEpoch &&
+      prov.renderGeneration !== null && dep.renderGeneration !== null && prov.renderGeneration < dep.renderGeneration) {
+    state.lastRejected = { rawPx: Number.isFinite(m) ? m : null, reason: "stale-render-generation", stale: true, provenance: { renderGeneration: prov.renderGeneration, docEpoch: prov.docEpoch }, receivedAt };
+    return null;
+  }
+  const cur = state.measurement;
+  if (cur) {
+    const cp = cur.provenance;
+    if (prov.docEpoch !== null && cp.docEpoch !== null && prov.docEpoch < cp.docEpoch) {
+      state.lastRejected = { rawPx: Number.isFinite(m) ? m : null, reason: "stale-doc-epoch", stale: true, provenance: { renderGeneration: prov.renderGeneration, docEpoch: prov.docEpoch }, receivedAt };
+      return null;
+    }
+    if (prov.docEpoch !== null && cp.docEpoch !== null && prov.docEpoch === cp.docEpoch &&
+        prov.renderGeneration !== null && cp.renderGeneration !== null && prov.renderGeneration < cp.renderGeneration) {
+      state.lastRejected = { rawPx: Number.isFinite(m) ? m : null, reason: "stale-render-generation", stale: true, provenance: { renderGeneration: prov.renderGeneration, docEpoch: prov.docEpoch }, receivedAt };
+      return null;
+    }
+    if (prov.docEpoch !== null && cp.docEpoch !== null && prov.docEpoch === cp.docEpoch &&
+        prov.renderGeneration !== null && cp.renderGeneration !== null && prov.renderGeneration === cp.renderGeneration &&
+        prov.seq !== null && state._lastAcceptedSeq !== null && prov.seq < state._lastAcceptedSeq) {
+      // 同代内 seq 倒退 = 采样更早的旧报告晚到 → 拒绝替换（反例 A）
+      state.lastRejected = { rawPx: Number.isFinite(m) ? m : null, reason: "late-report-seq", stale: true, provenance: { renderGeneration: prov.renderGeneration, docEpoch: prov.docEpoch }, receivedAt };
+      return null;
+    }
+  }
+  // 先落 receive-time host 观测（显式独立字段），再快照 receiveGeneration（staleness 基准）
+  // 注意：scaleRequested 不从此处回写 configuration——requested scale 的唯一权威是 main setScale
+  // （noteScaleRequested）；报告可能采样于 scale 变化之前，用它回写会造成状态回卷。
+  noteHost(state, { workArea: host.workArea, displayScaleFactor: host.displayScaleFactor });
+  noteSeatConfiguration(state, { seatSink: host.seatSink, standSinkOffset: host.standSinkOffset, sinkTier: host.sinkTier });
   state.measurement = {
-    category: GEOMETRY_SNAPSHOT_FIELDS.MEASUREMENT,
     rawPx: Number.isFinite(m) ? m : null,
     accepted: true,
     value: Number.isFinite(Number(decision.value)) ? Number(decision.value) : null,
-    // provenance：报告自带的身份证据；缺项保留 null，永不补齐
-    provenance: { renderGeneration: rg, docEpoch: de, geometryRevision: Number.isFinite(Number(metaObj.geometryRevision)) ? Number(metaObj.geometryRevision) : null },
-    insufficientProvenance: rg === null,       // renderGeneration 必须在场；docEpoch 允许缺省（0 纪元旧包）
-    // 采样时补充的依赖快照（与报告同拍采集，证明依赖关系）
-    supplement: {
-      scaleApplied: Number.isFinite(Number(supp.scaleApplied)) ? Number(supp.scaleApplied) : null,
-      viewport: supp.viewport && Number.isFinite(supp.viewport.width) ? { width: supp.viewport.width, height: supp.viewport.height } : null,
-      layoutBasis: supp.layoutBasis || null,
-      scaleRequested: Number.isFinite(Number(supp.scaleRequested)) ? Number(supp.scaleRequested) : null,
-      workArea: supp.workArea && Number.isFinite(supp.workArea.y) ? { x: supp.workArea.x, y: supp.workArea.y, width: supp.workArea.width, height: supp.workArea.height } : null,
-      displayScaleFactor: Number.isFinite(Number(supp.displayScaleFactor)) ? Number(supp.displayScaleFactor) : null,
-      seatSink: Number.isFinite(Number(supp.seatSink)) ? Number(supp.seatSink) : null,
-      standSinkOffset: Number.isFinite(Number(supp.standSinkOffset)) ? Number(supp.standSinkOffset) : null,
-      sinkTier: supp.sinkTier || null
+    provenance: prov, // 采样时身份（renderer 自带）
+    // receive-time host observation 快照（显式不是 provenance；staleness 用）
+    hostAtReceive: {
+      scaleRequested: Number.isFinite(Number(host.scaleRequested)) && host.scaleRequested !== null ? Number(host.scaleRequested) : null,
+      workArea: host.workArea && Number.isFinite(host.workArea.y) ? { x: host.workArea.x, y: host.workArea.y, width: host.workArea.width, height: host.workArea.height } : null,
+      displayScaleFactor: Number.isFinite(Number(host.displayScaleFactor)) && host.displayScaleFactor !== null ? Number(host.displayScaleFactor) : null,
+      seatSink: Number.isFinite(Number(host.seatSink)) && host.seatSink !== null ? Number(host.seatSink) : null,
+      standSinkOffset: Number.isFinite(Number(host.standSinkOffset)) && host.standSinkOffset !== null ? Number(host.standSinkOffset) : null,
+      sinkTier: host.sinkTier || null
     },
-    // 采样瞬间的依赖 generation 快照（identity 比较基准；观测记录，不是「补贴」）
-    capturedGeneration: {
-      scaleGeneration: state.dependency.scaleGeneration,
-      viewportGeneration: state.dependency.viewportGeneration,
+    capturedReceiveGeneration: {
+      scaleGeneration: state.dependency.scaleGeneration,   // main setScale 计数（receive 时）
       workAreaGeneration: state.host.workAreaGeneration
     },
-    observedAt
+    receivedAt
   };
+  // 单调观测更新（在 accepted 入库后）
+  if (prov.scaleEpoch !== null) {
+    state._maxScaleEpochSeen = state._maxScaleEpochSeen === null ? prov.scaleEpoch : Math.max(state._maxScaleEpochSeen, prov.scaleEpoch);
+  }
+  if (prov.seq !== null) state._lastAcceptedSeq = prov.seq;
   return state.measurement;
 }
 
 /**
- * validity（PHASE 7 输出）：valid / stale / insufficient + reason。
- * 只做 identity 比较，不看时间先后（「晚收到」本身不构成 stale）。
- * 方向性：只有「测量身份旧于当前身份」→ stale；测量身份新于当前身份（body-generation
- * 事件缺失但报告可信携带身份）不构成 stale——几何证据自证身份。
+ * validity：valid / stale / insufficient + reason。只做 identity 比较，不看时间先后。
  */
 function geometryValidity(state) {
   const m = state.measurement;
   if (!m) return { validity: "insufficient", reason: "no-measurement" };
-  if (m.insufficientProvenance) return { validity: "insufficient", reason: "provenance-missing-renderGeneration" };
-  const g = state.dependency, c = m.capturedGeneration;
-  // 请求尺度换代后无新测量 → stale（test 4/5）
-  if (c.scaleGeneration !== g.scaleGeneration) return { validity: "stale", reason: "scale-generation-advanced" };
-  if (c.viewportGeneration !== g.viewportGeneration) return { validity: "stale", reason: "viewport-generation-advanced" };
-  if (c.workAreaGeneration !== state.host.workAreaGeneration) return { validity: "stale", reason: "work-area-changed" };
-  // 测量身份旧于当前依赖身份 → stale（test 6：旧 renderer generation 晚到）
-  if (m.provenance.docEpoch !== null && g.docEpoch !== null && m.provenance.docEpoch < g.docEpoch) {
-    return { validity: "stale", reason: "doc-epoch-older-than-current" };
-  }
-  if (m.provenance.renderGeneration !== null && g.renderGeneration !== null && m.provenance.renderGeneration < g.renderGeneration) {
-    return { validity: "stale", reason: "render-generation-older-than-current" };
-  }
+  if (m.provenance.renderGeneration === null) return { validity: "insufficient", reason: "provenance-missing-renderGeneration" };
+  const g = state.dependency, c = m.capturedReceiveGeneration, p = m.provenance;
+  // renderer 采样身份落后于当前依赖身份 → stale（旧代证据）
+  if (p.docEpoch !== null && g.docEpoch !== null && p.docEpoch < g.docEpoch) return { validity: "stale", reason: "doc-epoch-older-than-current" };
+  if (p.renderGeneration !== null && g.renderGeneration !== null && p.renderGeneration < g.renderGeneration) return { validity: "stale", reason: "render-generation-older-than-current" };
+  // renderer scale identity：采样 epoch 落后于已见最大 → stale（不按数值认同一）
+  if (p.scaleEpoch !== null && state._maxScaleEpochSeen !== null && p.scaleEpoch < state._maxScaleEpochSeen) return { validity: "stale", reason: "scale-epoch-older-than-observed" };
+  // main receive 后依赖换代（setScale / workArea 变化）→ stale
+  if (c.scaleGeneration !== g.scaleGeneration) return { validity: "stale", reason: "scale-generation-advanced-after-receive" };
+  if (c.workAreaGeneration !== state.host.workAreaGeneration) return { validity: "stale", reason: "work-area-changed-after-receive" };
   return { validity: "valid", reason: "identity-match" };
 }
 
-/**
- * DERIVED VALUE：消费进定位的 gap。**仅 valid snapshot 可派生**——
- * stale/insufficient 的旧 gap 不得用于新定位判断（FREEZE 依赖缺口铁律）。
- */
+/** DERIVED VALUE：消费进定位的 gap。仅 valid snapshot 可派生（stale/insufficient 不可消费）。 */
 function derivedConsumedGap(state) {
   if (geometryValidity(state).validity !== "valid") return null;
   const m = state.measurement;
   return m && m.accepted && Number.isFinite(m.value) ? m.value : null;
 }
 
-/** DERIVED VALUE：坐姿预期窗口底线（walkGeo.groundLine + seatSink 同族公式，只读推演用） */
-function derivedSeatBottom(state, windowHeight, seated) {
-  const wa = state.host.workArea;
-  const gap = derivedConsumedGap(state);
-  if (!wa || !Number.isFinite(windowHeight) || gap === null) return null;
-  const sink = seated && state.capability && state.capability.skinHasSit && Number.isFinite(state.configuration.seatSink)
-    ? state.configuration.seatSink : 0;
-  return Math.max(wa.y, wa.y + wa.height - windowHeight) + gap + (seated ? sink : 0);
-}
-
-/** 只读快照（诊断输出用，bounded 字段表） */
+/** 只读视图（诊断输出用，bounded 字段表） */
 function geometrySnapshotView(state) {
   const v = geometryValidity(state);
   return {
@@ -245,8 +266,8 @@ function geometrySnapshotView(state) {
     reason: v.reason,
     consumedGap: derivedConsumedGap(state),
     measurement: state.measurement ? {
-      rawPx: state.measurement.rawPx, accepted: state.measurement.accepted,
-      provenance: state.measurement.provenance, supplement: state.measurement.supplement
+      rawPx: state.measurement.rawPx, value: state.measurement.value,
+      provenance: state.measurement.provenance, hostAtReceive: state.measurement.hostAtReceive
     } : null,
     lastRejected: state.lastRejected,
     capability: state.capability,
@@ -257,10 +278,8 @@ function geometrySnapshotView(state) {
 }
 
 module.exports = {
-  GEOMETRY_SNAPSHOT_FIELDS,
   createGeometrySnapshotState,
   noteScaleRequested,
-  noteViewport,
   noteDocGeneration,
   noteHost,
   noteSeatConfiguration,
@@ -268,6 +287,5 @@ module.exports = {
   noteMeasurement,
   geometryValidity,
   derivedConsumedGap,
-  derivedSeatBottom,
   geometrySnapshotView
 };
