@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld("petAPI", {
   setSleeping: (v) => ipcRenderer.send("pet:set-sleeping", !!v),
   setHasSit: (v) => ipcRenderer.send("pet:set-has-sit", !!v), // 皮肤有无坐下动画上报（无则坐姿不下沉，防"站着脚陷进任务栏"）
   setGroundGap: (px, meta) => ipcRenderer.send("pet:set-ground-gap", px, meta || null),
+  reportShadowEvidence: (ev) => ipcRenderer.send("pet:shadow-evidence", ev || null), // Shadow v0.1（默认关）：渲染层 body 证据上行；main 侧 gate OFF 时零消费
   setWalking: (on) => ipcRenderer.invoke("pet:set-walking", !!on),
   walkingPause: (b, source) => ipcRenderer.send("pet:walking-pause", !!b, source || "drag"),
   walkingEngineStop: () => ipcRenderer.send("pet:walking-engine-stop"),
