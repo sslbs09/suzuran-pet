@@ -81,6 +81,7 @@ const { replayCrashRecovery } = require("./src/crash-recovery"); // 崩溃恢复
 const { createCrashBudget } = require("./src/crash-budget"); // crash 自愈预算按逻辑窗口分桶（H2，可单测）
 const walkState = require("./src/walk-state"); // 行走几何决策纯函数（v2.5.26 收敛①）
 const runtimeShadow = require("./src/runtime-shadow"); // Runtime V2 Shadow Slice v0.1（只读 shadow，默认关闭）
+const runtimeV2Module = require("./src/runtime-v2"); // Runtime V2 Locomotion Cutover v0.1（production，默认关闭）
 const focusWatch = require("./src/focus-watch"); // 专注/离开状态机纯函数（v2.5.26 收敛②）
 const updater = require("./src/updater"); // asar-swap 自动更新（v2.5.26 ③）
 const weather = require("./src/weather"); // 免费天气 Open-Meteo（v2.5.26）
@@ -306,6 +307,7 @@ ipcMain.handle("pet:set-layer", (_e, v) => { setPetLayer(v); return true; });
 
 /** 一键坐到任务栏上：角色脚底贴齐任务栏上沿（窗口按 groundGap 下探补偿），播放 Sit 坐姿 */
 function sitOnTaskbar() {
+  if (typeof v2Locomotion !== "undefined" && v2Locomotion) v2Locomotion.interrupt("manual-sit-command"); // 用户命令优先：V2 让位（若持有）
   if (!win || win.isDestroyed()) return;
   const b = win.getBounds();
   const wa = walkGeo.workAreaOf(screen, b);
@@ -354,6 +356,7 @@ let displayClampTimer = null;
 function scheduleDisplayClamp(reason) {
   clearTimeout(displayClampTimer);
   displayClampTimer = setTimeout(() => clampPetToWorkArea(reason), 180);
+  if (typeof v2Geo !== "undefined" && v2Geo) v2Geo.workAreaGeneration += 1; // V2：host 上下文换代（旧测量不可再用于新定位判断）
   if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsHostChanged(reason); // Shadow 只读观察：display/workArea 上下文变化（gate OFF 零动作；typeof 守卫兼容测试沙箱代码块抽取，与 E1 取证先例同款）
 }
 
@@ -1379,7 +1382,11 @@ ipcMain.handle("pet:open-quickstart", () => { openQuickstart(); return true; });
 /* ---------- 桌宠大小缩放 ---------- */
 function setScale(scale) {
   const s = clampScale(scale);
+  const prevScaleForV2 = (config.getConfig().window || {}).scale;
   config.saveConfig({ window: { scale: s } });
+  // V2：scale 换代 + 让位（resize/reposition 属 V1 处理路径；下一 stable-sit 按新几何再开 episode）
+  if (typeof v2Geo !== "undefined" && v2Geo && prevScaleForV2 !== s) v2Geo.scaleGeneration += 1;
+  if (typeof v2Locomotion !== "undefined" && v2Locomotion) v2Locomotion.interrupt("scale-change");
   // Shadow 只读观察：requested scale 换代（gate OFF 零动作；typeof 守卫兼容测试沙箱代码块抽取）
   if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsScaleChanged(s);
   if (win && !win.isDestroyed()) {
@@ -2146,6 +2153,7 @@ function wsScanSignature() {
  *  进入对话暂停、结束（done/error/中止/快捷回复）统一在 finally 恢复。 */
 function chatPauseWalk(p) {
   if (!walk.active) return;
+  if (p && typeof v2Locomotion !== "undefined" && v2Locomotion) v2Locomotion.interrupt("chat-pause"); // V2 让位（先释放 ownership，V1 照常）
   walk.chatPaused = !!p;
   if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsTakeover("chat", !!p); // Shadow 只读观察：对话接管（gate OFF 零动作）
   if (p) { cancelFlight(); cancelWalkJump(); walk.taskbarHang = false; }
@@ -2865,7 +2873,7 @@ function setCatToy(on) {
     if (!config.getConfig().mouseTrackGlobal) stopMouseTrack();
   }
 }
-ipcMain.on("pet:set-cat-toy", (_e, on) => { setCatToy(!!on); });
+ipcMain.on("pet:set-cat-toy", (_e, on) => { if (on && typeof v2Locomotion !== "undefined" && v2Locomotion) v2Locomotion.interrupt("cat-toy-command"); setCatToy(!!on); });
 // 摸头互动（v2.3）：渲染层快速连点角色触发；主进程 10s 节流回复台词（避免连点刷屏）
 const patThrottle = lines.throttled(10000);
 // 摸头情绪递进（v2.5.26）：6s 内连摸 3 次起切撒娇档音色（越摸越黏），停手 6s 重置
@@ -3432,6 +3440,7 @@ function cancelSeatExit(reason) {
  * 只写 Y——绝不触碰 x/face/phase/jump/flight/targetX/动画。 */
 function seatExitStep(caller) {
   if (!seatExit || !win || win.isDestroyed()) return;
+  if (typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion.deniesLegacy("seatExitStep")) return; // V2 持有：Y 过渡归 episode 自己的 transition（V1 seatExit 模块态不参与）
   const before = win.getBounds();
   const baseY = walk.sleeping ? liveSleepTargetY(before) : liveStandTargetY(before);
   const preActive = seatExit;
@@ -3497,6 +3506,8 @@ function walkSpeed() {                         // 托盘速度档位倍率（借
  *  未捕获异常会弹模态错误框冻结主进程（2026-08-24 walkTick:2148 实测发生）。 */
 function walkSetPosition(x, y, where) {
   if (!win || win.isDestroyed()) return false;
+  // V2 locomotion ownership：旧 walking writer 在此被真实拒绝（denyCounts 可观测，不是“碰巧没调用”）
+  if (typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion.deniesLegacy("walkSetPosition:" + where)) return false;
   // 允许 x 为负（角色条带左移贴屏幕左缘，charInset 补偿），只拦截 NaN/越界；曾强制 x≥1 导致左侧“空气墙”
   const px = Math.round(Number(x)) || 0, py = Math.round(Number(y)) || 0; // ||0 归一化 -0（Electron setPosition(-0) 会 conversion failure）
   if (!Number.isSafeInteger(px) || !Number.isSafeInteger(py) || Math.abs(px) > 1000000 || Math.abs(py) > 1000000) {
@@ -3591,6 +3602,112 @@ const shadowBridge = RUNTIME_V2_SHADOW_ENABLED ? runtimeShadow.createShadowBridg
   }
 }) : null;
 
+/* ===== Runtime V2 Locomotion Cutover v0.1（production，默认关闭） =====
+ * gate=SUSSURRO_RUNTIME_V2_LOCOMOTION=1：满足 canEnterSlice 的 Sit→StandUp→Move→EnterSit
+ * episode 由 V2 真实接管（phase authority / motion ownership / native commit / closure）。
+ * OFF：零 V2 对象/零 timer/零 listener——完全走现有 V1；条件不满足：fallback V1。 */
+const RUNTIME_V2_LOCOMOTION_ENABLED = runtimeV2Module.locomotionGateEnabled();
+const v2Geo = RUNTIME_V2_LOCOMOTION_ENABLED ? {
+  measurement: null,           // {value, renderGeneration, docEpoch, scaleGeneration, workAreaGeneration}——采样身份
+  scaleGeneration: 0,          // setScale 换代（main 权威）
+  workAreaGeneration: 0,       // display/host 换代（main 观测）
+  bodyIdentity: null           // {docEpoch, renderGeneration}（accepted 报告推进；replacement 检测源）
+} : null;
+function v2GeometryUsable() {
+  const m = v2Geo && v2Geo.measurement;
+  if (!m) return { usable: false, validity: "insufficient", reason: "no-measurement" };
+  if (!Number.isSafeInteger(m.renderGeneration)) return { usable: false, validity: "insufficient", reason: "provenance-missing" };
+  if (m.scaleGeneration !== v2Geo.scaleGeneration) return { usable: false, validity: "stale", reason: "scale-generation-advanced" };
+  if (m.workAreaGeneration !== v2Geo.workAreaGeneration) return { usable: false, validity: "stale", reason: "work-area-changed" };
+  return { usable: true, validity: "valid", reason: "identity-match" };
+}
+function v2CanEnterSlice() {
+  if (!v2Locomotion) return { ok: false, reason: "gate-off" };
+  const o = v2Authority.owner();
+  if (o !== runtimeV2Module.OWNERS.LEGACY) return { ok: false, reason: "occupied:" + o };
+  if (config.getConfig().renderMode !== "spine") return { ok: false, reason: "not-spine" };
+  if (!walk.active) return { ok: false, reason: "engine-off" };
+  if (!skinHasSit) return { ok: false, reason: "no-sit-capability" };
+  if (walk.paused || walk.dragPaused || walk.chatPaused || walk.zoomPaused || walk.sleeping || walk.catToy) return { ok: false, reason: "external-occupancy" };
+  if (walk.perched || walk.iconRest || walk.iconTarget || walk.gotoPerch || walk.returning || walk.freeStand || walk.flight || walk.jump || walk.taskbarHang) return { ok: false, reason: "out-of-scope-state" };
+  if (!(walk.seated && walk.resting)) return { ok: false, reason: "not-stable-sit" };
+  const gu = v2GeometryUsable();
+  if (!gu.usable) return { ok: false, reason: "geometry-" + gu.validity };
+  try { if (!walkGeo.workAreaOf(screen, win.getBounds())) return { ok: false, reason: "no-workarea" }; } catch { return { ok: false, reason: "no-workarea" }; }
+  return { ok: true };
+}
+const v2Authority = RUNTIME_V2_LOCOMOTION_ENABLED ? runtimeV2Module.createMotionAuthority() : null;
+const v2Commit = RUNTIME_V2_LOCOMOTION_ENABLED ? runtimeV2Module.createWindowCommit({
+  authority: v2Authority,
+  // 本 slice 唯一 native position commit point（与 V1 写路径同族：setPosition + layer 节流）
+  writePosition: (x, y) => { win.setPosition(x, y); applyLayerThrottled(); },
+  readRect: () => (win && !win.isDestroyed() ? win.getBounds() : null),
+  notifyWrite: (r) => { // Shadow 最小兼容：诊断可识别 v2-locomotion writer（仅 gate ON 路径到达；故障隔离）
+    if (typeof shadowBridge !== "undefined" && shadowBridge) {
+      const via = r.kind === "move" ? "v2-move" : r.kind === "standup-y" ? "v2-standup-y" : "v2-enter-sit";
+      shadowBridge.obsRectWrite(via, r.x, r.y, r.outcome === "succeeded" ? "succeeded" : "failed");
+    }
+  }
+}) : null;
+const v2Locomotion = RUNTIME_V2_LOCOMOTION_ENABLED ? (() => {
+  const controller = runtimeV2Module.createLocomotionController({
+    authority: v2Authority,
+    commit: v2Commit,
+    deps: {
+      now: () => Date.now(),
+      bounds: () => (win && !win.isDestroyed() ? win.getBounds() : null),
+      workArea: () => { try { const b = win && !win.isDestroyed() ? win.getBounds() : null; return b ? walkGeo.workAreaOf(screen, b) : null; } catch { return null; } },
+      clampX: (x, wa, width) => walkGeo.clampWalkX(x, wa, width, false, PET_LOCAL_X), // 与 V1 同式复用纯计算（不复制算法）
+      speed: () => walkSpeed(),
+      groundGap: () => walk.groundGap,
+      seatSink: () => effectiveSeatSink(),
+      skinHasSit: () => skinHasSit,
+      face: () => walk.face,
+      standBaseY: (b, wa) => wa.y + wa.height + walk.groundGap - b.height, // applySeatPosition baseY 同式
+      geometryUsable: v2GeometryUsable,
+      geometryDependency: () => v2Geo.measurement,
+      bodyIdentity: () => v2Geo.bodyIdentity,
+      policies: { standBeatMs: STANDBEAT_MS, seatExitMs: SEAT_EXIT_MS },
+      enterSitHoldTicks: 8
+    },
+    hooks: {
+      setProjection: (patch) => { Object.assign(walk, patch); }, // §14：以下字段此时仅为 compatibility/read projection
+      broadcast: (options) => { walkBroadcast(options); },
+      beginStandBroadcast: () => {
+        // Shadow 最小兼容：stand-up admission 先于广播（双 gate 同 ON 时 Shadow 因果序正确）
+        if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsStandUpArm();
+        if (STANDBEAT_POSE_ENABLED) walkBroadcast({ standBeatPoseIntent: "stand" }); else walkBroadcast();
+      },
+      setFace: (f) => { walkUpdateFace(f); }, // V1 防抖/广播规则原样复用
+      scheduleLegacySit: () => { walkSchedulePhase(sitPhaseMs()); }, // episode 关闭后 sit 等待期归 V1 timed policy
+      resumeLegacy: (reason) => {
+        if (walk.active && !walk.phaseTimer && !walk.sleeping) walkSchedulePhase(randInt(1500, 4000)); // V1 自愈之上的预挂
+        try { logTts("walk", "[V2-LOC] resume-legacy reason=" + reason); } catch { /* 诊断不影响交回 */ }
+      },
+      noteEvent: (ev) => {
+        try {
+          // Shadow 最小兼容：V2 episode 的 stand-up/move admission 以同型事件上行，
+          // 双 gate 同 ON 时 Shadow 不会把 V2 路径误判为缺失准入（§13；诊断不阻碍生产）
+          if (typeof shadowBridge !== "undefined" && shadowBridge && ev) {
+            if (ev.ev === "phase-move") shadowBridge.obsBeatEnd(ev.beatDeadline); // beat-end admission 先于 move 广播（Shadow 因果序）
+            else if (ev.ev === "phase-enter-sit") shadowBridge.obsEnterRestPose(); // ENTER_SIT admission 先于 sit 广播
+          }
+        } catch { /* 诊断故障隔离 */ }
+        try { logTts("walk", "[V2-LOC] " + JSON.stringify(ev)); } catch { /* 诊断不影响主流程 */ }
+      }
+    }
+  });
+  return {
+    owns: () => controller.owns(),
+    beginEpisode: (input) => controller.beginEpisode(input),
+    tick: () => controller.tick(),
+    interrupt: (reason) => controller.interrupt(reason),
+    onGeometryAccepted: (identity) => controller.onGeometryAccepted(identity),
+    deniesLegacy: (caller) => !!v2Authority && v2Authority.denyLegacyWriter(caller),
+    stats: () => controller.stats()
+  };
+})() : null;
+
 function cancelFlight() {
   if (!walk.flight) return false;
   walk.flight = null;
@@ -3614,6 +3731,7 @@ function startFlight(vx, vy) {
   if (!win || win.isDestroyed() || !walk.active || walk.sleeping || !win.isVisible()) return false;
   const speed = Math.hypot(vx, vy);
   if (!Number.isFinite(speed) || speed <= 200) return false;
+  if (typeof v2Locomotion !== "undefined" && v2Locomotion) v2Locomotion.interrupt("flight-throw"); // 抛掷夺权：V2 episode 释放
   clearDragPause("throw-accepted", false);
   const limit = Math.min(1, 1200 / speed);
   clearTimeout(walk.phaseTimer);
@@ -3758,6 +3876,7 @@ function walkPhaseMs() {  // 单次散步：8s ~ 设置上限（默认20s）
  *  任何中间位移（拖拽/重启钳制）都会在下一次调用时纠正。仅 Spine 模式。 */
 function applySeatPosition() {
   if (!win || win.isDestroyed() || config.getConfig().renderMode !== "spine") return;
+  if (typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion.deniesLegacy("applySeatPosition")) return; // V2 持有：seat anchor 归 commit point
   const b = win.getBounds();
   const wa = walkGeo.workAreaOf(screen, b);
   const baseY = wa.y + wa.height + walk.groundGap - b.height;   // 站立贴地
@@ -3812,6 +3931,8 @@ function enterRestPose() {
 /** 尺寸提交后的最终定位：只读取提交后的最新 bounds，并按当前姿态决定落点。 */
 function repositionAfterWindowSizeChange(renderModeCommit = false, wasGroundAnchored = false) {
   if (!win || win.isDestroyed()) return;
+  // V2 持有：resize 后重锚属 slice 定位（§8 不绕 commit point）；V2 逐拍 live 提交会在 ≤1 tick 内重贴地线
+  if (typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion.deniesLegacy("repositionAfterWindowSizeChange")) return;
   const bounds = win.getBounds();
   const wa = walkGeo.workAreaOf(screen, bounds);
   const decision = renderModeMod.resizeRepositionDecision({
@@ -3854,6 +3975,7 @@ function standSinkOffset() {
 
 async function walkOnPhaseEnd() {
   if (!walk.active) return;
+  if (typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion.owns()) return; // belt：V2 持有期间旧 V1 phase callback 不得推进同一 episode（正常路径 V1 phaseTimer 已让位）
   if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsPhaseEnd(); // Shadow 只读：相位回调入口控制事实快照（gate OFF 零动作）
   if (walk.catToy) { walkSchedulePhase(randInt(400, 900)); return; } // 逗猫棒：相位机让位，由 walkTick 持续追鼠标
   if (walk.paused) {                        // 拖拽中冻结一切相位动作（防 applySeatPosition 把窗口弹回任务栏）
@@ -3920,6 +4042,14 @@ async function walkOnPhaseEnd() {
      * 不会留下 resting=true + 死 id + 无回调的无限 Relax 站桩。
      * renderer 收到 seated=false+resting=true；默认保持 watcher defer，E2 才附加一次窄 pose intent。 */
     if (STANDBEAT_ENABLED && walk.seated) {
+      // V2 cutover：Sit→StandUp→Move→EnterSit 由 V2 接管执行。方向/时长仍由 V1 现策略选定（V2 不重抽）。
+      // beginEpisode 失败（owner 竞争/依赖缺失）→ 无缝落回下方 V1 原路径，行为不变。
+      const v2Take = typeof v2CanEnterSlice === "function" ? v2CanEnterSlice() : { ok: false, reason: "gate-off" };
+      if (v2Take.ok) {
+        walk.dir = Math.random() < 0.5 ? -1 : 1; // V1 决定 direction（既有策略）
+        const v2Res = v2Locomotion.beginEpisode({ dir: walk.dir, moveMs: walkPhaseMs() }); // V1 决定 duration（既有策略）
+        if (v2Res.ok) return;
+      }
       armSeatExit("move", "phase");        // Y 过渡照常起坡（t0=实际 Y 零位移），beat 拍继续推进
       walk.seated = false;
       walk.resting = true;
@@ -4371,6 +4501,9 @@ function outOfScreenGuard() {
 function walkTick() {
   if (!win || win.isDestroyed()) return;
   if (typeof seatExitForensicSnapshot === "function") seatExitForensicSnapshot("walkTick");
+  // V2 locomotion episode 持有：V1 locomotion（stand-beat/seatExit tick/movement/折返/自愈）整体旁路，
+  // 由 controller.tick() 经唯一 commit point 驱动（垂直/水平控制由 V2 逐拍等价覆盖）。
+  if (typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion.owns()) { v2Locomotion.tick(); return; }
   // 左缘翻边判定（坐下/静止在左缘也要切；拖拽/飞行/跳跃中不切防干扰）
   // 用「角色条带左缘」判断而非窗口 x：切边/切回时窗口被平移 ±276，用窗口 x 会立即再次触发形成左右横跳
   if (!walk.paused && !walk.sleeping && !walk.flight && !walk.jump) {
@@ -4685,6 +4818,7 @@ function startWalkingEngine(opts = {}) {
     if (Math.abs(b0.y + b0.height - walk.groundGap - (wa0.y + wa0.height)) < 60) applySeatPosition();
   } catch { /* 忽略 */ }
   walk.timer = setInterval(walkTick, WALK_TICK_MS);
+  if (typeof v2Authority !== "undefined" && v2Authority) v2Authority.engineOn(); // 引擎就绪：ownership 默认 LEGACY（尚未接管）
   walkBroadcast(); // resume 首播 = active=true + 停止前业务姿态原值（不再出现随机 face 覆盖）
   if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsEngine(true); // Shadow 只读：引擎边界
   walkSchedulePhase(randInt(5000, 15000));
@@ -4710,6 +4844,7 @@ function stopWalkingEngine(silent = false) {
   }
   applyLayer(walk.seated);
   walk.active = false;
+  if (typeof v2Locomotion !== "undefined" && v2Locomotion) { v2Locomotion.interrupt("engine-stop"); v2Authority.engineOff(); } // episode 随引擎终止（旧 callback 已失效）
   if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsEngine(false); // Shadow 只读：引擎边界（episode 由此收尾）
   clearInterval(walk.timer); walk.timer = null;
   clearTimeout(walk.phaseTimer); walk.phaseTimer = null;
@@ -4772,7 +4907,8 @@ ipcMain.on("pet:walking-engine-stop", () => { // 运行时停走（不持久化�
   stopWalkingEngine();
 });
 ipcMain.on("pet:walking-pause", (_e, p, source) => {
-  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsTakeover(source === "zoom" ? "zoom" : "drag", !!p); // Shadow 只读：拖拽/放大接管（gate OFF 零动作）
+  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsTakeover(source === "zoom" ? "zoom" : "drag", !!p);
+  if (p && typeof v2Locomotion !== "undefined" && v2Locomotion) v2Locomotion.interrupt(source === "zoom" ? "zoom-pause" : "drag-pause"); // V2 让位：先释放 ownership，再进 V1 暂停/磁吸逻辑（Shadow 只读接管观察在上一行）
   if (p) { cancelFlight(); cancelWalkJump(); walk.taskbarHang = false; } // 鼠标重新抓住时立即停止飞行/跳跃/半挂
   if (source === "zoom") { // 放大聊天框暂停：独立标志，60s 拖拽自愈不得解除（否则大窗口下恢复行走会打乱几何）
     walk.zoomPaused = !!p;
@@ -4830,7 +4966,8 @@ ipcMain.on("pet:throw", (_e, vx, vy) => {
   clearDragPause("throw-rejected");
 });
 ipcMain.on("pet:set-sleeping", (_e, v) => {
-  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsTakeover("sleep", !!v); // Shadow 只读：入睡接管边界（gate OFF 零动作）
+  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsTakeover("sleep", !!v);
+  if (v && typeof v2Locomotion !== "undefined" && v2Locomotion) v2Locomotion.interrupt("sleep-command"); // 入睡属 scope 外：V2 让位（Shadow 只读接管观察在上一行）
   // 方案 2（2026-09-06，用户拍板）：不在别人窗口顶/图标顶上睡觉——坐窗（perched）或坐图标
   // （iconRest）时收到入睡请求 → 先落回地面（returning 流程），本次入睡请求忽略；
   // 落地坐下后相位机到点会再次请求入睡，届时已在地面上正常睡。窗口关闭时也有
@@ -4903,6 +5040,7 @@ ipcMain.on("pet:set-sleeping", (_e, v) => {
 }); // 睡觉时行走引擎原地待命
 ipcMain.on("pet:set-has-sit", (_e, v) => { // 渲染层皮肤加载后上报：无坐下动画的皮肤不做坐姿下沉
   const next = !!v;
+  if (!next && v2Locomotion) v2Locomotion.interrupt("capability-lost"); // Sit 能力丢失：V2 episode 让位
   if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsHasSit(next); // Shadow 只读：body capability 事实（gate OFF 零动作）
   if (next === skinHasSit) return;
   skinHasSit = next;
@@ -4955,7 +5093,13 @@ ipcMain.on("pet:set-ground-gap", (_e, px, meta = {}) => {
   lastGroundGapReports[mode] = report.identity;
   if (report.target === "spine") {
     walk.groundGap = report.value;
-    if (!walk.paused && !walk.flight && !walk.jump && walk.seated) applySeatPosition();
+    if (typeof v2Geo !== "undefined" && v2Geo && Number.isSafeInteger(Number(meta && meta.renderGeneration))) {
+      // V2 geometry dependency：记录采样身份（renderGeneration/docEpoch）+ 当拍 main 换代基准
+      v2Geo.measurement = { value: report.value, renderGeneration: Number(meta.renderGeneration), docEpoch: Number.isSafeInteger(Number(meta && meta.docEpoch)) ? Number(meta.docEpoch) : null, scaleGeneration: v2Geo.scaleGeneration, workAreaGeneration: v2Geo.workAreaGeneration };
+      v2Geo.bodyIdentity = { docEpoch: v2Geo.measurement.docEpoch, renderGeneration: v2Geo.measurement.renderGeneration };
+      if (v2Locomotion) v2Locomotion.onGeometryAccepted(v2Geo.bodyIdentity); // body 代际变化 → controller interrupt("body-replacement")
+    }
+    if (!walk.paused && !walk.flight && !walk.jump && walk.seated) applySeatPosition(); // V2 持有时此路被 deny，anchor 归 episode
     return;
   }
   if (report.target === "gif") {

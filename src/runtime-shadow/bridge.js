@@ -16,7 +16,7 @@
 "use strict";
 
 /** 位移类写入标签（walkSetPosition 的 where 参数） */
-const TRANSLATE_WRITERS = new Set(["walkTick", "walk-approach", "cat-toy", "jump-ease", "jump-perch-sink"]);
+const TRANSLATE_WRITERS = new Set(["walkTick", "walk-approach", "cat-toy", "jump-ease", "jump-perch-sink", "v2-move"]);
 
 /**
  * @param {Object} args

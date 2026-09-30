@@ -36,28 +36,28 @@ function predictMotionOwnership(phase, ctx = {}) {
         owner: OWNERS.V1_MAIN,
         verbs: { hold: true, translate: false, anchorUpdate: true },   // 坐姿冻结位移；仅几何/能力事件触发重锚
         basis: "seated-frozen",
-        allowedWriters: ["seat", "engine", "set-scale", "guard"]
+        allowedWriters: ["seat", "engine", "set-scale", "guard", "v2-enter-sit"]
       };
     case "stand-up":
       return {
         owner: OWNERS.V1_MAIN,
         verbs: { hold: true, translate: false, anchorUpdate: true },   // stand-beat 冻结 X，仅 Y 过渡推进
         basis: "stand-beat-y-only",
-        allowedWriters: ["seat", "seat-exit-y", "engine", "set-scale", "guard"]
+        allowedWriters: ["seat", "seat-exit-y", "engine", "set-scale", "guard", "v2-standup-y"]
       };
     case "move":
       return {
         owner: OWNERS.V1_MAIN,
         verbs: { hold: false, translate: true, anchorUpdate: true },   // walkTick 平移 + ground line 贴地
         basis: "walk-translate",
-        allowedWriters: ["walkTick", "seat", "seat-exit-y", "engine", "set-scale", "guard"]
+        allowedWriters: ["walkTick", "seat", "seat-exit-y", "engine", "set-scale", "guard", "v2-move"]
       };
     case "enter-sit":
       return {
         owner: OWNERS.V1_MAIN,
         verbs: { hold: true, translate: false, anchorUpdate: true },   // 下沉锚定
         basis: "seat-sink-anchor",
-        allowedWriters: ["seat", "seat-exit-y", "engine", "set-scale", "guard"]
+        allowedWriters: ["seat", "seat-exit-y", "engine", "set-scale", "guard", "v2-enter-sit"]
       };
     default:
       return {
@@ -84,6 +84,10 @@ function classifyWriter(via) {
     case "jump-ease":
     case "jump-perch-sink":
       return { verb: "translate", translate: true };   // 缓动跳跃＝位移类写入
+    case "v2-move":
+      return { verb: "translate", translate: true }; // V2 locomotion 位移（cutover 后唯一 move writer）
+    case "v2-standup-y":
+    case "v2-enter-sit":
     case "seat":
       return { verb: "anchorUpdate", anchorUpdate: true };
     case "seat-exit-y":
