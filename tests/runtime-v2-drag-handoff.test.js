@@ -35,6 +35,7 @@ function makeRuntime(opts = {}) {
   const commit = runtimeV2.createWindowCommit({
     authority,
     writePosition: (x, y) => { st.writes.push({ x, y }); st.bounds = Object.assign({}, st.bounds, { x, y }); },
+    writePositionExternal: (x, y) => { st.writes.push({ x, y }); st.bounds = Object.assign({}, st.bounds, { x, y }); },
     readRect: () => Object.assign({}, st.bounds),
     notifyWrite: (r) => st.events.push({ commit: r.kind, outcome: r.outcome })
   });
@@ -93,9 +94,9 @@ function buildPetMove(v2Drag, docEpoch) {
   const state = { nativeWrites: () => nativeWrites };
   const dragSeatUpdate = () => { state.snap = (state.snap || 0) + 1; };
   new Function(
-    "on", "win", "v2Drag", "renderModeSeq", "dragSeatUpdate",
+    "on", "win", "v2Drag", "v2Perf", "renderModeSeq", "dragSeatUpdate",
     `const ipcMain = { on }; let dbgLastMoveTs = 0;\n${sourceBlock('ipcMain.on("pet:move"', "let dbgLastMoveTs", "pet:move")}`
-  )((ch, fn) => { state.fn = fn; }, win, v2Drag, docEpoch, dragSeatUpdate);
+  )((ch, fn) => { state.fn = fn; }, win, v2Drag, null, docEpoch, dragSeatUpdate);
   return { fire: (dx, dy) => state.fn(null, dx, dy), state };
 }
 
@@ -244,4 +245,80 @@ test("commit point 统一：drag-move 与 locomotion kind 都记在同一 stats�
   assert.equal(r.commit.stats.committed >= 1, true);
   assert.equal(r.authority.owner(), "external-drag");
   void b;
+});
+
+/* ---------------- 性能合同：热路径最小成本（ownership 语义不放松） ---------------- */
+
+test("PERF-1: commitExternal 成功路径零 host reread（getBounds 只在 needHostRect 显式要求时读）", () => {
+  let rectReads = 0, extWrites = 0, locoWrites = 0;
+  const authority = runtimeV2.createMotionAuthority();
+  const commit = runtimeV2.createWindowCommit({
+    authority,
+    writePosition: () => { locoWrites += 1; },
+    writePositionExternal: () => { extWrites += 1; },
+    readRect: () => { rectReads += 1; return { x: 0, y: 0, width: 1, height: 1 }; },
+    notifyWrite: () => {}
+  });
+  const acq = authority.externalAcquire("drag");
+  for (let i = 0; i < 50; i++) {
+    const res = commit.commitExternal({ externalToken: acq.token, kind: "drag-move", x: 100 + i, y: 200 });
+    assert.equal(res.ok, true);
+  }
+  assert.equal(rectReads, 0, "50 次 drag move：零 getBounds/host reread");
+  assert.equal(extWrites, 50, "drag 写走 external writer");
+  assert.equal(locoWrites, 0, "drag 不走 locomotion writer（不触发 layer 断言）");
+  // locomotion 需要时才读（needHostRect 显式）
+  authority.externalRelease("test");
+  const ep = authority.acquire("e1");
+  commit.commitPosition({ token: ep.token, episodeId: "e1", kind: "enter-sit", x: 1, y: 2, needHostRect: true });
+  assert.equal(rectReads, 1, "仅显式 needHostRect 才读");
+});
+
+test("PERF-2: drag writer 与 locomotion writer 分离——drag-move 不触发 applyLayerThrottled 族成本", () => {
+  let layerThrottleCalls = 0, bareCalls = 0;
+  const authority = runtimeV2.createMotionAuthority();
+  const commit = runtimeV2.createWindowCommit({
+    authority,
+    writePosition: () => { layerThrottleCalls += 1; },   // 代表含 applyLayerThrottled 的 walk/seat writer
+    writePositionExternal: () => { bareCalls += 1; },    // 代表裸 setPosition（legacy pet:move 同价）
+    notifyWrite: () => {}
+  });
+  const acq = authority.externalAcquire("drag");
+  commit.commitExternal({ externalToken: acq.token, kind: "drag-move", x: 5, y: 5 });
+  assert.equal(bareCalls, 1);
+  assert.equal(layerThrottleCalls, 0, "drag move 不做 layer 断言（根因修复点）");
+});
+
+test("PERF-3: ownership/token 准入在热路径修复后仍然生效（stale 全拒）", () => {
+  const r = makeRuntime();
+  const b = r.beginDrag();
+  assert.equal(r.commit.commitExternal({ externalToken: b.token, kind: "drag-move", x: 610, y: 500 }).ok, true);
+  r.endDrag("drag-cleanup");
+  assert.equal(r.commit.commitExternal({ externalToken: b.token, kind: "drag-move", x: 620, y: 500 }).ok, false, "release 后 stale token 仍拒");
+  assert.equal(r.commit.commitExternal({ externalToken: b.token + 5, kind: "drag-move", x: 630, y: 500 }).ok, false, "错 token 仍拒");
+  const ep = r.v2Locomotion.beginEpisode({ dir: 1, moveMs: 500 });
+  r.advance(300);
+  assert.equal(r.commit.commitPosition({ token: ep.token, episodeId: ep.episodeId, kind: "move", x: 610, y: 400 }).ok, true, "V2 locomotion commit 不受影响");
+  r.v2Locomotion.interrupt("test");
+  assert.equal(r.commit.commitPosition({ token: ep.token, episodeId: ep.episodeId, kind: "move", x: 615, y: 400 }).ok, false, "stale V2 仍拒");
+});
+
+test("PERF-4: 源码合同——drag 热路径零逐帧日志/stringify；notify 跳过 drag-move；单一 IPC 上行", () => {
+  // notifyWrite 对 drag-move 零工作（drag 的 Shadow 可见性由 obsTakeover 覆盖）
+  assert.match(mainSource, /if \(r\.kind === "drag-move"\) return;/, "notifyWrite 跳过 drag-move");
+  // drag writer 是裸 setPosition（不含 applyLayerThrottled）
+  assert.match(mainSource, /writePositionExternal: \(x, y\) => \{ win\.setPosition\(x, y\); \}/, "external writer 裸 setPosition");
+  assert.doesNotMatch(mainSource, /writePositionExternal:[^\n]*applyLayerThrottled/, "external writer 不得带 layer 断言");
+  // pet:move V2 分支热路径无逐帧 stringify/logTts（PERF 汇总在 v2Perf gate 之后、200 次才一行）
+  const moveStart = mainSource.indexOf("ipcMain.on(\"pet:move\"");
+  const moveBlock = mainSource.slice(moveStart, mainSource.indexOf("dragSeatUpdate();", moveStart));
+  assert.doesNotMatch(moveBlock, /JSON\.stringify/, "pet:move 热路径零 stringify");
+  const hotLogs = (moveBlock.match(/logTts\(/g) || []);
+  assert.equal(hotLogs.length, 1, "pet:move 热路径唯一 logTts 是 PERF 采样行");
+  assert.match(moveBlock, /v2Perf\.moves % 200 === 0\) logTts/, "该行在 200 次有界采样 gate 内");
+  assert.match(mainSource, /v2Perf\.moves % 200 === 0/, "PERF 汇总有界采样（200 次一行）");
+  // 单一 IPC：pointermove 仍只经 moveWindow→pet:move 一条上行（renderer 未新增第二条高频 IPC）
+  const petSource = fs.readFileSync(require.resolve("../renderer/pet.js"), "utf8").replace(/\r\n/g, "\n");
+  const moveCalls = (petSource.match(/petAPI\.moveWindow\(/g) || []).length;
+  assert.equal(moveCalls, 1, "renderer 仅一条 pet:move 上行路径");
 });

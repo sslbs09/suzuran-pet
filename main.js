@@ -3108,7 +3108,13 @@ ipcMain.on("pet:move", (_e, dx, dy) => {
   if (typeof v2Drag !== "undefined" && v2Drag) { // V2 拖拽 ownership：位移必须经 commit point + EXTERNAL 准入
     if (!win || win.isDestroyed() || !v2Drag.active()) return; // 无活动会话（迟到/无 begin/reload 后旧 pointer）→ 不写、不吸附、不刷新时刻
     let pos; try { pos = win.getPosition(); } catch { return; }
+    const t0 = v2Perf ? process.hrtime.bigint() : 0n;
     const res = v2Drag.commitMove(pos[0] + (Number(dx) || 0), pos[1] + (Number(dy) || 0), { docEpoch: renderModeSeq });
+    if (v2Perf) { // 有界测量：commitMove 全程耗时（含 setPosition），200 次采样汇总一行
+      const dt = process.hrtime.bigint() - t0;
+      v2Perf.moves += 1; v2Perf.totalNs += dt; if (dt > v2Perf.maxNs) v2Perf.maxNs = dt;
+      if (v2Perf.moves % 200 === 0) logTts("walk", "[V2-PERF] drag moves=" + v2Perf.moves + " avgMs=" + (Number(v2Perf.totalNs) / 1e6 / v2Perf.moves).toFixed(3) + " maxMs=" + (Number(v2Perf.maxNs) / 1e6).toFixed(3));
+    }
     if (!res.ok) return; // 非 EXTERNAL owner / stale token → 拒绝
     dragSeatUpdate();
     dbgLastMoveTs = Date.now();
@@ -3646,13 +3652,20 @@ function v2CanEnterSlice() {
   try { if (!walkGeo.workAreaOf(screen, win.getBounds())) return { ok: false, reason: "no-workarea" }; } catch { return { ok: false, reason: "no-workarea" }; }
   return { ok: true };
 }
+const RUNTIME_V2_PERF_ENABLED = RUNTIME_V2_LOCOMOTION_ENABLED && typeof process !== "undefined" && process.env.SUSSURRO_RUNTIME_V2_PERF === "1";
+const v2Perf = RUNTIME_V2_PERF_ENABLED ? { moves: 0, totalNs: 0, maxNs: 0 } : null; // 有界计数器（诊断 gate，默认关）
 const v2Authority = RUNTIME_V2_LOCOMOTION_ENABLED ? runtimeV2Module.createMotionAuthority() : null;
 const v2Commit = RUNTIME_V2_LOCOMOTION_ENABLED ? runtimeV2Module.createWindowCommit({
   authority: v2Authority,
-  // 本 slice 唯一 native position commit point（与 V1 写路径同族：setPosition + layer 节流）
+  // 本 slice 唯一 native position commit point。
+  // writePosition=locomotion writer（含 layer 节流，与 V1 walkSetPosition 语义对齐）；
+  // writePositionExternal=drag writer（裸 setPosition）——legacy pet:move 从不做 layer 断言，
+  // 拖拽热路径必须与其逐字同价（setAlwaysOnTop 在拖拽中是可感知 hitch，性能回归根因）。
   writePosition: (x, y) => { win.setPosition(x, y); applyLayerThrottled(); },
+  writePositionExternal: (x, y) => { win.setPosition(x, y); },
   readRect: () => (win && !win.isDestroyed() ? win.getBounds() : null),
-  notifyWrite: (r) => { // Shadow 最小兼容：诊断可识别 v2-locomotion writer（仅 gate ON 路径到达；故障隔离）
+  notifyWrite: (r) => { // Shadow 最小兼容：仅 locomotion kind 上行（drag-move 零每-move 诊断工作）
+    if (r.kind === "drag-move") return;
     if (typeof shadowBridge !== "undefined" && shadowBridge) {
       const via = r.kind === "move" ? "v2-move" : r.kind === "standup-y" ? "v2-standup-y" : "v2-enter-sit";
       shadowBridge.obsRectWrite(via, r.x, r.y, r.outcome === "succeeded" ? "succeeded" : "failed");
