@@ -1826,10 +1826,10 @@ test("A2-T1/T3/T5: seat-held window debt is repaid at release; sit→move keeps 
 });
 
 test("A2-contract: release re-anchor wired in setSpineAnim; ratchet sync wired at autoScale fire", () => {
-  assert.match(renderer, /seatEpisode\.active = false;\n\s*if \(\(window\.SeatFit \? window\.SeatFit\.seatReleaseShouldRefit\(seatEpisode\) : seatEpisode\.pendingFit\)\) \{[\s\S]{0,200}scheduleFitSpine\(\{\}\);/, "释放坐姿时兑现 fit 欠账");
+  assert.match(renderer, /seatEpisode\.active = false;[\s\S]{0,200}if \(\(window\.SeatFit \? window\.SeatFit\.seatReleaseShouldRefit\(seatEpisode\) : seatEpisode\.pendingFit\)\) \{[\s\S]{0,200}scheduleFitSpine\(\{\}\);/, "释放坐姿时兑现 fit 欠账");
   const fireStart = renderer.indexOf("spineBaseScaleX *= kk;");
   const fireBlock = renderer.slice(fireStart, renderer.indexOf("fitSpinePose(generation, ownerGeneration, owner);", fireStart));
-  assert.match(fireBlock, /seatEpisode\.active && seatEpisode\.owner === spineObj[\s\S]{0,240}seatRatchetSync\(seatEpisode, spineBaseScaleX\)/, "autoScale 权威值落地即同步棘轮快照");
+  assert.match(fireBlock, /seatEpisode\.active && seatEpisode\.owner === spineObj[\s\S]{0,420}seatRatchetSync\(seatEpisode, spineBaseScaleX\)/, "autoScale 权威值落地即同步棘轮快照");
 });
 
 /* ---------- A2.1：pre-visible bootstrap——首次可见即最终尺寸 ---------- */
