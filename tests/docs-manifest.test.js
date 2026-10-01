@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-const main = fs.readFileSync(require.resolve("../main.js"), "utf8");
+const main = fs.readFileSync(require.resolve("../main.js"), "utf8").replace(/\r\n/g, "\n"); // 行尾归一化（与 render-mode 等源码读取测试同款；分支 checkout 可能产生 CRLF）
 const start = main.indexOf("function selectTutorialDir(");
 const end = main.indexOf("\n\n/** 文档清单", start);
 assert.notEqual(start, -1, "selectTutorialDir exists");
