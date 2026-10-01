@@ -46,6 +46,17 @@ function qtSquashSnapshot(extra) {
     seatExitYOwnsY: seatExitYOwnsY(), busy: !!busy, seated: !!(walkState && walkState.seated), paused: !!(walkState && walkState.paused), sleeping: !!(walkState && walkState.sleeping)
   }, extra || {});
 }
+/* ===== 临时 SEAT EPISODE LIFECYCLE TRACE（同 gate；只在 seatEpisode 状态变化时记录，不逐帧）===== */
+let seatTraceStableAt = 0; // stable-sit 去重（广播级重复不刷屏）
+function seatTrace(tag, fields, dedupMs) {
+  if (!QBTRACE) return;
+  if (dedupMs && tag === "stable-sit") {
+    const now = Date.now();
+    if (now - seatTraceStableAt < dedupMs) return;
+    seatTraceStableAt = now;
+  }
+  qt("SEAT " + tag, fields);
+}
 
 /* ---------- Spine 渲染系统（可切换 GIF/Spine；支持桌面行走） ---------- */
 let spineApp = null;         // PixiJS Application
@@ -295,8 +306,10 @@ function setSpineAnim(name, loop, reason = "") {
     seatEpisode.previousScale = seatEpisode.entryScale;
     seatEpisode.finalFitDone = false;
     seatEpisode.pendingFit = false;
+    seatTrace("arm", { reason: "enter-sit", reason2: reason, beforeName, seated: !!(walkState && walkState.seated), paused: !!(walkState && walkState.paused), generation: activeRenderGeneration, entryScale: seatEpisode.entryScale });
   } else if (!isSit && beforeName === sitAnimName()) {
     seatEpisode.active = false;
+    seatTrace("clear", { reason: "leave-sit", name, reason2: reason, seated: !!(walkState && walkState.seated), paused: !!(walkState && walkState.paused), generation: activeRenderGeneration });
     if ((window.SeatFit ? window.SeatFit.seatReleaseShouldRefit(seatEpisode) : seatEpisode.pendingFit)) {
       seatEpisode.pendingFit = false;
       scheduleFitSpine({}); // A-v2：hold 期间的 pass 只标了 pendingFit，释放时兑现欠账——重新锚定完整窗口补回采样
@@ -991,6 +1004,7 @@ function fitSpinePose(generation = spineFitGeneration, ownerGeneration = spineFi
     if (!spineObj || !spineApp || activeRenderMode !== "spine" || spineRuntimeOwner !== owner || generation !== spineFitGeneration || ownerGeneration !== activeRenderGeneration) { fitBootstrapCheck(false); emitFitDiag("abort-guard"); return; }
     if (seatEpisode.active && seatEpisode.owner === spineObj && seatTrackActive()) {
       seatEpisode.pendingFit = true;
+      seatTrace("fit-hold", { reason: "seat-phase-fit-deferred", generation: activeRenderGeneration });
       if (shadowObs && shadowObs.active) shadowObs.noteSafely("fit-handoff", () => ({ kind: "hold-seat" }));
       fitBootstrapCheck(false);
       emitFitDiag("hold-seat");
@@ -1075,6 +1089,7 @@ function fitSpinePose(generation = spineFitGeneration, ownerGeneration = spineFi
           // A-v2：新权威 baseline 落地即同步活跃的坐姿棘轮快照，
           // 防 seatContainmentCommit（只降不升的 min(previousScale,entryScale) 上限）把放大到位的 scale 拉回旧 baseline。
           if (seatEpisode.active && seatEpisode.owner === spineObj) {
+            seatTrace("ratchet-sync", { reason: "autoscale-new-baseline", entryScale: Math.abs(spineBaseScaleX), generation: activeRenderGeneration });
             if (window.SeatFit) window.SeatFit.seatRatchetSync(seatEpisode, spineBaseScaleX);
             else { seatEpisode.entryScale = Math.abs(spineBaseScaleX); seatEpisode.previousScale = seatEpisode.entryScale; }
           }
@@ -1653,6 +1668,7 @@ function installSeatLifecycle() {
 function uninstallSeatLifecycle() {
   if (seatLifecycle.ticker && spineApp?.ticker) spineApp.ticker.remove(seatLifecycle.ticker, spineApp.ticker);
   seatLifecycle.ticker = null; seatLifecycle.owner = null; seatLifecycle.lastSafe = null;
+  seatTrace("reset", { reason: "lifecycle-teardown", wasActive: !!seatEpisode.active, ownerWasSpine: !!(seatEpisode.owner && seatEpisode.owner === spineObj) });
   seatEpisode.owner = null; seatEpisode.active = false; seatEpisode.entryScale = 0; seatEpisode.previousScale = 0; seatEpisode.finalFitDone = false; seatEpisode.pendingFit = false;
   if (seatExitY) releaseSeatExitY("lifecycle-teardown"); // token 随 owner 终结（内部已含 applyEcoFps 复判）
   applyEcoFps("uninstall"); // 对 spineApp=null 安全（helper 首行守卫）
@@ -2191,6 +2207,10 @@ function applyWalkState(s) {
       setSpineAnim(target, true, "seat-phase");
       try { window.petAPI.playback && window.petAPI.playback("[fit] seat-phase anim=" + target); } catch { /* 忽略 */ }
       scheduleFitSpine({ seatPhase: true });
+    }
+    // SEATTRACE：stable Sit 到达判定（轨道已是 Sit 且 episode 活跃）；2s 去重防广播级重复
+    if (QBTRACE && sit && spineObj.state.getCurrent(0)?.animation?.name === sit && seatEpisode.active && seatEpisode.owner === spineObj) {
+      seatTrace("stable-sit", { seated: !!walkState.seated, perched: !!walkState.perched, paused: !!walkState.paused, generation: activeRenderGeneration, anim: sit }, 2000);
     }
     return;
   }
