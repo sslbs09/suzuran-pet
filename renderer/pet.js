@@ -4101,7 +4101,7 @@ function finishDrag(reason = "cancel") {
 
   if (reason !== "pointerup") {
     // 异常取消只安全放下当前位置：不 click、不 pat、不 throw、不打开输入栏。
-    window.petAPI.walkingPause(false, "drag");
+    if (state.dragAdmitted) window.petAPI.walkingPause(false, "drag"); // Closure：只有真进入过 drag admission 才需要释放（tap/headpat 从不 admit）
     return true;
   }
 
@@ -4170,10 +4170,12 @@ function onDragStart(e) {
     // v2.5.22d Q 弹按压（GIF 模式）：按下压缩，松手回弹（CSS 仅对 GIF 生效，其他模式无此动画）
     petEl.classList.remove("pet-squash", "pet-squash-release");
     petEl.classList.add("pet-squash");
-    state = { pointerId: e.pointerId, target, sx: e.screenX, sy: e.screenY, moved: false, active: true, samples: [] };
+    state = { pointerId: e.pointerId, target, sx: e.screenX, sy: e.screenY, moved: false, active: true, samples: [], dragAdmitted: false };
     dragState = state;
     addDragSample(state, e);
-    window.petAPI.walkingPause(true, "drag"); // 拖拽中暂停桌面行走，松手恢复
+    // Interaction/Pause admission（Motion Substrate Closure 修正）：pointerdown 只进入 pending/candidate，
+    // 不再提前 walkingPause(true,"drag")/EXTERNAL_DRAG——轻点/摸头不进 drag 生命周期，Q-bounce 正常触发；
+    // 真 drag 的 admission 后移到 pointermove 位移阈值（admit 先于同 handler 的首个 moveWindow，同源 IPC 有序）。
   } catch {
     if (dragState === state) dragState = null;
     if (state) state.active = false;
@@ -4208,6 +4210,10 @@ window.addEventListener("pointermove", (e) => {
   const dx = e.screenX - dragState.sx;
   const dy = e.screenY - dragState.sy;
   if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+    if (!dragState.dragAdmitted) { // drag admission 后移：位移超过阈值才真正进入 drag 生命周期（tap/headpat 不进 EXTERNAL_DRAG）
+      dragState.dragAdmitted = true;
+      window.petAPI.walkingPause(true, "drag"); // 先 admit（EXTERNAL 就位）——同源 IPC 有序，随后的首个 pet:move 才被 commitExternal 接受
+    }
     dragState.moved = true;
     try { window.petAPI.playback("[ui] 判定为拖动 dx=" + Math.round(dx) + " dy=" + Math.round(dy)); } catch { /* 忽略 */ }
     petEl.classList.add("dragging");
