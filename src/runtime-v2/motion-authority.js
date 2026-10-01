@@ -110,9 +110,37 @@ function createMotionAuthority() {
     },
     ownsV2() { return state.owner === OWNERS.V2; },
     ownsExternal() { return state.owner === OWNERS.EXTERNAL; },
-    /** V2 持有时，旧 V1 walking writer 的真实拒绝（带计数供诊断/测试证明不是“碰巧没调用”）。 */
+    /**
+     * 统一 position admission（本轮 Closure 的核心：owner 是窗口写权限的唯一事实来源）。
+     * writerClass：
+     *   "legacy"          — 仅 owner∈{LEGACY,NONE} 允许（V2/EXTERNAL 持有时一律拒）
+     *   "v2-locomotion"   — 仅当前有效 V2 token+episode 允许
+     *   "external-drag"   — 仅当前有效 external token 允许
+     * NONE 对普通 locomotion 写开放无意义（walkTick 停），但放置/几何写（clamp/reposition）
+     * 在 NONE（引擎停）仍允许，避免引擎停止时显示器变化把角色留在屏外。
+     * 返回 {ok, reason}；不产生副作用（判定纯查询）。
+     */
+    positionAdmit(writerClass, ctx = {}) {
+      if (writerClass === "v2-locomotion") {
+        return this.isCurrent(ctx.token, ctx.episodeId)
+          ? { ok: true } : { ok: false, reason: "stale-or-not-owner" };
+      }
+      if (writerClass === "external-drag") {
+        return this.isExternalCurrent(ctx.externalToken)
+          ? { ok: true } : { ok: false, reason: "not-external-owner" };
+      }
+      // legacy（含放置/几何/guard 写）：EXTERNAL_DRAG 与 V2_LOCOMOTION 持有时被拒（对称闭合）
+      if (state.owner === OWNERS.V2) return { ok: false, reason: "owner-v2" };
+      if (state.owner === OWNERS.EXTERNAL) return { ok: false, reason: "owner-external-drag" };
+      return { ok: true };
+    },
+    /** 供 guard/clamp 等「非 commit 的 legacy 放置写」在回调执行时快速判定是否被占用。 */
+    isLegacyBlocked() {
+      return state.owner === OWNERS.V2 || state.owner === OWNERS.EXTERNAL;
+    },
+    /** V2/EXTERNAL 持有时，旧 V1 legacy writer 的真实拒绝（计数供诊断/测试证明不是“碰巧没调用”）。 */
     denyLegacyWriter(caller) {
-      if (state.owner !== OWNERS.V2) return false;
+      if (!this.isLegacyBlocked()) return false;
       const k = String(caller || "unknown");
       denyCounts[k] = (denyCounts[k] || 0) + 1;
       return true;

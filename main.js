@@ -340,8 +340,13 @@ function clampPetToWorkArea(reason = "显示器变化") {
     const maxY = wa.y + wa.height - b.height + 80; // 保留坐姿下沉到任务栏的空间
     const y = Math.min(Math.max(b.y, wa.y), Math.max(wa.y, maxY));
     if (x !== b.x || y !== b.y) {
-      win.setPosition(Math.round(x), Math.round(y));
-      logTts("display", reason + "，已钳制到工作区");
+      // Motion Substrate Closure：无论来源（display / 延迟 clamp / setScale / pet:set-size 回调），
+      // 到达此执行点时重查 owner；V2/EXTERNAL 持有时不得裸钳位（记录有界 defer，由当前 owner 处理）
+      if (v2LegacyPositionBlocked()) v2NoteDeferredClamp("clamp:" + reason);
+      else {
+        win.setPosition(Math.round(x), Math.round(y));
+        logTts("display", reason + "，已钳制到工作区");
+      }
     }
     if (walkState.seatReanchorOnResizeDecision({ seated: walk.seated, perched: walk.perched, dragPaused: walk.dragPaused, flight: walk.flight, jump: walk.jump })) {
       applySeatPosition();
@@ -1386,7 +1391,8 @@ function setScale(scale) {
   config.saveConfig({ window: { scale: s } });
   // V2：scale 换代 + 让位（resize/reposition 属 V1 处理路径；下一 stable-sit 按新几何再开 episode）
   if (typeof v2Geo !== "undefined" && v2Geo && prevScaleForV2 !== s) v2Geo.scaleGeneration += 1;
-  if (typeof v2Locomotion !== "undefined" && v2Locomotion) v2Locomotion.interrupt("scale-change");
+  if (typeof v2Locomotion !== "undefined" && v2Locomotion) v2Locomotion.interrupt("scale-change"); // 显式操作：先释放 V2 episode
+  if (typeof v2Drag !== "undefined" && v2Drag && v2Drag.active()) v2Drag.end("scale-change");       // 再释放 EXTERNAL_DRAG，scale 不与拖拽同时写 position
   // Shadow 只读观察：requested scale 换代（gate OFF 零动作；typeof 守卫兼容测试沙箱代码块抽取）
   if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsScaleChanged(s);
   if (win && !win.isDestroyed()) {
@@ -3163,7 +3169,7 @@ function dragSeatUpdate(final = false) {
       const visibleFeetY = Math.min(feet + groundGap, waBottom);
       ny = Math.round(Math.max(wa.y, visibleFeetY - b.height + 22));
       nx = Math.min(Math.max(b.x, walkMinX(wa)), wa.x + wa.width - b.width);
-      walkSetPosition(nx, ny, "taskbar-half-hang");
+      v2DragCommitLanding(nx, ny); // Closure：EXTERNAL 持有时半挂经 external admission（唯一 drag writer）
       walkBroadcast();
       applyLayer();
       return false;
@@ -3220,7 +3226,7 @@ function dragSeatUpdate(final = false) {
     walk.gotoPerch = false;
     walk.returning = false;
     walk.perched = false;
-    win.setPosition(Math.round(nx), Math.round(ny));
+    v2DragCommitLanding(nx, ny); // Closure：落座 snap 经统一 admission（EXTERNAL 持有→external；LEGACY→直写）
   }
   if (changed) {
     if (!seated && desktopIconMode()) {       // 桌面模式离开吸附区＝自由放置：保持松手位置站姿，不自愈回任务栏
@@ -3749,6 +3755,26 @@ const v2Drag = RUNTIME_V2_LOCOMOTION_ENABLED ? runtimeV2Module.createDragSession
     }
   }
 }) : null;
+
+/* ===== 统一 position admission 门面（Motion Substrate Closure v0.1） =====
+ * owner 是主窗口写权限的唯一事实来源；gate OFF（v2Authority null）→ 全放行（baseline 逐字不变）。
+ * 被占用（V2/EXTERNAL 持有）时，异步 guard/clamp/deferred 回调不得裸写：记录有界 defer 标记，
+ * 由当前 owner 的 controller 逐拍落地或 release 后重新评估；interval/回调每次执行都重查 owner，
+ * 因此 stale callback 无法在「创建时 LEGACY、回调时已易主」后复活写权。 */
+const v2ClampDeferred = { count: 0, last: null }; // 有界：仅计数 + 最近原因，绝不逐帧
+function v2LegacyPositionBlocked() {
+  return !!(typeof v2Authority !== "undefined" && v2Authority && v2Authority.isLegacyBlocked());
+}
+function v2NoteDeferredClamp(reason) {
+  try { v2ClampDeferred.count += 1; v2ClampDeferred.last = String(reason || ""); } catch { /* 诊断不影响让位 */ }
+}
+// EXTERNAL 持有期间，drag landing/半挂 也必须走 external admission（唯一 drag writer）；LEGACY 时直写（同 legacy 语义）
+function v2DragCommitLanding(x, y) {
+  if (typeof v2Drag !== "undefined" && v2Drag && v2Drag.active()) {
+    return v2Drag.commitMove(x, y, { docEpoch: renderModeSeq }).ok;
+  }
+  try { win.setPosition(Math.round(x), Math.round(y)); return true; } catch { return false; }
+}
 
 function cancelFlight() {
   if (!walk.flight) return false;
@@ -4519,6 +4545,9 @@ function outOfScreenGuard() {
   try {
     if (!win || win.isDestroyed() || !win.isVisible()) return;
     if (walk.paused || walk.flight || walk.jump) return; // 拖拽/飞行中不干预
+    // Motion Substrate Closure：独立 2s interval 在回调到达时重查 owner——V2/EXTERNAL 持有时
+    // 不得裸写（角色地面线由 V2 controller 逐拍维护 / drag 由 external 维护），记录有界 defer 后让位。
+    if (v2LegacyPositionBlocked()) { v2NoteDeferredClamp("outOfScreenGuard"); return; }
     const b = win.getBounds();
     const wa = walkGeo.workAreaOf(screen, b);
     const groundGap = renderModeMod.effectiveGroundGap(config.getConfig().renderMode, walk.groundGap, gifVisualGroundGap);

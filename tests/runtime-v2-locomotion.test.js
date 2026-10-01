@@ -273,7 +273,9 @@ test("A: gate OFF——零 V2 运行时对象、所有 bypass 点 typeof 守卫�
   assert.match(mainSource, /const v2Commit = RUNTIME_V2_LOCOMOTION_ENABLED \? runtimeV2Module\.createWindowCommit\(\{/);
   assert.match(mainSource, /const v2Locomotion = RUNTIME_V2_LOCOMOTION_ENABLED \? \(\(\) => \{/);
   assert.match(mainSource, /const v2Drag = RUNTIME_V2_LOCOMOTION_ENABLED \? runtimeV2Module\.createDragSession\(\{/, "drag 会话条件创建：OFF 全为 null");
-  assert.match(mainSource, /\}\) : null;\n\nfunction cancelFlight/, "v2Drag : null 收尾后接 cancelFlight（OFF 无 V2 运行时对象）");
+  assert.match(mainSource, /\}\) : null;\n\n\/\* ===== 统一 position admission 门面/, "v2Drag : null 收尾后接统一 admission 门面（OFF 无 V2 运行时对象）");
+  // 门面在 gate OFF（v2Authority null）时恒「未阻塞」→ guard/clamp baseline 逐字不变
+  assert.match(mainSource, /function v2LegacyPositionBlocked\(\) \{[\s\S]{0,120}v2Authority && v2Authority\.isLegacyBlocked\(\)\);/, "admission 门面 gate OFF 短路放行");
   assert.match(mainSource, /const res = v2Drag\.commitMove\(/, "pet:move 经 commit point（EXTERNAL 准入）");
   assert.match(mainSource, /v2Drag\.begin\("drag", \{ docEpoch: renderModeSeq, senderId: _e\.sender && _e\.sender\.id \}\)/, "drag begin：LEGACY→EXTERNAL_DRAG 显式交接");
   assert.match(mainSource, /v2Drag\.active\(\)\) v2Drag\.end\(reason\)/, "clearDragPause 统一收口 end");

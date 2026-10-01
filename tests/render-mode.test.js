@@ -1019,7 +1019,12 @@ const dragStart = mainSource.indexOf("function dragSeatUpdate");
 const dragEnd = mainSource.indexOf("/* ---------- 桌面行走 v2", dragStart);
 const dragBlock = mainSource.slice(dragStart, dragEnd);
 assert.doesNotMatch(dragBlock, /[+\-]\s*walk\.groundGap/, "dragSeatUpdate 不直接消费 raw groundGap");
-assert.match(dragBlock, /win\.setPosition\(Math\.round\(nx\), Math\.round\(ny\)\);/, "dragSeatUpdate native 坐标归一化");
+// Closure v0.1：drag landing 改为委托统一 admission 门面（EXTERNAL 持有时经 external commit，LEGACY 直写），
+// 坐标归一化保证迁移到 v2DragCommitLanding 内——仍禁止裸未归一化 native 写。
+assert.match(dragBlock, /v2DragCommitLanding\(nx, ny\)/, "dragSeatUpdate 落座/半挂写经统一 admission 门面");
+const dragLandingHelper = mainSource.slice(mainSource.indexOf("function v2DragCommitLanding"), mainSource.indexOf("function cancelFlight"));
+assert.match(dragLandingHelper, /win\.setPosition\(Math\.round\(x\), Math\.round\(y\)\)/, "admission 门面 LEGACY 分支原生坐标归一化（保证未丢失）");
+assert.match(dragLandingHelper, /v2Drag\.commitMove\(/, "EXTERNAL 持有时 landing 经 external commit");
 
 const groundReportStart = rendererSource.indexOf("function reportGroundGap");
 const groundReportEnd = rendererSource.indexOf("function scheduleGeometryReport", groundReportStart);
@@ -1215,7 +1220,7 @@ function createDragSeatFixture({ x = 100, y = 768, seated = true, layer = "alway
   };
   const api = new Function(
     "win", "walk", "config", "screen", "walkGeo", "renderModeMod", "effectiveSeatSink", "desktopIconMode", "desktopIconCache",
-    "walkSetPosition", "walkBroadcast", "applyLayer", "walkSchedulePhase", "clearTimeout", "randInt", "walkMinX", "PET_LOCAL_X", "gifVisualGroundGap",
+    "walkSetPosition", "walkBroadcast", "applyLayer", "walkSchedulePhase", "clearTimeout", "randInt", "walkMinX", "PET_LOCAL_X", "gifVisualGroundGap", "v2DragCommitLanding",
     `${/* 本夹具只测 seat 落位几何，不测 transition：注入恒零 seatExit 上下文（applySeatPosition 的 offset 层自然短路） */ ""}
      let seatExit = null; const seatExitOffsetY = () => 0;
      ${sourceBlock(mainSource, "function dragSeatUpdate", "/* ---------- 桌面行走 v2", "dragSeatUpdate")};
@@ -1232,7 +1237,9 @@ function createDragSeatFixture({ x = 100, y = 768, seated = true, layer = "alway
     { list: icons },
     (px, py) => { bounds.x = px; bounds.y = py; posWrites.push({ x: px, y: py, via: "walkSetPosition" }); },
     () => broadcasts.push({ seated: walk.seated, resting: walk.resting }),
-    () => {}, () => {}, () => {}, () => 7000, () => 0, 138, 0
+    () => {}, () => {}, () => {}, () => 7000, () => 0, 138, 0,
+    // Closure 门面：本夹具无 drag session（LEGACY）→ 语义即归一化裸 setPosition（与真 helper LEGACY 分支一致）
+    (x, y) => { const px = Math.round(x), py = Math.round(y); bounds.x = px; bounds.y = py; posWrites.push({ x: px, y: py, via: "landing" }); return true; }
   );
   return { api, walk, bounds, posWrites, broadcasts };
 }

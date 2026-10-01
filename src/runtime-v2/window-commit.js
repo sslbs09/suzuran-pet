@@ -61,9 +61,10 @@ function createWindowCommit({ authority, writePosition, writePositionExternal, r
   /** V2 locomotion commit（STAND_UP/MOVE/ENTER_SIT；writer 含 layer 节流，与 V1 walk writer 对齐）。 */
   function commitPosition(ctx) {
     const kind = String((ctx && ctx.kind) || "unknown");
-    if (!ctx || !authority.isCurrent(ctx.token, ctx.episodeId)) {
+    const adm = authority.positionAdmit("v2-locomotion", ctx);
+    if (!ctx || !adm.ok) {
       stats.denied += 1;
-      return { ok: false, reason: "stale-or-not-owner", outcome: "denied", kind, episodeId: (ctx && ctx.episodeId) || null };
+      return { ok: false, reason: adm.reason || "stale-or-not-owner", outcome: "denied", kind, episodeId: (ctx && ctx.episodeId) || null };
     }
     return guardedWrite(ctx);
   }
@@ -71,9 +72,10 @@ function createWindowCommit({ authority, writePosition, writePositionExternal, r
   /** EXTERNAL_DRAG commit（拖拽位移；裸 setPosition——与 legacy pet:move 热路径同价）。token 失效 → 拒写。 */
   function commitExternal(ctx) {
     const kind = String((ctx && ctx.kind) || "drag-move");
-    if (!ctx || !authority.isExternalCurrent(ctx.externalToken)) {
+    const adm = authority.positionAdmit("external-drag", ctx);
+    if (!ctx || !adm.ok) {
       stats.denied += 1;
-      return { ok: false, reason: "not-external-owner", outcome: "denied", kind, sessionId: (ctx && ctx.sessionId) || null };
+      return { ok: false, reason: adm.reason || "not-external-owner", outcome: "denied", kind, sessionId: (ctx && ctx.sessionId) || null };
     }
     return guardedWrite(Object.assign({ external: true }, ctx));
   }
