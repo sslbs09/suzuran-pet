@@ -31,6 +31,22 @@ let MOODS = []; // [{name,label,emotion,custom,exists}]
 
 const SPRITE_BASE = "pet-user://sprites/user/";
 
+/* ===== 临时 Q-BOUNCE DECISIVE TRACE（默认关闭；SUSSURRO_QBOUNCE_TRACE=1 经 preload 暴露）=====
+ * 只为区分 A trigger 没进 / B blocked / C apply 后被覆盖 / D stale owner / E 错渲染路径。
+ * OFF：qt() 立即 return，零生产日志、零行为改变。ON：每次 headpat 仅数条事件（不逐帧）。 */
+const QBTRACE = !!(window.petAPI && window.petAPI.qbounceTrace);
+function qt(tag, fields) {
+  if (!QBTRACE) return;
+  try { window.petAPI.playback && window.petAPI.playback("[QTRACE] " + tag + " " + JSON.stringify(fields || {})); } catch { /* 诊断绝不影响交互 */ }
+}
+function qtSquashSnapshot(extra) {
+  return Object.assign({
+    activeRenderMode, spineObj: !!spineObj, generation: activeRenderGeneration,
+    seatEpisodeActive: !!seatEpisode.active, seatEpisodeOwnerIsSpine: !!(seatEpisode.owner && seatEpisode.owner === spineObj),
+    seatExitYOwnsY: seatExitYOwnsY(), busy: !!busy, seated: !!(walkState && walkState.seated), paused: !!(walkState && walkState.paused), sleeping: !!(walkState && walkState.sleeping)
+  }, extra || {});
+}
+
 /* ---------- Spine 渲染系统（可切换 GIF/Spine；支持桌面行走） ---------- */
 let spineApp = null;         // PixiJS Application
 let spineObj = null;         // PIXI Spine 对象
@@ -2283,9 +2299,15 @@ function headPatSquashBlocked() {
   return seatExitYOwnsY() || !!(seatEpisode.active && seatEpisode.owner === spineObj);
 }
 function headPatSquash() {
-  if (!spineObj || activeRenderMode !== "spine" || headPatSquashBlocked()) return;
+  const _bSeatExit = seatExitYOwnsY();
+  const _bEpisode = !!(seatEpisode.active && seatEpisode.owner === spineObj);
+  qt("squash-enter", qtSquashSnapshot({ blockedBySeatExitY: _bSeatExit, blockedBySeatEpisodeOwner: _bEpisode, spineModeOk: activeRenderMode === "spine" && !!spineObj }));
+  if (!spineObj) { qt("squash-blocked", { reason: "no-spine-obj" }); return; }
+  if (activeRenderMode !== "spine") { qt("squash-blocked", { reason: "not-spine-mode" }); return; }
+  if (_bSeatExit) { qt("squash-blocked", { reason: "seatExitYOwnsY" }); return; }
+  if (_bEpisode) { qt("squash-blocked", { reason: "seatEpisodeOwner" }); return; }
   try { // 对齐 GIF 侧 backlog-1 契约（pet.css prefers-reduced-motion 禁用 squash）：JS 替代实现须尊重同一系统设置
-    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) { qt("squash-blocked", { reason: "prefers-reduced-motion" }); return; }
   } catch { /* matchMedia 异常按未要求减少动效处理 */ }
   const gen = ++pokeFeedbackGen; // 新一轮交互使上一轮排队回调永久失效
   const owner = spineObj;
@@ -2293,8 +2315,8 @@ function headPatSquash() {
   const same = (a, b) => !!a && !!b && a.x === b.x && a.y === b.y && a.sx === b.sx && a.sy === b.sy;
   const writeBase = (t) => { owner.x = t.x; owner.y = t.y; owner.scale.set(t.sx, t.sy); };
   const keyframe = (k) => {
-    if (gen !== pokeFeedbackGen || owner !== spineObj || activeRenderMode !== "spine") return;
-    if (headPatSquashBlocked()) return;
+    if (gen !== pokeFeedbackGen || owner !== spineObj || activeRenderMode !== "spine") { if (QBTRACE) qt("squash-dropped", { reason: gen !== pokeFeedbackGen ? "superseded" : owner !== spineObj ? "stale-owner(D)" : "mode-changed", gen, k }); return; }
+    if (headPatSquashBlocked()) { if (QBTRACE) qt("squash-dropped", { reason: "blocked-mid", gen, k, seatExitYOwnsY: seatExitYOwnsY(), seatEpisodeOwnerIsSpine: !!(seatEpisode.owner && seatEpisode.owner === spineObj) }); return; }
     const cur = read();
     // 认到外部写者（fit pass / 行走对齐等）：以它的值为新基准继续，绝不用陈旧绝对值把它拉回去
     if (!same(cur, patSquashShadow) && !same(cur, patSquashBase)) patSquashBase = cur;
@@ -2303,6 +2325,7 @@ function headPatSquash() {
       patSquashBase = null;
       patSquashShadow = null;
       if (t) writeBase(t);
+      qt("squash-clear", { reason: "keyframe-end", gen });
       return;
     }
     let b = null;
@@ -2318,10 +2341,15 @@ function headPatSquash() {
   };
   // 上一轮被新交互打断：先还原到基准再重新起手，对齐 GIF「移除 class 后重放 keyframes」语义，
   // 否则连点会把压缩量叠乘（0.9 → 0.81 → …，角色逐次变小）。
-  if (patSquashShadow && same(read(), patSquashShadow) && patSquashBase) writeBase(patSquashBase);
+  if (patSquashShadow && same(read(), patSquashShadow) && patSquashBase) { qt("squash-clear", { reason: "re-arm-reset", gen }); writeBase(patSquashBase); }
   patSquashBase = read();
   patSquashShadow = null;
   keyframe(0.9);
+  qt("squash-applied", { gen, ownerIsCurrentSpine: owner === spineObj, transform: (() => { try { return read(); } catch { return null; } })() });
+  if (QBTRACE) requestAnimationFrame(() => { // 一次性 post-frame 观察（C/D 判据；不逐帧、不做持续 profiling）
+    let t = null; try { t = read(); } catch {}
+    qt("squash-post-frame", { gen, sameOwner: owner === spineObj, sameGen: gen === pokeFeedbackGen, transform: t, seatExitYOwnsY: seatExitYOwnsY(), seatEpisodeActive: !!seatEpisode.active, seatEpisodeOwnerIsSpine: !!(seatEpisode.owner && seatEpisode.owner === spineObj) });
+  });
   setTimeout(() => keyframe(1.05), 210);
   setTimeout(() => keyframe(1), 350);
 }
@@ -4089,6 +4117,7 @@ function finishDrag(reason = "cancel") {
   const speed = velocity ? Math.round(Math.hypot(velocity.vx, velocity.vy)) : 0;
 
   if (!wasDrag) {
+    qt("trigger", qtSquashSnapshot({ kind: "pointerup", wasDrag: false, moved: state && state.moved, patCount: (patSeq && patSeq.count) || 0 }));
     try { window.petAPI.playback("[ui] click 未拖动 count=" + ((patSeq && patSeq.count) || 0)); } catch { /* 忽略 */ }
     headPatSquash(); // 摸头/单击的瞬时 Q 弹：GIF 由上面的 pet-squash-release class 承担，Spine 在此补齐（非 spine 模式为 no-op）
     const now = Date.now();
