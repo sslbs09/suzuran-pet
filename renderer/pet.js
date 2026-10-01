@@ -31,6 +31,24 @@ let MOODS = []; // [{name,label,emotion,custom,exists}]
 
 const SPRITE_BASE = "pet-user://sprites/user/";
 
+/* ===== State Core：Interaction admission 分类器（candidate → threshold → admitted drag / tap）=====
+ * pointerdown 只是 candidate（零 IPC）；位移超过阈值才 admit DRAG（此后才发 walkingPause(true,"drag")+
+ * moveWindow）；pointerup 未过阈值 = tap/headpat body-local interaction（不 acquire Motion）。
+ * renderer reload / document replacement 由新文档自然重建候选（旧 candidate 随页消亡）。 */
+const dragInteraction = window.StateCoreInteraction
+  ? window.StateCoreInteraction.createInteractionState({ threshold: 3, now: () => Date.now() })
+  : { // 兜底：模块缺失时保持 1d2da8f 行为（pointerdown 立即 admission）
+      begin: () => { window.petAPI.walkingPause(true, "drag"); return { ok: true }; },
+      move: (x, y) => {
+        const dx = x - dragState.sx, dy = y - dragState.sy;
+        const crossed = Math.abs(dx) > 3 || Math.abs(dy) > 3;
+        if (crossed && dragState) { dragState.sx = x; dragState.sy = y; }
+        return { crossed, moved: !!(dragState && dragState.moved), justAdmitted: false, interactionId: null, dx, dy };
+      },
+      end: () => ({ wasDrag: !!(dragState && dragState.moved), interactionId: null }),
+      invalidate: () => ({ ok: false, noop: true })
+    };
+
 /* ---------- Spine 渲染系统（可切换 GIF/Spine；支持桌面行走） ---------- */
 let spineApp = null;         // PixiJS Application
 let spineObj = null;         // PIXI Spine 对象
@@ -4063,6 +4081,8 @@ function refreshDragClickable() {
 function finishDrag(reason = "cancel") {
   const state = dragState;
   if (!state || !state.active) return false;
+  // State Core Interaction：先结算 candidate 生命周期（wasDrag/interactionId），再摘全局状态
+  const ended = dragInteraction.end(); // tap：wasDrag=false + 无 interactionId（body-local，不涉 Motion/Pause）
 
   // 先摘掉全局状态，再 releasePointerCapture；release 可能同步触发 lostpointercapture。
   dragState = null;
@@ -4073,11 +4093,12 @@ function finishDrag(reason = "cancel") {
 
   if (reason !== "pointerup") {
     // 异常取消只安全放下当前位置：不 click、不 pat、不 throw、不打开输入栏。
-    window.petAPI.walkingPause(false, "drag");
+    if (ended.wasDrag) window.petAPI.walkingPause(false, "drag", ended.interactionId); // 只有真 admit 过的 drag 才需释放（tap 无 lease）
     return true;
   }
 
-  const wasDrag = state.moved;
+  const wasDrag = ended.wasDrag;
+  const interactionId = ended.interactionId;
   // 正常 pointerup 不把释放坐标额外加入 samples，保持原 mouseup 的甩动算法。
   // v2.5.22d Q 弹回弹（GIF 模式）：松手换 release 动画，播完清理
   petEl.classList.add("pet-squash-release");
@@ -4120,10 +4141,10 @@ function finishDrag(reason = "cancel") {
       scheduleDizzyFeedback(); // 被抛出去：落地时晕乎/抗议
     } catch {
       // IPC 发送失败时也立即解除 drag pause，不能把恢复交给 watchdog。
-      window.petAPI.walkingPause(false, "drag");
+      window.petAPI.walkingPause(false, "drag", interactionId);
     }
   } else {
-    window.petAPI.walkingPause(false, "drag");
+    window.petAPI.walkingPause(false, "drag", interactionId); // State Core：携带 interaction 身份（leaseId 匹配释放）
   }
   return true;
 }
@@ -4144,7 +4165,9 @@ function onDragStart(e) {
     state = { pointerId: e.pointerId, target, sx: e.screenX, sy: e.screenY, moved: false, active: true, samples: [] };
     dragState = state;
     addDragSample(state, e);
-    window.petAPI.walkingPause(true, "drag"); // 拖拽中暂停桌面行走，松手恢复
+    // State Core Interaction：pointerdown = candidate（零 IPC、不进 drag 生命周期）。
+    // admission 在 pointermove 位移阈值（真位移才 walkingPause(true,"drag") + EXTERNAL_DRAG）。
+    dragInteraction.begin({ pointerId: e.pointerId, x: e.screenX, y: e.screenY });
   } catch {
     if (dragState === state) dragState = null;
     if (state) state.active = false;
@@ -4176,15 +4199,15 @@ window.addEventListener("pointermove", (e) => {
   }
   clickability.setLastMouse(e.clientX, e.clientY);
   addDragSample(dragState, e);
-  const dx = e.screenX - dragState.sx;
-  const dy = e.screenY - dragState.sy;
-  if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+  // State Core Interaction：阈值 crossing 才 admit DRAG（justAdmitted 时先发 walkingPause(true,"drag",id)
+  // 让 EXTERNAL_DRAG/pause 先就位——同源 IPC 有序——再 moveWindow 提交位移
+  const step = dragInteraction.move(e.screenX, e.screenY);
+  if (step.crossed) {
+    if (step.justAdmitted) window.petAPI.walkingPause(true, "drag", step.interactionId);
     dragState.moved = true;
-    try { window.petAPI.playback("[ui] 判定为拖动 dx=" + Math.round(dx) + " dy=" + Math.round(dy)); } catch { /* 忽略 */ }
+    try { window.petAPI.playback("[ui] 判定为拖动 dx=" + Math.round(step.dx) + " dy=" + Math.round(step.dy)); } catch { /* 忽略 */ }
     petEl.classList.add("dragging");
-    window.petAPI.moveWindow(dx, dy);
-    dragState.sx = e.screenX;
-    dragState.sy = e.screenY;
+    window.petAPI.moveWindow(step.dx, step.dy);
   }
 });
 window.addEventListener("pointerup", (e) => {

@@ -81,7 +81,8 @@ const { replayCrashRecovery } = require("./src/crash-recovery"); // 崩溃恢复
 const { createCrashBudget } = require("./src/crash-budget"); // crash 自愈预算按逻辑窗口分桶（H2，可单测）
 const walkState = require("./src/walk-state"); // 行走几何决策纯函数（v2.5.26 收敛①）
 const runtimeShadow = require("./src/runtime-shadow"); // Runtime V2 Shadow Slice v0.1（只读 shadow，默认关闭）
-const runtimeV2Module = require("./src/runtime-v2"); // Runtime V2 Locomotion Cutover v0.1（production，默认关闭）
+const runtimeV2Module = require("./src/runtime-v2");
+const stateCore = require("./src/state-core"); // WhiteMoon State Core v0.1（canonical state；与 locomotion 同 gate） // Runtime V2 Locomotion Cutover v0.1（production，默认关闭）
 const focusWatch = require("./src/focus-watch"); // 专注/离开状态机纯函数（v2.5.26 收敛②）
 const updater = require("./src/updater"); // asar-swap 自动更新（v2.5.26 ③）
 const weather = require("./src/weather"); // 免费天气 Open-Meteo（v2.5.26）
@@ -400,6 +401,7 @@ function createWindow() {
   // 渲染进程异常退出（崩溃/OOM/被系统回收）：自动重载恢复，防桌宠无声消失；60s 内连续 3 次则停止自愈
   win.webContents.on("render-process-gone", (_e, details) => {
     clearDragPause("renderer-crash");
+  if (typeof v2StateCore !== "undefined" && v2StateCore) { v2StateCore.lifecycle.invalidate("renderer-crash", "render-process-gone"); v2StateCore.pause.revokeByDomain("renderer", "renderer-crash"); v2StateCore.posture.invalidateSupport("crash"); v2StateCore.syncPauseProjection(); }
     const now = Date.now();
     const budget = crashBudget.record("pet", now); // 主 pet 独立预算域（H2）：辅助窗崩溃不再吃掉 pet 的自愈额度
     // 全量崩溃详情（exitCode/reason/内存），minidump 在 userData 下由 crashReporter 收集
@@ -1046,6 +1048,12 @@ ipcMain.handle("pet:reload-renderer", () => { // WebGL 上下文丢失等场景�
   if (!win || win.isDestroyed() || now - rendererReloadAt < 60000) return false;
   rendererReloadAt = now;
   clearDragPause("renderer-reload");
+  if (typeof v2StateCore !== "undefined" && v2StateCore) { // Lifecycle Projection：失效 transient，保留 canonical semantic posture
+    v2StateCore.lifecycle.invalidate("renderer-reload", "pet:reload-renderer");
+    v2StateCore.pause.revokeByDomain("renderer", "renderer-reload");
+    v2StateCore.posture.invalidateSupport("reload");
+    v2StateCore.syncPauseProjection();
+  }
   logTts("render", "渲染层自愈：webContents.reload（WebGL 上下文丢失/渲染异常）");
   bumpRenderModeIntentForRecovery();
   groundGapDocFloor = renderModeSeq; // F6：文档换代（自愈 reload）——旧纪元晚到包拒收
@@ -1395,6 +1403,7 @@ function setScale(scale) {
   if (typeof v2Drag !== "undefined" && v2Drag && v2Drag.active()) v2Drag.end("scale-change");       // 再释放 EXTERNAL_DRAG，scale 不与拖拽同时写 position
   // Shadow 只读观察：requested scale 换代（gate OFF 零动作；typeof 守卫兼容测试沙箱代码块抽取）
   if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsScaleChanged(s);
+  if (typeof v2StateCore !== "undefined" && v2StateCore) v2StateCore.posture.invalidateSupport("scale"); // posture 语义保持；support 证据诚实过期
   if (win && !win.isDestroyed()) {
     const resizeRevision = windowSizeRevision.next();
     const wasGrounded = captureResizeAnchor();
@@ -2160,10 +2169,11 @@ function wsScanSignature() {
 function chatPauseWalk(p) {
   if (!walk.active) return;
   if (p && typeof v2Locomotion !== "undefined" && v2Locomotion) v2Locomotion.interrupt("chat-pause"); // V2 让位（先释放 ownership，V1 照常）
-  walk.chatPaused = !!p;
+  if (typeof v2StateCore !== "undefined" && v2StateCore) { if (p) v2StateCore.chatLease.acquire(); else v2StateCore.chatLease.release(); v2StateCore.syncPauseProjection(); }
+  walk.chatPaused = !!p; // compatibility projection（CANONICAL=PauseAuthority.chat lease）
   if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsTakeover("chat", !!p); // Shadow 只读观察：对话接管（gate OFF 零动作）
   if (p) { cancelFlight(); cancelWalkJump(); walk.taskbarHang = false; }
-  walk.paused = walk.dragPaused || walk.chatPaused || walk.zoomPaused;
+  walk.paused = (typeof v2StateCore !== "undefined" && v2StateCore ? v2StateCore.pause.effectivePaused() : (walk.dragPaused || walk.chatPaused || walk.zoomPaused)); // CANONICAL=PauseAuthority；walk.paused 为 compatibility projection
   walk.pausedAt = 0; // 对话暂停不参与拖拽 60s 自愈
   walkBroadcast();
   logTts("walk", p ? "对话暂停散步" : "对话结束恢复散步");
@@ -3509,7 +3519,8 @@ const PET_LOCAL_X = 138;                       // 标准 Spine 260×200 窗口�
 
 /** 清理拖拽暂停；只触碰 dragPaused 及其专属时间状态，保留 chat/zoom 暂停。 */
 function clearDragPause(reason = "drag-cleanup", broadcast = true) {
-  if (typeof v2Drag !== "undefined" && v2Drag && v2Drag.active()) v2Drag.end(reason); // 拖拽会话收口：release EXTERNAL_DRAG → LEGACY（旧 token 失效，不复活旧 attempt；Shadow obsTakeover("drag",false) 在释放链记录）
+  if (typeof v2Drag !== "undefined" && v2Drag && v2Drag.active()) v2Drag.end(reason);
+  if (typeof v2StateCore !== "undefined" && v2StateCore) { v2StateCore.pause.revoke("drag", reason); v2StateCore.syncPauseProjection(); } // main 权威 revoke（watchdog/teardown/throw） // 拖拽会话收口：release EXTERNAL_DRAG → LEGACY（旧 token 失效，不复活旧 attempt；Shadow obsTakeover("drag",false) 在释放链记录）
   const ownsPausedAt = !walk.chatPaused && !walk.zoomPaused;
   const changed = !!walk.dragPaused || (ownsPausedAt && !!walk.pausedAt) ||
     walk.paused !== (walk.chatPaused || walk.zoomPaused);
@@ -3555,6 +3566,7 @@ function walkSetPosition(x, y, where) {
 }
 
 function walkBroadcast(options = {}) {
+  if (typeof v2StateCore !== "undefined" && v2StateCore) v2StateCore.posture.observeWalk(walk, { now: Date.now() }); // adapter：LEGACY policy → CANONICAL semantic posture/support kind
   const standBeatPoseIntent = STANDBEAT_ENABLED && STANDBEAT_POSE_ENABLED && options.standBeatPoseIntent === "stand"
     ? "stand" : null;
   const forensic = typeof seatExitForensicBroadcastMeta === "function" ? seatExitForensicBroadcastMeta() : null;
@@ -3775,6 +3787,33 @@ function v2DragCommitLanding(x, y) {
   }
   try { win.setPosition(Math.round(x), Math.round(y)); return true; } catch { return false; }
 }
+
+/* ===== State Core v0.1（canonical truth；gate OFF 时不存在——legacy 字段即 canonical，V1 逐字不变）=====
+ * CANONICAL：PauseAuthority leases / posture 语义 / support 证据世代 / lifecycle 代际。
+ * DERIVED COMPATIBILITY：walk.paused / dragPaused / chatPaused / zoomPaused 等
+ * 由 syncPauseProjection 单向同步（禁止反向随意写——legacy 字段只剩 policy/compatibility 语义）。 */
+const v2StateCore = RUNTIME_V2_LOCOMOTION_ENABLED ? (() => {
+  const pause = stateCore.createPauseAuthority();
+  const posture = stateCore.createPostureSupport();
+  const lifecycle = stateCore.createLifecycleProjection();
+  let chatLeaseSeq = 0, chatLeaseId = null, zoomLeaseId = null;
+  const core = { pause, posture, lifecycle };
+  core.syncPauseProjection = function () { // 单向：canonical → compatibility projection
+    walk.dragPaused = pause.isPaused("drag");
+    walk.chatPaused = pause.isPaused("chat");
+    walk.zoomPaused = pause.isPaused("zoom");
+    walk.paused = pause.effectivePaused();
+  };
+  core.chatLease = {
+    acquire() { const l = pause.acquire("chat", { leaseId: "chat-" + (++chatLeaseSeq), domain: "main", now: Date.now() }); chatLeaseId = l.leaseId; return l; },
+    release() { if (chatLeaseId === null) return { ok: false, noop: true }; const r = pause.release("chat", { leaseId: chatLeaseId }); chatLeaseId = null; return r; }
+  };
+  core.zoomLease = {
+    acquire() { const l = pause.acquire("zoom", { leaseId: "zoom-" + Date.now() + "-" + (++chatLeaseSeq), domain: "renderer", now: Date.now() }); zoomLeaseId = l.leaseId; return l; },
+    release() { if (zoomLeaseId === null) return { ok: false, noop: true }; const r = pause.release("zoom", { leaseId: zoomLeaseId }); zoomLeaseId = null; return r; }
+  };
+  return core;
+})() : null;
 
 function cancelFlight() {
   if (!walk.flight) return false;
@@ -4046,7 +4085,7 @@ async function walkOnPhaseEnd() {
   if (typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion.owns()) return; // belt：V2 持有期间旧 V1 phase callback 不得推进同一 episode（正常路径 V1 phaseTimer 已让位）
   if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsPhaseEnd(); // Shadow 只读：相位回调入口控制事实快照（gate OFF 零动作）
   if (walk.catToy) { walkSchedulePhase(randInt(400, 900)); return; } // 逗猫棒：相位机让位，由 walkTick 持续追鼠标
-  if (walk.paused) {                        // 拖拽中冻结一切相位动作（防 applySeatPosition 把窗口弹回任务栏）
+  if ((typeof v2StateCore !== "undefined" && v2StateCore ? v2StateCore.pause.effectivePaused() : (walk.dragPaused || walk.chatPaused || walk.zoomPaused))) {                // 拖拽中冻结一切相位动作（暂停判定=CANONICAL）
     walkSchedulePhase(randInt(3000, 6000));
     return;
   }
@@ -4544,7 +4583,7 @@ function walkAttemptPerch() {
 function outOfScreenGuard() {
   try {
     if (!win || win.isDestroyed() || !win.isVisible()) return;
-    if (walk.paused || walk.flight || walk.jump) return; // 拖拽/飞行中不干预
+    if ((typeof v2StateCore !== "undefined" && v2StateCore ? v2StateCore.pause.effectivePaused() : (walk.dragPaused || walk.chatPaused || walk.zoomPaused)) || walk.flight || walk.jump) return; // 拖拽/飞行中不干预（暂停判定=CANONICAL）
     // Motion Substrate Closure：独立 2s interval 在回调到达时重查 owner——V2/EXTERNAL 持有时
     // 不得裸写（角色地面线由 V2 controller 逐拍维护 / drag 由 external 维护），记录有界 defer 后让位。
     if (v2LegacyPositionBlocked()) { v2NoteDeferredClamp("outOfScreenGuard"); return; }
@@ -4724,7 +4763,7 @@ function walkTick() {
     else if (walk.dragPaused) cancelSeatExit("drag");
     else seatExitStep(walk.sleeping ? "sleepTick" : "pauseTick");
   }
-  if (walk.paused || walk.seated || !win.isVisible()) return; // 拖拽中/坐下/隐藏到托盘时不移动
+  if ((typeof v2StateCore !== "undefined" && v2StateCore ? v2StateCore.pause.effectivePaused() : (walk.dragPaused || walk.chatPaused || walk.zoomPaused)) || walk.seated || !win.isVisible()) return; // 暂停判定=CANONICAL effectivePaused（walk.paused 为 projection）
   // 自愈②：相位定时器丢失（不在任何过渡流程却无人排程）→ 自动重启循环，防永久静止
   if (!walk.paused && !walk.sleeping && !walk.phaseTimer &&
       !walk.gotoPerch && !walk.returning && !walk.perched && !walk.iconRest && !walk.seated) {
@@ -4977,28 +5016,36 @@ ipcMain.handle("pet:set-walking", (_e, on) => {
 ipcMain.on("pet:walking-engine-stop", () => { // 运行时停走（不持久化）：2.5D 模式停引擎但保留用户行走意图，切回 Spine 由 syncWalkingEngine 恢复
   stopWalkingEngine();
 });
-ipcMain.on("pet:walking-pause", (_e, p, source) => {
+ipcMain.on("pet:walking-pause", (_e, p, source, interactionId) => { // interactionId：renderer interaction 身份（leaseId）
   if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsTakeover(source === "zoom" ? "zoom" : "drag", !!p);
-  if (p && typeof v2Locomotion !== "undefined" && v2Locomotion) v2Locomotion.interrupt(source === "zoom" ? "zoom-pause" : "drag-pause"); // 先 interrupt+release locomotion token（旧 attempt 作废）
+  if (p && source !== "zoom" && typeof v2Locomotion !== "undefined" && v2Locomotion) v2Locomotion.interrupt("drag-pause"); // 先释放 V2 locomotion token（旧 attempt 作废）
+  // State Core：drag admission → ① PauseAuthority acquire（CANONICAL pause）→ ② MotionAuthority EXTERNAL_DRAG（顺序合同）
+  if (p && source !== "zoom" && typeof v2StateCore !== "undefined" && v2StateCore) {
+    v2StateCore.pause.acquire("drag", { leaseId: interactionId !== undefined ? interactionId : null, domain: "renderer", now: Date.now() });
+    v2StateCore.syncPauseProjection();
+  }
   if (p && source !== "zoom" && typeof v2Drag !== "undefined" && v2Drag) { // 交接：LEGACY → EXTERNAL_DRAG（V2 已释放，绝不并存）
     v2Drag.begin("drag", { docEpoch: renderModeSeq, senderId: _e.sender && _e.sender.id }); // Shadow 的 obsTakeover("drag",true) 已在上一行记录接管
   }
   if (p) { cancelFlight(); cancelWalkJump(); walk.taskbarHang = false; } // 鼠标重新抓住时立即停止飞行/跳跃/半挂
   if (source === "zoom") { // 放大聊天框暂停：独立标志，60s 拖拽自愈不得解除（否则大窗口下恢复行走会打乱几何）
-    walk.zoomPaused = !!p;
+    if (typeof v2StateCore !== "undefined" && v2StateCore) { if (p) v2StateCore.zoomLease.acquire(); else v2StateCore.zoomLease.release(); v2StateCore.syncPauseProjection(); }
+    walk.zoomPaused = !!p; // compatibility projection
     if (p) cancelSeatExit("zoom"); // resize/zoom 接管几何：cancel 不 finalize（由 reposition 链重新派生）
     walk.pausedAt = p ? Date.now() : 0;
   } else if (!p) {
+    if (typeof v2StateCore !== "undefined" && v2StateCore && source === "drag") { v2StateCore.pause.release("drag", { leaseId: interactionId !== undefined ? interactionId : null }); v2StateCore.syncPauseProjection(); }
     clearDragPause("walking-pause", false);
   } else {
-    walk.dragPaused = true;
+    if (typeof v2StateCore !== "undefined" && v2StateCore) v2StateCore.syncPauseProjection(); // lease 已 acquire；projection 对齐
+    walk.dragPaused = true; // compatibility projection
     cancelSeatExit("drag"); // 用户直接拥有窗口几何：立即取消过渡且不补写位置
     if (walk.standingUpUntil) walk.standingUpUntil = 0; // P0：拖拽夺走几何所有权，起身节拍作废（落座/自由放置由 dragSeatUpdate 决策）
     walk.pausedAt = Date.now();
     // 人格化：被抓住/点按时偶尔嘀咕
     maybePersonify("grabbed", { chance: 0.2, cooldownMs: 90000 });
   }
-  walk.paused = walk.dragPaused || walk.chatPaused || walk.zoomPaused; // 拖拽/对话/放大任一暂停都停住
+  walk.paused = (typeof v2StateCore !== "undefined" && v2StateCore ? v2StateCore.pause.effectivePaused() : (walk.dragPaused || walk.chatPaused || walk.zoomPaused)); // CANONICAL=PauseAuthority；walk.paused 为 compatibility projection
   if (walk.active) walkBroadcast(); // 暂停/恢复即时同步渲染层动画（暂停时切站立待机）
   if (!p && walk.active && !walk.flight && !walk.jump) {
     // 松手/恢复：若之前处于坐窗流程中被拖走，就地转入「回到地面」下降流程
@@ -5167,6 +5214,7 @@ ipcMain.on("pet:set-ground-gap", (_e, px, meta = {}) => {
   lastGroundGapReports[mode] = report.identity;
   if (report.target === "spine") {
     walk.groundGap = report.value;
+    if (typeof v2StateCore !== "undefined" && v2StateCore) v2StateCore.posture.refreshSupportEvidence({ generation: Number.isFinite(Number(meta && meta.renderGeneration)) ? Number(meta.renderGeneration) : null }); // 新几何证据：evidence 世代推进
     if (typeof v2Geo !== "undefined" && v2Geo && Number.isSafeInteger(Number(meta && meta.renderGeneration))) {
       // V2 geometry dependency：记录采样身份（renderGeneration/docEpoch）+ 当拍 main 换代基准
       v2Geo.measurement = { value: report.value, renderGeneration: Number(meta.renderGeneration), docEpoch: Number.isSafeInteger(Number(meta && meta.docEpoch)) ? Number(meta.docEpoch) : null, scaleGeneration: v2Geo.scaleGeneration, workAreaGeneration: v2Geo.workAreaGeneration };
@@ -5472,6 +5520,7 @@ ipcMain.on("pet:set-size", (_e, w, h, source) => {
   // resizable:false 时 setSize 缩小会被忽略（放大接近原值看不出），先临时允许缩放
   try { if (!win.isResizable()) win.setResizable(true); } catch { /* 忽略 */ }
   win.setSize(ws, hs);
+  if (typeof v2StateCore !== "undefined" && v2StateCore) v2StateCore.posture.invalidateSupport("resize"); // posture 语义保持；support 证据诚实过期
   repositionAfterWindowSizeChange(renderModeCommit, wasGrounded);
   setTimeout(() => {
     const revisionCurrent = windowSizeRevision.isCurrent(resizeRevision);

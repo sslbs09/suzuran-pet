@@ -36,7 +36,7 @@ contextBridge.exposeInMainWorld("petAPI", {
   setGroundGap: (px, meta) => ipcRenderer.send("pet:set-ground-gap", px, meta || null),
   reportShadowEvidence: (ev) => ipcRenderer.send("pet:shadow-evidence", ev || null), // Shadow v0.1（默认关）：渲染层 body 证据上行；main 侧 gate OFF 时零消费
   setWalking: (on) => ipcRenderer.invoke("pet:set-walking", !!on),
-  walkingPause: (b, source) => ipcRenderer.send("pet:walking-pause", !!b, source || "drag"),
+  walkingPause: (b, source, interactionId) => ipcRenderer.send("pet:walking-pause", !!b, source || "drag", interactionId === undefined ? null : interactionId), // interactionId：State Core pause lease 身份（leaseId）
   walkingEngineStop: () => ipcRenderer.send("pet:walking-engine-stop"),
   onWalking: (cb) => ipcRenderer.on("pet:walking", (_e, s) => cb(s)),
   onRenderModeChanged: (cb) => ipcRenderer.on("pet:render-mode-changed", (_e, m) => cb(m)),

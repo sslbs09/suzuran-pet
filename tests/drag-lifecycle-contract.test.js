@@ -84,14 +84,15 @@ test("all abnormal lifecycle signals route to cancel", () => {
 
 test("cancel resumes only drag pause and cannot invoke click or throw", () => {
   const cancelBranch = finish.slice(finish.indexOf('if (reason !== "pointerup")'), finish.indexOf("const wasDrag"));
-  assert.match(cancelBranch, /window\.petAPI\.walkingPause\(false, "drag"\)/);
+  // State Core：只有真 admit 过的 drag（ended.wasDrag）才释放，且携带 interaction 身份（leaseId 匹配释放）
+  assert.match(cancelBranch, /if \(ended\.wasDrag\) window\.petAPI\.walkingPause\(false, "drag", ended\.interactionId\);/);
   assert.doesNotMatch(cancelBranch, /throwPet|\.pat\(|toggleInputBar|playSpineInteract/);
 });
 
 test("buttons=0 cancels before sampling or moving the window", () => {
   const move = renderer.slice(renderer.indexOf('window.addEventListener("pointermove"'), renderer.indexOf('window.addEventListener("pointerup"'));
   assert.ok(move.indexOf("finishDrag(\"buttons\")") < move.indexOf("addDragSample(dragState, e)"));
-  assert.ok(move.indexOf("finishDrag(\"buttons\")") < move.indexOf("moveWindow(dx, dy)"));
+  assert.ok(move.indexOf("finishDrag(\"buttons\")") < move.indexOf("moveWindow(step.dx, step.dy)"));
   assert.match(move, /if \(!\(e\.buttons & 1\)\)/);
 });
 

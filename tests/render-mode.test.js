@@ -1364,14 +1364,14 @@ function assertWalkPauseDragGateWiring(source = mainSource) {
   const block = sourceBlock(source, 'ipcMain.on("pet:walking-pause"', 'ipcMain.on("pet:throw"', "assertWalkPauseDragGateWiring");
   assert.match(block, /if \(source === "drag"\) \{[\s\S]{0,80}const sat = dragSeatUpdate\(true\);/, "final 定格只由真实 drag resume 触发");
   assert.equal((block.match(/dragSeatUpdate\(true\)/g) || []).length, 1, "handler 内 dragSeatUpdate(true) 单一调用点");
-  assert.match(block, /\} else if \(!p\) \{\s*clearDragPause\("walking-pause", false\);/, "非 zoom 恢复（含 interact/drag）仍走 clearDragPause（暂停解除不受定格门控影响）");
+  assert.match(block, /\} else if \(!p\) \{[\s\S]{0,240}clearDragPause\("walking-pause", false\);/, "非 zoom 恢复（含 interact/drag）仍走 clearDragPause（暂停解除不受定格门控影响；State Core 先按 leaseId 释放 drag lease）");
 }
 assertWalkPauseDragGateWiring();
 assert.doesNotMatch(mainSource, /final && seated && magnet !== "icon" && !freeDragMode/, "v1 的 final&&seated 收口块已撤销：dragSeatUpdate 几何语义回归 HEAD");
 
 /* preload/renderer 契约层（v1 测试盲区：undefined source 被 preload 归一化成 "drag"） */
 function assertPokeInteractWiring(rendererSrc = rendererSource, preloadSrc = preloadSource) {
-  assert.match(preloadSrc, /walkingPause: \(b, source\) => ipcRenderer\.send\("pet:walking-pause", !!b, source \|\| "drag"\)/, "preload 契约不变：无 source 归一化为 \"drag\"——renderer 必须显式区分 interact");
+  assert.match(preloadSrc, /walkingPause: \(b, source, interactionId\) => ipcRenderer\.send\("pet:walking-pause", !!b, source \|\| "drag", interactionId === undefined \? null : interactionId\)/, "preload 契约：无 source 归一化为 \"drag\" + interactionId lease 身份透传（State Core）");
   assert.match(rendererSrc, /pokeResumeTimer = setTimeout\(\(\) => \{ if \(!dragState\) window\.petAPI\.walkingPause\(false, "interact"\); \}, 2600\);/, "poke/单击互动 resume 显式 source=\"interact\"（不得退回无 source）");
   assert.doesNotMatch(rendererSrc, /walkingPause\(false\)[;,)]/, "renderer 不再存在任何无 source 的 walkingPause(false) 调用");
 }
@@ -1495,7 +1495,7 @@ function createSeatExitFixture({ y = 768, x = 100, height = 300, width = 260, ga
   assert.match(mainSource, /const targetY = seatExit \? rawTargetY \+ seatExitOffsetY\(\) : rawTargetY;/, "applySeatPosition offset-aware");
   assert.match(mainSource, /if \(walk\.seated\) armSeatExit\("move", "phase"\);/, "stand 真实边沿 arm");
   assert.match(mainSource, /wasSeatedBeforeSleep && v[\s\S]{0,400}armSeatExit\("sleep", "set-sleeping"\);/, "入睡坐→睡经 transition，不再单帧 standY");
-  assert.match(mainSource, /walk\.dragPaused = true;\s*\n\s*cancelSeatExit\("drag"\);/, "drag 暂停：cancel 不 finalize");
+  assert.match(mainSource, /walk\.dragPaused = true;(?:[^\n]*)\n\s*cancelSeatExit\("drag"\);/, "drag 暂停：cancel 不 finalize");
   assert.match(mainSource, /if \(p\) cancelSeatExit\("zoom"\);/, "zoom：cancel 交回 reposition 链");
   assert.match(mainSource, /decision\.position\.y \+ seatExitOffsetY\(\)/, "resize ground 重锚共用瞬态公式（无未含 offset 的旁路写）");
   assert.match(mainSource, /if \(seatExit && \(walk\.paused \|\| walk\.sleeping \|\| !win\.isVisible\(\)\)\)/, "pause/sleep/hidden y-only 驱动拍存在且先于移动段");
