@@ -280,9 +280,9 @@ test("A: gate OFF——零 V2 运行时对象、所有 bypass 点 typeof 守卫�
   assert.match(mainSource, /v2Drag\.begin\("drag", \{ docEpoch: renderModeSeq, senderId: _e\.sender && _e\.sender\.id \}\)/, "drag begin：LEGACY→EXTERNAL_DRAG 显式交接");
   assert.match(mainSource, /v2Drag\.active\(\)\) v2Drag\.end\(reason\)/, "clearDragPause 统一收口 end");
   assert.match(mainSource, /if \(typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion\.owns\(\)\) \{ v2Locomotion\.tick\(\); return; \}/, "walkTick cutover");
-  assert.match(mainSource, /if \(typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion\.deniesLegacy\("walkSetPosition:" \+ where\)\) return false;/);
-  assert.match(mainSource, /if \(typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion\.deniesLegacy\("applySeatPosition"\)\) return;/);
-  assert.match(mainSource, /if \(typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion\.deniesLegacy\("seatExitStep"\)\) return;/);
+  assert.match(mainSource, /if \(typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion\.deniesLegacy\("walkSetPosition:" \+ where\)\) \{ if \(typeof qmain === "function"\) qmain\("admit-deny", \{ writer: "walkSetPosition", where \}\); return false; \}/);
+  assert.match(mainSource, /if \(typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion\.deniesLegacy\("applySeatPosition"\)\) \{ if \(typeof qmain === "function"\) qmain\("admit-deny", \{ writer: "applySeatPosition" \}\); return; \}/);
+  assert.match(mainSource, /if \(typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion\.deniesLegacy\("seatExitStep"\)\) \{ if \(typeof qmain === "function"\) qmain\("admit-deny", \{ writer: "seatExitStep" \}\); return; \}/);
   assert.match(mainSource, /const v2Take = typeof v2CanEnterSlice === "function" \? v2CanEnterSlice\(\) : \{ ok: false, reason: "gate-off" \};/);
   assert.match(mainSource, /if \(v2Take\.ok\) \{[\s\S]{0,160}walk\.dir = Math\.random\(\) < 0\.5 \? -1 : 1;[\s\S]{0,140}beginEpisode[\s\S]{0,80}if \(v2Res\.ok\) return;/, "方向/时长由 V1 选定；接管失败无缝回 V1");
   assert.match(mainSource, /armSeatExit\("move", "phase"\);[\s\S]{0,60}walk\.seated = false;/, "V1 原 stand-beat 路径完整保留（fallback）");

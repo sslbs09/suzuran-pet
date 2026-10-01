@@ -342,7 +342,7 @@ function clampPetToWorkArea(reason = "显示器变化") {
     if (x !== b.x || y !== b.y) {
       // Motion Substrate Closure：无论来源（display / 延迟 clamp / setScale / pet:set-size 回调），
       // 到达此执行点时重查 owner；V2/EXTERNAL 持有时不得裸钳位（记录有界 defer，由当前 owner 处理）
-      if (v2LegacyPositionBlocked()) v2NoteDeferredClamp("clamp:" + reason);
+      if (v2LegacyPositionBlocked()) { v2NoteDeferredClamp("clamp:" + reason); if (typeof qmain === "function") qmain("admit-deny", { writer: "clampPetToWorkArea", reason }); }
       else {
         win.setPosition(Math.round(x), Math.round(y));
         logTts("display", reason + "，已钳制到工作区");
@@ -3461,7 +3461,7 @@ function cancelSeatExit(reason) {
  * 只写 Y——绝不触碰 x/face/phase/jump/flight/targetX/动画。 */
 function seatExitStep(caller) {
   if (!seatExit || !win || win.isDestroyed()) return;
-  if (typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion.deniesLegacy("seatExitStep")) return; // V2 持有：Y 过渡归 episode 自己的 transition（V1 seatExit 模块态不参与）
+  if (typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion.deniesLegacy("seatExitStep")) { if (typeof qmain === "function") qmain("admit-deny", { writer: "seatExitStep" }); return; } // V2 持有：Y 过渡归 episode 自己的 transition（V1 seatExit 模块态不参与）
   const before = win.getBounds();
   const baseY = walk.sleeping ? liveSleepTargetY(before) : liveStandTargetY(before);
   const preActive = seatExit;
@@ -3529,7 +3529,7 @@ function walkSpeed() {                         // 托盘速度档位倍率（借
 function walkSetPosition(x, y, where) {
   if (!win || win.isDestroyed()) return false;
   // V2 locomotion ownership：旧 walking writer 在此被真实拒绝（denyCounts 可观测，不是“碰巧没调用”）
-  if (typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion.deniesLegacy("walkSetPosition:" + where)) return false;
+  if (typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion.deniesLegacy("walkSetPosition:" + where)) { if (typeof qmain === "function") qmain("admit-deny", { writer: "walkSetPosition", where }); return false; }
   // 允许 x 为负（角色条带左移贴屏幕左缘，charInset 补偿），只拦截 NaN/越界；曾强制 x≥1 导致左侧“空气墙”
   const px = Math.round(Number(x)) || 0, py = Math.round(Number(y)) || 0; // ||0 归一化 -0（Electron setPosition(-0) 会 conversion failure）
   if (!Number.isSafeInteger(px) || !Number.isSafeInteger(py) || Math.abs(px) > 1000000 || Math.abs(py) > 1000000) {
@@ -3776,6 +3776,14 @@ function v2DragCommitLanding(x, y) {
   try { win.setPosition(Math.round(x), Math.round(y)); return true; } catch { return false; }
 }
 
+/* ===== 临时 Q-BOUNCE 决定性 trace 的 main 侧关联（默认关闭；与 renderer SUSSURRO_QBOUNCE_TRACE 同 env）=====
+ * 只记录 headpat 生命周期与 EXTERNAL_DRAG / admission deny 是否意外关联；OFF 零日志。 */
+const QBOUNCE_TRACE_MAIN = typeof process !== "undefined" && process.env.SUSSURRO_QBOUNCE_TRACE === "1";
+function qmain(tag, fields) {
+  if (!QBOUNCE_TRACE_MAIN) return;
+  try { logTts("walk", "[QTRACE-MAIN] " + tag + " " + JSON.stringify(fields || {})); } catch { /* 诊断不影响主流程 */ }
+}
+
 function cancelFlight() {
   if (!walk.flight) return false;
   walk.flight = null;
@@ -3944,7 +3952,7 @@ function walkPhaseMs() {  // 单次散步：8s ~ 设置上限（默认20s）
  *  任何中间位移（拖拽/重启钳制）都会在下一次调用时纠正。仅 Spine 模式。 */
 function applySeatPosition() {
   if (!win || win.isDestroyed() || config.getConfig().renderMode !== "spine") return;
-  if (typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion.deniesLegacy("applySeatPosition")) return; // V2 持有：seat anchor 归 commit point
+  if (typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion.deniesLegacy("applySeatPosition")) { if (typeof qmain === "function") qmain("admit-deny", { writer: "applySeatPosition" }); return; } // V2 持有：seat anchor 归 commit point
   const b = win.getBounds();
   const wa = walkGeo.workAreaOf(screen, b);
   const baseY = wa.y + wa.height + walk.groundGap - b.height;   // 站立贴地
@@ -4000,7 +4008,7 @@ function enterRestPose() {
 function repositionAfterWindowSizeChange(renderModeCommit = false, wasGroundAnchored = false) {
   if (!win || win.isDestroyed()) return;
   // V2 持有：resize 后重锚属 slice 定位（§8 不绕 commit point）；V2 逐拍 live 提交会在 ≤1 tick 内重贴地线
-  if (typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion.deniesLegacy("repositionAfterWindowSizeChange")) return;
+  if (typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion.deniesLegacy("repositionAfterWindowSizeChange")) { if (typeof qmain === "function") qmain("admit-deny", { writer: "reposition" }); return; }
   const bounds = win.getBounds();
   const wa = walkGeo.workAreaOf(screen, bounds);
   const decision = renderModeMod.resizeRepositionDecision({
@@ -4547,7 +4555,7 @@ function outOfScreenGuard() {
     if (walk.paused || walk.flight || walk.jump) return; // 拖拽/飞行中不干预
     // Motion Substrate Closure：独立 2s interval 在回调到达时重查 owner——V2/EXTERNAL 持有时
     // 不得裸写（角色地面线由 V2 controller 逐拍维护 / drag 由 external 维护），记录有界 defer 后让位。
-    if (v2LegacyPositionBlocked()) { v2NoteDeferredClamp("outOfScreenGuard"); return; }
+    if (v2LegacyPositionBlocked()) { v2NoteDeferredClamp("outOfScreenGuard"); if (typeof qmain === "function") qmain("admit-deny", { writer: "outOfScreenGuard" }); return; }
     const b = win.getBounds();
     const wa = walkGeo.workAreaOf(screen, b);
     const groundGap = renderModeMod.effectiveGroundGap(config.getConfig().renderMode, walk.groundGap, gifVisualGroundGap);
@@ -4979,6 +4987,7 @@ ipcMain.on("pet:walking-engine-stop", () => { // 运行时停走（不持久化�
 });
 ipcMain.on("pet:walking-pause", (_e, p, source) => {
   if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsTakeover(source === "zoom" ? "zoom" : "drag", !!p);
+  if (typeof qmain === "function") qmain(p ? "pause-begin" : "pause-end", { source, ownerBefore: (typeof v2Authority !== "undefined" && v2Authority) ? v2Authority.owner() : null, walkPausedBefore: walk.paused });
   if (p && typeof v2Locomotion !== "undefined" && v2Locomotion) v2Locomotion.interrupt(source === "zoom" ? "zoom-pause" : "drag-pause"); // 先 interrupt+release locomotion token（旧 attempt 作废）
   if (p && source !== "zoom" && typeof v2Drag !== "undefined" && v2Drag) { // 交接：LEGACY → EXTERNAL_DRAG（V2 已释放，绝不并存）
     v2Drag.begin("drag", { docEpoch: renderModeSeq, senderId: _e.sender && _e.sender.id }); // Shadow 的 obsTakeover("drag",true) 已在上一行记录接管
