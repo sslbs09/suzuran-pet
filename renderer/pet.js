@@ -2383,7 +2383,7 @@ function playSpineInteract() {
   if (!spineObj || activeRenderMode !== "spine" || busy) return;
   if (shadowObs && shadowObs.active) shadowObs.noteSafely("boundary-takeover", () => ({ kind: "headpat" })); // Shadow 只读：渲染层动画接管边界
   // 睡觉中不互动：否则 Interact→排队恢复 spinePhaseAnim()=Move，主进程 sleeping=true 不位移
-  // →「Move 动画播放但不移动」冻结（2026-09-05 用户目击，鼠标靠近感应也会触发本函数）
+  // →「Move 动画播放但不移动」冻结（2026-09-05 用户目击；hover 靠近感应器已删除，本函数只剩正式 press/click 与落地反馈入口）
   if (isSleeping || walkState.sleeping) return;
   const inter = ["Interact", "interact"].find((n) => spineHas(n));
   if (!inter) {
@@ -3885,28 +3885,10 @@ document.addEventListener("mousedown", (e) => {
   document.addEventListener("mouseup", () => { ds = null; });
 })();
 
-/* ---------- 鼠标逗宠互动（v2.1）：鼠标在角色附近停留 → 播放互动动画（冷却 8s） ---------- */
-let mouseNearAt = 0;
-let mouseInteractCooldown = 0;
-document.addEventListener("mousemove", (e) => {
-  if (activeRenderMode !== "spine" || busy || dragState || !petEl) return;
-  const now = Date.now();
-  if (now < mouseInteractCooldown) return;
-  try {
-    const r = petEl.getBoundingClientRect();
-    const d = Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
-    if (d < 130) {
-      if (!mouseNearAt) mouseNearAt = now;
-      else if (now - mouseNearAt > 1200) {
-        mouseNearAt = 0;
-        mouseInteractCooldown = now + 8000;
-        // 2.5D：微笑回应；Spine：互动动画（各自独立）
-        if (activeRenderMode === "rig" && rigRuntime) rigRuntime.preset("smile");
-        else playSpineInteract();
-      }
-    } else mouseNearAt = 0;
-  } catch { /* 忽略 */ }
-});
+// head-pat admission provenance：v2.1「鼠标逗宠」hover 感应器已删除。
+// 互动动画只能来自 pointerdown→pointerup 的正式 press/click 手势（finishDrag !wasDrag 分支）。
+// 删除原因：walking 窗口移过静止光标时 Windows 会送达 mousemove，hover≠tap，
+// 无按键的 pointer contact 曾把 Interact 动画 admission 成"被摸头"（2026-10 实机复现）。
 
 // 桌宠大小缩放（CSS zoom 整体缩放，窗口由主进程同步调整）
 function applyScale(s) {
