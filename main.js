@@ -92,6 +92,7 @@ const { createQuitLifecycle, runCleanupSteps } = require("./src/quit-lifecycle")
 const { isConsentAccepted, canUseRuntime, acceptConsent } = require("./src/consent-gate");
 const { createOnceRunner } = require("./src/runtime-lifecycle");
 const { createConversationService, classifyError } = require("./src/conversation-service"); // TD-4：会话单写者（统一任务ID/取消/错误码）
+const { createChatOwnership } = require("./src/chat-ownership"); // 「角色进入聊天交互」的 ownership 单一权威（所有 chat ingress 共享，见下方 chatOwnership）
 const { createLineGate } = require("./src/line-gate");
 const { transitionSleep, createWorkflowSignalState, recordWorkflowSignal, consumeWorkflowSignal, requeueWorkflowSignal } = require("./src/dialogue-state");
 const { hashToken, safeTokenEqual, tokenMatches, sanitizeClients } = require("./src/agent-auth");
@@ -155,6 +156,11 @@ let workflowFlushTimer = null;
 let workflowPendingText = "";
 let workflowPendingEmotion = "idle";
 const conversation = createConversationService(); // TD-4：聊天/重新生成共用单写者；sender 经任务 meta 携带
+// chat ingress ownership 单一权威（2026-10 补齐外部入口 ownership 洞）：
+// UI pet:ask 经 handleAsk→chatPauseWalk；外部 /chat 及未来 MCP/DSH/Codex 入口经 chatOwnership.run。
+// 两者共用 conversation 单写者互斥；ingress 不决定 pause/lease/busy owner 生命周期。
+// pauseWalk 用惰性箭头：chatPauseWalk 是函数声明（会提升），但此处在其定义之前求值，故只能在调用时取。
+const chatOwnership = createChatOwnership({ conversation, pauseWalk: (p) => chatPauseWalk(p) });
 const askBuffer = createDebounceBuffer(); // 消息生成防抖（v2.6）：生成/合成中来的消息只留最新一条，回合结束补发
 let pendingAskTimer = null;               // 合并窗口定时器（每次新消息重置）
 const ASK_COALESCE_MS = 300;              // 连续快速发送的合并窗口：窗口内多条只留最后一条
@@ -1618,7 +1624,10 @@ function startAgentApi() {
       const enq = agentTaskQueue.enqueue(({ id, signal }) => {
         agentApiAbort = new AbortController();
         signal.addEventListener("abort", () => agentApiAbort.abort(), { once: true });
-        return chatClient.chat({
+        // 外部 chat 与 UI chat 共用同一条 ownership 执行路径（chatOwnership.run）：
+        // 先与 conversation 单写者互斥，再成对持有 chat pause lease。
+        // 排队（agentTaskQueue 串行链）期间不触碰 ownership——只有真正开始执行才拿 lease。
+        return chatOwnership.run(async () => chatClient.chat({
           persona: buildChatPersona(),
           history: history.recent("chat", cfg.chat.maxHistoryTurns || 10),
           text,
@@ -1626,7 +1635,7 @@ function startAgentApi() {
           signal: agentApiAbort.signal,
           genGate: () => history.generation() === genAtAsk, // F-03：清史后迟到的 Agent 任务不得写回向量库
           onChunk: () => {},
-        });
+        }), { source: "agent-api", signal });
       });
       if (enq.busy) {
         send(429, { ok: false, error: "请求繁忙（并发队列已满），请稍后重试" });
@@ -1644,6 +1653,9 @@ function startAgentApi() {
         send(200, { ok: true, taskId: enq.id, reply: r.text, emotion: r.emotion || "" });
         maybeWorkflowComment(); // 观察 AI 工作流：外部 AI/脚本通过 Agent 接口找她时偶尔嘀咕
       } catch (e) {
+        // ownership 互斥拒绝 = 角色正忙（UI chat 或另一条 /chat 在跑）→ 429 而非 500。
+        // 与 UI 侧 conversation.isBusy()→buffer 是同一语义的两端：一个排队补发，一个显式拒绝。
+        if (e && e.code === "BUSY") { send(429, { ok: false, error: "角色正忙（busy），请稍后重试" }); return; }
         send(500, { ok: false, error: String(e.message || e) });
       } finally {
         agentApiAbort = null;
@@ -2166,7 +2178,12 @@ function wsScanSignature() {
 /* ---------- 对话核心 ---------- */
 /** 对话期间暂停散步（busy 时渲染层不切 Move 动画，若窗口仍移动会出现“坐着滑行”）：
  *  进入对话暂停、结束（done/error/中止/快捷回复）统一在 finally 恢复。 */
+let chatPauseHeld = false; // chat pause 互斥闩（2026-10 补外部入口 ownership 洞）：重复 enter / 无主 exit 一律不动 lease 槽。
+// chatLease 是单槽（chatLeaseId），两个 chat owner 并发时先释放者会 lease-id-mismatch 被拒并清空槽，
+// 后释放者退化为 noop → chat pause 永久泄漏。本闩让「进」与「出」严格配对，跨入口不可能重复 acquire。
 function chatPauseWalk(p) {
+  if (p) { if (chatPauseHeld) return; chatPauseHeld = true; }
+  else { if (!chatPauseHeld) return; chatPauseHeld = false; }
   if (!walk.active) return;
   if (p && typeof v2Locomotion !== "undefined" && v2Locomotion) v2Locomotion.interrupt("chat-pause"); // V2 让位（先释放 ownership，V1 照常）
   if (typeof v2StateCore !== "undefined" && v2StateCore) { if (p) v2StateCore.chatLease.acquire(); else v2StateCore.chatLease.release(); v2StateCore.syncPauseProjection(); }
