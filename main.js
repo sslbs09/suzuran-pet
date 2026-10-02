@@ -1024,7 +1024,7 @@ ipcMain.handle("pet:regenerate", async () => { // Swipes：重新生成最后一
       swipes: entry.swipes, swipeIndex: entry.swipeIndex });
     return { full: newFull };
   } catch (e) { logTts("chat", "regenerate 失败: " + (e && e.message || e)); sendToRenderer("pet:done", { mode: "chat", full: "", emotion: "" }); return null; }
-  finally { conversation.finish(task.id); }
+  finally { conversation.finish(task.id); drainAskBuffer("regen-complete"); } // regen 也是单写者 owner：释放后兑现缓冲的一次补发
 });
 /** 原生窗口外观同步（v2.5.28）：把用户主题映射到 nativeTheme.themeSource——
  *  Windows 下所有 BrowserWindow 的原生标题栏/滚动条随深浅色变化，设置页深色 UI
@@ -2178,17 +2178,37 @@ function chatPauseWalk(p) {
   walkBroadcast();
   logTts("walk", p ? "对话暂停散步" : "对话结束恢复散步");
 }
+/* busy 缓冲与补发（2026-10-02 实机 FAIL 修复）：
+ * - busy 期间的请求只进单槽缓冲（latest-wins，v2.6 message-buffer 既有语义），
+ *   不 acquire chat pause、不进入 provider 链——旧实现把缓冲块放在 handleAskInner 内、
+ *   handleAsk 的 chatPauseWalk 包装之内，且合并定时器在 busy 仍为 true 时直接重入
+ *   handleAsk → acquire/release + walkBroadcast 每 300ms 翻转（行走姿态"单腿闪烁"）+ 自激循环。
+ * - 补发只由 busy owner 的真实释放事件驱动（ask/regenerate finally drain）；
+ *   合并窗口定时器到点也只做「空闲才取」，busy 未清则原地等事件，绝不递归。 */
+function bufferAsk(sender, payload) {
+  askBuffer.push({ sender, payload }); // 覆盖式单槽：连续多条只留最新（既有语义）
+  if (pendingAskTimer) clearTimeout(pendingAskTimer);
+  pendingAskTimer = setTimeout(() => { pendingAskTimer = null; drainAskBuffer("coalesce-window"); }, ASK_COALESCE_MS);
+}
+function drainAskBuffer(reason) { // 恰好一次：busy 已清才 take；补发重走完整 admission（pause 此刻才 acquire）
+  if (conversation.isBusy()) return;
+  if (pendingAskTimer) { clearTimeout(pendingAskTimer); pendingAskTimer = null; }
+  const p = askBuffer.take();
+  if (p) handleAsk(p.sender, p.payload);
+}
 async function handleAsk(sender, payload) {
   // F-03（实机验收）：受理时刻的清史代次随消息走——防抖缓冲/锁释放导致的迟到重发
   // 据此识别并丢弃，防止被清除对话经延迟管线重新写入 history/向量库/记忆
   if (payload && typeof payload === "object" && typeof payload.askGen !== "number") {
     payload.askGen = history.generation();
   }
+  if (conversation.isBusy()) { bufferAsk(sender, { id: payload && payload.id, text: payload && payload.text }); return; } // BUSY：只缓冲，不 acquire pause、不算 active request
   chatPauseWalk(true);
   try {
     await handleAskInner(sender, payload);
   } finally {
     chatPauseWalk(false);
+    drainAskBuffer("ask-complete"); // 本回合若是 owner：busy 已在 inner finally 清除，缓冲恰好补发一次
   }
 }
 async function handleAskInner(sender, { id, text, askGen }) {
@@ -2202,14 +2222,8 @@ async function handleAskInner(sender, { id, text, askGen }) {
   }
   if (conversation.isBusy()) {
     // v2.6 消息生成防抖：上一句还在生成/合成时再来消息，不再直接报错——
-    // 只缓冲最新一条（连续快速发送只留最后一条），当前回合结束后自动补发（src/message-buffer）
-    askBuffer.push({ sender, payload: { id, text } });
-    if (pendingAskTimer) clearTimeout(pendingAskTimer);
-    pendingAskTimer = setTimeout(() => {
-      pendingAskTimer = null;
-      const p = askBuffer.take();
-      if (p) handleAsk(p.sender, p.payload);
-    }, ASK_COALESCE_MS);
+    // 只缓冲最新一条（连续快速发送只留最后一条），当前回合结束后补发（src/message-buffer）
+    bufferAsk(sender, { id, text }); // 补发改为 owner 释放事件驱动（drainAskBuffer），杜绝 busy 卡死时定时器自激重入 handleAsk
     logTts("chat", "生成防抖: 缓冲新消息，当前回合结束后补发");
     return;
   }
@@ -2265,7 +2279,7 @@ async function handleAskInner(sender, { id, text, askGen }) {
 
   const task = conversation.start({ kind: mode, meta: { sender } });
   if (!task.ok) { // 极小竞态：busy 检查后、启动前又有任务进来 → 走生成防抖缓冲
-    askBuffer.push({ sender, payload: { id, text } });
+    bufferAsk(sender, { id, text }); // 竞态入缓冲同样获得补发保障（定时器 + owner 释放事件双保险）
     logTts("chat", "生成防抖: 单写者竞态缓冲");
     return;
   }
@@ -2370,7 +2384,7 @@ async function handleAskInner(sender, { id, text, askGen }) {
       sender.send("pet:error", { id, code: classifyError(err), message: String(err.message || err) });
     }
   } finally {
-    conversation.finish(id);
+    conversation.finish(task.id); // 2026-10-02 修复：finish 必须用 start 自分配的服务端 task.id。旧代码传渲染层 payload.id——两个独立 UUID 永不相等，finish 守卫永不命中，busy 从本会话第一条消息起永久泄漏（实机第二句起 buffer 自激 + pause 风暴的根因；regenerate 路径一直是正确写法）
   }
 }
 
