@@ -30,6 +30,12 @@ assertEq("en 相对 zh 多键", diff(enKeys, zhKeys), []);
 assertEq("ja 相对 zh 缺键", diff(zhKeys, jaKeys), []);
 assertEq("ja 相对 zh 多键", diff(jaKeys, zhKeys), []);
 
+// 1b) PARAM parity：同一 key 各语言的 {param} 占位符集合必须一致（插值合同）
+const paramsOf = (s) => (String(s).match(/\{(\w+)\}/g) || []).sort().join(",");
+const paramMismatch = zhKeys.filter((k) =>
+  paramsOf(I18N.DICT.zh[k]) !== paramsOf(I18N.DICT.en[k]) || paramsOf(I18N.DICT.zh[k]) !== paramsOf(I18N.DICT.ja[k]));
+assertEq("占位符参数集跨语言一致", paramMismatch, []);
+
 // 2) 值非空 + t() 兜底
 const emptyKeys = [];
 for (const lang of ["zh", "en", "ja"])

@@ -12,6 +12,7 @@ const path = require("path");
 
 const storage = require("./storage");
 const secrets = require("./secrets");
+const locale = require("./locale"); // i18n substrate v1：uiLang 经唯一 normalizeLocale 收口（canonical 持久值）
 const { sanitizeClients } = require("./agent-auth");
 const { normalizeConfigShape, mergeConfigPatch } = require("./config-shape");
 const APP_DIR = storage.APP_DIR; // 只读程序资源目录
@@ -318,7 +319,7 @@ function buildSettingsView() {
     security: cfg.security || { externalCredNoticeSeen: false },
     hotkey: cfg.hotkey,
     startHidden: !!cfg.startHidden,
-    uiLang: cfg.uiLang || "zh",
+    uiLang: locale.normalizeLocale(cfg.uiLang),
     renderMode: cfg.renderMode === "spine" ? "spine" : cfg.renderMode === "rig" ? "rig" : cfg.renderMode === "live2d" ? "live2d" : "gif",
     rigSkinId: cfg.rigSkinId || "", // PSD 2.5D 皮肤（v2.2）
     rigScale: Number(cfg.rigScale) > 0 ? Number(cfg.rigScale) : 1.0,

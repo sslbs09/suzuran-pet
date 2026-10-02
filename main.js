@@ -65,6 +65,7 @@ const history = require("./src/history");
 const settingsPatch = require("./src/settings-patch"); // 渲染层 patch 白名单过滤纯函数（v2.5.23 抽取，可单测）
 const schedules = require("./src/schedules");
 const i18n = require("./src/i18n");
+const locale = require("./src/locale"); // i18n substrate v1：唯一 normalize/admission 实现（config.uiLang canonical 收口）
 const features = require("./src/features");
 const { logTts } = require("./src/logger");
 const { buildTrayItems } = require("./src/tray-menu");
@@ -514,7 +515,7 @@ function createTray() {
 
 function refreshTrayMenu() {
   const cfg = config.getConfig();
-  const lang = cfg.uiLang || "zh";
+  const lang = locale.normalizeLocale(cfg.uiLang);
   const zcodeOn = !!cfg.zcodeEnabled;
   const pending = !isConsentAccepted(cfg);
   if (tray) tray.setToolTip(pending ? "苏苏洛桌宠（点击查看使用条款）" : "苏苏洛桌宠（点击隐藏/显示）");
@@ -637,11 +638,12 @@ function sendToAllWindows(channel, ...args) {
   }
 }
 ipcMain.handle("pet:get-i18n", () => {
-  const lang = config.getConfig().uiLang || "zh";
-  return { lang, dict: i18n.getDict(lang) };
+  const lang = locale.normalizeLocale(config.getConfig().uiLang);
+  return { lang, dict: i18n.getEffectiveDict(lang) }; // effective dict = zh base + selected overlay（缺键已回落 zh）
 });
 ipcMain.handle("pet:set-ui-lang", (_e, lang) => {
-  const v = ["zh", "en", "ja"].includes(String(lang)) ? String(lang) : "zh";
+  const v = locale.normalizeLocale(lang);
+  if (!locale.isAdmittedLocale(v)) return false; // ko/未知值拒绝准入：不写 config、不广播（Phase 6 开放 ko）
   config.saveConfig({ uiLang: v });
   refreshTrayMenu();
   sendToAllWindows("pet:ui-lang-changed", v);
@@ -764,7 +766,7 @@ function sendUpdateProgress(pct) {
  *  TD-12（2026-09-06）：优先完整包更新（下载 zip → run-update.ps1 覆盖重启），
  *  无 zip 资产时降级 asar-swap 增量（探活失败自动回滚）。 */
 async function runUpdateFlow(d) {
-  const lang = config.getConfig().uiLang || "zh";
+  const lang = locale.normalizeLocale(config.getConfig().uiLang);
   const fullPlan = d.fullPlan || null;
   const plan = d.plan || null;
   // 优先完整包（TD-12 云端更新：覆盖脚本逻辑固定，跨版本升级不再依赖旧版换包代码）
@@ -828,7 +830,7 @@ async function runUpdateFlow(d) {
   return { accepted: true, downloaded: true, applied: true };
 }
 async function trayCheckUpdate() {
-  const lang = config.getConfig().uiLang || "zh";
+  const lang = locale.normalizeLocale(config.getConfig().uiLang);
   try {
     sendToRenderer("pet:toast", i18n.t(lang, "tray.checkingUpdate"));
     const d = await updater.checkForUpdateDetailed(app.getVersion());
@@ -857,7 +859,7 @@ ipcMain.handle("pet:check-update", async () => { // 设置页「检查更新」�
   try {
     const d = await updater.checkForUpdateDetailed(app.getVersion());
     noteUpdateChecked();
-    if (!d.ok) return { ok: false, message: i18n.t(config.getConfig().uiLang || "zh", "tray.updateCheckFail") + d.error + "）" };
+    if (!d.ok) return { ok: false, message: i18n.t(locale.normalizeLocale(config.getConfig().uiLang), "tray.updateCheckFail") + d.error + "）" };
     if (!d.plan && !d.fullPlan) return { ok: true, updateAvailable: false, current: app.getVersion() };
     const r = await runUpdateFlow(d);
     return { ok: true, updateAvailable: true, current: app.getVersion(), latest: (d.fullPlan || d.plan).version, ...r };
@@ -2522,6 +2524,10 @@ ipcMain.handle("pet:save-settings", (_e, patch) => {
   // secrets 放行（复审新-1 修复）：走 DPAPI 通道不入 config.json，提取只认三个已知
   // 槽位的 replace action，放行无安全影响。
   const { patch: safePatch, secrets, autoLaunch, blocked, unknown } = settingsPatch.filterSettingsPatch(patch);
+  if (safePatch.uiLang !== undefined) { // locale admission：config 持久值必须 canonical 且在白名单（ko/未知值拒绝写入，保留现值）
+    const norm = locale.normalizeLocale(safePatch.uiLang);
+    if (locale.isAdmittedLocale(norm)) safePatch.uiLang = norm; else delete safePatch.uiLang;
+  }
   for (const key of blocked) logTts("settings", "已拦截渲染层写入敏感键: " + key);
   for (const key of unknown) logTts("settings", "已丢弃白名单外键: " + key); // P2-2：与黑名单同样留痕，便于发现设置页新增字段未同步白名单
   try {
@@ -5030,7 +5036,7 @@ function setWalking(on) {
     } else {
       config.saveConfig({ walking: false }); // 非 Spine 模式：拒绝并回滚开关
       refreshTrayMenu();
-      sendToRenderer("pet:toast", i18n.t(config.getConfig().uiLang || "zh", "tray.walkNeedSpine"));
+      sendToRenderer("pet:toast", i18n.t(locale.normalizeLocale(config.getConfig().uiLang), "tray.walkNeedSpine"));
     }
   } else {
     stopWalkingEngine();
@@ -5039,7 +5045,7 @@ function setWalking(on) {
 ipcMain.handle("pet:set-walking", (_e, on) => {
   const cfg = config.getConfig();
   if (on && cfg.renderMode !== "spine") {
-    return { ok: false, message: i18n.t(cfg.uiLang || "zh", "tray.walkNeedSpine") };
+    return { ok: false, message: i18n.t(locale.normalizeLocale(cfg.uiLang), "tray.walkNeedSpine") };
   }
   setWalking(!!on);
   return { ok: true };

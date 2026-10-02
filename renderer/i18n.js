@@ -18,24 +18,32 @@
     if (document.documentElement) document.documentElement.lang = _lang;
     document.querySelectorAll("[data-i18n]").forEach((el) => {
       const v = _dict[el.getAttribute("data-i18n")];
-      if (v) el.textContent = v;
+      if (v !== undefined) el.textContent = v;
     });
     document.querySelectorAll("[data-i18n-title]").forEach((el) => {
       const v = _dict[el.getAttribute("data-i18n-title")];
-      if (v) el.title = v;
+      if (v !== undefined) el.title = v;
     });
     document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
       const v = _dict[el.getAttribute("data-i18n-placeholder")];
-      if (v) el.placeholder = v;
+      if (v !== undefined) el.placeholder = v;
     });
     document.querySelectorAll("[data-i18n-alt]").forEach((el) => {
       const v = _dict[el.getAttribute("data-i18n-alt")];
-      if (v) el.alt = v;
+      if (v !== undefined) el.alt = v;
     });
   }
 
-  function t(key) {
-    return _dict[key] !== undefined ? _dict[key] : key;
+  function t(key, params) {
+    // effective dict（zh base + selected overlay）已由 main 构造：正常缺键应已在 main 回落 zh；
+    // 这里只剩真正未知 key 的 fail-safe——warn 后返回 key 本身（不 throw、不跨语言泄漏）。
+    const v = _dict[key];
+    if (v === undefined) {
+      console.warn("[i18n] renderer missing key:", key);
+      return key;
+    }
+    if (!params || typeof params !== "object") return v;
+    return String(v).replace(/\{(\w+)\}/g, (m, k) => (params[k] !== undefined ? String(params[k]) : m));
   }
 
   window.I18N = { apply, t, lang: () => _lang };
