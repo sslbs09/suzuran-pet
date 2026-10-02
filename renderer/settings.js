@@ -177,7 +177,7 @@ async function renderOnboard(S) {
   $("tts-plan").value = plan;
   toggleGenieFields();
 
-  $("ui-lang").value = S.uiLang || "zh";
+  $("ui-lang").value = S.uiLang; // main buildSettingsView 已 canonical（substrate v1：renderer 不再自带 locale 兜底）
   $("hotkey").value = S.hotkey || "Alt+Shift+S";
   $("start-hidden").value = String(!!S.startHidden);
   $("pet-scale").value = String(S.scale || 1);
