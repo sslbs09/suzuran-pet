@@ -84,6 +84,7 @@ const walkState = require("./src/walk-state"); // 行走几何决策纯函数（
 const runtimeShadow = require("./src/runtime-shadow"); // Runtime V2 Shadow Slice v0.1（只读 shadow，默认关闭）
 const runtimeV2Module = require("./src/runtime-v2");
 const stateCore = require("./src/state-core"); // WhiteMoon State Core v0.1（canonical state；与 locomotion 同 gate） // Runtime V2 Locomotion Cutover v0.1（production，默认关闭）
+const bodyStateShadowMod = require("./src/body-state/shadow"); // M1：BodyState 影子观察（ADR-009，只读，默认关闭）
 const focusWatch = require("./src/focus-watch"); // 专注/离开状态机纯函数（v2.5.26 收敛②）
 const updater = require("./src/updater"); // asar-swap 自动更新（v2.5.26 ③）
 const weather = require("./src/weather"); // 免费天气 Open-Meteo（v2.5.26）
@@ -3602,7 +3603,41 @@ function walkSetPosition(x, y, where) {
   }
 }
 
+/* ===== BodyState Shadow M1（ADR-009 / D-009：只读观察，默认关闭）=====
+ * gate=SUSSURRO_BODYSTATE_SHADOW=1 才启用，沿用 runtime-shadow 的 env gate 惯例。
+ * strict OFF：gate 关闭时 bodyStateShadow 为 null，observe() 首行即返回——
+ *              零对象、零闭包、零计数、零日志、零 payload 差异。
+ * 唯一 observation seam：walkBroadcast()（所有 posture writer 的统一出口）。
+ * 只读：从不写 walk / 窗口 / config / 动画 / geometry，不推进 phase/timer，
+ *      不获得 position authority，fail-open（异常绝不影响 production）。
+ * 注意：M1 只做「能力裁决 + 覆盖统计」；生产 BodyStateAuthority 尚未被驱动（M2 未开始），
+ *      因此 divergences 只反映**能力违规**，不代表姿态迁移结论。 */
+function bodyStateShadowGateEnabled(env) {
+  const e = env || (typeof process !== "undefined" ? process.env : {});
+  return e.SUSSURRO_BODYSTATE_SHADOW === "1";
+}
+const bodyStateShadow = bodyStateShadowGateEnabled()
+  ? bodyStateShadowMod.createBodyStateShadow({ enabled: true, log: logTts, reportEveryMs: 300000 })
+  : null;
+function bodyStateShadowObserve() {
+  if (!bodyStateShadow) return; // OFF：零成本短路
+  try {
+    bodyStateShadow.observe({
+      // 只传 shadow 投影真正需要的字段——不把 runtime / Electron 对象塞进去。
+      // resting 传下去仅作 legacy 上下文，shadow 不把它解释为 BodyPosture（ADR-009）。
+      seated: walk.seated, resting: walk.resting, perched: walk.perched,
+      sunk: walk.sunk, iconRest: walk.iconRest, iconTarget: walk.iconTarget, taskbarHang: walk.taskbarHang
+    }, {
+      // 权威能力源 = skinHasSit（渲染层上报）。不确定就标 UNKNOWN，绝不默认 true/false 造假分歧
+      // （沿用 main.js:3364 的 "UNKNOWN" 约定）。
+      capability: typeof skinHasSit === "boolean" ? skinHasSit : "UNKNOWN"
+    });
+  } catch { /* fail-open：影子异常绝不影响 production */ }
+}
 function walkBroadcast(options = {}) {
+  // fail-open 双层：内层在 bodyStateShadowObserve 内部（观察体异常），外层在此（接线本身异常）。
+  // 任何一层失败都不得打断生产广播——沿用 runtime-shadow 的 fail-open 契约。
+  try { bodyStateShadowObserve(); } catch { /* M1 观察绝不阻断 broadcast */ }
   if (typeof v2StateCore !== "undefined" && v2StateCore) v2StateCore.posture.observeWalk(walk, { now: Date.now() }); // adapter：LEGACY policy → CANONICAL semantic posture/support kind
   const standBeatPoseIntent = STANDBEAT_ENABLED && STANDBEAT_POSE_ENABLED && options.standBeatPoseIntent === "stand"
     ? "stand" : null;

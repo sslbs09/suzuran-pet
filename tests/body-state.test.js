@@ -286,8 +286,88 @@ test("SHADOW-7: ledgerMax 非法即拒绝（构造期错误可被看见）", () 
   assert.throws(() => createBodyStateShadow({ ledgerMax: -1 }), TypeError);
 });
 
-test("SHADOW-8: 无 bodyState 时即使 enabled 也保持关闭（不得误判为空真值）", () => {
+test("SHADOW-8: 无 bodyState 时不与 authority 比对（M1：只做能力裁决 + 覆盖统计）", () => {
+  // M1 语义（较 M0 强化）：生产 authority 尚未被驱动（M2 未开始），此时比对必然恒分歧、
+  // 毫无信息量。因此 bodyState 缺席时**完全跳过比对**，而不是拿空真值去比——
+  // 原意图「不得误判为空真值」由此得到更强满足：不存在任何虚假 posture/support 分歧。
   const sh = createBodyStateShadow({ bodyState: null, enabled: true });
-  assert.equal(sh.isEnabled(), false);
-  assert.equal(sh.observe({ seated: true }), null);
+  assert.equal(sh.isEnabled(), true, "gate 本身独立于 authority 是否接入");
+  assert.equal(sh.comparesAgainstAuthority(), false, "未接入 authority 时不做姿态比对");
+  assert.equal(sh.observe({ seated: true }, { capability: true }), null, "能力可坐 + 声称 seated → 无分歧");
+  assert.equal(sh.hasDivergence(), false, "绝不拿未接入的 authority 制造虚假分歧");
+  const s = sh.snapshot();
+  assert.equal(s.observations, 1, "观察与覆盖仍然记录");
+  assert.equal(s.comparesAuthority, false);
+  assert.equal(s.coverage.postures.seated, 1, "覆盖信号不依赖 authority 比对");
+});
+
+test("SHADOW-9: capability 未知 → 只标记不裁决，绝不制造假分歧", () => {
+  const sh = createBodyStateShadow({ enabled: true });
+  // 身体能力不可靠时不得默认 canSit=true/false
+  assert.equal(sh.observe({ seated: true }, { capability: "UNKNOWN" }), null);
+  assert.equal(sh.observe({ seated: true }, { capability: undefined }), null);
+  assert.equal(sh.observe({ seated: true }, { capability: "garbage" }), null);
+  const s = sh.snapshot();
+  assert.equal(s.divergences, 0, "未知能力不得被当成坐不了而产生假分歧");
+  assert.equal(s.coverage.capabilityUnknownSkips, 3);
+  assert.equal(s.coverage.capability.unknown, 3);
+  assert.equal(s.coverage.postures.seated, 3, "覆盖照常统计");
+});
+
+test("SHADOW-10: capability 违规（坐不了却声称 seated）→ 记分歧，且条目自带上下文", () => {
+  const sh = createBodyStateShadow({ enabled: true });
+  const d = sh.observe({ seated: true }, { capability: false });
+  assert.ok(d, "能力不允许的物理姿态必须被记为分歧");
+  assert.deepEqual(d.fields, ["capability"]);
+  assert.equal(d.capabilityViolation, "body-cannot-sit-but-legacy-seated");
+  assert.equal(d.capability, false, "条目自带 capability 上下文");
+  assert.equal(d.expected.posture, "seated");
+  assert.equal(typeof d.at, "number", "条目自带观测时刻");
+});
+
+test("SHADOW-11: 覆盖信号能区分「多状态覆盖」与「只见过 standing」，且样本量不足不算退出条件", () => {
+  const rich = createBodyStateShadow({ enabled: true });
+  for (const w of [{ seated: false }, { seated: true }, { perched: true }, { seated: false }]) {
+    rich.observe(w, { capability: true });
+  }
+  const poor = createBodyStateShadow({ enabled: true });
+  for (let i = 0; i < 3; i += 1) poor.observe({ seated: false }, { capability: true });
+
+  const a = rich.coverageSummary();
+  const b = poor.coverageSummary();
+
+  // ① 两者必须可区分：覆盖状态集合与观测次数都不同
+  assert.deepEqual(a.postureStates.sort(), ["perched", "seated", "standing"]);
+  assert.deepEqual(b.postureStates, ["standing"]);
+  assert.equal(a.distinctPostures, 3);
+  assert.equal(b.distinctPostures, 1);
+  assert.equal(a.observations > b.observations, true);
+  assert.equal(rich.hasDivergence(), false);
+  assert.equal(poor.hasDivergence(), false);
+  assert.notDeepEqual(a, b, "「多状态+多样本」与「单状态+少样本」不得等价");
+
+  // ② 即使覆盖多状态，样本量不足仍不算 M2 退出条件——这正是任务的 B 情形要防的
+  assert.equal(a.insufficientCoverage, true, "4 次观测不足以作为 M2 退出条件");
+  assert.equal(b.insufficientCoverage, true);
+
+  // ③ 样本量与状态数都达标后才翻转
+  const solid = createBodyStateShadow({ enabled: true });
+  for (let i = 0; i < 60; i += 1) {
+    solid.observe(i % 2 === 0 ? { seated: true } : { perched: true }, { capability: true });
+  }
+  const c = solid.coverageSummary();
+  assert.equal(c.observations, 60);
+  assert.equal(c.distinctPostures, 2);
+  assert.equal(c.insufficientCoverage, false, "样本量与覆盖都达标才可作为退出条件");
+});
+
+test("SHADOW-12: 诊断不含任何对话内容（本机诊断，非 telemetry）", () => {
+  const sh = createBodyStateShadow({ enabled: true });
+  sh.observe({ seated: true }, { capability: false, reason: "unit" });
+  const entry = sh.snapshot().ledger[0];
+  const keys = Object.keys(entry);
+  for (const forbidden of ["text", "prompt", "reply", "content", "message", "user"]) {
+    assert.equal(keys.indexOf(forbidden), -1, `诊断条目不得包含 ${forbidden}`);
+  }
+  assert.deepEqual(keys.sort(), ["actual", "at", "capability", "capabilityViolation", "expected", "fields", "reason"].sort());
 });
