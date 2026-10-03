@@ -934,5 +934,18 @@
   "set.audSynthFailed": "Synthesis failed: {error}",
   "set.confirmDiscardAll": "Discard all unsaved changes? The page reloads and inputs restore to the last saved values.",
   "set.saveShort": "Save",
-  "set.cancelShort": "Cancel"
+  "set.cancelShort": "Cancel",
+  "err.authInvalid": "Authentication failed. Check your API key.",
+  "err.noApiKey": "No API key is configured. Add one in Settings.",
+  "err.quotaExceeded": "The request quota has been reached. Please try again later.",
+  "err.timeout": "The request timed out. Please try again later.",
+  "err.networkError": "The network connection failed. Check your connection and try again.",
+  "err.ssrfBlocked": "The request address was blocked for security reasons.",
+  "err.badUrl": "The request address is invalid. Check your settings.",
+  "err.http": "The service returned an error (HTTP {status}). Please try again later.",
+  "err.httpGeneric": "The service returned an error. Please try again later.",
+  "err.cancelled": "The request was cancelled.",
+  "err.busy": "Another request is being processed. Please try again later.",
+  "err.internal": "An unexpected error occurred. Please try again later.",
+  "err.unknown": "The request could not be completed. Please try again later."
 }

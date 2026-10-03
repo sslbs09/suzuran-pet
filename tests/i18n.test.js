@@ -58,7 +58,7 @@ for (const f of fs.readdirSync(path.join(ROOT, "renderer"))) {
   if (/\.(js|html)$/i.test(f)) targets.push(path.join("renderer", f));
 }
 const used = new Set();
-const KEY_RE = /"(?:tray|ui|set|skin|pet|common)\.[A-Za-z0-9.]+"/g;
+const KEY_RE = /"(?:tray|ui|set|skin|pet|common|err)\.[A-Za-z0-9.]+"/g;
 for (const t of targets) {
   const src = fs.readFileSync(path.join(ROOT, t), "utf8");
   let m;

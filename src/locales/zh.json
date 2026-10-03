@@ -934,5 +934,18 @@
   "set.audSynthFailed": "合成失败：{error}",
   "set.confirmDiscardAll": "放弃所有未保存的改动？页面将重新加载，已填内容会恢复为上次保存的值。",
   "set.saveShort": "保存",
-  "set.cancelShort": "取消"
+  "set.cancelShort": "取消",
+  "err.authInvalid": "认证失败。请检查 API 密钥。",
+  "err.noApiKey": "未配置 API 密钥。请在设置中添加。",
+  "err.quotaExceeded": "请求额度已用完。请稍后重试。",
+  "err.timeout": "请求超时。请稍后重试。",
+  "err.networkError": "网络连接失败。请检查连接后重试。",
+  "err.ssrfBlocked": "请求地址因安全限制被拒绝。",
+  "err.badUrl": "请求地址无效。请检查设置。",
+  "err.http": "服务返回错误（HTTP {status}）。请稍后重试。",
+  "err.httpGeneric": "服务返回错误。请稍后重试。",
+  "err.cancelled": "请求已取消。",
+  "err.busy": "当前正在处理其他请求。请稍后重试。",
+  "err.internal": "发生意外错误。请稍后重试。",
+  "err.unknown": "暂时无法完成请求。请稍后重试。"
 }

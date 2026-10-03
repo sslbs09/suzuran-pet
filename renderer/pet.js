@@ -3219,8 +3219,15 @@ window.petAPI.onDone(({ mode, full, emotion, swipes, swipeIndex }) => {
   resetSleepTimer();
 });
 
-window.petAPI.onError(({ message }) => {
-  showError(message);
+window.petAPI.onError((payload) => {
+  if (payload && Object.prototype.hasOwnProperty.call(payload, "code")) {
+    const presentation = window.ErrorPresenter.toPresentation({ code: payload.code, meta: payload.meta });
+    showError(window.I18N.t(presentation.key, presentation.params));
+  } else if (payload && typeof payload.message === "string") {
+    showError(payload.message); // 旧版无 code payload 保留原文兼容；仅新 code 路径承诺过滤技术详情
+  } else {
+    showError(window.I18N.t("err.unknown"));
+  }
   if (SPEECH_DIAG && diagThinkingId) { speechDiagLog("THINKING_END", diagThinkingId, "error"); speechDiagEnd(diagThinkingId); diagThinkingId = 0; } // 错误路径同样收口 thinking session
   maybeFlushPendingSend(); // 防抖：错误后补发等待中的消息（用户想说的还是会被回答）
   speak("唔……出错了。");
