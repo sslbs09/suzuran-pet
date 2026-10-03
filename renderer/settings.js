@@ -32,6 +32,26 @@ function setResult(el, text, ok) {
   el.className = "result" + (ok ? " ok" : ok === false ? " err" : "");
 }
 
+/* Phase 5-B：设置页「结果错误」呈现唯一入口。契约与 renderer/pet.js 的 pet:error 路径一致
+ * （Phase 5-A error-presenter 为唯一实现，禁止在设置页另建映射表）：
+ *   {ok:false, code, meta} → ErrorPresenter.toPresentation() → I18N.t(key, params)
+ *   {ok:false, message}    → 旧版兼容，原文照旧（技术详情过滤只对新 code 路径生效）
+ *   其余 / 字段缺失          → err.unknown
+ * 注意 hasOwnProperty 判定：有 code 字段即视为「已编码」，即便 code 非法也走 presenter，
+ * 绝不回落到 message——否则伪造/未知 code 可借 message 绕过过滤。 */
+function presentResultError(result) {
+  if (result && Object.prototype.hasOwnProperty.call(result, "code")) {
+    const presentation = window.ErrorPresenter.toPresentation({ code: result.code, meta: result.meta });
+    return window.I18N.t(presentation.key, presentation.params);
+  }
+  if (result && typeof result.message === "string" && result.message) return result.message; // 旧版无 code 保留原文兼容
+  return window.I18N.t("err.unknown");
+}
+
+/* 渲染层自身捕获的异常没有 code 事实来源，也不得把 e.message（可能含路径/堆栈）送进用户 UI，
+ * 统一归 INTERNAL；日志侧仍走原有 console 输出，不在本阶段范围内。 */
+const INTERNAL_FAILURE = Object.freeze({ code: "INTERNAL" });
+
 async function toast(msg) {
   console.log("[设置]", msg);
 }
@@ -356,7 +376,7 @@ async function renderOnboard(S) {
         del.addEventListener("click", async () => {
           if (!window.confirm(L("set.skinConfirmDelete", { name: s.id }))) return;
           const r = await window.petAPI.rigDelete(s.id);
-          if (!r || !r.ok) { window.alert((r && r.message) || L("set.delFailed")); return; }
+          if (!r || !r.ok) { window.alert(presentResultError(r)); return; }
           if (r.clearedCurrent) { S.rigSkinId = ""; $("rig-switch").checked = false; }
           loadRigSkins(); // 局部刷新列表，不重载整页（不丢其他未保存设置）
         });
@@ -504,7 +524,7 @@ $("btn-test").addEventListener("click", async () => {
   if (patch.secrets.chatApiKey) c.apiKey = patch.secrets.chatApiKey.value;
   setResult($("test-result"), L("set.testing"));
   const r = await window.petAPI.testChat(c);
-  setResult($("test-result"), r.message, r.ok);
+  setResult($("test-result"), r.ok ? r.message : presentResultError(r), r.ok);
 });
 
 /* ---------- 自动读取模型列表 ---------- */
@@ -513,7 +533,7 @@ $("btn-list-models").addEventListener("click", async () => {
   setResult($("model-result"), L("set.testing"));
   const r = await window.petAPI.listModels(c);
   if (!r.ok) {
-    setResult($("model-result"), L("set.modelFail") + r.message, false);
+    setResult($("model-result"), L("set.modelFail") + presentResultError(r), false);
     return;
   }
   const pick = $("model-pick");
@@ -550,7 +570,7 @@ async function doSaveApi() {
   }
   const r = await window.petAPI.saveSettings(patch);
   if (r === true) { _loadedChatUserName = newName; setResult($("test-result"), L("set.apiSaved"), true); }
-  else { setResult($("test-result"), L("set.saveFailed") + (r && r.message || L("set.unknown")), false); }
+  else { setResult($("test-result"), L("set.saveFailed") + presentResultError(r), false); }
 }
 
 /* ---------- 人设 ---------- */
@@ -569,7 +589,7 @@ $("btn-reset-persona").addEventListener("click", async () => {
     $("persona").value = r.persona;
     setResult($("persona-result"), L("set.personaReset"), true);
   } else {
-    setResult($("persona-result"), "❌ " + (r.message || L("set.personaResetFail")), false);
+    setResult($("persona-result"), "❌ " + presentResultError(r), false);
   }
 });
 
@@ -599,8 +619,8 @@ $("btn-clear-trcache").addEventListener("click", async () => {
   const out = $("gsv-result");
   try {
     const r = await window.petAPI.clearTranslateCache();
-    setResult(out, r.ok ? L("set.trCleared") : "❌ " + (r.error || "failed")); // r.error=技术原文透传
-  } catch { setResult(out, "❌ failed"); }
+    setResult(out, r.ok ? L("set.trCleared") : "❌ " + presentResultError(r)); // 失败统一经 error-presenter，不再透传 r.error 技术原文
+  } catch { setResult(out, "❌ " + presentResultError(INTERNAL_FAILURE)); }
 });
 
 /* ---------- 一键重启日语 TTS ---------- */
@@ -753,8 +773,8 @@ function renderFixedLinePool(status = fixedLineStatus) {
         setResult($("fixed-lines-result"), L("set.fixedReloading"));
         try {
           const r = await window.petAPI.reloadFixedLineAudio(item.id);
-          setResult($("fixed-lines-result"), r && r.ok ? L("set.fixedReloadDone") : (r && r.message) || L("set.fixedReloadFail"), !!(r && r.ok));
-        } catch (e) { setResult($("fixed-lines-result"), String(e.message || e), false); }
+          setResult($("fixed-lines-result"), r && r.ok ? L("set.fixedReloadDone") : presentResultError(r), !!(r && r.ok));
+        } catch { setResult($("fixed-lines-result"), presentResultError(INTERNAL_FAILURE), false); }
         await refreshFixedLinePool();
       });
       row.className += " has-reload";
@@ -770,8 +790,8 @@ async function refreshFixedLinePool() {
   try {
     fixedLineStatus = await window.petAPI.getFixedLineAudioStatus();
     renderFixedLinePool();
-  } catch (e) {
-    setResult($("fixed-lines-result"), L("set.fixedReadFail") + String(e.message || e), false);
+  } catch {
+    setResult($("fixed-lines-result"), L("set.fixedReadFail") + presentResultError(INTERNAL_FAILURE), false);
   }
 }
 function setFixedLineButtons(running) {
@@ -786,8 +806,8 @@ $("btn-fixed-lines-start").addEventListener("click", async () => {
   setResult($("fixed-lines-result"), L("set.fixedStarting"));
   try {
       const r = await window.petAPI.startFixedLineAudioPreload({ retryFailed: false, pools });
-      setResult($("fixed-lines-result"), r && r.ok ? (r.state === "completed" ? L("set.fixedDone") : r.state === "completed_with_errors" ? L("set.fixedDoneErrors") : L("set.fixedPausedCont")) : (r && r.message) || L("set.fixedNotStartedRun"), !!(r && r.ok));
-  } catch (e) { setResult($("fixed-lines-result"), String(e.message || e), false); }
+      setResult($("fixed-lines-result"), r && r.ok ? (r.state === "completed" ? L("set.fixedDone") : r.state === "completed_with_errors" ? L("set.fixedDoneErrors") : L("set.fixedPausedCont")) : presentResultError(r), !!(r && r.ok));
+  } catch { setResult($("fixed-lines-result"), presentResultError(INTERNAL_FAILURE), false); }
   await refreshFixedLinePool();
   setFixedLineButtons(false);
 });
@@ -798,9 +818,9 @@ $("btn-fixed-lines-retry").addEventListener("click", async () => {
     const r = await window.petAPI.startFixedLineAudioPreload({ retryFailed: true });
     setResult($("fixed-lines-result"), r && r.ok
       ? (r.state === "completed" ? L("set.fixedRetryDone") : r.state === "completed_with_errors" ? L("set.fixedRetryErrors") : L("set.fixedPausedCont"))
-      : (r && r.message) || L("set.fixedNotStartedRun"), !!(r && r.ok && r.state === "completed"));
+      : presentResultError(r), !!(r && r.ok && r.state === "completed"));
   }
-  catch (e) { setResult($("fixed-lines-result"), String(e.message || e), false); }
+  catch { setResult($("fixed-lines-result"), presentResultError(INTERNAL_FAILURE), false); }
   await refreshFixedLinePool();
   setFixedLineButtons(false);
 });
@@ -812,7 +832,7 @@ $("btn-fixed-lines-cancel").addEventListener("click", async () => {
 $("btn-fixed-lines-clear").addEventListener("click", async () => {
   if (!confirm(L("set.fixedClearConfirm"))) return;
   const r = await window.petAPI.clearFixedLineAudioCache();
-  setResult($("fixed-lines-result"), r && r.ok ? L("set.fixedCleared") : (r && r.message) || L("set.fixedClearFail"), !!(r && r.ok));
+  setResult($("fixed-lines-result"), r && r.ok ? L("set.fixedCleared") : presentResultError(r), !!(r && r.ok));
   await refreshFixedLinePool();
 });
 $("btn-fixed-lines-toggle").addEventListener("click", () => {
@@ -830,7 +850,7 @@ $("btn-fixed-lines-pools-common").addEventListener("click", () => {
 $("btn-fixed-lines-clear-old").addEventListener("click", async () => {
   if (!confirm(L("set.fixedClearOldConfirm"))) return;
   const r = await window.petAPI.clearOldFixedLineCaches();
-  setResult($("fixed-lines-result"), r && r.ok ? L("set.fixedClearedOldPre") + r.removed + L("set.fixedClearedOldSuf") : (r && r.message) || L("set.fixedClearOldFail"), !!(r && r.ok));
+  setResult($("fixed-lines-result"), r && r.ok ? L("set.fixedClearedOldPre") + r.removed + L("set.fixedClearedOldSuf") : presentResultError(r), !!(r && r.ok));
   await refreshFixedLinePool();
 });
 if (window.petAPI.onFixedLineAudioProgress) {
@@ -860,9 +880,9 @@ $("tts-fixed-only").addEventListener("change", async () => {
   setResult($("voice-result"), on ? L("set.fixedOnlyStopping") : L("set.fixedOnlyStarting"));
   let r;
   try { r = await window.petAPI.setFixedOnly(on); }
-  catch (e) { r = { ok: false, message: String(e && e.message || e) }; }
+  catch { r = { ok: false, code: "INTERNAL" }; }
   setResult($("voice-result"),
-    r && r.ok ? (on ? L("set.fixedOnlyOn") : L("set.fixedOnlyOff")) : L("set.fixedOnlyFail") + (r && r.message || ""),
+    r && r.ok ? (on ? L("set.fixedOnlyOn") : L("set.fixedOnlyOff")) : L("set.fixedOnlyFail") + presentResultError(r),
     !!(r && r.ok));
   await refreshFixedLinePool();
 });
@@ -879,12 +899,12 @@ $("btn-check-update").addEventListener("click", async () => {
   setResult($("update-result"), L("set.checkingUpdate"));
   try {
     const r = await window.petAPI.checkForUpdate();
-    if (!r.ok) setResult($("update-result"), L("set.updateStartFail") + (r.message || ""), false);
+    if (!r.ok) setResult($("update-result"), L("set.updateStartFail") + presentResultError(r), false);
     else if (!r.updateAvailable) setResult($("update-result"), L("set.upToDate") + "（v" + r.current + "）", true);
     else if (r.downloaded) setResult($("update-result"), L("set.updateReadyRestart"), true);
-    else if (r.accepted) setResult($("update-result"), L("set.updateStartFail") + (r.reason || ""), false);
+    else if (r.accepted) setResult($("update-result"), L("set.updateStartFail") + presentResultError(INTERNAL_FAILURE), false); // r.reason 为校验/HTTP 技术原文，不进 UI
     else setResult($("update-result"), L("set.updateDeclined"), true);
-  } catch (e) { setResult($("update-result"), String(e.message || e), false); }
+  } catch { setResult($("update-result"), presentResultError(INTERNAL_FAILURE), false); }
   $("btn-check-update").disabled = false;
 });
 if (window.petAPI.onUpdateProgress) {
@@ -1132,7 +1152,7 @@ $("btn-agent-client-add").addEventListener("click", async () => {
   const name = (input && input.value.trim()) || "";
   if (!name) { window.alert(L("set.agentNeedName")); return; }
   const r = await window.petAPI.addAgentClient(name);
-  if (!r || !r.ok) { window.alert((r && r.message) || L("set.agentAddFailed")); return; }
+  if (!r || !r.ok) { window.alert(presentResultError(r)); return; }
   if (input) input.value = "";
   window.alert(L("set.agentAdded", { name: r.name, token: r.token }));
   const aa = (await window.petAPI.getSettings()).agentApi || {};
@@ -1189,7 +1209,7 @@ $("btn-scan-creds").addEventListener("click", async () => {
   setResult($("import-result"), L("set.credScanning"));
   SCAN = await window.petAPI.scanCredentials();
   if (!SCAN || !SCAN.ok) {
-    setResult($("import-result"), (SCAN && SCAN.message) || L("set.credScanFailed"), false);
+    setResult($("import-result"), presentResultError(SCAN), false);
     return;
   }
   const sel = $("cred-source");
@@ -1255,7 +1275,7 @@ $("btn-import-cred").addEventListener("click", async () => {
     renderKeySource();
     setResult($("import-result"), L("set.credEncryptedSaved", { fp: r.fingerprint }) + (r.note ? "。" + r.note : ""), true); // r.note=main 侧文本透传
   } else {
-    setResult($("import-result"), "❌ " + ((r && r.message) || L("set.credImportFailed")), false);
+    setResult($("import-result"), "❌ " + presentResultError(r), false);
   }
 });
 
@@ -1272,7 +1292,7 @@ async function clearSecretFlow(slot, label) {
   S = await window.petAPI.getSettings();
   renderKeyStatuses();
   if (r && r.ok) setResult($("clear-result"), L("set.cleared") + (slot === "agent" ? L("set.clearedRestartNote") : ""), true);
-  else setResult($("clear-result"), "❌ " + ((r && r.message) || L("set.clearFailed")), false);
+  else setResult($("clear-result"), "❌ " + presentResultError(r), false);
 }
 $("btn-clear-chat-key").addEventListener("click", () => clearSecretFlow("chat", L("set.chatKeyShort")));
 $("btn-clear-cosy-key").addEventListener("click", () => clearSecretFlow("ttsCosy", L("set.cosyKeyShort")));
@@ -1348,7 +1368,7 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
               const nt = input.value.trim();
               if (nt && nt !== f.text) {
                 const r = await window.petAPI.updateMemoryFact(f.id, nt);
-                if (!r || !r.ok) { window.alert((r && r.message) || L("set.memEditFailed")); return; }
+                if (!r || !r.ok) { window.alert(presentResultError(r)); return; }
               }
             }
             refresh();
@@ -1389,7 +1409,7 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
       if (!v) return;
       const r = await window.petAPI.addMemoryFact(v);
       if (r && r.ok) { addInput.value = ""; refresh(); }
-      else window.alert((r && r.message) || L("set.memAddFailed"));
+      else window.alert(presentResultError(r));
     };
     addBtn.addEventListener("click", doAdd);
     addInput.addEventListener("keydown", (e) => { if (e.key === "Enter") doAdd(); });
@@ -1420,7 +1440,7 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
       res.textContent = L("set.audSynthesizing");
       try {
         const r = await window.petAPI.emotionAudition(cfg.key);
-        if (!r || !r.ok) { res.textContent = (r && r.message) || L("set.audFailed"); return; } // message=main 侧文本透传
+        if (!r || !r.ok) { res.textContent = presentResultError(r); return; }
         const base = Number((document.getElementById("tts-rate") || {}).value) || 0.95;
         const audio = new Audio("data:audio/wav;base64," + r.b64);
         audio.playbackRate = Math.max(0.9, Math.min(1.1, base * cfg.rateMul));
@@ -1430,7 +1450,7 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
         audio.onerror = () => { res.textContent = L("set.audPlayFailed"); };
         await audio.play().catch(() => { res.textContent = L("set.audPlayFailedHint"); });
       } catch (e) {
-        res.textContent = L("set.audSynthFailed", { error: (e && e.message) || e });
+        res.textContent = L("set.audSynthFailed", { error: presentResultError(INTERNAL_FAILURE) });
       }
     });
   }

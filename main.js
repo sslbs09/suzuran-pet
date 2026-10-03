@@ -1781,7 +1781,7 @@ ipcMain.handle("pet:open-voice-studio", () => { openVoiceStudio(); return true; 
 
 ipcMain.handle("pet:emotion-audition", async (_e, key) => { // v2.6 设置页情绪音色试听（真实 GSV 链路 + 参考音频）
   try { return await tts.emotionAudition(String(key || "")); }
-  catch (e) { return { ok: false, message: String(e.message || e) }; }
+  catch (e) { return { ok: false, code: "INTERNAL", message: String(e.message || e) }; }
 });
 
 ipcMain.handle("pet:tts-preview", async (_e, { text, refAudio, refText }) => {
@@ -2502,7 +2502,7 @@ ipcMain.handle("pet:add-agent-client", (_e, name) => {
     clients.push({ name: n, tokenHash: hashToken(token), grantedAt: Date.now(), lastSeen: 0 });
     config.saveConfig({ agentApi: { ...(cfg.agentApi || {}), clients } });
     return { ok: true, name: n, token };
-  } catch (e) { return { ok: false, message: String(e && e.message || e) }; }
+  } catch (e) { return { ok: false, code: "INTERNAL", message: String(e && e.message || e) }; }
 });
 // 接入管理：断开某个 agent（移除其 token，立即失效）
 ipcMain.handle("pet:remove-agent-client", (_e, name) => {
@@ -2647,7 +2647,7 @@ ipcMain.handle("pet:reset-persona", () => {
     personaCache = config.getPersonaText();
     return { ok: true, persona: def };
   } catch (e) {
-    return { ok: false, message: String(e.message || e) };
+    return { ok: false, code: "INTERNAL", message: String(e.message || e) };
   }
 });
 ipcMain.handle("pet:test-chat", (_e, overrides) => chatClient.testConnection(overrides || {}));
@@ -2663,7 +2663,7 @@ ipcMain.handle("pet:clear-secret", (_e, slot) => {
   try {
     return { ok: true, status: config.replaceSecrets({ [key]: "" }), message: "已清除" };
   } catch (e) {
-    return { ok: false, message: String(e.message || e), status: config.secretStatus() };
+    return { ok: false, code: "INTERNAL", message: String(e.message || e), status: config.secretStatus() };
   }
 });
 
@@ -2707,14 +2707,14 @@ ipcMain.handle("pet:fixed-lines-clear", () => {
     const profile = fixedLineCache.profileFromConfig(config.getConfig());
     fixedLineCache.clear(profile);
     return { ok: true };
-  } catch (e) { return { ok: false, message: String(e.message || e) }; }
+  } catch (e) { return { ok: false, code: "INTERNAL", message: String(e.message || e) }; }
 });
 ipcMain.handle("pet:fixed-lines-clear-old", () => {
   try {
     const profile = fixedLineCache.profileFromConfig(config.getConfig());
     const removed = fixedLineCache.clearOldFingerprints(fixedLineCache.pathsFor(profile).fingerprint);
     return { ok: true, removed };
-  } catch (e) { return { ok: false, message: String(e.message || e) }; }
+  } catch (e) { return { ok: false, code: "INTERNAL", message: String(e.message || e) }; }
 });
 
 
@@ -2968,7 +2968,7 @@ ipcMain.handle("pet:add-memory-fact", (_e, text) => {
       : { type: "manual-" + Date.now().toString(36), text: t.slice(0, 120) };
     memory.addFacts([fact]);
     return { ok: true };
-  } catch (e) { return { ok: false, message: String(e && e.message || e) }; }
+  } catch (e) { return { ok: false, code: "INTERNAL", message: String(e && e.message || e) }; }
 });
 ipcMain.handle("pet:delete-memory-fact", (_e, id) => {
   try { memory.deleteFact(String(id || "")); return true; } catch { return false; }
@@ -2977,7 +2977,7 @@ ipcMain.handle("pet:update-memory-fact", (_e, id, text) => { // 编辑单条记�
   try {
     const ok = memory.updateFact(String(id || ""), String(text || ""));
     return { ok, message: ok ? "" : "记忆不存在或内容无效（需 2-120 字）" };
-  } catch (e) { return { ok: false, message: String(e.message || e) }; }
+  } catch (e) { return { ok: false, code: "INTERNAL", message: String(e.message || e) }; }
 });
 ipcMain.handle("pet:clear-memory", () => {
   try { memory.clear(); return true; } catch { return false; }
@@ -3005,7 +3005,7 @@ ipcMain.handle("pet:clear-translate-cache", () => {
     tc.save(config.STORAGE.userDir, {});
     require("./src/ja-translate").clearTrDisk();
     return { ok: true };
-  } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+  } catch (e) { return { ok: false, code: "INTERNAL", error: String((e && e.message) || e) }; }
 });
 ipcMain.on("pet:set-personify", (_e, on) => {
   config.saveConfig({ personify: !!on });

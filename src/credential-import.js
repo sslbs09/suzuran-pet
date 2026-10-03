@@ -99,8 +99,10 @@ function scan() {
   };
 }
 
-function fail(message) {
-  return { ok: false, message };
+/** Phase 5-B：code 仅用于「非预期失败」（原始异常文本不得进用户 UI）；
+ *  可预期的校验/引导文案不传 code，渲染层走 legacy message 兼容路径，保留可操作指引。 */
+function fail(message, code) {
+  return code ? { ok: false, code, message } : { ok: false, message };
 }
 
 /** 从 v2 config 中取出指定 provider 的明文 key（仅主进程内存使用） */
@@ -154,7 +156,7 @@ function importCredential(req = {}) {
       noteParts.push("来源：~/.zcode/skills/vision/.env（DASHSCOPE_API_KEY）");
     }
   } catch (e) {
-    return fail(String(e.message || e));
+    return fail(String(e.message || e), "INTERNAL");
   }
 
   try {
@@ -168,7 +170,7 @@ function importCredential(req = {}) {
       message: "已导入并加密保存"
     };
   } catch (e) {
-    return fail("导入失败：" + String(e.message || e));
+    return fail("导入失败：" + String(e.message || e), "INTERNAL");
   }
 }
 
