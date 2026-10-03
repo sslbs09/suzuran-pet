@@ -32,6 +32,10 @@
       const v = _dict[el.getAttribute("data-i18n-alt")];
       if (v !== undefined) el.alt = v;
     });
+    document.querySelectorAll("[data-i18n-aria-label]").forEach((el) => {
+      const v = _dict[el.getAttribute("data-i18n-aria-label")];
+      if (v !== undefined) el.setAttribute("aria-label", v);
+    });
   }
 
   function t(key, params) {

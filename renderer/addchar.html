@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'">
-<title>苏苏洛 · 添加人物</title>
+<title data-i18n="page.addchar.title">苏苏洛 · 添加人物</title>
 <link rel="stylesheet" href="ui.css" />
 <style>
   .addchar-page .ui-shell { max-width: 560px; }
@@ -14,14 +14,15 @@
 </head>
 <body class="ui-page addchar-page">
   <div class="ui-shell">
-    <header class="ui-header"><h1>➕ 添加人物</h1><div class="sub">导入其他角色的 Spine 模型，让桌宠换人</div></header>
-    <p class="hint" style="margin:0 0 8px;">模型需要 <b>.atlas + .skel（或 .json）+ .png</b> 三个文件（游戏导出/拆包得到）。选择一个包含这三个文件的文件夹即可导入，导入后会自动切换到新人物。</p>
-    <button id="btn-import" type="button" class="primary">📂 选择模型文件夹并导入</button>
+    <header class="ui-header"><h1 data-i18n="page.addchar.h1">➕ 添加人物</h1><div class="sub" data-i18n="page.addchar.sub">导入其他角色的 Spine 模型，让桌宠换人</div></header>
+    <p class="hint" style="margin:0 0 8px;"><span data-i18n="page.addchar.hintA">模型需要</span> <b data-i18n="page.addchar.hintFiles">.atlas + .skel（或 .json）+ .png</b> <span data-i18n="page.addchar.hintB">三个文件（游戏导出/拆包得到）。选择一个包含这三个文件的文件夹即可导入，导入后会自动切换到新人物。</span></p>
+    <button id="btn-import" type="button" class="primary" data-i18n="page.addchar.import">📂 选择模型文件夹并导入</button>
     <div id="status"></div>
-    <h2 style="margin-top:14px;">当前已有的人物</h2>
+    <h2 style="margin-top:14px;" data-i18n="page.addchar.existing">当前已有的人物</h2>
     <div class="model-list" id="model-list">加载中…</div>
-    <p class="foot" style="margin-top:12px;">—— 苏苏洛桌宠 · 添加人物 ——</p>
+    <p class="foot" style="margin-top:12px;" data-i18n="page.addchar.foot">—— 苏苏洛桌宠 · 添加人物 ——</p>
   </div>
+  <script src="i18n.js"></script>
   <script src="theme.js"></script>
 <script src="theme-init.js"></script>
   <script src="addchar.js"></script>

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' pet-user: data: file: blob:; media-src 'self' data: blob:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'">
-<title>苏苏洛 · 表情管理</title>
+<title data-i18n="page.moods.title">苏苏洛 · 表情管理</title>
 <link rel="stylesheet" href="ui.css" />
 <link rel="stylesheet" href="settings.css" />
 <style>
@@ -31,25 +31,26 @@
 <body class="ui-page moods-page">
   <div class="ui-shell">
     <header class="ui-header">
-      <h1>🎨 表情管理（换装）</h1>
-      <div class="sub">每个情绪单独一个格子：点「选择 GIF」填入你自己的表情，随时可「恢复默认」。<b>包内默认仍是苏苏洛原版表情</b>，改坏了也能一键还原。</div>
+      <h1 data-i18n="page.moods.h1">🎨 表情管理（换装）</h1>
+      <div class="sub" data-i18n="page.moods.sub">每个情绪单独一个格子：点「选择 GIF」填入你自己的表情，随时可「恢复默认」。<b data-i18n="page.moods.subB">包内默认仍是苏苏洛原版表情</b><span data-i18n="page.moods.subC">，改坏了也能一键还原。</span></div>
     </header>
 
-    <div class="note" style="margin-bottom:14px;">💡 <b>名字就是用途</b>：直接点表情名字输入框改（≤5 字），GIF 文件不变；「设为情绪」= AI 会根据对话用它，「设为待机」= 休息循环用。所有修改立即生效。</div>
+    <div class="note" style="margin-bottom:14px;"><span data-i18n="page.moods.noteA">💡 </span><b data-i18n="page.moods.noteB">名字就是用途</b><span data-i18n="page.moods.noteC">：直接点表情名字输入框改（≤5 字），GIF 文件不变；「设为情绪」= AI 会根据对话用它，「设为待机」= 休息循环用。所有修改立即生效。</span></div>
 
     <section>
-      <h2>＋ 自定义情绪</h2>
-      <p class="hint">没有想要的情绪？自己加一个（≤5 个字，最多共 30 个），比如「摸鱼」「干饭」「犯困」——然后给它选一个 GIF，AI 会在合适的时候用它。</p>
+      <h2 data-i18n="page.moods.custom">＋ 自定义情绪</h2>
+      <p class="hint" data-i18n="page.moods.customHint">没有想要的情绪？自己加一个（≤5 个字，最多共 30 个），比如「摸鱼」「干饭」「犯困」——然后给它选一个 GIF，AI 会在合适的时候用它。</p>
       <div class="row">
-        <label class="col"><span>情绪词（≤5 个字）</span><input id="new-mood" type="text" maxlength="5" placeholder="例：摸鱼" /></label>
-        <button id="btn-add-mood" type="button" class="primary">＋ 添加情绪</button>
+        <label class="col"><span data-i18n="page.moods.labelMood">情绪词（≤5 个字）</span><input id="new-mood" type="text" maxlength="5" placeholder="例：摸鱼" data-i18n-placeholder="page.moods.phMood" /></label>
+        <button id="btn-add-mood" type="button" class="primary" data-i18n="page.moods.add">＋ 添加情绪</button>
         <span id="add-result" class="result"></span>
       </div>
     </section>
 
     <div id="mood-grid" class="mood-grid"></div>
-    <p class="foot" id="dir-hint">苏苏洛桌宠 · 表情管理</p>
+    <p class="foot" id="dir-hint" data-i18n="page.moods.foot">苏苏洛桌宠 · 表情管理</p>
   </div>
+<script src="i18n.js"></script>
 <script src="theme.js"></script>
 <script src="theme-init.js"></script>
 <script src="moods.js"></script>
