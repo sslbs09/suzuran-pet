@@ -50,6 +50,8 @@ let quitCalled = 0;
 const pendingItems = buildTrayItems({
   cfg: { agreed: false },
   pending: true,
+  lang: "zh",
+  i18n: require("../src/i18n"), // Phase 2：pending 分支 label 已键化，夹具补注入真实 translator
   openTerms: () => { termsOpened++; },
   quitApp: () => { quitCalled++; }
 });

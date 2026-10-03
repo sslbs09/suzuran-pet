@@ -189,11 +189,12 @@ function ensureRenderModeRequest(mode) {
   return { mode: renderModeIntentMode, seq: renderModeSeq };
 }
 
-function renderModeFallbackToast(mode) {
-  if (mode === "rig") return "2.5D 资源不可用，已回退到 GIF";
-  if (mode === "live2d") return "Live2D 初始化失败，已回退到 GIF";
-  if (mode === "spine") return "Spine 初始化失败，已回退到 GIF";
-  return "渲染模式初始化失败，已回退到 GIF";
+function renderModeFallbackToast(mode) { // Phase 2：渲染回退提示键化（按 mode 查表，措辞保持原样）
+  const key = mode === "rig" ? "notice.fallbackRig"
+    : mode === "live2d" ? "notice.fallbackLive2d"
+    : mode === "spine" ? "notice.fallbackSpine"
+    : "notice.fallbackGeneric";
+  return i18n.t(currentUiLang(), key);
 }
 
 function dispatchRenderModeIntent(mode) {
@@ -518,7 +519,7 @@ function refreshTrayMenu() {
   const lang = locale.normalizeLocale(cfg.uiLang);
   const zcodeOn = !!cfg.zcodeEnabled;
   const pending = !isConsentAccepted(cfg);
-  if (tray) tray.setToolTip(pending ? "苏苏洛桌宠（点击查看使用条款）" : "苏苏洛桌宠（点击隐藏/显示）");
+  if (tray) tray.setToolTip(pending ? i18n.t(currentUiLang(), "tray.tooltipTerms", { name: "苏苏洛" }) : i18n.t(currentUiLang(), "tray.tooltipNormal", { name: "苏苏洛" })); // name=BRAND（保持原行为字面）
   const items = buildTrayItems({
     cfg, lang, i18n, zcodeOn, forcedMode, pending, openTerms,
     isWindowVisible, toggleWindow, setMode, setTts, setRate, setSpeakJa, setWalking,
@@ -632,6 +633,9 @@ function setSpeakJa(v) {
 }
 
 /* ---------- 界面语言（中 / 英 / 日，可切换；聊天内容始终中文） ---------- */
+function currentUiLang() { // i18n substrate：main 侧统一取当前 canonical locale（Phase 2 native closure 用）
+  return locale.normalizeLocale(config.getConfig().uiLang);
+}
 function sendToAllWindows(channel, ...args) {
   for (const w of BrowserWindow.getAllWindows()) {
     try { w.webContents.send(channel, ...args); } catch { /* 忽略 */ }
@@ -759,7 +763,7 @@ function lastUpdateCheckAt() {
   try { return Number(JSON.parse(fs.readFileSync(updateCheckMarkerPath(), "utf8")).at) || 0; } catch { return 0; }
 }
 function sendUpdateProgress(pct) {
-  sendToRenderer("pet:toast", "⬇ " + pct + "%");
+  sendToRenderer("pet:toast", i18n.t(currentUiLang(), "notice.updateProgress", { pct }));
   if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send("pet:update-progress", pct);
 }
 /** 更新确认框 → 带进度下载（SHA-256 校验，fail closed）→ 退出后覆盖升级。
@@ -837,7 +841,7 @@ async function trayCheckUpdate() {
     noteUpdateChecked();
     if (!d.ok) { // 2026-09-03 审计：网络失败不再误报"已是最新"
       logTts("update", "检查更新失败: " + d.error);
-      dialog.showMessageBox({ type: "error", message: i18n.t(lang, "tray.updateCheckFail") + d.error + "）" });
+      dialog.showMessageBox({ type: "error", message: i18n.t(lang, "tray.updateCheckFail", { reason: d.error }) });
       return;
     }
     if (!d.plan && !d.fullPlan) { dialog.showMessageBox({ type: "info", title: "苏苏洛桌宠", message: i18n.t(lang, "tray.alreadyLatest") }); return; }
@@ -859,7 +863,7 @@ ipcMain.handle("pet:check-update", async () => { // 设置页「检查更新」�
   try {
     const d = await updater.checkForUpdateDetailed(app.getVersion());
     noteUpdateChecked();
-    if (!d.ok) return { ok: false, message: i18n.t(locale.normalizeLocale(config.getConfig().uiLang), "tray.updateCheckFail") + d.error + "）" };
+    if (!d.ok) return { ok: false, message: i18n.t(locale.normalizeLocale(config.getConfig().uiLang), "tray.updateCheckFail", { reason: d.error }) };
     if (!d.plan && !d.fullPlan) return { ok: true, updateAvailable: false, current: app.getVersion() };
     const r = await runUpdateFlow(d);
     return { ok: true, updateAvailable: true, current: app.getVersion(), latest: (d.fullPlan || d.plan).version, ...r };
@@ -1826,7 +1830,7 @@ function ttsGuideDir() {
 function openTtsGuide(fileName) {
   const dir = ttsGuideDir();
   if (!dir) {
-    sendToRenderer("pet:toast", "未找到「语音部署与训练指南」文件夹");
+    sendToRenderer("pet:toast", i18n.t(currentUiLang(), "notice.voiceGuideMissing"));
     return;
   }
   if (fileName) {
@@ -1838,7 +1842,7 @@ function openTtsGuide(fileName) {
 
 function setMode(m) {
   if (m === "zcode" && !config.getConfig().zcodeEnabled) {
-    sendToRenderer("pet:toast", "任务模式未启用（可在 config.json 开启 zcodeEnabled）");
+    sendToRenderer("pet:toast", i18n.t(currentUiLang(), "notice.taskModeDisabled"));
     return;
   }
   forcedMode = m;
@@ -1961,7 +1965,7 @@ function sendScheduleDue(item) {
   sendProactive(text, mood, { force: true });
   sendToRenderer("pet:schedule-due", item);
   if (!isWindowVisible() && Notification.isSupported()) {
-    const n = new Notification({ title: "苏苏洛桌宠日程提醒", body: item.title + (item.notes ? "\n" + item.notes : "") });
+    const n = new Notification({ title: i18n.t(currentUiLang(), "notification.scheduleReminderTitle", { appName: "苏苏洛桌宠" }), body: item.title + (item.notes ? "\n" + item.notes : "") }); // appName=BRAND 固定；body 为用户日程数据（DATA，不翻译）
     n.on("click", () => { // 通知点击联动（v2.5.26）：置前+显示桌宠
       try { if (win && !win.isDestroyed()) { if (!win.isVisible()) win.show(); win.focus(); win.moveTop(); } } catch { /* 忽略 */ }
       sendToRenderer("pet:schedule-due", item);
@@ -2314,7 +2318,7 @@ async function handleAskInner(sender, { id, text, askGen }) {
       try {
         const fact = mm[1].trim().replace(/[。！!]$/, "");
         memory.addFacts([{ type: "manual", text: "博士特意让我记住：「" + fact + "」" }]);
-        sendToRenderer("pet:toast", "📌 好的，我记住了");
+        sendToRenderer("pet:toast", i18n.t(currentUiLang(), "notice.memoryRemembered"));
       } catch { /* 忽略 */ }
     }
   }
@@ -2323,7 +2327,7 @@ async function handleAskInner(sender, { id, text, askGen }) {
     const stageBefore = bond.getStage().key;
     const b = bond.addExp(1);
     if (b.leveledUp) {
-      sendToRenderer("pet:toast", "🥰 羁绊升级 Lv." + b.level);
+      sendToRenderer("pet:toast", i18n.t(currentUiLang(), "notice.bondLevelUp", { level: b.level }));
       const st = bond.getStage();
       if (st.key !== stageBefore && lines.STAGE_LINES[st.key] && lines.STAGE_LINES[st.key].length) {
         sendProactive(lines.pickTpl(lines.STAGE_LINES[st.key], chatVars()), lines.LINE_MOODS["stage" + st.key] || "温柔"); // 羁绊阶段→音色分档（v2.5.26）
@@ -2392,7 +2396,7 @@ async function handleAskInner(sender, { id, text, askGen }) {
           if (summary && history.generation() === genAtSummary) {
             memory.updateSummary(summary); // v2.5：摘要真正入库，后续轮次注入人设
             logTts("memory", "记忆摘要: " + summary.slice(0, 80));
-            sendToRenderer("pet:toast", "🧠 记忆已更新");
+            sendToRenderer("pet:toast", i18n.t(currentUiLang(), "notice.memoryUpdated"));
           }
         }).catch(() => {});
       }
@@ -2479,8 +2483,8 @@ ipcMain.handle("pet:open-config", () => shell.openPath(config.CONFIG_PATH));
 
 function refreshPetName() {
   const name = config.fillTokens("{{petName}}");
-  if (win && !win.isDestroyed()) win.setTitle(name + "桌宠");
-  if (tray) tray.setToolTip(name + "桌宠（点击隐藏/显示）");
+  if (win && !win.isDestroyed()) win.setTitle(i18n.t(currentUiLang(), "ui.petWindowTitle", { name }));
+  if (tray) tray.setToolTip(i18n.t(currentUiLang(), "tray.tooltipNormal", { name }));
   sendToAllWindows("pet:name-changed", name);
 }
 
@@ -2890,7 +2894,7 @@ ipcMain.on("pet:set-walk-global", (_e, on) => { // 桌面全域行走（实验�
 });
 ipcMain.on("pet:set-soft-render", (_e, on) => { // 软件渲染（重启生效）：无显卡/驱动异常环境兜底
   config.saveConfig({ softRender: !!on });
-  sendToRenderer("pet:toast", on ? "软件渲染已开启，重启应用后生效" : "已切换为硬件渲染，重启应用后生效");
+  sendToRenderer("pet:toast", i18n.t(currentUiLang(), on ? "notice.softwareRenderOn" : "notice.hardwareRenderOn"));
   logTts("render", "软件渲染: " + (on ? "开启（重启生效）" : "关闭（重启生效）"));
 });
 ipcMain.on("pet:set-emotion-voice", (_e, key, on) => { // 情绪音色分档开关：该档停用后用默认音色（参考音频+语气词/语速一起关）
@@ -2934,7 +2938,7 @@ let patCombo = 0, patComboAt = 0;
 ipcMain.on("pet:pat", () => {
   try {
     const b = bond.addExp(1); // 摸头 +1 经验
-    if (b.leveledUp) sendToRenderer("pet:toast", "🥰 羁绊升级 Lv." + b.level);
+    if (b.leveledUp) sendToRenderer("pet:toast", i18n.t(currentUiLang(), "notice.bondLevelUp", { level: b.level }));
   } catch { /* 忽略 */ }
   const now = Date.now();
   patCombo = (now - patComboAt < 6000) ? patCombo + 1 : 1;
@@ -5571,7 +5575,7 @@ ipcMain.handle("pet:tts-clone", (_e, text, opts) => {
   return tts.queueTts(text, opts);
 });
 tts.setPartSender((part) => sendToRenderer("pet:tts-part", part)); // v2.5.5 逐句流式推送
-tts.setJaFallbackCb(() => sendToRenderer("pet:toast", "⚠️ 日语翻译失败，暂时用中文音色说话（请检查①聊天 API 的配额或 Key）"));
+tts.setJaFallbackCb(() => sendToRenderer("pet:toast", i18n.t(currentUiLang(), "notice.jaTranslateFail")));
 
 
 /* ---------- 本地 Genie (GPT-SoVITS) TTS（ttsGenie） ---------- */
@@ -5714,7 +5718,7 @@ function initializeNormalRuntime() {
         const _err = memory.lastLoadError ? memory.lastLoadError() : "";
         const _had = memory.lastHadData ? memory.lastHadData() : false;
         logTts("security", "记忆文件异常" + (_had ? "（文件有内容但读取失败）" : "（首启空文件）") + "，已重置为空" + (_err ? " | 原因: " + _err : ""));
-        if (_had) sendToRenderer("pet:toast", "⚠️ 记忆文件异常（可能被外部修改），已重置为空");
+        if (_had) sendToRenderer("pet:toast", i18n.t(currentUiLang(), "notice.memoryFileReset"));
       }
       // §14 追加 102：向量记忆同款加密（只存经语义去重的对话片段，"上次她说…"级细节回引）
       require("./src/vector-memory").init({
@@ -5828,7 +5832,7 @@ function initializeNormalRuntime() {
       if (!_cfg.chat.apiKey) {
         setTimeout(() => {
           openSettings();
-          sendToRenderer("pet:toast", "首次使用：请在设置里填写 API Key 与称呼 💕");
+          sendToRenderer("pet:toast", i18n.t(currentUiLang(), "notice.firstRunApiSetup"));
         }, 1200);
       }
     }

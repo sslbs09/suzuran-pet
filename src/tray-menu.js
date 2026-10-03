@@ -25,9 +25,9 @@ function buildTrayItems(deps) {
 
   if (pending) {
     return [
-      { label: "查看/继续确认使用条款与隐私政策", click: () => openTerms() },
+      { label: i18n.t(lang, "tray.pendingTermsLabel"), click: () => openTerms() },
       { type: "separator" },
-      { label: "退出", click: () => quitApp() }
+      { label: i18n.t(lang, "tray.exit"), click: () => quitApp() }
     ];
   }
 
@@ -69,7 +69,7 @@ function buildTrayItems(deps) {
         label: (() => { // 皮肤名：优先取 SPINE_CN 全名「人物·皮肤」里「·」后的部分；summer/winter 同理
           const cn = SPINE_CN[dir];
           if (skin && cn && cn.includes("·")) return cn.split("·").slice(1).join("·");
-          return skin ? skin.replace(/_/g, " ") : "默认";
+          return skin ? skin.replace(/_/g, " ") : i18n.t(lang, "tray.skinDefault");
         })(),
         icon: skinIconOf ? skinIconOf(m) : undefined, // v2.5.26 皮肤预览图
         type: "radio",
@@ -100,7 +100,7 @@ function buildTrayItems(deps) {
       click: (item) => {
         if (item.checked) {
           const list = rigSkinList();
-          if (!list.length) { sendToRenderer("pet:toast", "请先在「🧩 PSD 角色工具」导入 PSD 皮肤"); item.checked = false; return; }
+          if (!list.length) { sendToRenderer("pet:toast", i18n.t(lang, "notice.importRigSkinFirst")); item.checked = false; return; }
           setRigSkin(cfg.rigSkinId || list[0].id);
         } else setRigSkin("");
       }
@@ -199,8 +199,8 @@ function buildTrayItems(deps) {
     { type: "separator" },
     // 常用窗口区
     { label: i18n.t(lang, "tray.settings"), click: () => openSettings() },
-    { label: "📖 文档中心", click: () => openDocs() },
-    { label: "📅 日程安排", click: () => openSchedule() },
+  { label: i18n.t(lang, "tray.docsLabel"), click: () => openDocs() },
+  { label: i18n.t(lang, "tray.scheduleLabel"), click: () => openSchedule() },
     { label: i18n.t(lang, "tray.moodManager"), click: () => openMoodManager() },
     { label: i18n.t(lang, "tray.quickstart"), click: () => openQuickstart() },
     { label: i18n.t(lang, "tray.help"), click: () => openHelp() },
