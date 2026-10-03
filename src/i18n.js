@@ -23,32 +23,28 @@ const DICT = {
   ja: require("./locales/ja.json")
 };
 
-const effectiveCache = new Map(); // canonical locale → effective dict（zh base + overlay，进程级缓存）
-
-/** 进程内 catalog 被替换/修补后重建 effective 缓存（Phase 6 语言热接入复用；生产常规路径无需调用）。 */
-function resetEffectiveCache() {
-  effectiveCache.clear();
-}
-
 function getDict(lang) {
   const id = normalizeLocale(lang);
   return DICT[id] || DICT[DEFAULT_LOCALE];
 }
 
 /**
- * 有效词典：{...zh, ...selected}。selected 为 zh 时即 zh 本身（同一引用）；
- * selected 缺 key → zh 值透出（缺键回落唯一指向 default，绝不指向相邻语言）。
+ * overlay 构造（纯函数）：zh base + selected overlay —— selected 缺 key → zh 值透出
+ * （缺键回落唯一指向 default，绝不指向相邻语言）。每次调用直接现算：
+ * 356-key × 3 语规模成本可忽略，换取零 cache invalidation、零 stale dict。
+ */
+function buildEffectiveDict(base, selected) {
+  return Object.assign({}, base, selected);
+}
+
+/**
+ * 有效词典。zh 即 base 本身（同一引用）；未收录 locale（如 Phase 6 前的 ko）→ zh 兜底。
  */
 function getEffectiveDict(lang) {
   const id = normalizeLocale(lang);
   const sel = DICT[id] ? id : DEFAULT_LOCALE;
   if (sel === DEFAULT_LOCALE) return DICT[DEFAULT_LOCALE];
-  let eff = effectiveCache.get(sel);
-  if (!eff) {
-    eff = Object.assign({}, DICT[DEFAULT_LOCALE], DICT[sel]);
-    effectiveCache.set(sel, eff);
-  }
-  return eff;
+  return buildEffectiveDict(DICT[DEFAULT_LOCALE], DICT[sel]);
 }
 
 /** {name}/{level} 占位符替换；未提供的参数保留原样占位（不吞不炸）。 */
@@ -71,4 +67,4 @@ function t(lang, key, fallbackOrParams) {
   return fillParams(raw, typeof fallbackOrParams === "object" && fallbackOrParams !== null ? fallbackOrParams : null);
 }
 
-module.exports = { DICT, getDict, getEffectiveDict, resetEffectiveCache, t };
+module.exports = { DICT, getDict, buildEffectiveDict, getEffectiveDict, t };

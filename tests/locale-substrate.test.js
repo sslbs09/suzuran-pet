@@ -47,19 +47,15 @@ test("ADMISSION: 当前仅 zh/en/ja 可持久化；ko/区域变体/未知拒绝"
 /* ---------------- 3. MAIN FALLBACK / PARAM ---------------- */
 
 test("MAIN-FALLBACK: t() 经 normalize；selected 缺键回落 zh 值；彻底未知键 fail-safe 返回 key 不 throw", () => {
-  // probe 置于本用例最前：需在任何 getEffectiveDict("en") 之前删除键（缓存未生成时验证现算 overlay）
-  const probe = "tray.exit";
-  const saved = i18n.DICT.en[probe];
-  try {
-    delete i18n.DICT.en[probe];
-    assert.equal(i18n.getEffectiveDict("en")[probe], i18n.DICT.zh[probe], "effective dict 中 selected 缺键已回落 zh");
-    assert.equal(i18n.t("en", probe), i18n.DICT.zh[probe], "t() 同样回落 zh（不跨语言泄漏）");
-  } finally {
-    i18n.DICT.en[probe] = saved;
-    i18n.resetEffectiveCache(); // probe 期间生成的缓存已 stale（缺键态），重建后再继续后续断言
-  }
   assert.equal(i18n.t("zh-CN", "tray.exit"), i18n.DICT.zh["tray.exit"], "区域变体归一后取 zh");
   assert.equal(i18n.t("en", "tray.exit"), "Exit");
+  // selected 缺键 → zh 的 overlay 合同：对构造 fixture 直接验证生产同款纯函数（不触碰真实 catalog）
+  const fakeZh = { a: "甲", b: "乙" };
+  const fakeEn = { a: "A" }; // 缺 b
+  const fake = i18n.buildEffectiveDict(fakeZh, fakeEn);
+  assert.equal(fake.a, "A", "selected 命中优先");
+  assert.equal(fake.b, "乙", "selected 缺键回落 zh（绝不指向相邻语言）");
+  assert.deepEqual(i18n.buildEffectiveDict(fakeZh, fakeZh), fakeZh, "selected=base 时即 base 本身");
   assert.equal(i18n.t("en", "__no_such_key__"), "__no_such_key__", "未知键 fail-safe=key");
   assert.equal(i18n.t("en", "__no_such_key__", "备用文案"), "备用文案", "旧式字符串 fallback 兼容");
 });
@@ -72,7 +68,7 @@ test("PARAM: {name} 占位符插值；缺参数保留占位不炸", () => {
 
 /* ---------------- 4. EFFECTIVE DICT（zh base + overlay） ---------------- */
 
-test("EFFECTIVE-DICT: zh 原引用；en/ja 为 zh base + selected overlay；引用稳定（缓存）", () => {
+test("EFFECTIVE-DICT: zh 原引用；en/ja 为 zh base + selected overlay；每个值都来自 selected 或 zh", () => {
   assert.equal(i18n.getEffectiveDict("zh"), i18n.DICT.zh, "zh 即 base 本身（同引用）");
   assert.equal(i18n.getEffectiveDict("zh-CN"), i18n.DICT.zh, "归一后同引用");
   for (const l of ["en", "ja"]) {
@@ -82,7 +78,6 @@ test("EFFECTIVE-DICT: zh 原引用；en/ja 为 zh base + selected overlay；引�
       const v = eff[k];
       assert.ok(v === i18n.DICT[l][k] || v === i18n.DICT.zh[k], `${l}[${k}] 只能来自 selected 或 zh（绝不来自其他语言）`);
     }
-    assert.equal(i18n.getEffectiveDict(l), eff, "进程级缓存：同 locale 同引用");
   }
   assert.equal(i18n.getEffectiveDict("ko-KR"), i18n.DICT.zh, "未收录 locale（ko 未入 catalog）→ zh dict 兜底");
 });
