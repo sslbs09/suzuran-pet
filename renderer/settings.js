@@ -8,7 +8,7 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-const L = (key) => (window.I18N && I18N.t(key)) || key; // 国际化动态文案
+const L = (key, params) => (window.I18N && I18N.t(key, params)) || key; // 国际化动态文案（params 支持 {x} 插值）
 
 const PRESETS = {
   deepseek:     { apiType: "openai",    baseUrl: "https://api.deepseek.com/v1",                model: "deepseek-chat" },
@@ -33,6 +33,17 @@ function setResult(el, text, ok) {
 
 async function toast(msg) {
   console.log("[设置]", msg);
+}
+
+/* Phase 4-B1：动态呈现节点唯一 owner（版本号/密钥来源）。静态绑定已从 settings.html 移除
+ * （双 owner 解除）；locale 变化经 I18N.onChange 从既有 state 重绘，零业务副作用。 */
+function renderVersion() { // 版本单一来源 app.getVersion（P1-5）；文案进 catalog，version 为 DATA 参数
+  const verEl = document.getElementById("version");
+  if (verEl && window.petAPI.appVersion) verEl.textContent = L("set.versionBrand", { version: window.petAPI.appVersion });
+}
+function renderKeySource() {
+  const el = document.getElementById("key-source");
+  if (el) el.textContent = L("set.keyStatus") + (S.keySource || L("set.unknown"));
 }
 
 /* ---------- 日志诊断分区（v2.5.28）：尾部读取 + 报错高亮 + 一键脱敏导出 ----------
@@ -126,13 +137,8 @@ async function renderOnboard(S) {
 (async function init() {
   S = await window.petAPI.getSettings();
   renderOnboard(S);
-  // 版本号：单一来源 package.json（app.getVersion），比硬编码文本更可信（P1-5）
-  const verEl = document.getElementById("version");
-  if (verEl && window.petAPI.appVersion) {
-    verEl.textContent = "苏苏洛桌宠 · v" + window.petAPI.appVersion;
-  }
-  document.getElementById("key-source").textContent =
-    L("set.keyStatus") + (S.keySource || L("set.unknown"));
+  renderVersion();
+  renderKeySource();
 
   $("api-type").value = S.chat.apiType || "openai";
   $("base-url").value = S.chat.baseUrl || "";
@@ -1548,3 +1554,17 @@ function syncNavVisibility() {
   // 供外部调用：生成 Agent Token 后 .value 是程序赋值不触发 input 事件，需手动标记
   window.__setMarkDirty = markDirty;
 })();
+
+/* ---------- Phase 4-B1：locale 变化的动态重绘（单一订阅，零业务副作用） ----------
+ * 只从既有 state 重渲染 presentation：S（配置快照）、DOM 控件值（render-mode）、
+ * fixedLineStatus（音频池快照）。不发保存/测试/合成/扫描/重启等任何业务请求。
+ * skins 列表、mem-stats、试听 result 等 runtime 文本由各自 JS owner 保持原样
+ * （其字符串收口属 B2；静态绑定已全部解除，locale 切换不会再覆盖它们）。 */
+if (window.I18N && window.I18N.onChange) window.I18N.onChange(() => {
+  renderVersion();
+  renderKeySource();
+  if (S && S.pet) renderOnboard(S); // S 未加载时跳过（init 后首次 onChange 自然覆盖）
+  const rm = $("render-mode");
+  if (rm) applyRenderModeUI(rm.value); // rm-hint 与模式区块可见性的唯一 owner
+  if (fixedLineStatus) renderFixedLinePool(); // 池面板文案全部 L() 化，可安全重绘
+});

@@ -138,6 +138,14 @@ test("P3-LEAK: 目标页面静态 DOM 的裸中文（绑定后残余）仅剩已
     //  - <code> 内路径/命令/URL：DATA
     //  - addchar.html #model-list 初始文本 "加载中…"：addchar.js 启动即覆盖的动态列表容器（DEFERRED_TO_PHASE4）
     //  - psd.html tip 段：<span data-i18n=...> 起始行之后、跨物理行的 span 延续文本（同键 ownership，绑定在起始行）
+    // Phase 4-B1 dynamic-owner 节点：静态绑定已解除、唯一 owner=页面 JS render（初始文本仅为
+    // 加载前 fallback；其文本本地化收口属 B2）。语言切换由 I18N.onChange 管线重绘，不再被 static apply 覆盖。
+    const DYNAMIC_OWNER_IDS = [
+      "rm-hint", "rig-skins-list", "live2d-skins-list", "mem-stats", "api-key", "agent-token",
+      "fixed-lines-profile", "fixed-lines-state", "fixed-lines-summary", "btn-fixed-lines-toggle",
+      "bubble-width-val", "version", "status-card", "file-path", "tree", "sel-info",
+      "preview-wrap", "rig-wrap", "dir-hint", "sprite", "input", "mode-chip", "btn-tts"
+    ];
     const DEFERRED = [/id="model-list">加载中…<\/div>/];
   const leaks = [];
   for (const page of TARGET_PAGES) {
@@ -162,11 +170,14 @@ test("P3-LEAK: 目标页面静态 DOM 的裸中文（绑定后残余）仅剩已
       .replace(/placeholder="[^"]*\\[^"]*"/g, "")
       .replace(/placeholder="例：你好呀[^"]*"/g, "")
       .replace(/value="你好呀[^"]*"/g, "")
-      .replace(/<code>[^<]*<\/code>/g, "");
+      .replace(/<code>[^<]*<\/code>/g, "")
+      .replace(/<span class="hint">[^<]*<\/span>/g, "") // terms foot hint：owner=terms.js（失败态优先）
+      .replace(/<title>[^<]*<\/title>/g, ""); // docs <title>：owner=docs.js renderDocsTitle
     scrubbed.split("\n").forEach((line, idx) => {
       if (!/[\u4e00-\u9fff]/.test(line)) return;
       if (/data-i18n/.test(line)) return; // 已绑定行：初始文本=catalog zh 值的静态回显，en/ja 下由 apply() 替换（有 ownership）
       if (DEFERRED.some((re) => re.test(line))) return; // JS 启动即覆盖的容器初值（动态 owner 归 Phase 4）
+      if (DYNAMIC_OWNER_IDS.some((id) => line.includes('id="' + id + '"'))) return; // Phase 4-B1：唯一 owner=页面 JS render（文本收口 B2）
       if (idx > 0 && /data-i18n/.test(scrubbed.split("\n")[idx - 1]) && !/<(h\d|p|div|section|button|label|li|td|a|span)/.test(line)) return; // 绑定元素跨行延续文本
       leaks.push(`${page}:${idx + 1}: ${line.trim().slice(0, 90)}`);
     });

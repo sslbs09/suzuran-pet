@@ -762,5 +762,7 @@
   "page.quickstart.s3c": "（",
   "page.quickstart.s3d": "）。",
   "page.quickstart.back": "← 返回使用说明",
-  "page.quickstart.foot": "—— 苏苏洛桌宠 · 1.1 正式版 ——"
+  "page.quickstart.foot": "—— 苏苏洛桌宠 · 1.1 正式版 ——",
+  "set.versionBrand": "苏苏洛桌宠 · v{version}",
+  "page.docs.titleWith": "苏苏洛 · {name}"
 }

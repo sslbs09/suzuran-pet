@@ -762,5 +762,7 @@
   "page.quickstart.s3c": " (",
   "page.quickstart.s3d": ").",
   "page.quickstart.back": "← Back to Help",
-  "page.quickstart.foot": "—— Sussurro Pet · v1.1 ——"
+  "page.quickstart.foot": "—— Sussurro Pet · v1.1 ——",
+  "set.versionBrand": "Sussurro Pet · v{version}",
+  "page.docs.titleWith": "Sussurro · {name}"
 }

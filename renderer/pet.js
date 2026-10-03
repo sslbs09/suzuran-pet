@@ -4441,3 +4441,13 @@ if (!window.__renderLifecycleTestMode) (async function init() {
     scheduleBubbleHide(30000); // 开场白：语音播完再隐藏，防止长开场白被提前收起
   }
 })();
+
+/* ---------- Phase 4-B1：locale 变化的动态重绘（单一订阅，零业务副作用） ----------
+ * input placeholder 是唯一受语言影响的运行时动态属性：录音状态必须保留
+ * （recording 中切语言仍显示"录音中…"，空闲显示本地化普通占位符）。
+ * 本注册同时覆盖 i18n 首次 ready 的初始本地化（ready 后回调立即安全执行一次）。
+ * sprite alt（值=自定义宠物名，DATA）、modeChip/btnTts 运行时 title（值=forced-mode /
+ * tts state，其文本本地化收口属 B2）均已解除静态绑定，locale apply 不再覆盖 runtime state。 */
+if (window.I18N && window.I18N.onChange) window.I18N.onChange(() => {
+  inputEl.placeholder = isRecording ? I18N.t("ui.micRecording") : I18N.t("ui.placeholder");
+});

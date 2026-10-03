@@ -147,8 +147,7 @@ function syncIframeTheme() {
   } catch { /* 忽略 */ }
 }
 
-async function init() {
-  try { const st = await window.petAPI.getState(); applyTheme(st && st.theme); } catch { /* 忽略 */ }
+async function init() {  try { const st = await window.petAPI.getState(); applyTheme(st && st.theme); } catch { /* 忽略 */ }
   const list = await window.petAPI.docsList().catch(() => []);
   const nav = $("docs-nav");
   const byGroup = {};
@@ -192,15 +191,33 @@ async function openDoc(doc, btn) {
     iframe.srcdoc = injectDocsScrollbarStyle(r.srcdoc || "");
     iframe.hidden = false;
     iframe.addEventListener("load", syncIframeTheme, { once: true }); // srcdoc 异步加载，载入后补主题
-    document.title = "苏苏洛 · " + doc.name;
+    setDocsCurrentTitle(doc.name);
     return;
   }
   const c = $("docs-content");
   c.hidden = false;
   c.className = "docs-pane docs-md";
   c.innerHTML = mdToHtml(r.text);
-  document.title = "苏苏洛 · " + doc.name;
+  setDocsCurrentTitle(doc.name);
   c.scrollTop = 0;
+}
+
+/* Phase 4-B1：窗口标题唯一 owner。doc.name = DATA（不翻译），locale 变化只重 localize 包装；
+ * 不重新读取文档内容、不改导航。I18N 不可用时保持原中文文案（优雅降级）。 */
+let _docsCurrentName = null;
+function setDocsCurrentTitle(name) {
+  _docsCurrentName = name;
+  renderDocsTitle();
+}
+function renderDocsTitle() {
+  const ready = !!(window.I18N && window.I18N.ready && window.I18N.ready());
+  document.title = _docsCurrentName
+    ? (ready ? I18N.t("page.docs.titleWith", { name: _docsCurrentName }) : "ススロ · " + _docsCurrentName)
+    : (ready ? I18N.t("page.docs.title") : "ススロ · ドキュメント");
+}
+if (typeof document !== "undefined" && typeof window !== "undefined") {
+  renderDocsTitle();
+  if (window.I18N && window.I18N.onChange) window.I18N.onChange(renderDocsTitle);
 }
 
 if (typeof window !== "undefined") {

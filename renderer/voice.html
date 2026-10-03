@@ -28,13 +28,13 @@
       <div class="sub" data-i18n="page.voice.sub">用一段参考音频，直接生成（克隆）苏苏洛音色 —— 全界面操作，不用碰命令行</div>
     </header>
 
-    <div id="status-card" class="status-card no" data-i18n="page.voice.checking">正在检查本地 Genie 语音部署状态…</div>
+    <div id="status-card" class="status-card no">正在检查本地 Genie 语音部署状态…</div>
 
     <section>
       <h2 data-i18n="page.voice.sec1Title">① 快速克隆（零样本训练，推荐）</h2>
       <p class="hint"><span data-i18n="page.voice.sec1HintA">原理：GPT-SoVITS 会模仿参考音频的音色与语气。参考音频越干净、越像日常说话，克隆效果越好。</span><b data-i18n="page.voice.sec1HintB">3~10 秒、单人、无背景音乐</b><span data-i18n="page.voice.sec1HintC">的 wav 最佳。</span></p>
       <div id="clone-form">
-        <div class="row"><label class="col grow"><span data-i18n="page.voice.labelRefAudio">参考音频文件</span><div class="file-row"><button id="btn-pick" type="button" class="primary" data-i18n="page.voice.pick">📂 选择音频…</button><div id="file-path" class="file-path" data-i18n="page.voice.phFilePath">未选择（示例音频：语音部署与训练指南\example_audio\ref_sussurro.wav）</div></div></label></div>
+        <div class="row"><label class="col grow"><span data-i18n="page.voice.labelRefAudio">参考音频文件</span><div class="file-row"><button id="btn-pick" type="button" class="primary" data-i18n="page.voice.pick">📂 选择音频…</button><div id="file-path" class="file-path">未选择（示例音频：语音部署与训练指南\example_audio\ref_sussurro.wav）</div></div></label></div>
         <div class="row"><label class="col grow"><span data-i18n="page.voice.labelRefText">参考音频原文（必须与音频逐字一致）</span><textarea id="ref-text" rows="3" spellcheck="false" placeholder="例：你好呀，新手星，我是苏苏洛，罗德岛的医疗干员。今天也要好好休息哦。"></textarea></label></div>
         <div class="row"><label class="col grow"><span data-i18n="page.voice.labelPreview">试听内容（用上面的音色合成，先听再应用）</span><input id="preview-text" type="text" value="你好呀，我是苏苏洛。今天也要好好休息哦，不许熬夜。" /></label></div>
         <div class="row actions"><button id="btn-preview" type="button" class="primary" data-i18n="page.voice.btnPreview">🔊 试听音色</button><button id="btn-apply" type="button" class="primary" data-i18n="page.voice.btnApply">✅ 应用音色（完成克隆）</button><span id="result" class="result"></span></div>

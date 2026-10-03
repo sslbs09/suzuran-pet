@@ -80,7 +80,7 @@
       </label>
       <label class="col">
         <span data-i18n="set.modeHintLabel">模式说明</span>
-        <p class="hint" id="rm-hint" style="margin:0;" data-i18n="set.rmHint">下方各区块按所选渲染模式显示：Spine 显示行走/模型选项，2.5D 显示角色/跟随选项，GIF 为经典表情。</p>
+        <p class="hint" id="rm-hint" style="margin:0;">下方各区块按所选渲染模式显示：Spine 显示行走/模型选项，2.5D 显示角色/跟随选项，GIF 为经典表情。</p>
       </label>
     </div>
     <!-- v2.5.26 重排：模式专属控件从「系统」区归位到渲染模式区 -->
@@ -99,11 +99,11 @@
       </div>
       <div class="col" data-rm="rig">
         <span data-i18n="set.rigSkinsLabel">🎬 已导入 2.5D 皮肤：</span>
-        <div id="rig-skins-list" class="rig-skin-hint" data-i18n="set.loading">加载中…</div>
+        <div id="rig-skins-list" class="rig-skin-hint">加载中…</div>
       </div>
       <div class="col" data-rm="live2d">
         <span data-i18n="set.live2dLabel">🎭 Live2D 模型（点选即生效，无需保存）：</span>
-        <div id="live2d-skins-list" class="rig-skin-hint" data-i18n="set.loading">加载中…</div>
+        <div id="live2d-skins-list" class="rig-skin-hint">加载中…</div>
       </div>
       <div class="col" data-rm="live2d">
         <span data-i18n="set.live2dScaleLabel">🎭 Live2D 角色大小：</span><b id="live2d-scale-val">100%</b><span data-i18n="set.live2dScaleNote">（渲染模式为 Live2D 时实时生效）</span>
@@ -183,7 +183,7 @@
     <div class="row">
       <div class="col full">
         <span data-i18n="set.memoryDesc">她记得的事（称谓/喜好/生日/健康/近期安排，本地加密存储，不联网上传）。可在聊天中自然更新，或在此逐条删除 / 清空。</span>
-        <p class="hint" id="mem-stats" style="margin:6px 0 4px;" data-i18n="set.loading">加载中…</p>
+        <p class="hint" id="mem-stats" style="margin:6px 0 4px;">加载中…</p>
         <div id="bond-wrap" style="margin:6px 0 10px;">
           <div id="bond-bar-label" style="font-size:12px;color:var(--ui-muted);margin-bottom:4px;"></div>
           <div style="height:8px;border-radius:4px;background:var(--ui-line);overflow:hidden;">
@@ -255,7 +255,7 @@
       <label class="col grow">
         <span data-i18n="set.apiKey">API Key</span>
         <div class="keybox">
-          <input id="api-key" type="password" placeholder="sk-…（Ollama 本地可留空）" data-i18n-placeholder="set.apiKeyPh" />
+          <input id="api-key" type="password" placeholder="sk-…（Ollama 本地可留空）" />
           <button id="btn-toggle-key" type="button" class="mini" title="显示/隐藏" data-i18n-title="set.keyToggleTitle">👁</button>
         </div>
       </label>
@@ -424,11 +424,11 @@
       <div class="fixed-lines-head">
         <div>
           <b data-i18n="set.fixedPoolTitle">🔊 固定台词音频池</b>
-          <div id="fixed-lines-profile" class="hint" data-i18n="set.fixedProfileLoading">读取当前语音方案…</div>
+          <div id="fixed-lines-profile" class="hint">读取当前语音方案…</div>
         </div>
-        <span id="fixed-lines-state" class="voice-pool-badge" data-i18n="set.fixedStateUnchecked">未检查</span>
+        <span id="fixed-lines-state" class="voice-pool-badge">未检查</span>
       </div>
-      <div id="fixed-lines-summary" class="fixed-lines-summary" data-i18n="set.fixedSummaryInit">已加载 0 / 0 · 失败 0 · 缓存 0 B</div>
+      <div id="fixed-lines-summary" class="fixed-lines-summary">已加载 0 / 0 · 失败 0 · 缓存 0 B</div>
       <div class="fixed-lines-progress"><span id="fixed-lines-progress-bar"></span></div>
       <div class="fixed-lines-pools" id="fixed-lines-pools">
         <span class="fixed-lines-pools-title" data-i18n="set.fixedPoolsTitle">预加载范围：</span>
@@ -443,7 +443,7 @@
         <button id="btn-fixed-lines-cancel" type="button" data-i18n="set.fixedBtnCancel">暂停</button>
         <button id="btn-fixed-lines-clear" type="button" class="danger" data-i18n="set.fixedBtnClear">清空当前缓存</button>
         <button id="btn-fixed-lines-clear-old" type="button" data-i18n="set.fixedBtnClearOld">清理旧版本缓存</button>
-        <button id="btn-fixed-lines-toggle" type="button" data-i18n="set.fixedBtnToggle">显示未加载/失败</button>
+        <button id="btn-fixed-lines-toggle" type="button">显示未加载/失败</button>
         <span id="fixed-lines-result" class="result"></span>
       </div>
       <div id="fixed-lines-list" class="fixed-lines-list" hidden></div>
@@ -504,7 +504,7 @@
       <label class="col">
         <span data-i18n="set.bubbleWidth">聊天气泡宽度</span>
         <input id="bubble-width" type="range" min="0" max="600" step="20" />
-        <span id="bubble-width-val" style="font-weight:600;" data-i18n="set.bubbleAuto">自适应</span>
+        <span id="bubble-width-val" style="font-weight:600;">自适应</span>
       </label>
       <label class="col">
         <span data-i18n="set.chatFontSize">聊天字体大小</span>
@@ -539,7 +539,7 @@
       <span id="other-result" class="result"></span>
     </div>
     <p class="hint" data-i18n="set.taskHint">任务模式（/zcode 前缀操控电脑）默认关闭：想开启请打开 config.json，把 <code>zcodeEnabled</code> 改为 <code>true</code> 并配置 <code>zcodeCli</code> 路径（需自行安装 ZCode）。</p>
-    <p class="foot" id="version" data-i18n="set.version">苏苏洛桌宠 · 2.5 正式版</p>
+    <p class="foot" id="version">苏苏洛桌宠 · 2.5 正式版</p>
   </section>
 
   <section id="sec-agent">
@@ -564,7 +564,7 @@
     <div class="row">
       <label class="col grow">
         <span data-i18n="set.agentTokenLabel">Agent Bearer Token（留空兼容旧脚本；设置后所有请求都必须携带 Authorization: Bearer）</span>
-        <input id="agent-token" type="password" autocomplete="off" placeholder="未启用认证" data-i18n-placeholder="set.agentTokenPh" />
+        <input id="agent-token" type="password" autocomplete="off" placeholder="未启用认证" />
       </label>
       <label class="col">
         <span data-i18n="set.agentBodyLimit">请求体上限（KB）</span>

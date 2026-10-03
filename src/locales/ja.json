@@ -762,5 +762,7 @@
   "page.quickstart.s3c": "（",
   "page.quickstart.s3d": "）。",
   "page.quickstart.back": "← 使い方に戻る",
-  "page.quickstart.foot": "—— ススロ デスクトップペット · v1.1 正式版 ——"
+  "page.quickstart.foot": "—— ススロ デスクトップペット · v1.1 正式版 ——",
+  "set.versionBrand": "ススロ デスクトップペット · v{version}",
+  "page.docs.titleWith": "ススロ · {name}"
 }

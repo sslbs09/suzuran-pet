@@ -50,19 +50,46 @@
     return String(v).replace(/\{(\w+)\}/g, (m, k) => (params[k] !== undefined ? String(params[k]) : m));
   }
 
-  window.I18N = { apply, t, lang: () => _lang };
+  window.I18N = { apply, t, lang: () => _lang, ready: () => _ready, onChange };
+
+  /* ---------- Phase 4-B1：locale 事件单一入口 + 动态 presentation hook ----------
+   * 语义（初始化与语言切换共用同一条管线，语言切换不是业务事件）：
+   *   getI18n → set effective dict → apply() 静态绑定 → notify 动态 render 回调
+   * 回调只允许重绘 presentation（从既有 runtime state），不得发起业务副作用。
+   * 注册时若已 ready 立即安全执行一次（免除页面脚本与 i18n 异步初始化的时序依赖）。
+   * 页面业务脚本禁止再自行监听 petAPI.onUiLangChanged（单一订阅原则）。 */
+  let _ready = false;
+  const _renderCallbacks = [];
+
+  function notifyRender() {
+    for (const cb of _renderCallbacks.slice()) {
+      try { cb(_lang); } catch { /* 单个页面 render 故障不阻断其他页面 */ }
+    }
+  }
+
+  function onChange(cb) { // 返回 unsubscribe；仅供 presentation 重绘
+    if (typeof cb !== "function") return () => {};
+    _renderCallbacks.push(cb);
+    if (_ready) { try { cb(_lang); } catch { /* 同上 */ } }
+    return () => {
+      const i = _renderCallbacks.indexOf(cb);
+      if (i >= 0) _renderCallbacks.splice(i, 1);
+    };
+  }
+
+  async function refresh() { // 唯一 locale 数据管线：init 与 ui-lang-changed 共用
+    if (!window.petAPI || !window.petAPI.getI18n) return;
+    const r = await window.petAPI.getI18n();
+    apply(r.lang, r.dict);
+    _ready = true;
+    notifyRender();
+  }
 
   async function init() {
     try {
-      if (window.petAPI && window.petAPI.getI18n) {
-        const r = await window.petAPI.getI18n();
-        apply(r.lang, r.dict);
-      }
+      await refresh();
       if (window.petAPI && window.petAPI.onUiLangChanged) {
-        window.petAPI.onUiLangChanged(async (lang) => {
-          const r = await window.petAPI.getI18n();
-          apply(r.lang, r.dict);
-        });
+        window.petAPI.onUiLangChanged(() => { refresh().catch(() => { /* 语言变更刷新失败保持旧 dict，下次事件重试 */ }); });
       }
     } catch { /* 忽略 */ }
   }
