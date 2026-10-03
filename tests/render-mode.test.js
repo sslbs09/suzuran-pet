@@ -600,8 +600,8 @@ assert.match(preloadSource, /reportRenderModeOutcome: \(outcome\) => ipcRenderer
 assert.match(preloadSource, /reportRenderModeCorrection: \(correction\) => ipcRenderer\.send\("pet:render-mode-correction", correction\)/, "internal correction bridge");
 assert.match(settingsSource, /onRenderModeOutcome/, "settings listens for accepted outcome");
 assert.match(settingsSource, /outcome\.requestedMode !== committed/, "settings distinguishes fallback from success");
-assert.match(settingsSource, /已切换并保存 ✓/, "settings shows success only after outcome");
-assert.match(settingsSource, /已回退到 GIF/, "settings shows fallback correction");
+assert.match(settingsSource, /L\("set\.rmSwitched"\)/, "settings shows success only after outcome (B2.1: 文案经 key)");
+assert.match(settingsSource, /L\("set\.rmFallbackShort"\)|L\("notice\.fallback/, "settings shows fallback correction (B2.1: 文案经 key)");
 assert.match(settingsSource, /correctionSourceMode/, "settings preserves correction-derived UI context");
 assert.match(settingsSource, /function ensureRigSkinForMode\(\)/, "settings has a narrow Rig resource precheck");
 assert.match(settingsSource, /renderer 仍保留真实 init failure \+ GIF fallback/, "precheck is UX-only");

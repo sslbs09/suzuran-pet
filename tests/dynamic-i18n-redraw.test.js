@@ -99,9 +99,9 @@ test("B1-STATE-PRESERVATION: version/path/pet name/列表 的 owner 与 DATA 边
   // docs 标题：doc.name 只作 {name} 参数（DATA 不翻译），旧直拼已清除
   assert.equal((SRC.docs.match(/"苏苏洛 · " \+ doc\.name/g) || []).length, 0, "旧 title 拼接已移除");
   assert.match(SRC.docs, /I18N\.t\("page\.docs\.titleWith", \{ name: _docsCurrentName \}\)/);
-  // voice file path：DATA（选中路径原样展示，locale 不覆盖——无静态绑定，owner=btn-pick 回调）
-  assert.match(SRC.voiceJs, /\$\("file-path"\)\.textContent = p;/);
-  assert.ok(!SRC.voiceHtml.includes('id="file-path" data-i18n'), "file-path 无静态绑定");
+  // voice file path：DATA（选中路径原样展示，无静态绑定）；B2.1 后 owner=renderFilePath 投影
+  assert.match(SRC.voiceJs, /selectedPath = p;[\s\S]{0,80}renderFilePath\(\)/, "pick 结果经 renderFilePath 投影");
+  assert.match(SRC.voiceJs, /\$\("file-path"\)\.textContent = selectedPath \|\| L\("page\.voice\.noFile", \{ path: SAMPLE_REF_PATH \}\);/, "路径原样 / 空态=本地化包装+路径参数");
   // pet name：sprite alt 由 applyPetName 写（DATA 名），无静态绑定
   assert.ok(!SRC.indexHtml.includes('data-i18n-alt="ui.petAlt"'), "alt owner=applyPetName");
   // skins/mem 列表：静态绑定解除后 locale apply 不清空（JS owner 保持）

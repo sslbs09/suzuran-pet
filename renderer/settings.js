@@ -23,6 +23,7 @@ const PRESETS = {
 };
 
 let S = {}; // 当前配置快照
+let _agentClients = []; // Agent 接入方快照（locale 重放数据源）
 let personaDirty = false; // 人设输入框是否有未保存改动（v2.5.18 未保存条用）
 let _loadedChatUserName = ""; // TD-9：改名检测基线（语音/翻译缓存键含称呼）
 
@@ -44,6 +45,24 @@ function renderVersion() { // 版本单一来源 app.getVersion（P1-5）；文�
 function renderKeySource() {
   const el = document.getElementById("key-source");
   if (el) el.textContent = L("set.keyStatus") + (S.keySource || L("set.unknown"));
+}
+function renderApiKeyPh() { // api-key placeholder 三态：S.secretStatus 的纯投影（locale 可重放）
+  const ck = S.secretStatus && S.secretStatus.chatApiKey;
+  $("api-key").placeholder =
+    ck && ck.unreadable ? L("set.keyUnreadable") :
+    ck && ck.saved ? L("set.keySaved") : L("set.apiKeyPh");
+}
+function renderAgentTokenPh() { // agent token placeholder 三态投影
+  const at = S.secretStatus && S.secretStatus.agentBearerToken;
+  $("agent-token").placeholder =
+    at && at.unreadable ? L("set.tokenUnreadable") :
+    at && at.saved ? L("set.tokenSaved") : L("set.tokenUnset");
+}
+function renderBubbleWidthVal() { // 值=DOM 滑块状态，文案 set.auto 可重放
+  const el = $("bubble-width-val");
+  if (!el) return;
+  const bw = Number($("bubble-width").value) || 0;
+  el.textContent = bw > 0 ? bw + " px" : L("set.auto");
 }
 
 /* ---------- 日志诊断分区（v2.5.28）：尾部读取 + 报错高亮 + 一键脱敏导出 ----------
@@ -144,11 +163,8 @@ async function renderOnboard(S) {
   $("base-url").value = S.chat.baseUrl || "";
   $("model").value = S.chat.model || "";
   $("api-key").value = "";
-  const ck = S.secretStatus && S.secretStatus.chatApiKey;
-  $("api-key").placeholder =
-    ck && ck.unreadable ? "已保存的密钥不可读取；输入新值可替换" :
-    ck && ck.saved ? "密钥已安全保存；输入新值可替换" : "sk-…（Ollama 本地可留空）";
-  $("pet-name").value = (S.pet && S.pet.name) || "苏苏洛";
+  renderApiKeyPh();
+  $("pet-name").value = (S.pet && S.pet.name) || "苏苏洛"; // 默认宠物名=角色内容默认值（DATA，不翻译）
   $("net-proxy").value = S.netProxy || ""; // O8 网络代理
   $("user-name").value = S.chat.userName || "主人";
   _loadedChatUserName = $("user-name").value; // TD-9：改名检测基线
@@ -208,17 +224,14 @@ async function renderOnboard(S) {
     $("chat-font-size-val").textContent = fz + " px";
     const bw = Number(ap.bubbleWidth) > 0 ? Number(ap.bubbleWidth) : 0;
     $("bubble-width").value = String(bw);
-    $("bubble-width-val").textContent = bw > 0 ? bw + " px" : "自适应";
+    $("bubble-width-val").textContent = bw > 0 ? bw + " px" : L("set.auto");
   } catch { /* 滑杆保持默认值 */ }
   const aa = S.agentApi || {};
   $("agent-enabled").value = String(aa.enabled !== false);
   $("agent-port").value = aa.port || 8765;
   $("agent-word").value = aa.invokeWord || "";
   $("agent-token").value = "";
-  const at = S.secretStatus && S.secretStatus.agentBearerToken;
-  $("agent-token").placeholder =
-    at && at.unreadable ? "已保存的 Token 不可读取；输入新值可替换" :
-    at && at.saved ? "Token 已安全保存；输入新值可替换" : "未启用认证";
+  renderAgentTokenPh();
   $("agent-max-body").value = Math.round((Number(aa.maxBodyBytes) || 65536) / 1024);
   $("agent-status-enabled").checked = aa.statusEnabled !== false;
   renderAgentClients(aa.clients || []);
@@ -282,13 +295,13 @@ async function renderOnboard(S) {
       const capability = await window.petAPI.live2dCapability();
       if (!capability || !capability.core) {
         const b = $("live2d-skins-list");
-        if (b) b.textContent = "（当前安装包未包含 Live2D Core，已禁用；请安装完整资源包）";
+        if (b) b.textContent = L("set.l2dNoCore");
         return;
       }
       const skins = await window.petAPI.live2dList();
       const box = $("live2d-skins-list");
       if (!box) return;
-      if (!skins || !skins.length) { box.textContent = "（暂无模型）"; return; }
+      if (!skins || !skins.length) { box.textContent = L("set.l2dNone"); return; }
       box.textContent = "";
       skins.forEach((s) => {
         const label = document.createElement("label");
@@ -302,7 +315,7 @@ async function renderOnboard(S) {
         radio.addEventListener("change", () => { if (radio.checked) window.petAPI.live2dSelect(s.id); });
         box.appendChild(label);
       });
-    } catch { const b = $("live2d-skins-list"); if (b) b.textContent = "加载失败"; }
+    } catch { const b = $("live2d-skins-list"); if (b) b.textContent = L("set.loadFailed"); }
   }
   const ls = Number(S.live2dScale) > 0 ? Number(S.live2dScale) : 1;
   const lsel = $("live2d-scale");
@@ -323,7 +336,7 @@ async function renderOnboard(S) {
     try {
       const skins = await window.petAPI.rigSkins();
       const box = $("rig-skins-list");
-      if (!skins || !skins.length) { box.textContent = "（暂无，去 PSD 工具导入）"; return; }
+      if (!skins || !skins.length) { box.textContent = L("set.rigNone"); return; }
       box.innerHTML = "";
       skins.forEach((s) => {
         const row = document.createElement("div");
@@ -334,23 +347,23 @@ async function renderOnboard(S) {
         radio.checked = s.id.toLowerCase() === (S.rigSkinId || "").toLowerCase();
         radio.addEventListener("change", () => { if (radio.checked) window.petAPI.rigSet(s.id); });
         const label = document.createElement("span");
-        label.textContent = s.id + ((s.id.toLowerCase() === (S.rigSkinId || "").toLowerCase()) ? "（当前）" : "");
+        label.textContent = s.id + ((s.id.toLowerCase() === (S.rigSkinId || "").toLowerCase()) ? " " + L("set.skinCurrent") : "");
         label.style.fontSize = "12px";
         const del = document.createElement("button");
         del.textContent = "🗑";
-        del.title = "删除此皮肤";
+        del.title = L("set.delSkinTip");
         del.style.cssText = "font-size:11px;padding:0 4px;cursor:pointer;margin-left:auto;";
         del.addEventListener("click", async () => {
-          if (!window.confirm("删除已导入的皮肤「" + s.id + "」？此操作不可恢复")) return;
+          if (!window.confirm(L("set.skinConfirmDelete", { name: s.id }))) return;
           const r = await window.petAPI.rigDelete(s.id);
-          if (!r || !r.ok) { window.alert((r && r.message) || "删除失败"); return; }
+          if (!r || !r.ok) { window.alert((r && r.message) || L("set.delFailed")); return; }
           if (r.clearedCurrent) { S.rigSkinId = ""; $("rig-switch").checked = false; }
           loadRigSkins(); // 局部刷新列表，不重载整页（不丢其他未保存设置）
         });
         row.appendChild(radio); row.appendChild(label); row.appendChild(del);
         box.appendChild(row);
       });
-    } catch { $("rig-skins-list").textContent = "加载失败"; }
+    } catch { $("rig-skins-list").textContent = L("set.loadFailed"); }
   }
   loadRigSkins();
 
@@ -379,15 +392,15 @@ async function renderOnboard(S) {
       $("render-mode").value = committed;
       applyRenderModeUI(committed);
       const emptyHint = $("rm-hint");
-      if (emptyHint) emptyHint.textContent = "没有 PSD 皮肤，已保持当前渲染模式";
+      if (emptyHint) emptyHint.textContent = L("set.rmNoSkins");
       return;
     }
     if ($("render-mode").value !== v) return;
     const r = await window.petAPI.saveSettings({ renderMode: v }).catch(() => null);
     const hint = $("rm-hint");
     if (!hint) return;
-    if (r === false || (r && r.ok === false)) hint.textContent = "切换请求失败";
-    else hint.textContent = "切换中…";
+    if (r === false || (r && r.ok === false)) hint.textContent = L("set.rmSwitchFail");
+    else hint.textContent = L("set.rmSwitching");
   });
   if (window.petAPI.onRenderModeOutcome) {
     window.petAPI.onRenderModeOutcome((outcome) => {
@@ -402,11 +415,11 @@ async function renderOnboard(S) {
         ? outcome.correctionSourceMode : "";
       if (correctionSource || outcome.requestedMode !== committed) {
         const source = correctionSource || outcome.requestedMode;
-        hint.textContent = source === "rig" ? "2.5D 资源不可用，已回退到 GIF"
-          : source === "live2d" ? "Live2D 初始化失败，已回退到 GIF"
-            : source === "spine" ? "Spine 初始化失败，已回退到 GIF" : "已回退到 GIF";
+        hint.textContent = source === "rig" ? L("notice.fallbackRig")
+          : source === "live2d" ? L("notice.fallbackLive2d")
+            : source === "spine" ? L("notice.fallbackSpine") : L("set.rmFallbackShort");
       } else {
-        hint.textContent = "已切换并保存 ✓";
+        hint.textContent = L("set.rmSwitched");
       }
     });
   }
@@ -437,10 +450,10 @@ function applyRenderModeUI(mode) {
   });
   const hint = $("rm-hint");
   if (hint) {
-    hint.textContent = mode === "spine" ? "Spine 模式：下方显示行走/模型相关选项（人物皮肤、桌面行走、动作试演等）。"
-      : mode === "rig" ? "2.5D 模式：下方显示角色相关选项（皮肤、大小、跟随鼠标、全局跟踪）。"
-      : mode === "live2d" ? "Live2D 模式：选择模型目录（把 .model3.json 所在文件夹放进 userData/assets/live2d/ 即可出现）。"
-      : "GIF 模式：经典表情，无行走与模型选项。";
+    hint.textContent = mode === "spine" ? L("set.rmHintSpine")
+      : mode === "rig" ? L("set.rmHintRig")
+        : mode === "live2d" ? L("set.rmHintLive2d")
+          : L("set.rmHintGif");
   }
   syncNavVisibility(); // v2.5.18：分区被渲染模式隐藏时，左侧导航项同步隐藏
 }
@@ -586,7 +599,7 @@ $("btn-clear-trcache").addEventListener("click", async () => {
   const out = $("gsv-result");
   try {
     const r = await window.petAPI.clearTranslateCache();
-    setResult(out, r.ok ? "✅ 翻译缓存已清空（预热会重新翻译）" : "❌ " + (r.error || "failed"));
+    setResult(out, r.ok ? L("set.trCleared") : "❌ " + (r.error || "failed")); // r.error=技术原文透传
   } catch { setResult(out, "❌ failed"); }
 });
 
@@ -952,7 +965,7 @@ function fillChatFontOptions(customFonts) { // 已导入的本地字体追加到
   (customFonts || []).forEach((f) => {
     const o = document.createElement("option");
     o.value = "custom:" + f;
-    o.textContent = "自定义·" + f.replace(/\.(ttf|otf|woff2?)$/i, "");
+    o.textContent = L("set.fontCustom", { family: f.replace(/\.(ttf|otf|woff2?)$/i, "") });
     o.setAttribute("data-custom", "1");
     sel.appendChild(o);
   });
@@ -970,14 +983,13 @@ $("chat-font-size").addEventListener("change", async () => {
   $("chat-font-size-val").textContent = fz + " px";
 });
 $("bubble-width").addEventListener("input", () => {
-  const v = Number($("bubble-width").value);
-  $("bubble-width-val").textContent = v > 0 ? v + " px" : "自适应";
+  renderBubbleWidthVal();
 });
 $("bubble-width").addEventListener("change", async () => {
   const r = await window.petAPI.setAppearance({ bubbleWidth: Number($("bubble-width").value) });
   const bw = Number(r.bubbleWidth) > 0 ? Number(r.bubbleWidth) : 0;
   $("bubble-width").value = String(bw);
-  $("bubble-width-val").textContent = bw > 0 ? bw + " px" : "自适应";
+  renderBubbleWidthVal();
 });
 $("btn-open-schedule").addEventListener("click", () => window.petAPI.openSchedule());
 $("btn-import-font").addEventListener("click", async () => {
@@ -1034,7 +1046,7 @@ async function doSaveOther() {
   const rm = $("render-mode").value;
   if (rm === "rig") {
     const skins = await window.petAPI.rigSkins();
-    if (!skins || !skins.length) { setResult($("other-result"), "请先在「🧩 PSD 角色工具」导入 PSD 皮肤", false); return; }
+    if (!skins || !skins.length) { setResult($("other-result"), L("notice.importRigSkinFirst"), false); return; }
     await window.petAPI.rigSet(S.rigSkinId || skins[0].id);
     $("rig-switch").checked = true;
   } else if (S.rigSkinId) {
@@ -1050,7 +1062,7 @@ async function doSaveOther() {
     if (wantRig) {
       const skins = await window.petAPI.rigSkins();
       if (skins && skins.length) await window.petAPI.rigSet(skins[0].id);
-      else { $("rig-switch").checked = false; setResult($("other-result"), "没有 PSD 皮肤，请先在「🧩 PSD 角色工具」导入", false); return; }
+      else { $("rig-switch").checked = false; setResult($("other-result"), L("set.rmNoPsdImport"), false); return; }
     } else {
       await window.petAPI.rigSet("");
     }
@@ -1071,17 +1083,18 @@ const AGENT_CLIENT_LABEL = (c) => {
   const now = Date.now();
   const online = c.lastSeen && now - c.lastSeen < 5 * 60 * 1000;
   const granted = c.grantedAt ? new Date(c.grantedAt).toLocaleDateString() : "—";
-  const seen = c.lastSeen ? new Date(c.lastSeen).toLocaleString() : "从未接入";
+  const seen = c.lastSeen ? new Date(c.lastSeen).toLocaleString() : L("set.agentNeverSeen");
   return { online, granted, seen };
 };
 function renderAgentClients(clients) {
+  _agentClients = clients || []; // 快照：locale 重放数据源（在线/时间显示由 AGENT_CLIENT_LABEL 现算）
   const box = document.getElementById("agent-clients");
   if (!box) return;
   box.innerHTML = "";
   if (!clients || !clients.length) {
     const empty = document.createElement("div");
     empty.style.cssText = "color:var(--ui-muted);font-size:12px;padding:6px 2px;";
-    empty.textContent = "暂无已授权接入方——点下方「新增接入」给其他 agent 生成独立 Token";
+    empty.textContent = L("set.agentNoClients");
     box.appendChild(empty);
     return;
   }
@@ -1091,19 +1104,19 @@ function renderAgentClients(clients) {
     const info = document.createElement("span");
     info.style.cssText = "flex:1;min-width:0;";
     const { online, granted, seen } = AGENT_CLIENT_LABEL(c);
-    info.textContent = (online ? "🟢 " : "⚪ ") + c.name + "　授权于 " + granted + "　最近 " + seen;
-    info.title = "Token 只在本机使用";
+    info.textContent = (online ? "🟢 " : "⚪ ") + c.name + " " + L("set.agentClientMeta", { granted, seen }); // name/granted/seen = 数据
+    info.title = L("set.agentTokenLocalOnly");
     const tok = document.createElement("span");
     tok.textContent = c.hasToken ? "🔐" : "⚠️";
-    tok.title = c.hasToken ? "Token 已安全保存；创建时的明文不会再次显示" : "该接入方没有有效 Token";
+    tok.title = c.hasToken ? L("set.agentTokStored") : L("set.agentTokMissing");
     tok.setAttribute("aria-label", tok.title);
     tok.style.cssText = "font-size:13px;padding:0 4px;";
     const del = document.createElement("button");
-    del.textContent = "断开";
-    del.title = "移除该接入方，其 token 立即失效";
+    del.textContent = L("set.agentDisconnect");
+    del.title = L("set.agentDisconnectTip");
     del.style.cssText = "border:1px solid var(--ui-line-strong);background:transparent;cursor:pointer;color:var(--ui-danger);font-size:12px;padding:2px 8px;border-radius:6px;";
     del.addEventListener("click", async () => {
-      if (!confirm("断开接入方「" + c.name + "」？其 token 将立即失效。")) return;
+      if (!confirm(L("set.agentConfirmRevoke", { name: c.name }))) return;
       await window.petAPI.removeAgentClient(c.name);
       const aa = (await window.petAPI.getSettings()).agentApi || {};
       renderAgentClients(aa.clients || []);
@@ -1117,11 +1130,11 @@ function renderAgentClients(clients) {
 $("btn-agent-client-add").addEventListener("click", async () => {
   const input = document.getElementById("agent-client-name");
   const name = (input && input.value.trim()) || "";
-  if (!name) { window.alert("请先填写接入方名称"); return; }
+  if (!name) { window.alert(L("set.agentNeedName")); return; }
   const r = await window.petAPI.addAgentClient(name);
-  if (!r || !r.ok) { window.alert((r && r.message) || "新增失败"); return; }
+  if (!r || !r.ok) { window.alert((r && r.message) || L("set.agentAddFailed")); return; }
   if (input) input.value = "";
-  window.alert("已授权接入方「" + r.name + "」。\n\nToken：" + r.token + "\n\n请复制给该接入方（仅本机 127.0.0.1 接口使用）。");
+  window.alert(L("set.agentAdded", { name: r.name, token: r.token }));
   const aa = (await window.petAPI.getSettings()).agentApi || {};
   renderAgentClients(aa.clients || []);
 });
@@ -1138,10 +1151,10 @@ $("btn-clear-history").addEventListener("click", async () => {
 
 /* ---------- ⑤ 密钥与凭据安全 ---------- */
 function keyStateText(st) {
-  if (!st || !st.available) return { text: "安全存储不可用（Windows DPAPI）", cls: "err" };
-  if (st.unreadable) return { text: "已保存但不可读取（更换 Windows 用户或 DPAPI 失效）", cls: "warn" };
-  if (st.saved) return { text: "已保存（DPAPI 加密）", cls: "ok" };
-  return { text: "未保存", cls: "" };
+  if (!st || !st.available) return { text: L("set.dpapiUnavailable"), cls: "err" };
+  if (st.unreadable) return { text: L("set.dpapiUnreadable"), cls: "warn" };
+  if (st.saved) return { text: L("set.secretSaved"), cls: "ok" };
+  return { text: L("set.secretNone"), cls: "" };
 }
 
 function renderKeyStatuses() {
@@ -1173,10 +1186,10 @@ $("btn-dismiss-notice").addEventListener("click", async () => {
 /* 扫描本机可导入凭据（返回值只含来源/指纹，绝无完整密钥） */
 let SCAN = null;
 $("btn-scan-creds").addEventListener("click", async () => {
-  setResult($("import-result"), "扫描中…");
+  setResult($("import-result"), L("set.credScanning"));
   SCAN = await window.petAPI.scanCredentials();
   if (!SCAN || !SCAN.ok) {
-    setResult($("import-result"), (SCAN && SCAN.message) || "扫描失败", false);
+    setResult($("import-result"), (SCAN && SCAN.message) || L("set.credScanFailed"), false);
     return;
   }
   const sel = $("cred-source");
@@ -1185,30 +1198,30 @@ $("btn-scan-creds").addEventListener("click", async () => {
   for (const p of SCAN.chat || []) {
     const o = document.createElement("option");
     o.value = "chat|" + p.providerId;
-    o.textContent = "[ZCode] " + p.name + " · " + (p.baseURL || "（无地址）") + " · " + p.fingerprint;
+    o.textContent = "[ZCode] " + p.name + " · " + (p.baseURL || L("set.credNoAddr")) + " · " + p.fingerprint;
     sel.appendChild(o);
     n++;
   }
   for (const c of SCAN.cosy || []) {
     const o = document.createElement("option");
     o.value = "cosy|";
-    o.textContent = "[DashScope] DASHSCOPE_API_KEY · " + (c.endpoint || "（默认端点）") + " · " + c.fingerprint;
+    o.textContent = "[DashScope] DASHSCOPE_API_KEY · " + (c.endpoint || L("set.credDefaultEndpoint")) + " · " + c.fingerprint;
     sel.appendChild(o);
     n++;
   }
   if (!n) {
     const o = document.createElement("option");
     o.value = "";
-    o.textContent = "（未发现可导入凭据）";
+    o.textContent = L("set.credNoneFound");
     sel.appendChild(o);
     $("btn-import-cred").disabled = true;
-    setResult($("import-result"), "本机未发现可导入的外部凭据（ZCode / DashScope 来源）", false);
+    setResult($("import-result"), L("set.credNoneHint"), false);
     return;
   }
   $("btn-import-cred").disabled = false;
   // 默认选中与当前用途匹配的第一项
   syncSourceToSlot();
-  setResult($("import-result"), "发现 " + n + " 条可导入凭据；确认后点击「导入所选凭据」", true);
+  setResult($("import-result"), L("set.credFound", { n }), true);
 });
 
 function syncSourceToSlot() {
@@ -1229,47 +1242,41 @@ $("btn-import-cred").addEventListener("click", async () => {
   const [kind, providerId] = v.split("|");
   const slot = kind === "cosy" ? "ttsCosy" : "chat";
   if (slot === "chat" && !providerId) return;
-  const purpose = slot === "chat" ? "聊天 API Key" : "CosyVoice Key";
-  const ok = confirm(
-    "确认导入？\n\n" +
-    "将从指定的本地来源复制该凭据到本应用的 Windows DPAPI 加密存储，作为「" + purpose + "」在对应服务调用时使用。\n" +
-    "原值不会被显示、修改或上传；外部来源文件保持不变。"
-  );
+  const purpose = slot === "chat" ? L("set.credSlotChat") : L("set.credSlotCosy");
+  const ok = confirm(L("set.credImportConfirm", { purpose }));
   if (!ok) return;
-  setResult($("import-result"), "导入中…");
+  setResult($("import-result"), L("set.credImporting"));
   const r = await window.petAPI.importCredential({ slot, providerId });
   if (r && r.ok) {
     S = await window.petAPI.getSettings(); // 刷新状态快照（不刷新输入框已填内容）
     renderKeyStatuses();
     maybeShowCredNotice();
-    const ck2 = S.secretStatus && S.secretStatus.chatApiKey;
-    $("api-key").placeholder =
-      ck2 && ck2.saved ? "密钥已安全保存；输入新值可替换" : "sk-…（Ollama 本地可留空）";
-    document.getElementById("key-source").textContent = L("set.keyStatus") + (S.keySource || L("set.unknown"));
-    setResult($("import-result"), "✅ 已加密保存（" + r.fingerprint + "）" + (r.note ? "。" + r.note : ""), true);
+    renderApiKeyPh();
+    renderKeySource();
+    setResult($("import-result"), L("set.credEncryptedSaved", { fp: r.fingerprint }) + (r.note ? "。" + r.note : ""), true); // r.note=main 侧文本透传
   } else {
-    setResult($("import-result"), "❌ " + ((r && r.message) || "导入失败"), false);
+    setResult($("import-result"), "❌ " + ((r && r.message) || L("set.credImportFailed")), false);
   }
 });
 
 /* 显式清除已保存密钥 */
 async function clearSecretFlow(slot, label) {
   const tips = {
-    chat: "确认清除已保存的聊天 API Key？\n\n清除后聊天将无法调用云端 API（本地 Ollama 不受影响），需重新填写或导入。",
-    ttsCosy: "确认清除已保存的 CosyVoice Key？\n\n清除后 CosyVoice 克隆音色不可用，会自动回退其他语音方案。",
-    agent: "确认清除 Agent Bearer Token？\n\n重启桌宠后，Agent API 将回到「空 token 兼容模式」（仅监听 127.0.0.1 的旧脚本无需认证即可调用）。"
+    chat: L("set.clearTipChat"),
+    ttsCosy: L("set.clearTipCosy"),
+    agent: L("set.clearTipAgent")
   };
-  if (!confirm(tips[slot] || ("确认清除" + label + "？"))) return;
-  setResult($("clear-result"), "清除中…");
+  if (!confirm(tips[slot] || L("set.clearConfirmGeneric", { label }))) return;
+  setResult($("clear-result"), L("set.clearing"));
   const r = await window.petAPI.clearSecret(slot);
   S = await window.petAPI.getSettings();
   renderKeyStatuses();
-  if (r && r.ok) setResult($("clear-result"), "✅ 已清除" + (slot === "agent" ? "；重启后生效" : ""), true);
-  else setResult($("clear-result"), "❌ " + ((r && r.message) || "清除失败"), false);
+  if (r && r.ok) setResult($("clear-result"), L("set.cleared") + (slot === "agent" ? L("set.clearedRestartNote") : ""), true);
+  else setResult($("clear-result"), "❌ " + ((r && r.message) || L("set.clearFailed")), false);
 }
-$("btn-clear-chat-key").addEventListener("click", () => clearSecretFlow("chat", "聊天 Key"));
-$("btn-clear-cosy-key").addEventListener("click", () => clearSecretFlow("ttsCosy", "Cosy Key"));
-$("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agent", "Agent Token"));
+$("btn-clear-chat-key").addEventListener("click", () => clearSecretFlow("chat", L("set.chatKeyShort")));
+$("btn-clear-cosy-key").addEventListener("click", () => clearSecretFlow("ttsCosy", L("set.cosyKeyShort")));
+$("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agent", L("set.agentTokenShort")));
 
 /* ---------- 记忆管理（v2.5.2）：查看/删除/清空 ---------- */
 (async () => {
@@ -1284,10 +1291,10 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
       if (!b || b.pct == null) { if (bar) bar.style.width = "0%"; if (lab) lab.textContent = ""; return; }
       bar.style.width = b.pct + "%";
       lab.textContent = b.max
-        ? `🥰 羁绊 Lv.${b.level}（MAX）· 已陪伴 ${b.days} 天`
-        : `🥰 羁绊 Lv.${b.level} · 距 Lv.${b.level + 1} 还差 ${b.next - b.exp} 经验（已陪伴 ${b.days} 天）`;
+        ? L("set.bondMax", { level: b.level, days: b.days })
+        : L("set.bondProgress", { level: b.level, next: b.level + 1, exp: b.next - b.exp, days: b.days });
     };
-    const failText = "记忆读取失败，点击此处重试";
+    const failText = L("set.memReadFailedRetry");
     const showFail = () => {
       statsEl.textContent = failText;
       statsEl.style.cursor = "pointer";
@@ -1300,24 +1307,24 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
         new Promise((_, rej) => setTimeout(() => rej(new Error("读取超时")), 6000))
       ]);
       if (!r || !Array.isArray(r.facts) || !r.facts.length) {
-        statsEl.textContent = "暂无已记住的信息——聊天中提到的称谓/喜好/生日/健康/安排会自动记住（本地加密）";
+        statsEl.textContent = L("set.memEmpty");
         listEl.innerHTML = "";
         renderBondBar(r && r.bond);
         return;
       }
       renderBondBar(r.bond);
-      statsEl.textContent = "已记住 " + r.facts.length + " 条" + (r.summary ? "（含对话摘要）" : "");
+      statsEl.textContent = L("set.memStats", { n: r.facts.length, summary: r.summary ? L("set.memStatsSummary") : "" });
       listEl.innerHTML = "";
       r.facts.forEach((f) => {
         const row = document.createElement("div");
         row.style.cssText = "display:flex;align-items:center;gap:8px;padding:3px 0;font-size:13px;";
         const label = document.createElement("span");
         label.style.cssText = "flex:1;";
-        const anchorLbl = ({ PLAN: "计划", PREFERENCE: "偏好", TABOO: "禁忌", EVENT: "重要日子", EMOTION: "情绪状态", RELATION: "关系身份" })[f.anchor] || "";
-        label.textContent = (anchorLbl ? "【" + anchorLbl + "】" : "") + "· " + f.text;
+        const anchorLbl = ({ PLAN: L("set.memCatPlan"), PREFERENCE: L("set.memCatPreference"), TABOO: L("set.memCatTaboo"), EVENT: L("set.memCatEvent"), EMOTION: L("set.memCatEmotion"), RELATION: L("set.memCatRelation") })[f.anchor] || "";
+        label.textContent = (anchorLbl ? "【" + anchorLbl + "】" : "") + "· " + f.text; // f.text=记忆内容（用户数据，不翻译）
         const edit = document.createElement("button");
         edit.textContent = "✎";
-        edit.title = "编辑这条";
+        edit.title = L("set.memEditThis");
         edit.style.cssText = "border:none;background:transparent;cursor:pointer;color:#2980b9;font-size:14px;padding:0 4px;";
         // Electron 不支持 window.prompt()（直接返回 null），编辑改用行内输入框
         edit.addEventListener("click", () => {
@@ -1327,11 +1334,11 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
           input.style.cssText = "flex:1;min-width:0;padding:3px 6px;border:1px solid var(--ui-line);border-radius:4px;background:var(--ui-surface);color:inherit;font-size:13px;";
           const save = document.createElement("button");
           save.textContent = "✓";
-          save.title = "保存";
+          save.title = L("set.saveShort");
           save.style.cssText = "border:none;background:transparent;cursor:pointer;color:#27ae60;font-size:14px;padding:0 4px;";
           const cancel = document.createElement("button");
           cancel.textContent = "✕";
-          cancel.title = "取消";
+          cancel.title = L("set.cancelShort");
           cancel.style.cssText = "border:none;background:transparent;cursor:pointer;color:#7f8c8d;font-size:14px;padding:0 4px;";
           row.replaceChildren(input, save, cancel);
           input.focus();
@@ -1341,7 +1348,7 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
               const nt = input.value.trim();
               if (nt && nt !== f.text) {
                 const r = await window.petAPI.updateMemoryFact(f.id, nt);
-                if (!r || !r.ok) { window.alert((r && r.message) || "编辑失败"); return; }
+                if (!r || !r.ok) { window.alert((r && r.message) || L("set.memEditFailed")); return; }
               }
             }
             refresh();
@@ -1355,7 +1362,7 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
         });
         const del = document.createElement("button");
         del.textContent = "✕";
-        del.title = "删除这条";
+        del.title = L("set.memDeleteThis");
         del.style.cssText = "border:none;background:transparent;cursor:pointer;color:#c0392b;font-size:14px;padding:0 4px;";
         del.addEventListener("click", async () => {
           await window.petAPI.deleteMemoryFact(f.id);
@@ -1369,7 +1376,7 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
     } catch { showFail(); }
   };
   btnClear.addEventListener("click", async () => {
-    if (!confirm("确定清空全部记忆吗？她会忘记所有记得的事。")) return;
+    if (!confirm(L("set.memConfirmClearAll"))) return;
     await window.petAPI.clearMemory();
     refresh();
   });
@@ -1382,7 +1389,7 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
       if (!v) return;
       const r = await window.petAPI.addMemoryFact(v);
       if (r && r.ok) { addInput.value = ""; refresh(); }
-      else window.alert((r && r.message) || "添加失败");
+      else window.alert((r && r.message) || L("set.memAddFailed"));
     };
     addBtn.addEventListener("click", doAdd);
     addInput.addEventListener("keydown", (e) => { if (e.key === "Enter") doAdd(); });
@@ -1410,20 +1417,20 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
       const res = document.getElementById("aud-result");
       if (!res) return;
       if (audAudio) { try { audAudio.pause(); } catch { /* 忽略 */ } audAudio = null; }
-      res.textContent = "合成中…";
+      res.textContent = L("set.audSynthesizing");
       try {
         const r = await window.petAPI.emotionAudition(cfg.key);
-        if (!r || !r.ok) { res.textContent = (r && r.message) || "合成失败"; return; }
+        if (!r || !r.ok) { res.textContent = (r && r.message) || L("set.audFailed"); return; } // message=main 侧文本透传
         const base = Number((document.getElementById("tts-rate") || {}).value) || 0.95;
         const audio = new Audio("data:audio/wav;base64," + r.b64);
         audio.playbackRate = Math.max(0.9, Math.min(1.1, base * cfg.rateMul));
         audAudio = audio;
-        res.textContent = "播放中…";
-        audio.onended = () => { res.textContent = "播放完成"; };
-        audio.onerror = () => { res.textContent = "播放失败"; };
-        await audio.play().catch(() => { res.textContent = "播放失败（请检查 GSV 服务）"; });
+        res.textContent = L("set.audPlaying");
+        audio.onended = () => { res.textContent = L("set.audDone"); };
+        audio.onerror = () => { res.textContent = L("set.audPlayFailed"); };
+        await audio.play().catch(() => { res.textContent = L("set.audPlayFailedHint"); });
       } catch (e) {
-        res.textContent = "合成失败：" + (e && e.message || e);
+        res.textContent = L("set.audSynthFailed", { error: (e && e.message) || e });
       }
     });
   }
@@ -1547,7 +1554,7 @@ function syncNavVisibility() {
   });
   const btnDiscard = $("set-discard");
   if (btnDiscard) btnDiscard.addEventListener("click", () => {
-    if (!confirm("放弃所有未保存的改动？页面将重新加载，已填内容会恢复为上次保存的值。")) return;
+    if (!confirm(L("set.confirmDiscardAll"))) return;
     location.reload();
   });
 
@@ -1563,8 +1570,13 @@ function syncNavVisibility() {
 if (window.I18N && window.I18N.onChange) window.I18N.onChange(() => {
   renderVersion();
   renderKeySource();
+  renderApiKeyPh();
+  renderAgentTokenPh();
+  renderKeyStatuses();
+  renderBubbleWidthVal();
   if (S && S.pet) renderOnboard(S); // S 未加载时跳过（init 后首次 onChange 自然覆盖）
   const rm = $("render-mode");
   if (rm) applyRenderModeUI(rm.value); // rm-hint 与模式区块可见性的唯一 owner
   if (fixedLineStatus) renderFixedLinePool(); // 池面板文案全部 L() 化，可安全重绘
+  renderAgentClients(_agentClients); // 接入方列表纯投影（快照数据，零新请求）
 });

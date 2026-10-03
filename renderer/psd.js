@@ -8,6 +8,7 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
+const L = (key, params) => (window.I18N && I18N.t(key, params)) || key;
 let psd = null;
 let sel = null;         // { node, parent, el } 当前选中的图层/组
 let edited = false;     // 是否做过图层改动（应用到桌宠时需走内存重序列化）
@@ -31,7 +32,7 @@ $("drop").addEventListener("drop", (e) => {
   $("drop").classList.remove("over");
   const f = e.dataTransfer.files && e.dataTransfer.files[0];
   if (f && /\.psd$/i.test(f.name)) loadFile(f);
-  else setStatus("请拖入 .psd 文件", true);
+  else setStatusL("page.psd.needPsdFile", null, true);
 });
 $("file").addEventListener("change", (e) => {
   const f = e.target.files && e.target.files[0];
@@ -39,12 +40,41 @@ $("file").addEventListener("change", (e) => {
   e.target.value = "";
 });
 
-function setStatus(msg, isErr) {
-  const s = $("status");
-  s.textContent = msg;
-  s.className = isErr ? "err" : "";
+/* Phase 4-B2.1：状态条/元信息/预览提示/rig 信息 = 最近一次事件的可重放投影
+ * （存 key+params 而非译文，locale 变化经 renderX() 重放，零业务副作用）。
+ * params 里的 layer 名、文件路径、error message、尺寸数字 = DATA 原样透传。 */
+let _lastStatus = null; // { key, params, isErr }
+let _lastMeta = null;   // { w, h, total, canvas }
+let _parseHint = false; // 解析完成后 preview-wrap 显示静态提示（无预览图时）
+let _rigInfo = null;    // { n, edited, refreshed }（refreshed=随编辑刷新态）
+
+function setStatusL(key, params, isErr) {
+  _lastStatus = { key, params: params || null, isErr: !!isErr };
+  renderStatus();
 }
-function dbg(msg) { try { window.petAPI && window.petAPI.playback("[psd] " + msg); } catch { /* 忽略 */ } }
+function renderStatus() {
+  if (!_lastStatus) return;
+  const s = $("status");
+  s.textContent = L(_lastStatus.key, _lastStatus.params);
+  s.className = _lastStatus.isErr ? "err" : "";
+}
+function dbg(msg) { try { window.petAPI && window.petAPI.playback("[psd] " + msg); } catch { /* 忽略 */ } } // INTERNAL：不翻译
+
+function renderMeta() {
+  if (!_lastMeta) return;
+  $("meta").textContent = L("page.psd.meta", _lastMeta);
+}
+function renderPreviewHint() {
+  if (_parseHint && !previewImg) {
+    $("preview-wrap").innerHTML = `<span class="meta">${L("page.psd.parseHint")}</span>`;
+  }
+}
+function renderRigInfo() {
+  if (!_rigInfo) return;
+  $("rig-info").textContent = _rigInfo.refreshed
+    ? L("page.psd.rigRefreshedInfo", { n: _rigInfo.n })
+    : L("page.psd.rigInfo", { n: _rigInfo.n, edited: _rigInfo.edited ? L("page.psd.rigInfoEdited") : "" });
+}
 
 /* ---------------- 图层树（可选择 + 显隐切换） ---------------- */
 
@@ -59,7 +89,7 @@ function buildTree() {
         const div = document.createElement("div");
         div.className = "lvl grp";
         div.style.paddingLeft = (depth * 12) + "px";
-        div.textContent = `${isHidden(c) ? "🙈 " : ""}${c.name || "未命名"} [组]`;
+        div.textContent = `${isHidden(c) ? "🙈 " : ""}${c.name || L("page.psd.unnamed")} ${L("page.psd.groupTag")}`;
         tree.appendChild(div);
         draw(c.children, depth + 1);
       } else {
@@ -73,7 +103,7 @@ function buildTree() {
         eye.className = "eye";
         const hidden = isHidden(c);
         eye.textContent = hidden ? "🙈" : "👁";
-        eye.title = hidden ? "显示该图层" : "隐藏该图层";
+        eye.title = hidden ? L("page.psd.eyeShow") : L("page.psd.eyeHide");
         eye.addEventListener("click", (e) => {
           e.stopPropagation();
           pushSnap(); // 撤销快照（显隐切换）
@@ -82,7 +112,7 @@ function buildTree() {
         });
         const nm = document.createElement("span");
         nm.className = "nm";
-        nm.textContent = c.name || "未命名";
+        nm.textContent = c.name || L("page.psd.unnamed");
         const dim = document.createElement("span");
         dim.className = "dim";
         dim.textContent = c.canvas ? `（${c.canvas.width}×${c.canvas.height}）` : "";
@@ -94,7 +124,7 @@ function buildTree() {
     }
   };
   draw(psd ? psd.children : [], 0);
-  if (!tree.children.length) tree.textContent = "尚未加载 PSD";
+  if (!tree.children.length) tree.textContent = L("page.psd.treeEmpty");
   if (sel) refreshSelButton();
   return leafCount;
 }
@@ -108,13 +138,13 @@ function selectLayer(node, parent, el) {
 
 function refreshSelButton() {
   if (!sel) {
-    $("sel-info").textContent = "未选择图层";
+    $("sel-info").textContent = L("page.psd.noSelection");
     $("btn-layer-dup").disabled = $("btn-layer-scale").disabled = $("scale-pct").disabled = $("btn-layer-del").disabled = true;
     return;
   }
-  const L = sel.node;
-  const hasCanvas = !!(L && L.canvas);
-  $("sel-info").textContent = (L.name || "未命名") + (hasCanvas ? `（${L.canvas.width}×${L.canvas.height}）` : " [组]");
+  const L2 = sel.node;
+  const hasCanvas = !!(L2 && L2.canvas);
+  $("sel-info").textContent = (L2.name || L("page.psd.unnamed")) + (hasCanvas ? `（${L2.canvas.width}×${L2.canvas.height}）` : ` ${L("page.psd.groupTag")}`);
   $("btn-layer-dup").disabled = $("btn-layer-scale").disabled = $("scale-pct").disabled = !hasCanvas;
   $("btn-layer-del").disabled = false;
 }
@@ -168,7 +198,7 @@ function pushSnap() {
   redoStack.length = 0;
   updateUndoButtons();
 }
-function restorePsd(snap, label) {
+function restorePsd(snap, statusKey) {
   psd.children = snap.root.slice();
   for (const g of snap.groups) g.obj.children = g.order.slice();
   for (const l of snap.leaves) {
@@ -189,17 +219,17 @@ function restorePsd(snap, label) {
   if (previewImg) refreshPreviewSoon();
   if (rigRuntime) refreshRigSoon();
   updateUndoButtons();
-  setStatus(label);
+  setStatusL(statusKey, null, false);
 }
 function undoPsd() {
   if (!undoStack.length || !psd) return;
   redoStack.push(snapshotPsd());
-  restorePsd(undoStack.pop(), "↩ 已撤销");
+  restorePsd(undoStack.pop(), "page.psd.undoDone");
 }
 function redoPsd() {
   if (!redoStack.length || !psd) return;
   undoStack.push(snapshotPsd());
-  restorePsd(redoStack.pop(), "↪ 已重做");
+  restorePsd(redoStack.pop(), "page.psd.redoDone");
 }
 function updateUndoButtons() {
   const u = document.getElementById("btn-layer-undo");
@@ -235,60 +265,60 @@ function contentCenterOf(canvas) {
 
 /** 单层缩放：以图层内容中心为锚缩放画布，内容中心在 PSD 文档中的位置不变 */
 function scaleLayer() {
-  const L = sel && sel.node;
-  if (!L || !L.canvas) { setStatus("请先选择一个有像素的图层", true); return; }
+  const lay = sel && sel.node;
+  if (!lay || !lay.canvas) { setStatusL("page.psd.needPixelLayer", null, true); return; }
   let pct = Number($("scale-pct").value);
   if (!Number.isFinite(pct)) pct = 100;
   pct = Math.max(10, Math.min(500, pct));
   $("scale-pct").value = pct;
   pushSnap(); // 撤销快照
   const s = pct / 100;
-  const c = contentCenterOf(L.canvas);
-  const nw = Math.max(1, Math.round(L.canvas.width * s));
-  const nh = Math.max(1, Math.round(L.canvas.height * s));
+  const c = contentCenterOf(lay.canvas);
+  const nw = Math.max(1, Math.round(lay.canvas.width * s));
+  const nh = Math.max(1, Math.round(lay.canvas.height * s));
   const n = document.createElement("canvas");
   n.width = nw; n.height = nh;
   const ctx = n.getContext("2d");
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
   const dx = c.cx * (1 - s), dy = c.cy * (1 - s);
-  ctx.drawImage(L.canvas, dx, dy, nw, nh);
-  L.canvas = n;
-  L.left = Math.round((L.left | 0) + dx);
-  L.top = Math.round((L.top | 0) + dy);
-  if (typeof L.right === "number") L.right = L.left + nw;
-  if (typeof L.bottom === "number") L.bottom = L.top + nh;
+  ctx.drawImage(lay.canvas, dx, dy, nw, nh);
+  lay.canvas = n;
+  lay.left = Math.round((lay.left | 0) + dx);
+  lay.top = Math.round((lay.top | 0) + dy);
+  if (typeof lay.right === "number") lay.right = lay.left + nw;
+  if (typeof lay.bottom === "number") lay.bottom = lay.top + nh;
   setEdited({ tree: true }); // 尺寸/坐标变化 → 重建行（dim 更新）
-  setStatus(`已缩放「${L.name || "图层"}」至 ${pct}%（按内容中心）`);
+  setStatusL("page.psd.scaled", { name: lay.name || L("page.psd.layerDefault"), pct });
 }
 
 /** 复制选中图层：原样复制，偏移 +16,+16 便于看到效果，插入到原图层上方 */
 function dupLayer() {
-  const L = sel && sel.node;
-  if (!L || !L.canvas) { setStatus("请先选择一个有像素的图层", true); return; }
+  const lay = sel && sel.node;
+  if (!lay || !lay.canvas) { setStatusL("page.psd.needPixelLayer", null, true); return; }
   const parent = sel.parent || psd;
   const kids = parent.children || (parent.children = []);
-  const idx = kids.indexOf(L);
+  const idx = kids.indexOf(lay);
   pushSnap(); // 撤销快照
   const n = document.createElement("canvas");
-  n.width = L.canvas.width; n.height = L.canvas.height;
-  n.getContext("2d").drawImage(L.canvas, 0, 0);
+  n.width = lay.canvas.width; n.height = lay.canvas.height;
+  n.getContext("2d").drawImage(lay.canvas, 0, 0);
   const cp = {
-    name: (L.name || "图层") + " 副本",
+    name: (lay.name || L("page.psd.layerDefault")) + L("page.psd.copySuffix"),
     canvas: n,
-    left: (L.left | 0) + 16,
-    top: (L.top | 0) + 16,
-    opacity: typeof L.opacity === "number" ? L.opacity : 1,
-    visible: !isHidden(L),
-    hidden: isHidden(L),
+    left: (lay.left | 0) + 16,
+    top: (lay.top | 0) + 16,
+    opacity: typeof lay.opacity === "number" ? lay.opacity : 1,
+    visible: !isHidden(lay),
+    hidden: isHidden(lay),
   };
-  if (typeof L.right === "number") { cp.right = cp.left + n.width; cp.bottom = cp.top + n.height; }
+  if (typeof lay.right === "number") { cp.right = cp.left + n.width; cp.bottom = cp.top + n.height; }
   kids.splice(idx + 1, 0, cp);
   edited = true;
   $("btn-apply-rig").disabled = false;
   buildTree();
   selectLayer(cp, parent);
-  setStatus(`已复制图层「${cp.name}」`);
+  setStatusL("page.psd.copied", { name: cp.name });
 }
 
 /** 删除选中图层（组整体删除其子级） */
@@ -297,10 +327,10 @@ function delLayer() {
   const parent = sel.parent || psd;
   const kids = parent.children || [];
   const idx = kids.indexOf(sel.node);
-  const nm = sel.node.name || "图层";
+  const nm = sel.node.name || L("page.psd.layerDefault");
   pushSnap(); // 撤销快照
   if (idx >= 0) kids.splice(idx, 1);
-  else nm = "未知节点";
+  else setStatusL("page.psd.unknownNode", null, true);
   edited = true;
   $("btn-apply-rig").disabled = false;
   sel = null;
@@ -308,19 +338,19 @@ function delLayer() {
   refreshSelButton();
   if (previewImg) refreshPreviewSoon();
   if (rigRuntime) refreshRigSoon();
-  setStatus(`已删除图层「${nm}」`);
+  setStatusL("page.psd.deleted", { name: nm });
 }
 
 /** 导入一张图片作为新图层（放最上层，居中） */
 $("btn-layer-add").addEventListener("click", () => {
-  if (!psd) { setStatus("请先加载 PSD", true); return; }
+  if (!psd) { setStatusL("page.psd.needPsd", null, true); return; }
   $("layer-file").click();
 });
 $("layer-file").addEventListener("change", (e) => {
   const f = e.target.files && e.target.files[0];
   e.target.value = "";
   if (f && /\.(png|jpe?g|webp|gif)$/i.test(f.name)) addLayerFile(f);
-  else setStatus("请选择 PNG/JPG/WebP/GIF 图片", true);
+  else setStatusL("page.psd.needImage", null, true);
 });
 async function addLayerFile(file) {
   try {
@@ -337,8 +367,8 @@ async function addLayerFile(file) {
     n.width = img.naturalWidth || img.width;
     n.height = img.naturalHeight || img.height;
     n.getContext("2d").drawImage(img, 0, 0);
-    const L = {
-      name: "新增图层",
+    const L2 = {
+      name: L("page.psd.newLayerName"),
       canvas: n,
       left: Math.max(0, Math.round((psd.width - n.width) / 2)),
       top: Math.max(0, Math.round((psd.height - n.height) / 2)),
@@ -350,16 +380,16 @@ async function addLayerFile(file) {
     };
     pushSnap(); // 撤销快照
     psd.children = psd.children || [];
-    psd.children.push(L);
+    psd.children.push(L2);
     edited = true;
     $("btn-apply-rig").disabled = false;
     buildTree();
-    selectLayer(L, psd);
+    selectLayer(L2, psd);
     if (previewImg) refreshPreviewSoon();
     if (rigRuntime) refreshRigSoon();
-    setStatus(`已新增图层「${file.name}」（${n.width}×${n.height}）`);
+    setStatusL("page.psd.addedLayer", { name: file.name, w: n.width, h: n.height });
   } catch (e) {
-    setStatus("导入图层失败：" + (e && e.message || e), true);
+    setStatusL("page.psd.importLayerFailed", { error: (e && e.message) || e }, true);
   }
 }
 
@@ -414,7 +444,7 @@ function flattenPsd(p) {
 }
 
 async function loadFile(file) {
-  setStatus("正在解析 " + file.name + " …");
+  setStatusL("page.psd.parsing", { name: file.name });
   try {
     const buf = await file.arrayBuffer();
     lastPsdBuf = buf;
@@ -427,19 +457,21 @@ async function loadFile(file) {
     buildTree();
     const total = countLayers(psd.children);
     const withCanvas = countCanvas(psd.children);
-    $("meta").textContent = "尺寸 " + psd.width + "×" + psd.height + " · 图层 " + total + " 个（含像素 " + withCanvas + "）";
+    _lastMeta = { w: psd.width, h: psd.height, total, canvas: withCanvas };
+    renderMeta();
     dbg("解析完成 尺寸=" + psd.width + "x" + psd.height + " 图层=" + total + " 含canvas=" + withCanvas + " 顶层=" + (psd.children || []).length);
     $("btn-flatten").disabled = false;
     $("btn-rig").disabled = false;
     $("btn-export").disabled = true;
     $("btn-layer-add").disabled = false;
     $("btn-apply-rig").disabled = !lastPsdPath;
-    $("preview-wrap").innerHTML = '<span class="meta">解析完成，点击「扁平化预览」，或先选中图层做调整</span>';
-    setStatus("解析完成 ✓（图层 " + total + "，含像素 " + withCanvas + "）");
+    _parseHint = true;
+    renderPreviewHint();
+    setStatusL("page.psd.parsedDone", { total, canvas: withCanvas });
   } catch (e) {
     psd = null;
     dbg("解析失败: " + (e && e.message || e));
-    setStatus("解析失败：" + (e && e.message || e), true);
+    setStatusL("page.psd.parseFailed", { error: (e && e.message) || e }, true);
   }
 }
 
@@ -472,11 +504,13 @@ function doFlatten() {
     img.src = canvas.toDataURL("image/png");
     wrap.appendChild(img);
     previewImg = img;
+    _parseHint = false; // 预览图已接管 preview-wrap，提示占位失效
     $("btn-export").disabled = false;
-    setStatus(opaque > 0 ? `预览生成 ✓（非透明像素 ${opaque}，绘制 ${stats.drawn}/${stats.layers} 层${edited ? "，已含编辑" : ""}）` : "⚠ 预览为空：图层没有可绘制像素", opaque === 0);
+    if (opaque > 0) setStatusL("page.psd.previewStats", { opaque, drawn: stats.drawn, layers: stats.layers, edited: edited ? L("page.psd.previewEdited") : "" });
+    else setStatusL("page.psd.previewEmptyWarn", null, true);
   } catch (e) {
     dbg("扁平化失败: " + (e && e.message || e));
-    setStatus("扁平化失败：" + (e && e.message || e), true);
+    setStatusL("page.psd.flattenFailed", { error: (e && e.message) || e }, true);
   }
 }
 
@@ -485,13 +519,13 @@ $("btn-flatten").addEventListener("click", doFlatten);
 $("btn-export").addEventListener("click", async () => {
   if (!psd) return;
   const img = $("preview");
-  if (!img) { setStatus("请先扁平化预览", true); return; }
+  if (!img) { setStatusL("page.psd.needFlatten", null, true); return; }
   try {
     const res = await window.petAPI.psdSave(img.src, psd.width + "x" + psd.height);
-    if (res && res.ok) setStatus("已导出：" + res.path);
-    else setStatus("导出失败：" + ((res && res.message) || "未知错误"), true);
+    if (res && res.ok) setStatusL("page.psd.exported", { path: res.path });
+    else setStatusL("page.psd.exportFailed", { error: (res && res.message) || L("page.psd.unknownError") }, true);
   } catch (e) {
-    setStatus("导出失败：" + (e && e.message || e), true);
+    setStatusL("page.psd.exportFailed", { error: (e && e.message) || e }, true);
   }
 });
 
@@ -523,18 +557,19 @@ function doRigPreview() {
     window.Rigger.cleanPsdLayers(psdImg);
     const rig = window.Rigger.buildRig(psdImg, rigOpts());
     rigRuntime.applyRig(rig);
-    $("rig-info").textContent = rig.layers.length + " 部件 / 已按编辑态刷新（含图层改动）";
-    setStatus("2.5D 预览已随编辑刷新 ✓");
+    _rigInfo = { n: rig.layers.length, edited, refreshed: true };
+    renderRigInfo();
+    setStatusL("page.psd.rigRefreshed", null);
   } catch (e) {
     dbg("2.5D 刷新失败: " + (e && e.message || e));
-    setStatus("2.5D 刷新失败：" + (e && e.message || e), true);
+    setStatusL("page.psd.rigRefreshFailed", { error: (e && e.message) || e }, true);
   }
 }
 
 $("btn-rig").addEventListener("click", async () => {
   if (!psd) return;
   try {
-    setStatus("正在自动装配 2.5D …");
+    setStatusL("page.psd.rigAssembling", null);
     const wrap = $("rig-wrap");
     wrap.innerHTML = "";
     const cv = document.createElement("canvas");
@@ -552,11 +587,12 @@ $("btn-rig").addEventListener("click", async () => {
     rigRuntime.applyRig(rig);
     if (pre && pre.noisy > 0) dbg("2.5D 预处理: 清除噪声 " + pre.noisy + "/" + pre.layers + " 层");
     if (rig.synth && (rig.synth.eye || rig.synth.mouth)) dbg("2.5D 差分: 自动生成闭眼/闭口");
-    $("rig-info").textContent = rig.layers.length + " 部件 / 自动装配完成，鼠标移入预览区可视线跟随" + (edited ? "（已含图层编辑）" : "");
-    setStatus("2.5D 动态预览已启动 ✓");
+    _rigInfo = { n: rig.layers.length, edited, refreshed: false };
+    renderRigInfo();
+    setStatusL("page.psd.rigStarted", null);
   } catch (e) {
     dbg("2.5D 装配失败: " + (e && e.message || e));
-    setStatus("2.5D 装配失败：" + (e && e.message || e), true);
+    setStatusL("page.psd.rigFailed", { error: (e && e.message) || e }, true);
   }
 });
 
@@ -572,24 +608,38 @@ function blobToBase64(blob) {
 $("btn-apply-rig").addEventListener("click", async () => {
   if (!psd) return;
   try {
-    setStatus("正在应用到桌宠 …");
+    setStatusL("page.psd.applying", null);
     if (!edited) {
-      if (!lastPsdPath) { setStatus("无法获取文件路径（请用文件选择器打开，或先做任意图层编辑）", true); return; }
+      if (!lastPsdPath) { setStatusL("page.psd.noFilePath", null, true); return; }
       const res = await window.petAPI.rigApply(lastPsdPath);
-      if (res && res.ok) setStatus("✅ 已应用 2.5D 角色：" + res.id + "（桌宠已切换）");
-      else setStatus("应用失败：" + ((res && res.message) || "未知错误"), true);
+      if (res && res.ok) setStatusL("page.psd.applied", { id: res.id });
+      else setStatusL("page.psd.applyFailed", { error: (res && res.message) || L("page.psd.unknownError") }, true);
       return;
     }
     // 编辑过：用 ag-psd 把内存图层树序列化回 .psd，主进程落盘为当前皮肤（保留图层结构）
     const buf = window.agPsd.writePsd(psd);
     let name = ((lastPsdPath || "").split(/[\\/]/).pop() || "").replace(/\.psd$/i, "");
     if (!name) name = "psd-edit";
-    name = name + "-edit.psd";
+    name = name + "-edit.psd"; // 落盘文件名=技术标识，不翻译
     const b64 = await blobToBase64(new Blob([buf], { type: "application/octet-stream" }));
     const res = await window.petAPI.rigApplyBuffer(name, b64);
-    if (res && res.ok) setStatus("✅ 已应用编辑后 2.5D 角色：" + res.id + "（含图层改动，桌宠已切换）");
-    else setStatus("应用失败：" + ((res && res.message) || "未知错误"), true);
+    if (res && res.ok) setStatusL("page.psd.appliedEdited", { id: res.id });
+    else setStatusL("page.psd.applyFailed", { error: (res && res.message) || L("page.psd.unknownError") }, true);
   } catch (e) {
-    setStatus("应用失败：" + (e && e.message || e), true);
+    setStatusL("page.psd.applyFailed", { error: (e && e.message) || e }, true);
+  }
+});
+
+/* Phase 4-B2.1：locale 变化 = 纯状态重放（key+params 重翻译），零业务请求；
+ * psd 文档对象/撤销栈/预览图/rig 运行时全部保持。buildTree+refreshSelButton
+ * 为 DOM 重建（树结构来自内存 psd，不重新解析文件）。 */
+if (window.I18N && window.I18N.onChange) window.I18N.onChange(() => {
+  renderStatus();
+  renderMeta();
+  renderRigInfo();
+  renderPreviewHint();
+  if (psd) {
+    buildTree();
+    refreshSelButton();
   }
 });
