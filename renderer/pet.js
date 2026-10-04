@@ -2706,8 +2706,7 @@ async function sendText(text) {
   try {
     await window.petAPI.ask(text);
   } catch {
-    const presentation = window.ErrorPresenter.toPresentation(INTERNAL_FAILURE);
-    showError(window.I18N.t(presentation.key, presentation.params));
+    showError(window.ErrorPresent.presentError(INTERNAL_FAILURE));
   }
 }
 
@@ -3222,14 +3221,9 @@ window.petAPI.onDone(({ mode, full, emotion, swipes, swipeIndex }) => {
 });
 
 window.petAPI.onError((payload) => {
-  if (payload && Object.prototype.hasOwnProperty.call(payload, "code")) {
-    const presentation = window.ErrorPresenter.toPresentation({ code: payload.code, meta: payload.meta });
-    showError(window.I18N.t(presentation.key, presentation.params));
-  } else if (payload && typeof payload.message === "string") {
-    showError(payload.message); // 旧版无 code payload 保留原文兼容；仅新 code 路径承诺过滤技术详情
-  } else {
-    showError(window.I18N.t("err.unknown"));
-  }
+  // Phase 5-G2：与设置页等 8 个页面共用同一适配器。语义不变——有 code 走 presenter，
+  // 无 code 的旧 payload 保留原文兼容（仅新 code 路径承诺过滤技术详情）。
+  showError(window.ErrorPresent.presentError(payload));
   if (SPEECH_DIAG && diagThinkingId) { speechDiagLog("THINKING_END", diagThinkingId, "error"); speechDiagEnd(diagThinkingId); diagThinkingId = 0; } // 错误路径同样收口 thinking session
   maybeFlushPendingSend(); // 防抖：错误后补发等待中的消息（用户想说的还是会被回答）
   speak("唔……出错了。");

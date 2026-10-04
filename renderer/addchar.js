@@ -5,13 +5,7 @@ const btn = document.getElementById("btn-import");
 const statusEl = document.getElementById("status");
 const listEl = document.getElementById("model-list");
 const t = (key, params) => (window.I18N && window.I18N.t(key, params)) || key;
-const presentError = (result) => {
-  if (result && Object.prototype.hasOwnProperty.call(result, "code")) {
-    const p = window.ErrorPresenter.toPresentation({ code: result.code, meta: result.meta });
-    return window.I18N.t(p.key, p.params);
-  }
-  return result && typeof result.error === "string" && result.error ? result.error : window.I18N.t("err.unknown");
-};
+const presentError = (result) => window.ErrorPresent.presentError(result); // Phase 5-G2：统一适配器
 
 /* Phase 5-E3：列表快照与状态文案进 state，DOM 由 render*() 纯投影。
  * locale 变化只重跑投影——不重新调用 petAPI、不重建业务状态。 */

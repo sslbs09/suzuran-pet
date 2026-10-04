@@ -35,10 +35,14 @@ test("terms.js never writes a raw message into the DOM", () => {
 });
 
 test("terms.js routes errors through the shared presenter contract", () => {
-  assert.match(termsCode, /window\.ErrorPresenter\.toPresentation\(/, "presenter is used");
-  assert.match(termsCode, /window\.I18N\.t\(/, "output goes through I18N");
-  assert.match(termsCode, /hasOwnProperty\.call\(result,\s*"code"\)/,
-    "code presence decided by hasOwnProperty so a present-but-invalid code cannot fall through");
+  // 5-G2：实现已收敛到 renderer/error-present.js；legacy:false 保留条款页的强策略
+  assert.match(termsCode, /window\.ErrorPresent\.presentError\(result, \{ legacy: false \}\)/,
+    "terms uses the shared adapter and keeps its strict no-legacy-echo policy");
+  assert.doesNotMatch(termsCode, /ErrorPresenter\.toPresentation/, "no page-local presenter call");
+  const adapter = fs.readFileSync(path.join(root, "renderer/error-present.js"), "utf8");
+  assert.match(adapter, /hasOwnProperty\.call\(result,\s*"code"\)/,
+    "code presence decided by hasOwnProperty inside the adapter — a present-but-invalid code cannot fall through");
+  assert.match(adapter, /opts\.legacy === false/, "adapter honours the strict legacy policy");
 });
 
 test("an uncoded result degrades to err.unknown rather than echoing text", () => {

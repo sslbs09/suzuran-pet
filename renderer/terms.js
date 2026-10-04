@@ -15,15 +15,10 @@ const t = (key) => (window.I18N && window.I18N.t(key)) || key;
 /* Phase 5-E1：条款页错误呈现与全应用同构（code/meta → ErrorPresenter → I18N → DOM）。
  * 修复前这里把主进程 result.message 直接写进 DOM，绕过 presenter 与 i18n——这是
  * 5-C/5-D 之后唯一仍在漏斗外的错误面。
- * 无 code 时落 err.unknown 而不是回显 message：那正是本阶段要消灭的路径；
+ * Phase 5-G2：实现收敛到 renderer/error-present.js；`legacy:false` 保留条款页的强策略
+ * ——无 code 时一律 err.unknown，绝不回显主进程文本（那正是本阶段要消灭的路径）。
  * 主进程 pet:agree-terms 已补 code，所以正常链路永远走 presenter 分支。 */
-const presentError = (result) => {
-  if (result && Object.prototype.hasOwnProperty.call(result, "code")) {
-    const p = window.ErrorPresenter.toPresentation({ code: result.code, meta: result.meta });
-    return window.I18N.t(p.key, p.params);
-  }
-  return window.I18N.t("err.unknown");
-};
+const presentError = (result) => window.ErrorPresent.presentError(result, { legacy: false });
 
 /* foot hint 唯一 owner = 本脚本。失败态存「来源」而非已渲染文本/布尔，
  * 这样 locale 切换时失败提示也跟着重本地化（修复前 hintFailure=true 会把

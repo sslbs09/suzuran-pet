@@ -49,6 +49,7 @@ function extractFunction(source, signature) {
 async function createRenderer(lang) {
   const petSource = fs.readFileSync(path.join(root, "renderer/pet.js"), "utf8");
   const i18nSource = fs.readFileSync(path.join(root, "renderer/i18n.js"), "utf8");
+  const adapterSource = fs.readFileSync(path.join(root, "renderer/error-present.js"), "utf8"); // 5-G2
   const html = fs.readFileSync(path.join(root, "renderer/index.html"), "utf8");
   const presenterScript = html.match(/<script\s+src="([^"]*error-presenter\.js)"\s*><\/script>/);
   const petScript = html.indexOf('src="pet.js"');
@@ -90,6 +91,7 @@ async function createRenderer(lang) {
   sandbox.window = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(presenterSource, sandbox, { filename: "src/error-presenter.js" });
+  vm.runInContext(adapterSource, sandbox, { filename: "renderer/error-present.js" }); // 5-G2
   vm.runInContext(i18nSource, sandbox, { filename: "renderer/i18n.js" });
   await new Promise((resolve) => setImmediate(resolve));
   vm.runInContext(extractFunction(petSource, "function showError(msg)"), sandbox, { filename: "renderer/pet.js" });

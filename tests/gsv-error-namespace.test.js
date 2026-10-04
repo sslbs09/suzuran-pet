@@ -107,18 +107,18 @@ test("4b) unknown and hostile codes still degrade to err.unknown in both entries
 });
 
 /* ---- 消费端：restartGsv 显式分流，通用漏斗不变 ---- */
-test("settings routes GSV codes explicitly and leaves the general funnel untouched", () => {
-  assert.match(settingsJs, /function isGsvCode\(result\)/, "GSV namespace membership is explicit");
-  assert.match(settingsJs, /window\.ErrorPresenter\.GSV_PRESENTATIONS, result\.code/,
-    "membership is decided against the GSV namespace");
-  assert.match(settingsJs, /window\.ErrorPresenter\.toGsvPresentation\(/, "GSV codes use the GSV entry");
-  assert.match(settingsJs, /isGsvCode\(r\) \? presentGsvError\(r\) : presentResultError\(r\)/,
-    "non-GSV results still go through the general funnel");
-  // 通用漏斗不得被 GSV 污染
+test("settings routes GSV codes through the shared adapter and leaves the general funnel untouched", () => {
+  assert.match(settingsJs, /window\.ErrorPresent\.presentRestartGsv\(r, L\("set\.gsvOk"\)\)/,
+    "restartGsv delegates the GSV/general split to the shared adapter");
+  // 通用漏斗不得被 GSV 污染，也不得再自带映射逻辑
   const funnel = settingsJs.slice(settingsJs.indexOf("function presentResultError("),
     settingsJs.indexOf("const INTERNAL_FAILURE"));
-  assert.ok(!/gsv/i.test(funnel), "presentResultError must stay GSV-free");
-  assert.match(funnel, /window\.ErrorPresenter\.toPresentation\(/, "general funnel unchanged");
+  assert.match(funnel, /window\.ErrorPresent\.presentError\(result\)/, "general funnel is a thin delegation");
+  assert.ok(!/toPresentation/.test(funnel), "presentResultError must stay mapping-free");
+  assert.ok(!/gsv/i.test(funnel.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "")),
+    "presentResultError must stay GSV-free");
+  assert.doesNotMatch(settingsJs, /function\s+(presentGsvError|isGsvCode)\s*\(/,
+    "5-G2：GSV 分流助手已收口进适配器，页面不得再自建");
 });
 
 test("restartGsv IPC contract is untouched: main still returns lowercase GSV codes", () => {

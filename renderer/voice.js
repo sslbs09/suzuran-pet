@@ -13,13 +13,7 @@
 
 const $ = (id) => document.getElementById(id);
 const L = (key, params) => (window.I18N && I18N.t(key, params)) || key;
-function presentError(result) {
-  if (result && Object.prototype.hasOwnProperty.call(result, "code")) {
-    const p = window.ErrorPresenter.toPresentation({ code: result.code, meta: result.meta });
-    return window.I18N.t(p.key, p.params);
-  }
-  return result && typeof result.message === "string" && result.message ? result.message : window.I18N.t("err.unknown");
-}
+const presentError = (result) => window.ErrorPresent.presentError(result); // Phase 5-G2：统一适配器
 const INTERNAL_FAILURE = Object.freeze({ code: "INTERNAL" });
 
 const SAMPLE_REF_PATH = "语音部署与训练指南\\example_audio\\ref_sussurro.wav"; // DATA：文档内固定路径标识，不翻译

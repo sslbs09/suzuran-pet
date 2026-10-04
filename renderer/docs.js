@@ -101,13 +101,7 @@ function mdToHtml(src) {
 
 /* ---------- 文档加载 ---------- */
 const $ = (id) => document.getElementById(id);
-const presentError = (result) => {
-  if (result && Object.prototype.hasOwnProperty.call(result, "code")) {
-    const p = window.ErrorPresenter.toPresentation({ code: result.code, meta: result.meta });
-    return window.I18N.t(p.key, p.params);
-  }
-  return result && typeof result.error === "string" && result.error ? result.error : window.I18N.t("err.unknown");
-};
+const presentError = (result) => window.ErrorPresent.presentError(result); // Phase 5-G2：统一适配器
 const DOCS_IFRAME_SCROLLBAR_STYLE = `<style id="suzuran-docs-scrollbar">
 html::-webkit-scrollbar { width: 9px; height: 9px; }
 html::-webkit-scrollbar-track { background: #f4f8f7; }

@@ -29,6 +29,7 @@ const mainSource = fs.readFileSync(mainPath, "utf8");
 const credImportSource = fs.readFileSync(credImportPath, "utf8");
 const presenterSource = fs.readFileSync(path.join(root, "src/error-presenter.js"), "utf8");
 const rendererI18nSource = fs.readFileSync(path.join(root, "renderer/i18n.js"), "utf8");
+const adapterSource = fs.readFileSync(path.join(root, "renderer/error-present.js"), "utf8"); // 5-G2
 
 function extractFunction(source, signature) {
   const start = source.indexOf(signature);
@@ -40,6 +41,15 @@ function extractFunction(source, signature) {
     if (source[i] === "}" && --depth === 0) return source.slice(start, i + 1);
   }
   throw new Error(`unterminated production function: ${signature}`);
+}
+
+/** 5-G2：页面转发已是一行箭头函数，brace 匹配不适用——按分号截取整条语句。 */
+function statement(source, marker) {
+  const start = source.indexOf(marker);
+  assert.notEqual(start, -1, `production statement found: ${marker}`);
+  const end = source.indexOf(";", start);
+  assert.notEqual(end, -1, `statement is terminated: ${marker}`);
+  return source.slice(start, end + 1);
 }
 
 async function createSettings(lang) {
@@ -56,9 +66,11 @@ async function createSettings(lang) {
   vm.createContext(sandbox);
   vm.runInContext(presenterSource, sandbox, { filename: "src/error-presenter.js" });
   vm.runInContext(rendererI18nSource, sandbox, { filename: "renderer/i18n.js" });
+  vm.runInContext(adapterSource, sandbox, { filename: "renderer/error-present.js" }); // 5-G2
   await new Promise((resolve) => setImmediate(resolve));
   assert.ok(sandbox.I18N && typeof sandbox.I18N.t === "function", "renderer I18N ready");
   assert.ok(sandbox.ErrorPresenter && typeof sandbox.ErrorPresenter.toPresentation === "function", "presenter loaded");
+  assert.ok(sandbox.ErrorPresent && typeof sandbox.ErrorPresent.presentError === "function", "shared adapter loaded");
   vm.runInContext(extractFunction(settingsSource, "function presentResultError(result)"), sandbox, {
     filename: "renderer/settings.js"
   });
@@ -91,14 +103,12 @@ async function createGsvRestartHandler(lang, outcome) {
   vm.createContext(sandbox);
   vm.runInContext(presenterSource, sandbox, { filename: "src/error-presenter.js" });
   vm.runInContext(rendererI18nSource, sandbox, { filename: "renderer/i18n.js" });
+  vm.runInContext(adapterSource, sandbox, { filename: "renderer/error-present.js" }); // 5-G2
   await new Promise((resolve) => setImmediate(resolve));
   sandbox.$ = (id) => elements.get(id);
   sandbox.L = (key, params) => sandbox.I18N.t(key, params);
   vm.runInContext(extractFunction(settingsSource, "function setResult(el, text, ok)"), sandbox, { filename: "renderer/settings.js" });
-  vm.runInContext(extractFunction(settingsSource, "function presentResultError(result)"), sandbox, { filename: "renderer/settings.js" });
-  // 5-G1：restartGsv 的 GSV 分流助手（声明在监听器之前，需与点击处理器一并装载）
-  vm.runInContext(extractFunction(settingsSource, "function presentGsvError(result)"), sandbox, { filename: "renderer/settings.js" });
-  vm.runInContext(extractFunction(settingsSource, "function isGsvCode(result)"), sandbox, { filename: "renderer/settings.js" });
+  // 5-G2：restartGsv 的 GSV 分流已收口进共享适配器 presentRestartGsv
   const start = settingsSource.indexOf('$("btn-restart-gsv").addEventListener');
   const end = settingsSource.indexOf('$("btn-save-voice")', start);
   assert.ok(start !== -1 && end > start, "production restartGsv click handler found");

@@ -14,13 +14,7 @@ const grid = document.getElementById("mood-grid");
 let moods = [];
 
 const L = (key, params) => (window.I18N && I18N.t(key, params)) || key;
-function presentError(result) {
-  if (result && Object.prototype.hasOwnProperty.call(result, "code")) {
-    const p = window.ErrorPresenter.toPresentation({ code: result.code, meta: result.meta });
-    return window.I18N.t(p.key, p.params);
-  }
-  return result && typeof result.message === "string" && result.message ? result.message : window.I18N.t("err.unknown");
-}
+const presentError = (result) => window.ErrorPresent.presentError(result); // Phase 5-G2：统一适配器
 
 function escapeHtml(value) {
   return String(value || "").replace(/[&<>'"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[ch]));

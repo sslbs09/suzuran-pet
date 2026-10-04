@@ -40,9 +40,15 @@ const statement = (text, marker) => extract(text, marker, ";");
 function functions(s, file, markers) {
   for (const marker of markers) vm.runInContext(fn(source(file), marker), s);
 }
+/** Phase 5-G2：共享 renderer 适配器——页面不再自带 presentError 实现，
+ *  测试沙箱必须装载与生产同一份 error-present.js（只装载，不替换生产实现）。 */
+function loadAdapter(s) {
+  vm.runInContext(read("renderer/error-present.js"), s);
+  assert.ok(s.ErrorPresent, "renderer/error-present.js installed window.ErrorPresent");
+}
 function presenter(s, file, name = "presentError") {
-  // Support from current production source permits old handlers to execute;
-  // no old producer, renderer or handler under test is replaced.
+  // 5-G2 起页面只保留一行转发；先装适配器，再装页面转发
+  loadAdapter(s);
   const marker = read(file).includes(`function ${name}(`) ? `function ${name}(` : `const ${name} =`;
   const text = source(file).includes(marker) ? source(file) : read(file);
   vm.runInContext(marker.startsWith("function") ? fn(text, marker) : statement(text, marker), s);
@@ -133,11 +139,20 @@ function main(overrides = {}) {
 }
 
 test("D2 supplemental guards preserve shared wiring and remove direct UI catch echoes", { skip: baseline }, () => {
-  for (const name of ["addchar", "docs", "voice", "psd", "schedule", "moods"]) {
+  for (const name of ["addchar", "docs", "voice", "psd", "schedule", "moods", "settings", "terms"]) {
     const html = read(`renderer/${name}.html`);
     assert.ok(html.includes("../src/error-presenter.js"));
-    assert.ok(html.indexOf('src="../src/error-presenter.js"') < html.indexOf(`src="${name}.js"`));
-    assert.match(read(`renderer/${name}.js`), /ErrorPresenter\.toPresentation/);
+    assert.ok(html.indexOf('src="../src/error-presenter.js"') < html.indexOf('src="error-present.js"'),
+      `${name}: presenter loads before the shared adapter`);
+    assert.ok(html.indexOf('src="error-present.js"') < html.indexOf(`src="${name}.js"`),
+      `${name}: shared adapter loads before ${name}.js`);
+    // 5-G2：页面不得再自带 ErrorPresenter 调用（映射决策只存在于 src/error-presenter.js）
+    // 比对前剥掉注释——文档里描述数据流时提到该函数名不算实现。
+    const pageCode = read(`renderer/${name}.js`).replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    assert.doesNotMatch(pageCode, /ErrorPresenter\.toPresentation/,
+      `${name}.js must route through the shared adapter, not the presenter directly`);
+    assert.match(pageCode, /ErrorPresent\./,
+      `${name}.js must use the shared adapter`);
   }
   assert.doesNotMatch(read("renderer/pet.js"), /showError\(String\(e\)\)/);
   assert.doesNotMatch(read("renderer/settings.js"), /badge\.title = item\.errorCode/);
@@ -192,6 +207,7 @@ test("production fixed-line renderer attaches localized badge titles in all loca
 test("production pet rejection renders INTERNAL and keeps bubble lifecycle", async () => {
   for (const lang of langs) {
     const { s } = await renderer(lang);
+    loadAdapter(s); // 5-G2：pet.js 的错误呈现已走共享适配器
     const bubble = node();
     let asks = 0;
     Object.assign(s, { agreed: true, isSpeakingAudio: false, ttsConfig: { enabled: false }, inputEl: { value: "hello" }, replyBuffer: "", bubbleText: bubble, bubbleEl: bubble, busy: true, wake() {}, setMood() {}, showBubble() {}, hideThinking() {}, showThinking() {}, updateControls() {}, scheduleBubbleHide() {} });
@@ -311,7 +327,7 @@ test("production workbook preserves static validation and codes parser/FS except
 test("production schedule add DOM maps storage failure and retains source validation", async () => {
   for (const lang of langs) {
     const { s, get } = await renderer(lang);
-    presenter(s, "renderer/schedule.js");
+    loadAdapter(s); // 5-G2：整文件装载前先装共享适配器
     for (const [id, value] of Object.entries({ title: "fixture", date: "2099-10-05", time: "09:00", recurrence: "none" })) get(id).value = value;
     const broken = scheduleModule({ atomicWrite() { throw new Error(hostile); } });
     let add = main({ schedules: broken }).handler("pet:add-schedule");
@@ -354,7 +370,8 @@ test("production add-character click maps main/local errors and retains legacy c
     s.btn = get("btn-import"); s.statusEl = get("status");
     s.petAPI.importSpine = () => importSpine();
     // 5-E3 起 addchar.js 的状态文案先落 module state 再投影，改为装载真实模块
-    // （presentError 由模块自身的 const 声明提供，不再单独预载，否则重复声明）
+    // （presentError 由模块自身的一行转发提供，不再单独预载，否则重复声明）
+    loadAdapter(s);
     s.petAPI.getSpineModels = async () => ({ list: [] });
     vm.runInContext(read("renderer/addchar.js"), s);
     await get("btn-import").fire();

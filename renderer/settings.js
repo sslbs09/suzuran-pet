@@ -38,14 +38,10 @@ function setResult(el, text, ok) {
  *   {ok:false, message}    → 旧版兼容，原文照旧（技术详情过滤只对新 code 路径生效）
  *   其余 / 字段缺失          → err.unknown
  * 注意 hasOwnProperty 判定：有 code 字段即视为「已编码」，即便 code 非法也走 presenter，
- * 绝不回落到 message——否则伪造/未知 code 可借 message 绕过过滤。 */
+ * 绝不回落到 message——否则伪造/未知 code 可借 message 绕过过滤。
+ * Phase 5-G2：实现已收敛到 renderer/error-present.js，这里只做页面级转发。 */
 function presentResultError(result) {
-  if (result && Object.prototype.hasOwnProperty.call(result, "code")) {
-    const presentation = window.ErrorPresenter.toPresentation({ code: result.code, meta: result.meta });
-    return window.I18N.t(presentation.key, presentation.params);
-  }
-  if (result && typeof result.message === "string" && result.message) return result.message; // 旧版无 code 保留原文兼容
-  return window.I18N.t("err.unknown");
+  return window.ErrorPresent.presentError(result);
 }
 
 /* 渲染层自身捕获的异常没有 code 事实来源，也不得把 e.message（可能含路径/堆栈）送进用户 UI，
@@ -624,18 +620,8 @@ $("btn-clear-trcache").addEventListener("click", async () => {
 });
 
 /* ---------- 一键重启日语 TTS ----------
- * Phase 5-G1：restartGsv 返回的是 GSV 引擎专属小写码（timeout/synth/disabled/nopath），
- * 它们刻意留在 error-presenter 的 GSV 专用命名空间，不再进入通用 ERROR_PRESENTATIONS。
- * 因此这里显式分流：属于 GSV 命名空间 → toGsvPresentation；其余（含大写通用码）
- * 一律走上面的 presentResultError，通用错误事实流完全不变。 */
-function presentGsvError(result) {
-  const p = window.ErrorPresenter.toGsvPresentation({ code: result && result.code });
-  return window.I18N.t(p.key, p.params);
-}
-function isGsvCode(result) {
-  return !!(result && Object.prototype.hasOwnProperty.call(result, "code") &&
-    Object.prototype.hasOwnProperty.call(window.ErrorPresenter.GSV_PRESENTATIONS, result.code));
-}
+ * Phase 5-G1：restartGsv 返回的是 GSV 引擎专属小写码，不属于通用错误码词表。
+ * Phase 5-G2：分流逻辑一并收口进共享适配器，本页只负责传 okText。 */
 $("btn-restart-gsv").addEventListener("click", async () => {
   const btn = $("btn-restart-gsv");
   const out = $("gsv-result");
@@ -644,8 +630,7 @@ $("btn-restart-gsv").addEventListener("click", async () => {
   let r;
   try { r = await window.petAPI.restartGsv(); } catch { r = { ok: false, code: "timeout" }; }
   btn.disabled = false;
-  const shown = r && r.ok ? L("set.gsvOk") : (isGsvCode(r) ? presentGsvError(r) : presentResultError(r));
-  setResult(out, shown, !!(r && r.ok));
+  setResult(out, window.ErrorPresent.presentRestartGsv(r, L("set.gsvOk")), !!(r && r.ok));
 });
 
 $("btn-save-voice").addEventListener("click", async () => { await doSaveVoice(); });

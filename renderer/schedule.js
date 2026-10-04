@@ -1,13 +1,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const t = (key, params) => (window.I18N && window.I18N.t(key, params)) || key;
-function presentError(result) {
-  if (result && Object.prototype.hasOwnProperty.call(result, "code")) {
-    const p = window.ErrorPresenter.toPresentation({ code: result.code, meta: result.meta });
-    return window.I18N.t(p.key, p.params);
-  }
-  return result && typeof result.error === "string" && result.error ? result.error : window.I18N.t("err.unknown");
-}
+const presentError = (result) => window.ErrorPresent.presentError(result); // Phase 5-G2：统一适配器
 function fmt(s) { return s.display ? `${s.display.date} ${s.display.time}` : s.status; }
 
 /* Phase 5-E3：运行时文本与其数据源分离。
