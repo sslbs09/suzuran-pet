@@ -92,7 +92,8 @@ const { createTaskQueue } = require("./src/task-queue");
 const { createQuitLifecycle, runCleanupSteps } = require("./src/quit-lifecycle");
 const { isConsentAccepted, canUseRuntime, acceptConsent } = require("./src/consent-gate");
 const { createOnceRunner } = require("./src/runtime-lifecycle");
-const { createConversationService, classifyError } = require("./src/conversation-service"); // TD-4：会话单写者（统一任务ID/取消/错误码）
+const { createConversationService } = require("./src/conversation-service"); // TD-4：会话单写者（统一任务ID/取消/错误码）
+const errorFacts = require("./src/error-facts"); // Phase 5-C：跨进程唯一投影 {code,meta,message}，detail 在此丢弃
 const { createChatOwnership } = require("./src/chat-ownership"); // 「角色进入聊天交互」的 ownership 单一权威（所有 chat ingress 共享，见下方 chatOwnership）
 const { createLineGate } = require("./src/line-gate");
 const { transitionSleep, createWorkflowSignalState, recordWorkflowSignal, consumeWorkflowSignal, requeueWorkflowSignal } = require("./src/dialogue-state");
@@ -1662,12 +1663,16 @@ function startAgentApi() {
         // ownership 互斥拒绝 = 角色正忙（UI chat 或另一条 /chat 在跑）→ 429 而非 500。
         // 与 UI 侧 conversation.isBusy()→buffer 是同一语义的两端：一个排队补发，一个显式拒绝。
         if (e && e.code === "BUSY") { send(429, { ok: false, error: "角色正忙（busy），请稍后重试" }); return; }
-        send(500, { ok: false, error: String(e.message || e) });
+        // Phase 5-C：Agent 响应保留既有 error 字段（协议兼容），并补 code/meta；
+        // detail/provider body 经 toPayload 丢弃，绝不外发给 Agent 调用方。
+        const fact = errorFacts.toPayload(e);
+        send(500, { ok: false, error: fact.message, code: fact.code, meta: fact.meta });
       } finally {
         agentApiAbort = null;
       }
     } catch (e) {
-      send(500, { ok: false, error: String(e.message || e) });
+      const outerFact = errorFacts.toPayload(e);
+      send(500, { ok: false, error: outerFact.message, code: outerFact.code, meta: outerFact.meta });
     }
   });
   agentServer = server;
@@ -2403,8 +2408,11 @@ async function handleAskInner(sender, { id, text, askGen }) {
     }
   } catch (err) {
     if (err.name !== "AbortError" && isCurrent()) {
-      // TD-4：pet:error 携带统一错误码（CANCELLED/HTTP_ERROR/TIMEOUT/INTERNAL），渲染层不必解析文本
-      sender.send("pet:error", { id, code: classifyError(err), message: String(err.message || err) });
+      // Phase 5-C：pet:error 只出 {id, code, meta, message}——保留 id 与旧 message 字段，
+      // detail/provider body 在 toPayload 处被丢弃，永不进入 renderer。
+      // AbortError 守卫保持原样（主动停止不发 pet:error）。
+      const fact = errorFacts.toPayload(err);
+      sender.send("pet:error", { id, code: fact.code, meta: fact.meta, message: fact.message });
     }
   } finally {
     conversation.finish(task.id); // 2026-10-02 修复：finish 必须用 start 自分配的服务端 task.id。旧代码传渲染层 payload.id——两个独立 UUID 永不相等，finish 守卫永不命中，busy 从本会话第一条消息起永久泄漏（实机第二句起 buffer 自激 + pause 风暴的根因；regenerate 路径一直是正确写法）
