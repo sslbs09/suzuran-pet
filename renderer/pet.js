@@ -2573,9 +2573,26 @@ function wake() {
   }
   resetSleepTimer();
 }
+/* ---------- PHASE 6-D.3 MINIMAL CHARACTER RUNTIME EXPERIMENT ----------
+ * EXPERIMENTAL CAUSAL-PATH PROBE — NOT PRODUCT TUNING
+ *
+ * 渲染层在这里只做一件事：接受 main 算好的「闲多久去请求睡」意图参数。
+ * 不重算心情、不读 bond.json、不 require bond/mood-day、不建第二个 mood 缓存、不轮询。
+ * gate OFF（默认）时快照里就是 300000，与改造前这里的 5 * 60 * 1000 逐位相同。
+ *
+ * 只改这一个 timer 参数。timer 生命周期、调用结构、isSleeping / awake / applyWalkState /
+ * walkState / animation / seatExitY / posture / render mode 一律不动。
+ * 睡意 authority 仍在 main（walk.sleeping，可能拒绝）——这里产生的是意图，不是状态。 */
+let sleepIdleThresholdMs = 300000; // 与 5 * 60 * 1000 逐位相同；init 前无快照时的初值
+function adoptSleepIdleThreshold(snapshot) {
+  sleepIdleThresholdMs = window.CharacterSleepIntent
+    ? window.CharacterSleepIntent.resolveSleepIdleThresholdMs(snapshot)
+    : 300000; // 纯逻辑核心缺席时的安全回落，与改造前行为一致
+  return sleepIdleThresholdMs;
+}
 function resetSleepTimer() {
   if (sleepTimer) clearTimeout(sleepTimer);
-  sleepTimer = setTimeout(() => { if (!busy) setMood("sleep"); }, 5 * 60 * 1000);
+  sleepTimer = setTimeout(() => { if (!busy) setMood("sleep"); }, sleepIdleThresholdMs);
 }
 
 /* ---------- 睡眠自动唤醒上限（v2.5.28）：睡满 25 分钟自己醒来散步/说话，闲了再睡 ----------
@@ -4321,6 +4338,10 @@ if (window.__renderLifecycleTestMode) {
       set: (k, v) => { if (seatExitY && k in seatExitY) seatExitY[k] = v; }
     },
     offsetDiagTickForTest: () => offsetDiagTick(), // 测试专用：手动驱动 OFFSETDIAG 采样拍（真实环境由 seat ticker 每帧调用）
+    sleepIdleCtl: { // Phase 6-D.3 专用：观察 + 喂快照，验证渲染层只消费、不重算（不改变任何生产语义）
+      adopt: (snapshot) => adoptSleepIdleThreshold(snapshot),
+      resolved: () => sleepIdleThresholdMs
+    },
     speechDiagCtl: SPEECH_DIAG ? { // 测试专用：SPEECHDIAG 生命周期手动驱动（沙箱 setInterval 为 no-op）
       start: (r) => speechDiagStart(r),
       end: (id) => speechDiagEnd(id),
@@ -4401,6 +4422,7 @@ if (!window.__renderLifecycleTestMode) (async function init() {
   if (Number(state.live2dScale) > 0) applyLive2dScale(state.live2dScale);
   if (window.petAPI.onLive2dScaleChanged) window.petAPI.onLive2dScaleChanged((v) => applyLive2dScale(v));
   applyTheme(state.theme);
+  if (state.characterRuntimeV0) adoptSleepIdleThreshold(state.characterRuntimeV0); // 必须在 resetSleepTimer 之前：意图参数先落地，计时器才按它排
   resetSleepTimer(); // v2.5.21c 修复：睡眠计时提前到条款/key 检查之前——未同意/未配 key 时桌宠也会困（此前被 return 跳过，永远不睡）
   setInterval(() => applyTheme(state.theme), 60000); // auto 模式跨时段自动切换
   if (window.matchMedia) {

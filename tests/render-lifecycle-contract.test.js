@@ -398,6 +398,7 @@ function createPetLifecycleHarness(opts = {}) {
     PetClickability: require("../src/clickability"), // 穿透纯逻辑核心双端文件（渲染层 <script> 全局的测试替身，sandbox 即 window）
     SeatFit: require("../src/seat-fit"), // A-v2 seat-hold/棘轮纯函数（同上先例）
     AnimationWatch: require("../src/animation-watch"), // POKE-S：trackDecision 真值表（生产经 <script> 挂 window）
+    CharacterSleepIntent: require("../src/character-runtime/sleep-intent"), // Phase 6-D.3：入睡阈值策略与渲染层消费校验（双端纯函数）
     PIXI: {
       Matrix: require("pixi.js").Matrix,
       Application: FakeApplication,
@@ -3868,6 +3869,33 @@ test("HPAT-11: prefers-reduced-motion 下 JS Q 弹整轮让位（对齐 GIF 侧 
   assert.ok(Math.abs(h.obj.scale.y - pose.sy * 0.9) < 1e-9, "系统设置恢复后 Q 弹照常：守卫不泄漏到正常路径");
   h.clock.advance(400);
   assert.deepEqual(hpatPose(h), pose, "正常一轮的收尾还原不受守卫影响");
+});
+
+/* ---------- Phase 6-D.3 渲染层消费契约（EXPERIMENTAL CAUSAL-PATH PROBE, NOT PRODUCT TUNING） ----------
+ * 这里跑的是真实 production renderer：seam 暴露的就是 init 调用的同一个 adoptSleepIdleThreshold。
+ * 断言渲染层「只消费 main 下发的阈值」：没有合法快照就回落 300000，绝不自算心情。 */
+test("Phase 6-D.3: renderer 只消费快照阈值，非法快照一律回落 300000", () => {
+  const h = createPetLifecycleHarness();
+  const ctl = h.lifecycle.sleepIdleCtl;
+  assert.ok(ctl, "sleepIdleCtl seam is exposed");
+
+  assert.equal(ctl.resolved(), 300000, "初始值即改造前 5 * 60 * 1000 的逐位结果");
+
+  // 合法快照：原样采用，渲染层不得自行改写
+  ctl.adopt({ enabled: true, todayMood: "慵懒", sleepIdleThresholdMs: 30000 });
+  assert.equal(ctl.resolved(), 30000, "合法快照被逐位采用");
+  ctl.adopt({ enabled: true, todayMood: "元气", sleepIdleThresholdMs: 180000 });
+  assert.equal(ctl.resolved(), 180000, "第二份合法快照同样被逐位采用");
+
+  // 非法快照：回落（这条保证渲染层永远不会把 undefined/NaN 喂给 setTimeout）
+  const bad = [undefined, null, {}, { sleepIdleThresholdMs: null },
+    { sleepIdleThresholdMs: NaN }, { sleepIdleThresholdMs: Infinity },
+    { sleepIdleThresholdMs: 0 }, { sleepIdleThresholdMs: -1 },
+    { sleepIdleThresholdMs: "30000" }];
+  for (const snapshot of bad) {
+    ctl.adopt(snapshot);
+    assert.equal(ctl.resolved(), 300000, "非法快照必须回落 300000：" + JSON.stringify(snapshot === undefined ? null : snapshot));
+  }
 });
 
 console.log("render lifecycle contract 全部通过");

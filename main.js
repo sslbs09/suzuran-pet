@@ -81,6 +81,7 @@ const walkGeo = require("./src/walk-geo"); // 行走几何纯函数（2026-08-27
 const { replayCrashRecovery } = require("./src/crash-recovery"); // 崩溃恢复重放的窗口身份守卫纯函数（H1，可单测）
 const { createCrashBudget } = require("./src/crash-budget"); // crash 自愈预算按逻辑窗口分桶（H2，可单测）
 const walkState = require("./src/walk-state"); // 行走几何决策纯函数（v2.5.26 收敛①）
+const characterSleepIntent = require("./src/character-runtime/sleep-intent"); // Phase 6-D.3：今日心情→入睡阈值（意图参数）纯策略，双端共用
 const runtimeShadow = require("./src/runtime-shadow"); // Runtime V2 Shadow Slice v0.1（只读 shadow，默认关闭）
 const runtimeV2Module = require("./src/runtime-v2");
 const stateCore = require("./src/state-core"); // WhiteMoon State Core v0.1（canonical state；与 locomotion 同 gate） // Runtime V2 Locomotion Cutover v0.1（production，默认关闭）
@@ -2002,6 +2003,32 @@ function todayMood() {
   }
   return moodDayCache.m;
 }
+
+/* ---------- PHASE 6-D.3 MINIMAL CHARACTER RUNTIME EXPERIMENT ----------
+ * EXPERIMENTAL CAUSAL-PATH PROBE — NOT PRODUCT TUNING
+ *
+ * 这是本轮唯一一处把「外部经历 → 派生内部状态 → 意图参数」真正接起来的地方：
+ *   bond.days → todayMood()（既有派生信号）→ sleepIdleThresholdMs（意图参数）→ 随 pet:get-state 下发。
+ *
+ * 方向纪律（Phase 6-D.3 冻结的边界，逐条对应实现）：
+ *   - main 负责算，renderer 只消费快照里那个已解析的整数：不读 bond.json、不 require bond/mood-day、
+ *     不自建第二份 mood 缓存、不加轮询；
+ *   - 睡意 authority 仍在本文件的 walk.sleeping。main 可以拒绝睡眠（perched / iconRest 等），
+ *     所以「想睡」本来就可能不成为「睡着」——INTENT IS NOT STATE，这里刻意不去动那条链；
+ *   - 跨午夜实时刷新是 v0 non-goal：mood 由日期 + 羁绊天数纯函数决定，跨天要重启才更新。
+ *
+ * gate OFF（config 默认）时快照里的 threshold 仍是 300000，与改造前 renderer 的 5 * 60 * 1000 逐位相同。 */
+let characterRuntimeV0Logged = false;
+function characterRuntimeV0Snapshot() {
+  const enabled = characterSleepIntent.characterRuntimeV0Enabled(config.getConfig());
+  // gate OFF 时连 todayMood() 都不算：OFF 臂必须是零派生、零日志、零行为差。
+  const snapshot = characterSleepIntent.buildCharacterRuntimeV0Snapshot({ enabled, todayMood: enabled ? todayMood() : "" });
+  if (snapshot.enabled && !characterRuntimeV0Logged) {
+    characterRuntimeV0Logged = true; // 每进程一条：够实机确认「启动后确实走了这条链」，又不刷屏
+    logTts("character-runtime-v0", "mood=" + snapshot.todayMood + " sleepIdleThresholdMs=" + snapshot.sleepIdleThresholdMs + " enabled=true");
+  }
+  return snapshot;
+}
 function chatVars() {
   const cfg = config.getConfig();
   return { name: (cfg.pet && cfg.pet.name) || "苏苏洛", user: (cfg.chat && cfg.chat.userName) || "博士" };
@@ -2482,6 +2509,7 @@ ipcMain.handle("pet:get-state", () => {
     fileGuard: !!cfg.fileGuard, // 蜜标监控（默认关）
     walking: !!cfg.walking,
     walkState: { active: walk.active, resting: walk.resting, perched: walk.perched, seated: walk.seated, face: walk.face, paused: walk.paused, sleeping: walk.sleeping },
+    characterRuntimeV0: characterRuntimeV0Snapshot(), // Phase 6-D.3 观测快照：经历→今日心情→入睡阈值（gate 默认关，OFF 时 threshold 恒为 300000）
     dimMode: !!cfg.dimMode,
     hiddenAtStart: !isWindowVisible()
   };

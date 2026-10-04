@@ -91,6 +91,7 @@ const DEFAULTS = {
   mouseTrackGlobal: false,                  // 全局鼠标跟踪（v2.2.1 实验性，需显式许可默认关）：读取屏幕鼠标位置，角色始终看向鼠标
   catToy: false,                            // 逗猫棒（需显式许可默认关）：读取鼠标位置，角色追着鼠标走
   walkGlobal: false,                        // 桌面全域行走（实验，默认关）：走到整个虚拟桌面（多显示器连屏），地面仍随所在显示器
+  characterRuntimeV0Enabled: false,          // Phase 6-D.3 因果通路实验（默认关）：经历→今日心情→入睡阈值；EXPERIMENTAL CAUSAL-PATH PROBE, NOT PRODUCT TUNING
   softRender: false,                        // 软件渲染（默认关，重启生效）：无独显/驱动异常环境用 CPU 渲染兜底（WebGL 走 SwiftShader）
   fileGuard: false,                          // 蜜标监控（默认关）：检测其他程序访问桌宠敏感配置区域
   proactiveChat: true,                       // 主动搭话（默认开，设置页单独开关）：闲置后主动开口
