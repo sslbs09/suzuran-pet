@@ -961,5 +961,21 @@
   "err.gsvSynthFail": "❌ 服务已启动但试合成失败（详见 tts.log）",
   "err.gsvDisabled": "日语语音服务未启用或配置不完整",
   "err.gsvNoPath": "语音引擎路径不存在（首次安装未配置）：请在语音设置里填写 Python 路径与服务脚本",
+
+  "page.schedule.summary": "共 {n} 条日程，待触发 {p} 条",
+  "page.schedule.btnDone": "完成",
+  "page.schedule.btnSnooze": "稍后10分",
+  "page.schedule.added": "已添加",
+  "page.schedule.importedCount": "已导入 {n} 条日程",
+  "page.schedule.previewMeta": "{file}：共 {total} 条，预览前 {n} 条",
+  "page.schedule.colRow": "行",
+  "page.schedule.templateSaved": "模板已保存",
+  "page.schedule.templateCancelled": "已取消",
+
+  "page.addchar.builtinOnly": "（仅内置苏苏洛）",
+  "page.addchar.currentTag": "（当前）",
+  "page.addchar.loadFail": "读取失败",
+  "page.addchar.pickHint": "请选择包含 .atlas / .skel/.json / .png 的文件夹…",
+  "page.addchar.imported": "✅ 已导入「{name}」并切换（{id}）",
   "err.unknown": "暂时无法完成请求。请稍后重试。"
 }

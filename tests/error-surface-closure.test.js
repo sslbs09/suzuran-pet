@@ -316,7 +316,11 @@ test("production schedule add DOM maps storage failure and retains source valida
     const broken = scheduleModule({ atomicWrite() { throw new Error(hostile); } });
     let add = main({ schedules: broken }).handler("pet:add-schedule");
     s.petAPI.addSchedule = (input) => Promise.resolve(add(null, input));
-    vm.runInContext(statement(source("renderer/schedule.js"), '$("add").onclick ='), s);
+    // 5-E3 起 schedule.js 的失败文案先落 module state 再投影，抽取单条语句不再自洽：
+    // 改为装载真实模块（含 state 声明与 render*），保持"跑生产代码本身"不变。
+    s.petAPI.getSchedules = async () => [];
+    s.petAPI.onScheduleDue = () => {};
+    vm.runInContext(read("renderer/schedule.js"), s);
     await get("add").fire();
     assert.equal(get("result").textContent, expected(lang, "INTERNAL")); safe(get("result").textContent);
     add = main().handler("pet:add-schedule");
@@ -349,8 +353,10 @@ test("production add-character click maps main/local errors and retains legacy c
     const importSpine = main({ addCharWin: null, win: null, dialog: { showOpenDialog() { dialogs++; throw new Error(hostile); } } }).handler("pet:import-spine");
     s.btn = get("btn-import"); s.statusEl = get("status");
     s.petAPI.importSpine = () => importSpine();
-    presenter(s, "renderer/addchar.js");
-    vm.runInContext(statement(source("renderer/addchar.js"), 'btn.addEventListener("click"'), s);
+    // 5-E3 起 addchar.js 的状态文案先落 module state 再投影，改为装载真实模块
+    // （presentError 由模块自身的 const 声明提供，不再单独预载，否则重复声明）
+    s.petAPI.getSpineModels = async () => ({ list: [] });
+    vm.runInContext(read("renderer/addchar.js"), s);
     await get("btn-import").fire();
     assert.equal(dialogs, 1, "actual external dialog boundary was reached");
     assert.equal(get("status").textContent, "❌ " + expected(lang, "INTERNAL")); safe(get("status").textContent);

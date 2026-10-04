@@ -961,5 +961,21 @@
   "err.gsvSynthFail": "❌ Server started but test synthesis failed (see tts.log)",
   "err.gsvDisabled": "Japanese TTS service is disabled or misconfigured",
   "err.gsvNoPath": "Engine path not found (fresh install, not configured): set Python path & server script in voice settings",
+
+  "page.schedule.summary": "{n} schedules, {p} pending",
+  "page.schedule.btnDone": "Done",
+  "page.schedule.btnSnooze": "Snooze 10m",
+  "page.schedule.added": "Added",
+  "page.schedule.importedCount": "Imported {n} schedules",
+  "page.schedule.previewMeta": "{file}: {total} rows, previewing first {n}",
+  "page.schedule.colRow": "Row",
+  "page.schedule.templateSaved": "Template saved",
+  "page.schedule.templateCancelled": "Cancelled",
+
+  "page.addchar.builtinOnly": "(only the built-in Sussurro)",
+  "page.addchar.currentTag": "(current)",
+  "page.addchar.loadFail": "Failed to load",
+  "page.addchar.pickHint": "Choose a folder containing .atlas / .skel/.json / .png…",
+  "page.addchar.imported": "✅ Imported “{name}” and switched ({id})",
   "err.unknown": "The request could not be completed. Please try again later."
 }

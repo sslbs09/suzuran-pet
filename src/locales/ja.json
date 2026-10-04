@@ -961,5 +961,21 @@
   "err.gsvSynthFail": "❌ サーバーは起動したがテスト合成に失敗しました（tts.log 参照）",
   "err.gsvDisabled": "日本語音声サービスが無効か設定不完全です",
   "err.gsvNoPath": "音声エンジンのパスがありません（初回インストールで未設定）：音声設定で Python パスとサービススクリプトを設定してください",
+
+  "page.schedule.summary": "日程 {n} 件・未発火 {p} 件",
+  "page.schedule.btnDone": "完了",
+  "page.schedule.btnSnooze": "10分後に再通知",
+  "page.schedule.added": "追加しました",
+  "page.schedule.importedCount": "日程を {n} 件インポートしました",
+  "page.schedule.previewMeta": "{file}：全 {total} 件、先頭 {n} 件をプレビュー",
+  "page.schedule.colRow": "行",
+  "page.schedule.templateSaved": "テンプレートを保存しました",
+  "page.schedule.templateCancelled": "キャンセルしました",
+
+  "page.addchar.builtinOnly": "（内蔵のススロのみ）",
+  "page.addchar.currentTag": "（現在）",
+  "page.addchar.loadFail": "読み込み失敗",
+  "page.addchar.pickHint": ".atlas / .skel/.json / .png を含むフォルダを選択…",
+  "page.addchar.imported": "✅「{name}」をインポートして切り替えました（{id}）",
   "err.unknown": "リクエストを完了できませんでした。時間をおいて再試行してください。"
 }
