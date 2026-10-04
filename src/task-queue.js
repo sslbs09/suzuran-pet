@@ -1,6 +1,8 @@
 "use strict";
 
 const { randomUUID } = require("crypto");
+// Phase 5-C：取消是结构化事实（CANCELLED），不再靠下游解析「请求已取消」文案
+const { ErrorWithCode, ERROR_CODES } = require("./error-facts");
 
 function createTaskQueue(maxSize = 3) {
   const limit = Number.isFinite(maxSize) && maxSize > 0 ? Math.floor(maxSize) : 3;
@@ -18,7 +20,7 @@ function createTaskQueue(maxSize = 3) {
     tasks.set(task.id, task);
     const execute = async () => {
       try {
-        if (task.state === "cancelled") throw new Error("请求已取消");
+        if (task.state === "cancelled") throw new ErrorWithCode(ERROR_CODES.CANCELLED, { message: "请求已取消" });
         task.state = "running";
         task.startedAt = Date.now();
         return await run({ id: task.id, signal: task.controller.signal });

@@ -47,7 +47,11 @@ function sseStream(chunks) {
       );
     } catch (e) { threw = e; }
     assert("error 帧抛出", !!threw, true);
-    assert("error 信息含内容", threw ? threw.message.includes("rate limit") : false, true);
+    assert("error 帧保留 sseError 标记（调用方不得静默吞掉）", threw ? threw.sseError === true : false, true);
+    // Phase 5-C：provider body 不再进入 message（禁止随 IPC/renderer 外发），改入 detail 供日志诊断
+    assert("error message 不含 provider body", threw ? !threw.message.includes("rate limit") : false, true);
+    assert("error message 为固定文案", threw ? threw.message === "流式响应错误" : false, true);
+    assert("provider body 保留在 detail（仅日志）", threw ? String(threw.detail).includes("rate limit") : false, true);
   }
 
   // 4) 分块跨行边界：data 行被切成两段仍能正确解析（流式网络包常见）

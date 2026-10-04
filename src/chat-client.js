@@ -11,6 +11,8 @@ const config = require("./config");
 const { activeWorldInfos } = require("./world-info"); // 世界书：按用户消息关键词激活情境块（§14 追加 102）
 const vectorMemory = require("./vector-memory"); // 向量记忆：语义片段回引（§14 追加 102）
 const { safeFetch, isLoopbackHost, originOf, sameOrigin } = require("./safe-url");
+// Phase 5-C：错误来源主动产出结构化事实（code/meta/message/detail），不再靠下游解析文案
+const { ErrorWithCode, ERROR_CODES, codeForHttpStatus, toPayload } = require("./error-facts");
 
 function buildPetRules() {
   const cfg = config.getConfig();
@@ -116,8 +118,9 @@ function storedKeyOriginViolation(storedBaseUrl, requestBaseUrl) {
  *  逃生（对应 config.chat.allowPrivateBaseUrl，本机自担风险）。纯函数可单测。 */
 function validateApiBase(base, allowPrivate) {
   let u;
-  try { u = new URL(base); } catch { throw new Error("API 地址无效: " + String(base).slice(0, 80)); }
-  if (!/^https?:$/.test(u.protocol)) throw new Error("仅支持 http/https: " + String(base).slice(0, 80));
+  try { u = new URL(base); }
+  catch (e) { throw new ErrorWithCode(ERROR_CODES.BAD_URL, { message: "API 地址无效", detail: String(base) + " | " + String(e.message || e) }); }
+  if (!/^https?:$/.test(u.protocol)) throw new ErrorWithCode(ERROR_CODES.BAD_URL, { message: "仅支持 http/https", detail: String(base).slice(0, 200) });
   const h = String(u.hostname).toLowerCase().replace(/^\[|\]$/g, "");
   if (/^(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|::1)$/.test(h)) return; // 回环放行
   if (allowPrivate) return; // 显式逃生开关
@@ -129,7 +132,7 @@ function validateApiBase(base, allowPrivate) {
     (ipv4[1] === "169" && ipv4[2] === "254")
   );
   if (priv || /^fe[89ab][0-9a-f]:/.test(h) || /^f[cd][0-9a-f]{2}:/.test(h)) {
-    throw new Error("拒绝向内网/链路本地地址发送请求（SSRF 防护）：" + h);
+    throw new ErrorWithCode(ERROR_CODES.SSRF_BLOCKED, { message: "拒绝向内网/链路本地地址发送请求（SSRF 防护）：" + h });
   }
 }
 
@@ -137,18 +140,23 @@ function validateApiBase(base, allowPrivate) {
  *  OpenAI 兼容 error 帧（data: {"error": ...}）会向上抛出（v2.5.24 优化建议 P1）；
  *  流空闲 30s 超时与 signal 取消检查（v2.5.27）。 */
 async function readSSE(resp, onChunk, extractor, signal) {
-  if (!resp.body) throw new Error("API 未返回可读取的流");
+  if (!resp.body) throw new ErrorWithCode(ERROR_CODES.INTERNAL, { message: "API 未返回可读取的流" });
   const reader = resp.body.getReader();
   const decoder = new TextDecoder("utf-8");
   let buf = "";
   let full = "";
   const idleMs = 30000;
   while (true) {
-    if (signal?.aborted) throw new Error("请求已取消");
+    if (signal?.aborted) throw new ErrorWithCode(ERROR_CODES.CANCELLED, { message: "请求已取消" });
+    // 空闲计时器必须在每次 read 后清理：否则长流每次读取都留下一个 30s 悬挂定时器
+    let idleTimer = null;
     const readResult = await Promise.race([
       reader.read(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("SSE 流空闲超时")), idleMs))
-    ]);
+      new Promise((_, reject) => {
+        idleTimer = setTimeout(
+          () => reject(new ErrorWithCode(ERROR_CODES.TIMEOUT, { message: "SSE 流空闲超时" })), idleMs);
+      })
+    ]).finally(() => { if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; } });
     const { done, value } = readResult;
     if (done) break;
     buf += decoder.decode(value, { stream: true });
@@ -161,7 +169,15 @@ async function readSSE(resp, onChunk, extractor, signal) {
       if (data === "[DONE]") continue;
       try {
         const j = JSON.parse(data);
-        if (j && j.error) throw Object.assign(new Error("流式响应错误: " + JSON.stringify(j.error).slice(0, 200)), { sseError: true });
+        if (j && j.error) {
+          // provider body 只进 detail（不进 message/payload/renderer），sseError 语义保持不变
+          const err = new ErrorWithCode(ERROR_CODES.INTERNAL, {
+            message: "流式响应错误",
+            detail: JSON.stringify(j.error).slice(0, 200)
+          });
+          err.sseError = true;
+          throw err;
+        }
         const delta = extractor(j);
         if (delta) {
           full += delta;
@@ -178,7 +194,7 @@ async function readSSE(resp, onChunk, extractor, signal) {
 
 async function chatOpenAI(cfg, messages, opts) {
   if (!cfg.chat.apiKey && !isLocalUrl(normalizeOpenAIBase(cfg.chat.baseUrl))) {
-    throw new Error("未配置 API Key：" + cfg._keySource);
+    throw new ErrorWithCode(ERROR_CODES.NO_API_KEY, { message: "未配置 API Key", detail: String(cfg._keySource || "") });
   }
   const url = normalizeOpenAIBase(cfg.chat.baseUrl) + "/chat/completions";
   validateApiBase(url, !!cfg.chat.allowPrivateBaseUrl); // SSRF 防护（优化建议 P0）
@@ -210,13 +226,15 @@ async function chatOpenAI(cfg, messages, opts) {
   }, { allowLoopback: isLocalUrl(url), credentialOrigin: originOf(url), allowFakeIpTransport: true }); // F-01 凭据绑定 + P02 fake-ip 运输令牌
   if (!resp.ok) {
     const errBody = await resp.text().catch(() => "");
-    throw new Error(`API ${resp.status}: ${errBody.slice(0, 300)}`);
+    // provider body 只进 detail；message 仅保留状态码，交给 error-presenter 生成用户文案
+    const { code, meta } = codeForHttpStatus(resp.status);
+    throw new ErrorWithCode(code, { meta, message: `API ${resp.status}`, detail: String(errBody).slice(0, 300) });
   }
   return readSSE(resp, opts.onChunk, (j) => j?.choices?.[0]?.delta?.content, opts.signal);
 }
 
 async function chatAnthropic(cfg, system, history, opts) {
-  if (!cfg.chat.apiKey) throw new Error("未配置 API Key：" + cfg._keySource);
+  if (!cfg.chat.apiKey) throw new ErrorWithCode(ERROR_CODES.NO_API_KEY, { message: "未配置 API Key", detail: String(cfg._keySource || "") });
   const url = normalizeAnthropicBase(cfg.chat.baseUrl) + "/messages";
   validateApiBase(url, !!cfg.chat.allowPrivateBaseUrl); // SSRF 防护（优化建议 P0）
   const smpA = cfg.chat.sampling || {};
@@ -241,7 +259,8 @@ async function chatAnthropic(cfg, system, history, opts) {
   }, { credentialOrigin: originOf(url), allowFakeIpTransport: true }); // F-01：已存凭据不跨 origin 重定向
   if (!resp.ok) {
     const errBody = await resp.text().catch(() => "");
-    throw new Error(`API ${resp.status}: ${errBody.slice(0, 300)}`);
+    const { code, meta } = codeForHttpStatus(resp.status);
+    throw new ErrorWithCode(code, { meta, message: `API ${resp.status}`, detail: String(errBody).slice(0, 300) });
   }
   return readSSE(resp, opts.onChunk, (j) => {
     if (j?.type === "content_block_delta" && j.delta?.type === "text_delta") {
@@ -334,12 +353,12 @@ async function testConnection(overrides = {}, cfg0) {
   const assertCredentialBinding = () => {
     if (!storedFallbackKey) return;
     const violation = storedKeyOriginViolation(cfg.chat.baseUrl, o.baseUrl);
-    if (violation) throw new Error(violation);
+    if (violation) throw new ErrorWithCode(ERROR_CODES.SSRF_BLOCKED, { message: violation });
   };
   const t0 = Date.now();
   const probe = (async () => {
     if (o.apiType === "anthropic") {
-      if (!o.apiKey) throw new Error("未填写 API Key");
+      if (!o.apiKey) throw new ErrorWithCode(ERROR_CODES.NO_API_KEY, { message: "未填写 API Key" });
       const url = normalizeAnthropicBase(o.baseUrl) + "/messages";
       validateApiBase(url, !!cfg.chat.allowPrivateBaseUrl); // SSRF 防护（优化建议 P0）
       assertCredentialBinding();
@@ -349,10 +368,14 @@ async function testConnection(overrides = {}, cfg0) {
         body: JSON.stringify({ model: o.model, max_tokens: 8, messages: [{ role: "user", content: "ping" }] }),
         signal: AbortSignal.timeout(30000)
       }, { credentialOrigin: originOf(url), allowFakeIpTransport: true });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+      if (!resp.ok) throw new ErrorWithCode(codeForHttpStatus(resp.status).code, {
+        meta: codeForHttpStatus(resp.status).meta,
+        message: `HTTP ${resp.status}`,
+        detail: String(await resp.text().catch(() => "")).slice(0, 200)
+      });
       return "ok";
     }
-    if (!o.apiKey && !isLocalUrl(normalizeOpenAIBase(o.baseUrl))) throw new Error("未填写 API Key");
+    if (!o.apiKey && !isLocalUrl(normalizeOpenAIBase(o.baseUrl))) throw new ErrorWithCode(ERROR_CODES.NO_API_KEY, { message: "未填写 API Key" });
     const url = normalizeOpenAIBase(o.baseUrl) + "/chat/completions";
     validateApiBase(url, !!cfg.chat.allowPrivateBaseUrl); // SSRF 防护（优化建议 P0）
     assertCredentialBinding();
@@ -368,28 +391,38 @@ async function testConnection(overrides = {}, cfg0) {
       }),
       signal: AbortSignal.timeout(30000)
     }, { allowLoopback: isLocalUrl(url), credentialOrigin: originOf(url), allowFakeIpTransport: true });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+    if (!resp.ok) throw new ErrorWithCode(codeForHttpStatus(resp.status).code, {
+      meta: codeForHttpStatus(resp.status).meta,
+      message: `HTTP ${resp.status}`,
+      detail: String(await resp.text().catch(() => "")).slice(0, 200)
+    });
     return "ok";
   })();
   try {
     await probe;
     return { ok: true, ms: Date.now() - t0, message: `连接成功（${Date.now() - t0}ms）` };
   } catch (e) {
-    return { ok: false, ms: Date.now() - t0, message: String(e.message || e) };
+    // 结果边界投影：只出 { code, meta, message }，detail 不外发（渲染层已有 presenter 兜底）
+    return { ok: false, ms: Date.now() - t0, ...toPayload(e) };
   }
 }
 
 /** 解析 GET /v1/models 响应并提取去重排序后的模型 id 列表（pet:list-models 专用，格式与原实现一致） */
 async function readModelList(resp) {
   if (!resp.ok) {
+    // provider body 只进本地日志，绝不进入返回值（返回值会直接走 IPC → renderer）
     const t = (await resp.text()).slice(0, 200);
-    return { ok: false, message: "HTTP " + resp.status + ": " + t };
+    if (t) console.error("[chat-client] /models 非 2xx body（不外发）:", t);
+    const { code, meta } = codeForHttpStatus(resp.status);
+    return { ok: false, code, meta, message: "HTTP " + resp.status };
   }
   const j = await resp.json();
   const raw = Array.isArray(j.data) ? j.data : Array.isArray(j.models) ? j.models : [];
   const ids = raw.map((m) => m.id || m.name || m.model).filter(Boolean);
   const uniq = [...new Set(ids)].sort((a, b) => a.localeCompare(b, "zh"));
-  if (!uniq.length) return { ok: false, message: "端口返回了空模型列表（可能不支持该接口）" };
+  if (!uniq.length) {
+    return { ok: false, code: ERROR_CODES.INTERNAL, meta: {}, message: "端口返回了空模型列表（可能不支持该接口）" };
+  }
   return { ok: true, models: uniq, count: uniq.length };
 }
 
@@ -414,14 +447,14 @@ async function listModels(overrides = {}, cfg) {
     const providedKey = typeof overrides.apiKey === "string" ? overrides.apiKey.trim() : "";
     const useStoredKey = !providedKey; // 空串/未提供 → 回退已存密钥，适用 credential binding
     const apiKey = providedKey || c.chat.apiKey;
-    if (!baseUrl) return { ok: false, message: "请先填写 API 地址" };
+    if (!baseUrl) return { ok: false, code: ERROR_CODES.BAD_URL, meta: {}, message: "请先填写 API 地址" };
     if (apiType === "anthropic") {
-      if (!apiKey) return { ok: false, message: "请先填写 API Key" };
+      if (!apiKey) return { ok: false, code: ERROR_CODES.NO_API_KEY, meta: {}, message: "请先填写 API Key" };
       const url = normalizeAnthropicBase(baseUrl) + "/models";
       validateApiBase(url, !!c.chat.allowPrivateBaseUrl); // SSRF 防护（与 testConnection 同界）
       if (useStoredKey) {
         const violation = storedKeyOriginViolation(c.chat.baseUrl, baseUrl);
-        if (violation) return { ok: false, message: violation };
+        if (violation) return { ok: false, code: ERROR_CODES.SSRF_BLOCKED, meta: {}, message: violation };
       }
       const resp = await safeFetch(url, {
         headers: {
@@ -437,7 +470,7 @@ async function listModels(overrides = {}, cfg) {
     validateApiBase(url, !!c.chat.allowPrivateBaseUrl); // SSRF 防护（与 testConnection 同界）
     if (useStoredKey && apiKey) {
       const violation = storedKeyOriginViolation(c.chat.baseUrl, baseUrl);
-      if (violation) return { ok: false, message: violation };
+      if (violation) return { ok: false, code: ERROR_CODES.SSRF_BLOCKED, meta: {}, message: violation };
     }
     const resp = await safeFetch(url, {
       headers: {
@@ -448,7 +481,7 @@ async function listModels(overrides = {}, cfg) {
     }, { allowLoopback: isLocalUrl(url), credentialOrigin: originOf(url), allowFakeIpTransport: true });
     return await readModelList(resp);
   } catch (e) {
-    return { ok: false, message: String(e.message || e) };
+    return { ok: false, ...toPayload(e) };
   }
 }
 

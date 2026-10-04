@@ -2,6 +2,7 @@
 
 const dns = require("dns").promises;
 const net = require("net");
+const { ErrorWithCode, ERROR_CODES } = require("./error-facts");
 
 const MAX_REDIRECTS = 3;
 const REDIRECT_CODES = new Set([301, 302, 303, 307, 308]);
@@ -113,12 +114,15 @@ function resetFakeIpAttestation() { _fakeIpCache = { pool: null, at: 0 }; }
 
 function parseHttpUrl(input) {
   let url;
-  try { url = new URL(String(input || "")); } catch { throw new Error("URL 格式无效"); }
+  try { url = new URL(String(input || "")); }
+  catch (e) { throw new ErrorWithCode(ERROR_CODES.BAD_URL, { message: "URL 格式无效", detail: String(e.message || e) }); }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("只允许使用 http 或 https URL");
+    throw new ErrorWithCode(ERROR_CODES.BAD_URL, { message: "只允许使用 http 或 https URL", detail: url.protocol });
   }
-  if (url.username || url.password) throw new Error("URL 不允许包含用户名或密码");
-  if (!url.hostname) throw new Error("URL 缺少主机名");
+  if (url.username || url.password) {
+    throw new ErrorWithCode(ERROR_CODES.BAD_URL, { message: "URL 不允许包含用户名或密码", detail: String(input).slice(0, 200) });
+  }
+  if (!url.hostname) throw new ErrorWithCode(ERROR_CODES.BAD_URL, { message: "URL 缺少主机名" });
   return url;
 }
 
@@ -126,10 +130,10 @@ function validateHttpUrl(input, { allowLoopback = false, allowPrivate = false } 
   const url = parseHttpUrl(input);
   const host = url.hostname.toLowerCase();
   if (!allowLoopback && (host === "localhost" || host.endsWith(".localhost"))) {
-    throw new Error("不允许访问本机地址");
+    throw new ErrorWithCode(ERROR_CODES.SSRF_BLOCKED, { message: "不允许访问本机地址" });
   }
   if (!allowPrivate && net.isIP(host) > 0 && isPrivateOrReservedIp(host) && !(allowLoopback && isLoopbackHost(host))) {
-    throw new Error("不允许访问私有或保留 IP 地址");
+    throw new ErrorWithCode(ERROR_CODES.SSRF_BLOCKED, { message: "不允许访问私有或保留 IP 地址" });
   }
   return url;
 }
@@ -142,16 +146,21 @@ async function assertSafeHttpUrl(input, options) {
   if (net.isIP(host) > 0) {
     // literal 目的地永远按保留段拦截（P02 fake-ip 豁免不触及此分支，含 198.18.x 字面量）
     if (!allowPrivate && isPrivateOrReservedIp(host) && !(allowLoopback && isLoopbackHost(host))) {
-      throw new Error("不允许访问私有或保留 IP 地址");
+      throw new ErrorWithCode(ERROR_CODES.SSRF_BLOCKED, { message: "不允许访问私有或保留 IP 地址" });
     }
     return url;
   }
   if (allowLoopback && isLoopbackHost(host)) return url;
   const lookup = (options && options.lookup) || dns.lookup;
   let addresses;
+  // DNS 失败 = NETWORK_ERROR（事实来源：lookup 抛错本身，不靠解析文案）
   try { addresses = await lookup(host, { all: true, verbatim: true }); }
-  catch { throw new Error("无法解析服务地址"); }
-  if (!addresses.length) throw new Error("无法解析服务地址");
+  catch (e) {
+    throw new ErrorWithCode(ERROR_CODES.NETWORK_ERROR, {
+      message: "无法解析服务地址", detail: String((e && e.message) || e)
+    });
+  }
+  if (!addresses || !addresses.length) throw new ErrorWithCode(ERROR_CODES.NETWORK_ERROR, { message: "无法解析服务地址" });
   const loopbackOnly = allowLoopback && addresses.every(({ address }) => isLoopbackHost(address));
   if (!loopbackOnly && addresses.some(({ address }) => isPrivateOrReservedIp(address))) {
     // P02 fake-ip 运输令牌豁免：仅 hostname 路径；要求调用方显式 opt-in，
@@ -163,7 +172,7 @@ async function assertSafeHttpUrl(input, options) {
     }
     const allInPool = !!fakePool &&
       addresses.every(({ address }) => net.isIP(address) === 4 && inCidr(address, fakePool));
-    if (!allInPool) throw new Error("服务地址解析到私有或保留 IP 地址");
+    if (!allInPool) throw new ErrorWithCode(ERROR_CODES.SSRF_BLOCKED, { message: "服务地址解析到私有或保留 IP 地址" });
   }
   return url;
 }
@@ -189,14 +198,15 @@ async function safeFetch(input, init = {}, options = {}) {
     // origin 一律拒绝——凭据头从不离开绑定 origin，跨源 302 不再是凭据外发通道。
     // 未设置时行为与旧版完全一致（其他调用方零漂移）。
     if (options.credentialOrigin && originOf(url) !== options.credentialOrigin) {
-      throw new Error("请求被重定向到不同来源，为保护凭据已中断");
+      throw new ErrorWithCode(ERROR_CODES.SSRF_BLOCKED, { message: "请求被重定向到不同来源，为保护凭据已中断" });
     }
     const response = await fetch(url, { ...init, redirect: "manual" });
     if (!REDIRECT_CODES.has(response.status)) return response;
-    if (redirects >= maxRedirects) throw new Error("重定向次数超过限制");
+    if (redirects >= maxRedirects) throw new ErrorWithCode(ERROR_CODES.INTERNAL, { message: "重定向次数超过限制" });
     const location = response.headers.get("location");
-    if (!location) throw new Error("服务返回了无效重定向");
-    current = new URL(location, url).toString();
+    if (!location) throw new ErrorWithCode(ERROR_CODES.BAD_URL, { message: "服务返回了无效重定向" });
+    try { current = new URL(location, url).toString(); }
+    catch (e) { throw new ErrorWithCode(ERROR_CODES.BAD_URL, { message: "服务返回了无效重定向", detail: String(e.message || e) }); }
   }
 }
 

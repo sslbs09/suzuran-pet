@@ -7,28 +7,22 @@
  *     仍走 task-queue 批处理——那是并发 by design，作为舱壁与单写者并存）；
  *  2. 统一 task ID/生命周期：start → running → finish/cancel，AbortController 随任务下发；
  *  3. 统一取消与错误码：cancelCurrent 一次取消当前任务；classifyError 把异常归类为
- *     CANCELLED/HTTP_ERROR/TIMEOUT/INTERNAL，渲染层 pet:error 自带 code 字段。
+ *     统一 code，渲染层 pet:error 自带 code 字段。
+ * Phase 5-C：错误码词表与分类统一由 src/error-facts.js 提供（单一事实来源）；
+ * 本模块的 classifyError 保留为兼容入口——旧的无 code Error 仍按历史文案兜底，
+ * 但新抛点应直接产出 ErrorWithCode，不再依赖解析 message 文本。
  * 纯 Node 可单测；Electron 无关——sender 等运行时对象经 meta 不透明字段携带。
  */
 const { randomUUID } = require("crypto");
+const errorFacts = require("./error-facts");
 
-const ERROR_CODES = {
-  BUSY: "BUSY",           // 已有任务在生成（调用方应走缓冲/拒绝）
-  CANCELLED: "CANCELLED", // 用户主动停止或 AbortError
-  HTTP_ERROR: "HTTP_ERROR",
-  TIMEOUT: "TIMEOUT",
-  EMPTY: "EMPTY",
-  INTERNAL: "INTERNAL"
-};
+/** 统一错误码（直接复用 error-facts 的 11 码词表，杜绝两处词表漂移） */
+const ERROR_CODES = errorFacts.ERROR_CODES;
 
-/** 把各类异常归类为统一错误码（渲染层据此做差异化提示，不再解析 message 文本） */
+/** 把各类异常归类为统一错误码（渲染层据此做差异化提示，不再解析 message 文本）。
+ *  事实优先（code / errno / status），仅在旧的无 code Error 上回落到历史文案兼容。 */
 function classifyError(err) {
-  if (!err) return ERROR_CODES.INTERNAL;
-  if (err.name === "AbortError") return ERROR_CODES.CANCELLED;
-  const msg = String(err.message || err);
-  if (/^HTTP \d+/.test(msg)) return ERROR_CODES.HTTP_ERROR;
-  if (/timeout|timed out|aborted/i.test(msg)) return ERROR_CODES.TIMEOUT;
-  return ERROR_CODES.INTERNAL;
+  return errorFacts.classifyError(err);
 }
 
 function createConversationService({ now = Date.now, taskId = () => randomUUID() } = {}) {
