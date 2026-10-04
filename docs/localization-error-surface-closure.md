@@ -66,6 +66,14 @@
 - Controller verification: 148 targeted tests passed, 0 failed. Against D1 (`2d58477`), the new behavior suite produced 13 actual-output failures and 1 intentional static-check skip; no missing-helper or extraction failure was used as regression evidence. A final empty PSD-result fallback adjustment passed all 22 affected closure/main-native tests.
 - The 14 closure tests execute production functions, registered IPC handlers, attached DOM/tooltips and the existing locale callbacks with controlled external boundaries. Focused review blockers were repaired. Touched-file lint has 0 errors and 5 existing warnings; whitespace verification passed. These are not real Electron/device execution claims.
 
+### 5-D3 evidence
+
+- The production Agent route now appends existing HTTP facts at transport/validation failures and `BUSY` facts at both local busy rejections. The HTTP status/error/header matrix below was checked over real loopback requests, with provider/runtime boundaries controlled.
+- New HTTP tests: before implementation, 17 tests produced 13 expected missing-fact failures and 4 passes; after implementation, all 17 passed. Controller verification of HTTP plus ingress ownership tests: 33 passed, 0 failed.
+- Focused final review: no blockers. The D2/D3 production behavior suites together passed 31 tests, including PSD null/undefined/empty-result fallback and legacy strings.
+- The first full regression run passed 684/685. Its only failure was an existing source-text assertion requiring the old exact BUSY object shape; the updated assertion verifies the unchanged 429/error and additive BUSY/meta fields. No ownership implementation was changed.
+- Final connected scan covered toast producers, result/alert/showError sinks, error `textContent`/tooltip/HTML paths, local exception catches, diagnostic `console`/`dbg`/`logTts`, Consent and auxiliary runtime renderers. No active technical exception text-to-DOM branch was found outside the deliberate legacy and sanitized-diagnostic contracts below.
+
 ## Error ownership table
 
 | Source owner | Fact / compatibility boundary | User presentation owner | Diagnostic / contract distinction |
@@ -92,9 +100,60 @@
 - Explicit source-owned static validation and consent/policy responses retain absent-code legacy fields.
 - Agent additions preserve exact original status, error text and relevant response headers; no authentication, queue, stop, chat ownership or lifecycle changes.
 
+| Agent outcome | HTTP status | Additive facts | Preserved contract |
+| --- | --- | --- | --- |
+| Unknown route/query, wrong method | 404 / 405 | `HTTP_ERROR`, `meta.status` | `not found` / `method not allowed`; `Allow` |
+| Authentication rejection | 401 | `AUTH_INVALID`, empty meta | `unauthorized`; `WWW-Authenticate: Bearer` |
+| Media type, malformed JSON, request validation | 415 / 400 | `HTTP_ERROR`, `meta.status` | Original `error` strings and request validation |
+| Oversize body | 413 | `HTTP_ERROR`, `meta.status` | `payload too large`; both declared and streamed size limits |
+| Queue full / runtime ownership busy | 429 | `BUSY`, empty meta | Original two distinct busy `error` strings |
+| Consent rejection | 403 | None, intentional legacy | Exact consent `error` text and absence of code/meta |
+| Generation / outer exception | 500 | Existing `toPayload` facts | Existing `error` field; bounded/redacted payload, no detail |
+| Health/status/stop/chat success | 200 | No change | Existing schemas and history/lifecycle behavior |
+
+## Changed-file inventory
+
+32 files relative to the baseline, grouped below. No dependency or lockfile changes.
+
+| Area | Files |
+| --- | --- |
+| Source / main boundary | `main.js`, `src/error-facts.js`, `src/error-presenter.js`, `src/schedules.js` |
+| Catalogs | `src/locales/zh.json`, `src/locales/en.json`, `src/locales/ja.json` |
+| Renderer scripts | `renderer/settings.js`, `renderer/pet.js`, `renderer/addchar.js`, `renderer/docs.js`, `renderer/moods.js`, `renderer/psd.js`, `renderer/schedule.js`, `renderer/voice.js` |
+| Existing page wiring | `renderer/addchar.html`, `renderer/docs.html`, `renderer/moods.html`, `renderer/psd.html`, `renderer/schedule.html`, `renderer/voice.html` |
+| Tests | `tests/agent-error-contract.test.js`, `tests/error-surface-closure.test.js`, `tests/error-facts.test.js`, `tests/error-facts-sources.test.js`, `tests/error-facts-main.test.js`, `tests/error-presentation.test.js`, `tests/settings-error-presentation.test.js`, `tests/dynamic-copy-i18n.test.js`, `tests/main-native-i18n.test.js`, `tests/chat-ingress-ownership.test.js` |
+| Report | `docs/localization-error-surface-closure.md` |
+
 ## Verification and remaining debt
 
-Final test totals, commits and changed-file inventory are pending final verification.
+CONFIRMED: the audited active technical failure paths use the existing presenter and locale catalog. There is one code-to-presentation mapping; the per-page adapters only connect facts to that mapping. The explicit no-code legacy fallback remains a compatibility exception.
+
+| Verification | Result |
+| --- | --- |
+| Baseline relevant regression | 100 passed, 0 failed |
+| D1 relevant regression | 101 passed, 0 failed |
+| D2 relevant regression | 148 passed, 0 failed; final affected subset 22 passed |
+| D2 D1-baseline behavior comparison | 13 expected behavior failures, 1 intentional static skip |
+| D3 pre-change HTTP contract comparison | 13 expected failures, 4 passes |
+| D3 real loopback HTTP suite | 17 passed, 0 failed |
+| Final focused D2/D3 behavior suites | 31 passed, 0 failed |
+| Final complete `npm test` | **685 passed, 0 failed, 0 skipped** |
+| Changed JavaScript lint | 0 errors; 5 baseline warnings (pet 3, settings 1, voice 1) |
+| `git diff --check` | Passed |
+| Focused review | No remaining blockers |
+
+Reproduction commands from this checkout:
+
+```powershell
+npm test
+node --test tests/agent-error-contract.test.js tests/error-surface-closure.test.js
+node node_modules/eslint/bin/eslint.js main.js src/error-facts.js src/error-presenter.js src/schedules.js renderer/settings.js renderer/pet.js renderer/addchar.js renderer/docs.js renderer/moods.js renderer/psd.js renderer/schedule.js renderer/voice.js tests/agent-error-contract.test.js tests/error-surface-closure.test.js tests/error-facts.test.js tests/error-facts-sources.test.js tests/error-facts-main.test.js tests/error-presentation.test.js tests/settings-error-presentation.test.js tests/dynamic-copy-i18n.test.js tests/main-native-i18n.test.js tests/chat-ingress-ownership.test.js
+git diff --check
+```
+
+Commit separation: `2d58477` D1 restart consolidation; `9db6abe` D2 diagnostic/renderer closure; the D3 audit commit adds only Agent metadata, its HTTP tests, the compatible ingress assertion and this final report. No squash was performed. Each commit has its own passing verification above.
+
+Remaining debt / limits:
 
 - Intentional legacy fallback remains: an absent-code legacy message/error is still displayed verbatim. This prevents claiming that arbitrary forged legacy payloads are universally filtered; the closure claim concerns audited active technical exception paths.
 - Static validation/policy copy may remain in its original language; no new meaningless error codes were invented to translate it.

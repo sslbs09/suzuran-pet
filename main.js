@@ -1561,9 +1561,9 @@ function startAgentApi() {
     };
     try {
       const url = new URL(req.url || "/", "http://127.0.0.1");
-      if (url.search || !["/health", "/chat", "/stop", "/status"].includes(url.pathname)) { send(404, { ok: false, error: "not found" }); return; }
+      if (url.search || !["/health", "/chat", "/stop", "/status"].includes(url.pathname)) { send(404, { ok: false, error: "not found", ...errorFacts.codeForHttpStatus(404) }); return; }
       const allowed = (url.pathname === "/health" || url.pathname === "/status") ? "GET" : "POST";
-      if (req.method !== allowed) { send(405, { ok: false, error: "method not allowed" }, { Allow: allowed }); return; }
+      if (req.method !== allowed) { send(405, { ok: false, error: "method not allowed", ...errorFacts.codeForHttpStatus(405) }, { Allow: allowed }); return; }
       const cfg = config.getConfig();
       const apiCfg = cfg.agentApi || {};
       // 鉴权：主 Token（bearerToken）或任一已授权接入的 client token 均可；命中 client 则更新接入名单活跃时间
@@ -1580,7 +1580,7 @@ function startAgentApi() {
       const isWrite = url.pathname === "/chat" || url.pathname === "/stop";
       const needsAuth = url.pathname === "/health" ? false : (isWrite || !!master || sanitizeClients(rawClients).length > 0);
       const authOk = !!provided && (safeTokenEqual(provided, master) || clientIndex >= 0);
-      if (needsAuth && !authOk) { send(401, { ok: false, error: "unauthorized" }, { "WWW-Authenticate": "Bearer" }); return; }
+      if (needsAuth && !authOk) { send(401, { ok: false, error: "unauthorized", ...errorFacts.codeForHttpStatus(401) }, { "WWW-Authenticate": "Bearer" }); return; }
       if (clientHit) { // 接入名单：记录该 agent 最近活跃（在线状态展示）
         clientHit.lastSeen = Date.now();
         // v2.5.22 优化（P2-3）：lastSeen 高频更新只改内存，60s 节流落盘——避免每次请求全量重写 config.json（磨损 SSD）
@@ -1615,18 +1615,18 @@ function startAgentApi() {
         send(200, { ok: true, cancelled });
         return;
       }
-      if (!/^application\/json(?:\s*;|$)/i.test(String(req.headers["content-type"] || ""))) { send(415, { ok: false, error: "application/json required" }); return; }
+      if (!/^application\/json(?:\s*;|$)/i.test(String(req.headers["content-type"] || ""))) { send(415, { ok: false, error: "application/json required", ...errorFacts.codeForHttpStatus(415) }); return; }
       if (!isConsentAccepted(cfg)) { send(403, { ok: false, error: "请先同意《使用条款与隐私政策》" }); return; }
       const maxBytes = Math.max(1024, Math.min(1024 * 1024, Number(apiCfg.maxBodyBytes) || 65536));
       const parsed = await readAgentJson(req, maxBytes);
-      if (parsed.error) { send(parsed.error, { ok: false, error: parsed.error === 413 ? "payload too large" : "invalid json" }); return; }
+      if (parsed.error) { send(parsed.error, { ok: false, error: parsed.error === 413 ? "payload too large" : "invalid json", ...errorFacts.codeForHttpStatus(parsed.error) }); return; }
       let text = String(parsed.body.text || "").trim();
       if (apiCfg.invokeWord) {
         const w = String(apiCfg.invokeWord).trim();
-        if (!text.startsWith(w)) { send(400, { ok: false, error: "消息需以调用词「" + w + "」开头" }); return; }
+        if (!text.startsWith(w)) { send(400, { ok: false, error: "消息需以调用词「" + w + "」开头", ...errorFacts.codeForHttpStatus(400) }); return; }
         text = text.slice(w.length).trim();
       }
-      if (!text) { send(400, { ok: false, error: "text 不能为空" }); return; }
+      if (!text) { send(400, { ok: false, error: "text 不能为空", ...errorFacts.codeForHttpStatus(400) }); return; }
       // 任务按 id 管理：/stop 可同时取消正在执行和排队请求
       const genAtAsk = history.generation(); // F-03 竞态护栏基线
       const enq = agentTaskQueue.enqueue(({ id, signal }) => {
@@ -1646,7 +1646,7 @@ function startAgentApi() {
         }), { source: "agent-api", signal });
       });
       if (enq.busy) {
-        send(429, { ok: false, error: "请求繁忙（并发队列已满），请稍后重试" });
+        send(429, { ok: false, error: "请求繁忙（并发队列已满），请稍后重试", code: "BUSY", meta: {} });
         return;
       }
       try {
@@ -1663,7 +1663,7 @@ function startAgentApi() {
       } catch (e) {
         // ownership 互斥拒绝 = 角色正忙（UI chat 或另一条 /chat 在跑）→ 429 而非 500。
         // 与 UI 侧 conversation.isBusy()→buffer 是同一语义的两端：一个排队补发，一个显式拒绝。
-        if (e && e.code === "BUSY") { send(429, { ok: false, error: "角色正忙（busy），请稍后重试" }); return; }
+        if (e && e.code === "BUSY") { send(429, { ok: false, error: "角色正忙（busy），请稍后重试", code: "BUSY", meta: {} }); return; }
         // Phase 5-C：Agent 响应保留既有 error 字段（协议兼容），并补 code/meta；
         // detail/provider body 经 toPayload 丢弃，绝不外发给 Agent 调用方。
         const fact = errorFacts.toPayload(e);

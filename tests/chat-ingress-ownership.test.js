@@ -285,7 +285,7 @@ test("F2: /chat 不再直连 chatClient.chat——已接入 canonical ownership 
 test("F3: ownership 被拒时 /chat 返回 429（busy）而非 500", () => {
   const chat = mainSource.slice(mainSource.indexOf("const enq = agentTaskQueue.enqueue"));
   assert.match(chat, /e\.code === "BUSY"/, "BUSY 需单独分流");
-  assert.match(chat, /send\(429, \{ ok: false, error: "角色正忙（busy），请稍后重试" \}\)/, "busy → 429");
+  assert.match(chat, /send\(429, \{ ok: false, error: "角色正忙（busy），请稍后重试", code: "BUSY", meta: \{\} \}\)/, "busy → 429，保留旧 error 并补充事实");
 });
 
 test("F4: conversation 单写者在 /chat 路径被成对 start/finish（不泄漏 busy owner）", () => {
