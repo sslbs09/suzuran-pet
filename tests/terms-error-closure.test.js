@@ -132,6 +132,14 @@ test("the two known consent states use their own catalog copy in every locale", 
   for (const lang of ["zh", "en", "ja"]) {
     assert.notEqual(i18n.t(lang, "page.terms.runtimeFailedHint"), i18n.t(lang, "err.internal"),
       `${lang}: restart advice must survive (err.internal alone would say only "try again later")`);
-    assert.notEqual(i18n.t(lang, "page.terms.saveFailedHint"), "page.terms.saveFailedHint");
+    assert.notEqual(i18n.t(lang, "page.terms.saveFailedHint"), i18n.t(lang, "err.internal"),
+      `${lang}: save-failure guidance must survive too`);
+  }
+});
+
+test("no consent hint key is left unreferenced", () => {
+  const src = termsJs;
+  for (const key of ["page.terms.runtimeFailedHint", "page.terms.saveFailedHint", "page.terms.footHint"]) {
+    assert.ok(src.includes(`"${key}"`), `${key} must be referenced by terms.js`);
   }
 });

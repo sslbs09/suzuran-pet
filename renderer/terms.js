@@ -58,7 +58,9 @@ agreeButton.addEventListener("click", async () => {
     if (result !== true && (!result || result.ok !== true)) {
       accepting = false;
       agreeButton.disabled = false; // 保存失败/未知失败：允许重试（runtime 失败才禁止）
-      showFailure({ result }); // 主进程已带 code → presenter；绝不回显 result.message
+      // 本页自己分支得出的已知状态：用本域文案（比 err.internal 的「稍后重试」更可操作）；
+      // 真正未知的失败走 catch → presentError，绝不回显 result.message。
+      showFailure({ key: "page.terms.saveFailedHint" });
       return;
     }
     agreed = true;
