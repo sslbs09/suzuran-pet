@@ -129,7 +129,7 @@ function buildTree() {
   };
   draw(psd ? psd.children : [], 0);
   if (!tree.children.length) tree.textContent = L("page.psd.treeEmpty");
-  if (sel) refreshSelButton();
+  if (sel) renderSelButton();
   return leafCount;
 }
 
@@ -137,10 +137,10 @@ function selectLayer(node, parent, el) {
   if (sel && sel.el) sel.el.classList.remove("sel");
   sel = { node, parent, el };
   if (sel.el) sel.el.classList.add("sel");
-  refreshSelButton();
+  renderSelButton();
 }
 
-function refreshSelButton() {
+function renderSelButton() {
   if (!sel) {
     $("sel-info").textContent = L("page.psd.noSelection");
     $("btn-layer-dup").disabled = $("btn-layer-scale").disabled = $("scale-pct").disabled = $("btn-layer-del").disabled = true;
@@ -165,12 +165,12 @@ function setEdited({ tree = false, eye = false } = {}) {
   } else if (tree) {
     buildTree();
   }
-  if (previewImg) refreshPreviewSoon();
-  if (rigRuntime) refreshRigSoon();
+  if (previewImg) schedulePreviewRefresh();
+  if (rigRuntime) scheduleRigRefresh();
 }
 
 let previewTimer = null;
-function refreshPreviewSoon() {
+function schedulePreviewRefresh() {
   clearTimeout(previewTimer);
   previewTimer = setTimeout(doFlatten, 250);
 }
@@ -219,9 +219,9 @@ function restorePsd(snap, statusKey) {
   edited = true;
   $("btn-apply-rig").disabled = false;
   buildTree();
-  refreshSelButton();
-  if (previewImg) refreshPreviewSoon();
-  if (rigRuntime) refreshRigSoon();
+  renderSelButton();
+  if (previewImg) schedulePreviewRefresh();
+  if (rigRuntime) scheduleRigRefresh();
   updateUndoButtons();
   setStatusL(statusKey, null, false);
 }
@@ -339,9 +339,9 @@ function delLayer() {
   $("btn-apply-rig").disabled = false;
   sel = null;
   buildTree();
-  refreshSelButton();
-  if (previewImg) refreshPreviewSoon();
-  if (rigRuntime) refreshRigSoon();
+  renderSelButton();
+  if (previewImg) schedulePreviewRefresh();
+  if (rigRuntime) scheduleRigRefresh();
   setStatusL("page.psd.deleted", { name: nm });
 }
 
@@ -389,8 +389,8 @@ async function addLayerFile(file) {
     $("btn-apply-rig").disabled = false;
     buildTree();
     selectLayer(L2, psd);
-    if (previewImg) refreshPreviewSoon();
-    if (rigRuntime) refreshRigSoon();
+    if (previewImg) schedulePreviewRefresh();
+    if (rigRuntime) scheduleRigRefresh();
     setStatusL("page.psd.addedLayer", { name: file.name, w: n.width, h: n.height });
   } catch (e) {
     setStatusL("page.psd.importLayerFailed", { error: INTERNAL_FAILURE }, true);
@@ -549,7 +549,7 @@ function rigPsdSource() {
 }
 
 let rigTimer = null;
-function refreshRigSoon() {
+function scheduleRigRefresh() {
   clearTimeout(rigTimer);
   rigTimer = setTimeout(doRigPreview, 300);
 }
@@ -635,7 +635,7 @@ $("btn-apply-rig").addEventListener("click", async () => {
 });
 
 /* Phase 4-B2.1：locale 变化 = 纯状态重放（key+params 重翻译），零业务请求；
- * psd 文档对象/撤销栈/预览图/rig 运行时全部保持。buildTree+refreshSelButton
+ * psd 文档对象/撤销栈/预览图/rig 运行时全部保持。buildTree+renderSelButton
  * 为 DOM 重建（树结构来自内存 psd，不重新解析文件）。 */
 if (window.I18N && window.I18N.onChange) window.I18N.onChange(() => {
   renderStatus();
@@ -644,6 +644,6 @@ if (window.I18N && window.I18N.onChange) window.I18N.onChange(() => {
   renderPreviewHint();
   if (psd) {
     buildTree();
-    refreshSelButton();
+    renderSelButton();
   }
 });

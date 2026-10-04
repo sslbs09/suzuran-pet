@@ -113,7 +113,7 @@ function renderBubbleWidthVal() { // 值=DOM 滑块状态，文案 set.auto 可�
     setResult(resultEl, L("set.logdiagStats").replace("{n}", String(rawLines.length)).replace("{e}", String(stats.error)).replace("{w}", String(stats.warn)), stats.error === 0);
     if (stick || onlyBad.checked) pre.scrollTop = pre.scrollHeight;
   }
-  async function refresh() {
+  async function fetchAndRenderLogs() {
     try {
       const r = await window.petAPI.logRead(Number(linesSel.value) || 500);
       if (!r || !r.ok) { setResult(resultEl, presentResultError(r), false); return; }
@@ -121,12 +121,13 @@ function renderBubbleWidthVal() { // 值=DOM 滑块状态，文案 set.auto 可�
       render();
     } catch { setResult(resultEl, presentResultError(INTERNAL_FAILURE), false); }
   }
-  $id("logdiag-refresh").addEventListener("click", refresh);
-  linesSel.addEventListener("change", refresh);
+  // 注意：DOM id 是协议的一部分，不随函数重命名（settings.html 里仍是 logdiag-refresh）
+  $id("logdiag-refresh").addEventListener("click", fetchAndRenderLogs);
+  linesSel.addEventListener("change", fetchAndRenderLogs);
   onlyBad.addEventListener("change", render);
   autoChk.addEventListener("change", () => {
     if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
-    if (autoChk.checked) autoTimer = setInterval(refresh, 10000); // 10s 轮询：日志尾部读取成本低（主进程读文件尾部）
+    if (autoChk.checked) autoTimer = setInterval(fetchAndRenderLogs, 10000); // 10s 轮询：日志尾部读取成本低（主进程读文件尾部）
   });
   $id("logdiag-export").addEventListener("click", async () => {
     const btn = $id("logdiag-export");
@@ -144,7 +145,7 @@ function renderBubbleWidthVal() { // 值=DOM 滑块状态，文案 set.auto 可�
 })();
 
 /* ---------- 首跑引导清单（v2.5.26）：3 步实时完成状态 ---------- */
-async function renderOnboard(S) {
+async function fetchAndRenderOnboard(S) {
   const box = document.getElementById("onboard-list");
   if (!box) return;
   let chatted = false;
@@ -171,7 +172,7 @@ async function renderOnboard(S) {
 /* ---------- 初始化 ---------- */
 (async function init() {
   S = await window.petAPI.getSettings();
-  renderOnboard(S);
+  fetchAndRenderOnboard(S);
   renderVersion();
   renderKeySource();
 
@@ -654,7 +655,7 @@ async function doSaveVoice() {
   };
   const r = await window.petAPI.saveSettings(patch);
   setResult($("voice-result"), r === true ? L("set.voiceSaved") : L("set.voiceSaveFail"), r === true);
-  if (r === true) await refreshFixedLinePool();
+  if (r === true) await fetchAndRenderFixedLinePool();
 }
 
 /* ---------- 固定台词音频池 ---------- */
@@ -766,7 +767,7 @@ function renderFixedLinePool(status = fixedLineStatus) {
           const r = await window.petAPI.reloadFixedLineAudio(item.id);
           setResult($("fixed-lines-result"), r && r.ok ? L("set.fixedReloadDone") : presentResultError(r), !!(r && r.ok));
         } catch { setResult($("fixed-lines-result"), presentResultError(INTERNAL_FAILURE), false); }
-        await refreshFixedLinePool();
+        await fetchAndRenderFixedLinePool();
       });
       row.className += " has-reload";
       row.append(text, btn, badge);
@@ -777,7 +778,7 @@ function renderFixedLinePool(status = fixedLineStatus) {
   }
   $("btn-fixed-lines-toggle").textContent = fixedLineShowAll ? L("set.fixedShowUnloaded") : `${L("set.fixedShowUnloadedN")}（${total - ready}）`;
 }
-async function refreshFixedLinePool() {
+async function fetchAndRenderFixedLinePool() {
   try {
     fixedLineStatus = await window.petAPI.getFixedLineAudioStatus();
     renderFixedLinePool();
@@ -799,7 +800,7 @@ $("btn-fixed-lines-start").addEventListener("click", async () => {
       const r = await window.petAPI.startFixedLineAudioPreload({ retryFailed: false, pools });
       setResult($("fixed-lines-result"), r && r.ok ? (r.state === "completed" ? L("set.fixedDone") : r.state === "completed_with_errors" ? L("set.fixedDoneErrors") : L("set.fixedPausedCont")) : presentResultError(r), !!(r && r.ok));
   } catch { setResult($("fixed-lines-result"), presentResultError(INTERNAL_FAILURE), false); }
-  await refreshFixedLinePool();
+  await fetchAndRenderFixedLinePool();
   setFixedLineButtons(false);
 });
 $("btn-fixed-lines-retry").addEventListener("click", async () => {
@@ -812,7 +813,7 @@ $("btn-fixed-lines-retry").addEventListener("click", async () => {
       : presentResultError(r), !!(r && r.ok && r.state === "completed"));
   }
   catch { setResult($("fixed-lines-result"), presentResultError(INTERNAL_FAILURE), false); }
-  await refreshFixedLinePool();
+  await fetchAndRenderFixedLinePool();
   setFixedLineButtons(false);
 });
 $("btn-fixed-lines-cancel").addEventListener("click", async () => {
@@ -824,7 +825,7 @@ $("btn-fixed-lines-clear").addEventListener("click", async () => {
   if (!confirm(L("set.fixedClearConfirm"))) return;
   const r = await window.petAPI.clearFixedLineAudioCache();
   setResult($("fixed-lines-result"), r && r.ok ? L("set.fixedCleared") : presentResultError(r), !!(r && r.ok));
-  await refreshFixedLinePool();
+  await fetchAndRenderFixedLinePool();
 });
 $("btn-fixed-lines-toggle").addEventListener("click", () => {
   fixedLineShowAll = !fixedLineShowAll;
@@ -842,7 +843,7 @@ $("btn-fixed-lines-clear-old").addEventListener("click", async () => {
   if (!confirm(L("set.fixedClearOldConfirm"))) return;
   const r = await window.petAPI.clearOldFixedLineCaches();
   setResult($("fixed-lines-result"), r && r.ok ? L("set.fixedClearedOldPre") + r.removed + L("set.fixedClearedOldSuf") : presentResultError(r), !!(r && r.ok));
-  await refreshFixedLinePool();
+  await fetchAndRenderFixedLinePool();
 });
 if (window.petAPI.onFixedLineAudioProgress) {
   window.petAPI.onFixedLineAudioProgress((progress) => {
@@ -858,7 +859,7 @@ if (window.petAPI.onFixedLineAudioProgress) {
     }
   });
 }
-refreshFixedLinePool();
+fetchAndRenderFixedLinePool();
 
 
 $("btn-open-guide").addEventListener("click", () => window.petAPI.openTtsGuide());
@@ -875,7 +876,7 @@ $("tts-fixed-only").addEventListener("change", async () => {
   setResult($("voice-result"),
     r && r.ok ? (on ? L("set.fixedOnlyOn") : L("set.fixedOnlyOff")) : L("set.fixedOnlyFail") + presentResultError(r),
     !!(r && r.ok));
-  await refreshFixedLinePool();
+  await fetchAndRenderFixedLinePool();
 });
 
 /* ---------- 界面语言（即时切换） ---------- */
@@ -1295,7 +1296,7 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
   const listEl = document.getElementById("mem-list");
   const btnClear = document.getElementById("mem-clear");
   if (!statsEl || !listEl || !btnClear) return;
-  const refresh = async () => {
+  const fetchAndRenderMemories = async () => {
     // 羁绊进度条（v2.5.26）：等级+经验进度可视化
     const renderBondBar = (b) => {
       const bar = $("bond-bar"), lab = $("bond-bar-label");
@@ -1309,7 +1310,7 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
     const showFail = () => {
       statsEl.textContent = failText;
       statsEl.style.cursor = "pointer";
-      statsEl.onclick = () => { statsEl.style.cursor = ""; statsEl.onclick = null; refresh(); };
+      statsEl.onclick = () => { statsEl.style.cursor = ""; statsEl.onclick = null; fetchAndRenderMemories(); };
     };
     try {
       // 超时兜底：getMemory 偶发挂起时不再永远停在「加载中…」（6s 未返回即视为异常）
@@ -1362,7 +1363,7 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
                 if (!r || !r.ok) { window.alert(presentResultError(r)); return; }
               }
             }
-            refresh();
+            fetchAndRenderMemories();
           };
           save.addEventListener("click", () => commit(true));
           cancel.addEventListener("click", () => commit(false));
@@ -1377,7 +1378,7 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
         del.style.cssText = "border:none;background:transparent;cursor:pointer;color:#c0392b;font-size:14px;padding:0 4px;";
         del.addEventListener("click", async () => {
           await window.petAPI.deleteMemoryFact(f.id);
-          refresh();
+          fetchAndRenderMemories();
         });
         row.appendChild(label);
         row.appendChild(edit);
@@ -1389,7 +1390,7 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
   btnClear.addEventListener("click", async () => {
     if (!confirm(L("set.memConfirmClearAll"))) return;
     await window.petAPI.clearMemory();
-    refresh();
+    fetchAndRenderMemories();
   });
   // 手动添加记忆（v2.5.3）：不用等聊天自动提取，直接输入一条
   const addInput = document.getElementById("mem-add-input");
@@ -1399,13 +1400,13 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
       const v = addInput.value.trim();
       if (!v) return;
       const r = await window.petAPI.addMemoryFact(v);
-      if (r && r.ok) { addInput.value = ""; refresh(); }
+      if (r && r.ok) { addInput.value = ""; fetchAndRenderMemories(); }
       else window.alert(presentResultError(r));
     };
     addBtn.addEventListener("click", doAdd);
     addInput.addEventListener("keydown", (e) => { if (e.key === "Enter") doAdd(); });
   }
-  refresh();
+  fetchAndRenderMemories();
 })();
 
 /* ---------- 情绪音色试听（v2.6）：走真实 GSV 日语链路 + 参考音频，含实时播放参数模拟 ---------- */
@@ -1585,7 +1586,7 @@ if (window.I18N && window.I18N.onChange) window.I18N.onChange(() => {
   renderAgentTokenPh();
   renderKeyStatuses();
   renderBubbleWidthVal();
-  if (S && S.pet) renderOnboard(S); // S 未加载时跳过（init 后首次 onChange 自然覆盖）
+  if (S && S.pet) fetchAndRenderOnboard(S); // S 未加载时跳过（init 后首次 onChange 自然覆盖）
   const rm = $("render-mode");
   if (rm) applyRenderModeUI(rm.value); // rm-hint 与模式区块可见性的唯一 owner
   if (fixedLineStatus) renderFixedLinePool(); // 池面板文案全部 L() 化，可安全重绘

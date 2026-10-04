@@ -33,7 +33,7 @@ function renderList() {
       [t("page.schedule.btnSnooze"), () => window.petAPI.snoozeSchedule(s.id, 10)],
       [t("page.schedule.cancel"), () => window.petAPI.cancelSchedule(s.id)]
     ];
-    for (const [label, fn] of buttons) { const b = document.createElement("button"); b.textContent = label; b.onclick = async () => { await fn(); refresh(); }; actions.appendChild(b); }
+    for (const [label, fn] of buttons) { const b = document.createElement("button"); b.textContent = label; b.onclick = async () => { await fn(); fetchAndRenderSchedules(); }; actions.appendChild(b); }
     el.append(meta, actions); return el;
   }));
 }
@@ -66,13 +66,13 @@ function renderPreview() {
 /* locale 变化：只从既有 state 重投影。不触碰 petAPI、不重建 dialog 焦点状态。 */
 function renderAll() { renderSummary(); renderList(); renderResult(); renderPreview(); }
 
-async function refresh() {
+async function fetchAndRenderSchedules() {
   const items = await window.petAPI.getSchedules();
   lastItems = items;
   renderSummary();
   renderList();
 }
-$("add").onclick = async () => { const r = await window.petAPI.addSchedule({ title: $("title").value, date: $("date").value, time: $("time").value, recurrence: $("recurrence").value, emotion: $("emotion").value, notes: $("notes").value }); lastResult = r.ok ? { key: "page.schedule.added" } : { error: r }; renderResult(); if (r.ok) { $("title").value = ""; $("notes").value = ""; refresh(); } };
+$("add").onclick = async () => { const r = await window.petAPI.addSchedule({ title: $("title").value, date: $("date").value, time: $("time").value, recurrence: $("recurrence").value, emotion: $("emotion").value, notes: $("notes").value }); lastResult = r.ok ? { key: "page.schedule.added" } : { error: r }; renderResult(); if (r.ok) { $("title").value = ""; $("notes").value = ""; fetchAndRenderSchedules(); } };
 $("import").onclick = async () => {
   const file = await window.petAPI.pickScheduleWorkbook();
   if (!file) return;
@@ -82,7 +82,7 @@ $("import").onclick = async () => {
     const r = await window.petAPI.importScheduleWorkbook(file);
     lastResult = r.ok ? { key: "page.schedule.importedCount", params: { n: r.count } } : { error: r };
     renderResult();
-    if (r.ok) refresh();
+    if (r.ok) fetchAndRenderSchedules();
   });
 };
 function showImportPreview(p, onConfirm) {
@@ -110,9 +110,9 @@ $("import-preview").addEventListener("keydown", (e) => {
   else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 });
 $("template").onclick = async () => { const ok = await window.petAPI.exportScheduleTemplate(); lastResult = { key: ok ? "page.schedule.templateSaved" : "page.schedule.templateCancelled" }; renderResult(); };
-window.petAPI.onScheduleDue(() => refresh());
+window.petAPI.onScheduleDue(() => fetchAndRenderSchedules());
 
 /* Phase 5-E3：locale 变化经 I18N.onChange 从既有 state 重投影（零 IPC / 零业务动作） */
 if (window.I18N && window.I18N.onChange) window.I18N.onChange(renderAll);
 
-const now = new Date(); $("date").value = now.toISOString().slice(0, 10); $("time").value = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()+1).padStart(2,"0")}`; refresh();
+const now = new Date(); $("date").value = now.toISOString().slice(0, 10); $("time").value = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()+1).padStart(2,"0")}`; fetchAndRenderSchedules();

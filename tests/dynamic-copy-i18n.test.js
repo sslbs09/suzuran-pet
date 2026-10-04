@@ -56,7 +56,7 @@ test("B2.1-REPLAY-PURE: 重放回调零业务副作用（无 await/petAPI 调用
   assert.ok(!/await |petAPI\.|doFlatten|doRigPreview|loadFile|pushSnap/.test(body), "psd 重放只做 render/纯树重建");
   const vcbStart = VOICE_JS.lastIndexOf("window.I18N.onChange(() => {");
   const vcb = VOICE_JS.slice(vcbStart, VOICE_JS.indexOf("\n});", vcbStart));
-  assert.ok(!/petAPI\.|refreshStatus|voiceStatus/.test(vcb), "voice 重放不调状态接口");
+  assert.ok(!/petAPI\.|fetchAndRenderVoiceStatus|voiceStatus/.test(vcb), "voice 重放不调状态接口（6-A：refreshStatus→fetchAndRenderVoiceStatus）");
   const scb = SETTINGS_JS.slice(SETTINGS_JS.lastIndexOf("I18N.onChange(() => {"));
   const sbody = scb.slice(0, scb.indexOf("\n});"));
   assert.ok(!/petAPI\.|await |doSave|testConn|rigApply|deleteMemory|clearMemory/.test(sbody), "settings 重放纯投影");

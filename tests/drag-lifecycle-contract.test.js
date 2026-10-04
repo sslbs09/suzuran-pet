@@ -58,7 +58,7 @@ test("finishDrag is idempotent and takes state before releasing capture", () => 
 
 test("finishDrag clears drag visuals and recomputes click-through", () => {
   assert.match(finish, /clearDragVisuals\(\)/);
-  assert.match(finish, /refreshDragClickable\(\)/);
+  assert.match(finish, /renderDragClickable\(\)/);
   assert.match(renderer, /petEl\.classList\.remove\("dragging", "pet-squash", "pet-squash-release"\)/);
 });
 

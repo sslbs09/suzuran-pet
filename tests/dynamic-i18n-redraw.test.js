@@ -60,7 +60,7 @@ test("B1-NO-SIDE-EFFECTS: 各页 onChange 回调仅重绘 presentation，不含�
   const settingsCbBody = settingsCb.slice(0, settingsCb.indexOf("});"));
   assert.ok(settingsCbBody.length > 40 && settingsCbBody.length < 2000, "settings onChange 回调存在且极小");
   for (const f of FORBIDDEN) assert.ok(!settingsCbBody.includes(f), "settings onChange 不得含业务动作: " + f);
-  assert.match(settingsCbBody, /renderVersion\(\);[\s\S]*renderKeySource\(\);[\s\S]*renderOnboard\(S\)[\s\S]*applyRenderModeUI\(rm\.value\)[\s\S]*renderFixedLinePool\(\);/, "重绘链 = 既有 state 的纯 render");
+  assert.match(settingsCbBody, /renderVersion\(\);[\s\S]*renderKeySource\(\);[\s\S]*fetchAndRenderOnboard\(S\)[\s\S]*applyRenderModeUI\(rm\.value\)[\s\S]*renderFixedLinePool\(\);/, "重绘链 = 既有 state 的纯 render（6-A：renderOnboard→fetchAndRenderOnboard，它会取 getMemory）");
   const petCb = SRC.pet.slice(SRC.pet.lastIndexOf("window.I18N.onChange("));
   // 5-G3：pet.js 回调重放三项纯投影（placeholder + modeChip.title + btnTts.title），仍是唯一订阅
   assert.equal((SRC.pet.match(/window\.I18N\.onChange\(/g) || []).length, 1, "pet.js 仍只有既有那一个 onChange 订阅");

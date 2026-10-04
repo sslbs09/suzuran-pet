@@ -2243,7 +2243,7 @@ function applyWalkState(s) {
     // defer 的唯一"状态已 live 但轨道被排队 successor 占用"形态：刷新 stale 队尾（见函数注释）。
     // 其余 defer 原因（resting/paused/睡眠等）语义下 successor 名与实时 target 一致或分支提前返回，
     // refresh 内部按名比对自动落空——不产生任何写。
-    refreshStaleQueuedSuccessor(cur, target);
+    renderStaleQueuedSuccessor(cur, target);
     return;
   }
   if (target && spineObj.state.getCurrent(0)?.animation?.name !== target) {
@@ -2361,7 +2361,7 @@ function headPatSquash() {
  *  目标与 successor 一致（合法 idle 排队）不做无意义替换；多段链不碰；无 disposeNext 的 runtime
  *  降级为手动摘链（排队 entry 在 setCurrent 前从不接线 listener/mixing——打包源码 setCurrent
  *  才做 mixing 配对，queue.start 只在 head 附加路径触发，摘除未晋升 entry 无事件/监听残留）。 */
-function refreshStaleQueuedSuccessor(cur, target) {
+function renderStaleQueuedSuccessor(cur, target) {
   if (!spineObj || !spineObj.state || typeof spineObj.state.addAnimation !== "function") return;
   if (!cur || cur.loop !== false || !target) return;   // 只处理"一次性互动+排队恢复"形态（poke-resume）
   const stale = cur.next;
@@ -4062,7 +4062,7 @@ function clearDragVisuals() {
   }
 }
 
-function refreshDragClickable() {
+function renderDragClickable() {
   try {
     clickability.refreshFromLastMouse(); // 坐标缺失由核心守卫拒绝：清理路径不得主动切穿透（无效坐标无 native 变更权限）
   } catch { /* 页面销毁时 IPC 可能已不可用 */ }
@@ -4079,7 +4079,7 @@ function finishDrag(reason = "cancel") {
   state.active = false;
   releaseDragPointer(state);
   clearDragVisuals();
-  refreshDragClickable();
+  renderDragClickable();
 
   if (reason !== "pointerup") {
     // 异常取消只安全放下当前位置：不 click、不 pat、不 throw、不打开输入栏。

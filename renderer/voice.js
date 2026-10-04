@@ -59,7 +59,7 @@ function renderStatus() { // 纯投影：_voiceStatus(null=检查中) + selected
   }
 }
 
-async function refreshStatus() {
+async function fetchAndRenderVoiceStatus() {
   _voiceStatus = await window.petAPI.voiceStatus();
   deployed = _voiceStatus.deployed;
   renderStatus();
@@ -103,7 +103,7 @@ $("btn-apply").addEventListener("click", async () => {
     text: $("ref-text").value.trim()
   });
   setResult(r.ok ? r.message : L("page.voice.applyFailed", { error: presentError(r) }), r.ok); // 成功 message=main 已翻译，透传
-  if (r.ok) refreshStatus();
+  if (r.ok) fetchAndRenderVoiceStatus();
 });
 
 $("btn-guide").addEventListener("click", () => {
@@ -121,4 +121,4 @@ if (window.I18N && window.I18N.onChange) window.I18N.onChange(() => {
 });
 
 renderFilePath();
-refreshStatus();
+fetchAndRenderVoiceStatus();

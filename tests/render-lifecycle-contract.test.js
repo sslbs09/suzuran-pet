@@ -2524,10 +2524,10 @@ test("POKE-S5: seated/sleeping/perched 在互动期变化——按最新语义�
 test("POKE-S6-contract: defer 接 stale-refresh；官方 disposeNext 摘链 + addAnimation 4 参 delay + 约束齐备", () => {
   const i = renderer.indexOf("function applyWalkState");
   const src = renderer.slice(i, renderer.indexOf("\nfunction ", i + 10));
-  assert.match(src, /if \(decision === "defer"\) \{[\s\S]{0,400}refreshStaleQueuedSuccessor\(cur, target\);[\s\S]{0,40}return;/,
-    "F3：删除 refresh 接线 → stale Relax 用例（S3/T2-accident）与本合同同时红");
-  const h = renderer.indexOf("function refreshStaleQueuedSuccessor");
-  assert.ok(h >= 0, "refresh helper 存在");
+  assert.match(src, /if \(decision === "defer"\) \{[\s\S]{0,400}renderStaleQueuedSuccessor\(cur, target\);[\s\S]{0,40}return;/,
+    "F3：删除 stale successor 接线 → stale Relax 用例（S3/T2-accident）与本合同同时红（6-A：refresh→render 重命名）");
+  const h = renderer.indexOf("function renderStaleQueuedSuccessor");
+  assert.ok(h >= 0, "stale successor 投影 helper 存在");
   const hs = renderer.slice(h, renderer.indexOf("\nfunction ", h + 10));
   assert.match(hs, /cur\.loop !== false/, "只处理一次性互动+排队形态");
   assert.match(hs, /if \(!stale \|\| stale\.next\) return;/, "复杂队列不碰（交回 watchdog）");

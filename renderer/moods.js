@@ -55,7 +55,7 @@ function render() {
     (moods.length >= 30 ? L("page.moods.countFull") : L("page.moods.countHint"));
 }
 
-async function refresh() {
+async function fetchAndRenderMoods() {
   const r = await window.petAPI.getMoods();
   if (r && r.moods) moods = r.moods;
   render();
@@ -82,25 +82,25 @@ grid.addEventListener("click", async (e) => {
   if (btn.classList.contains("btn-rename")) {
     const r = await window.petAPI.renameMood({ name, newLabel: input.value });
     setResultMessage(r);
-    await refresh();
+    await fetchAndRenderMoods();
   } else if (btn.classList.contains("btn-type")) {
     const r = await window.petAPI.setMoodType({ name, emotion: !m.emotion });
     setResultMessage(r);
-    await refresh();
+    await fetchAndRenderMoods();
   } else if (btn.classList.contains("btn-pick")) {
     const path = await window.petAPI.pickGif();
     if (!path) return;
     const r = await window.petAPI.applyGif({ name, filePath: path });
-    if (r.ok) await refresh();
+    if (r.ok) await fetchAndRenderMoods();
     else setMsg(L("page.moods.applyFailed", { error: presentError(r) }), false);
   } else if (btn.classList.contains("btn-reset")) {
     const r = await window.petAPI.resetGif(name);
-    if (r.ok) await refresh();
+    if (r.ok) await fetchAndRenderMoods();
     else setMsg(L("page.moods.restoreFailed", { error: presentError(r) }), false);
   } else if (btn.classList.contains("btn-del")) {
     if (!confirm(L("page.moods.confirmDelete", { name: m ? m.label : name }))) return;
     const r = await window.petAPI.removeMood(name);
-    if (r.ok) await refresh();
+    if (r.ok) await fetchAndRenderMoods();
     else setMsg(L("page.moods.deleteFailed", { error: presentError(r) }), false);
   }
 });
@@ -121,7 +121,7 @@ document.getElementById("btn-add-mood").addEventListener("click", async () => {
   setResultMessage(r);
   if (r.ok) {
     input.value = "";
-    await refresh();
+    await fetchAndRenderMoods();
   }
 });
 document.getElementById("new-mood").addEventListener("keydown", (e) => {
@@ -131,4 +131,4 @@ document.getElementById("new-mood").addEventListener("keydown", (e) => {
 /* Phase 4-B2.1：locale 变化 → render() 纯重投影（moods 数组为唯一 state，零业务请求） */
 if (window.I18N && window.I18N.onChange) window.I18N.onChange(render);
 
-refresh();
+fetchAndRenderMoods();

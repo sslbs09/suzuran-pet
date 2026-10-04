@@ -232,7 +232,8 @@ test("production PSD parse failure replays through its existing locale owner wit
   functions(s, "renderer/psd.js", ["function setStatusL(", "function renderStatus()", "function renderMeta()", "function renderPreviewHint()", "function renderRigInfo()", "function dbg(", "async function loadFile("]);
   s.petAPI.playback = (message) => diagnostic.push(message);
   s.agPsd = { readPsd() { parses++; throw new Error(hostile); } };
-  s.buildTree = s.refreshSelButton = () => { throw new Error("unexpected tree action after failure"); };
+  // 6-A 重命名后：守卫名必须跟生产函数名一致，否则这个「意外调用即抛」的护栏会静默失效
+  s.buildTree = s.renderSelButton = () => { throw new Error("unexpected tree action after failure"); };
   vm.runInContext(statement(source("renderer/psd.js"), "if (window.I18N && window.I18N.onChange) window.I18N.onChange("), s);
   s.file = { name: "fixture.psd", path: "controlled.psd", async arrayBuffer() { reads++; return new ArrayBuffer(1); } };
   await vm.runInContext("loadFile(file)", s);
@@ -392,7 +393,8 @@ test("production moods click maps config write failure and preserves success/leg
     const addMood = main({ getMoodList: () => [], config: { saveConfig() { throw new Error(hostile); } } }).handler("pet:add-mood");
     get("new-mood").value = "test";
     let refreshes = 0;
-    s.refresh = async () => { refreshes++; };
+    // 6-A 重命名：生产侧为 fetchAndRenderMoods，护栏名同步
+    s.fetchAndRenderMoods = async () => { refreshes++; };
     s.petAPI.addMood = (label) => Promise.resolve(addMood(null, label));
     presenter(s, "renderer/moods.js");
     functions(s, "renderer/moods.js", ["function setMsg("]);

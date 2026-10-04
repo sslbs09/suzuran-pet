@@ -192,8 +192,8 @@ test("T13 active drag keeps capture; drag cleanup on missing coords does not for
   drag.core.refreshClickable(20, 20);
   assert.deepEqual(drag.sent, [true], "拖拽中强制放行（mouseup 不得被穿透吞掉）");
   assert.equal(petUiHit(makeEl("DIV", []), { clientX: 0, clientY: 0 }, {}), false, "拖拽兜底不改变 isPetUI 本体语义");
-  assert.match(pet, /function refreshDragClickable\(\) \{[\s\S]*?clickability\.refreshFromLastMouse\(\);[\s\S]*?\}/);
-  assert.match(pet, /function finishDrag[\s\S]*?refreshDragClickable\(\);/);
+  assert.match(pet, /function renderDragClickable\(\) \{[\s\S]*?clickability\.refreshFromLastMouse\(\);[\s\S]*?\}/);
+  assert.match(pet, /function finishDrag[\s\S]*?renderDragClickable\(\);/);
   assert.equal((pet.match(/clickability\.setLastMouse\(e\.clientX, e\.clientY\);/g) || []).length, 2, "拖拽 pointermove/pointerup 同步 lastMouse 语义不变");
 });
 test("T14 render owner pointer ownership unchanged in commit paths", () => {
