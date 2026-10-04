@@ -64,7 +64,11 @@ test("B1-NO-SIDE-EFFECTS: 各页 onChange 回调仅重绘 presentation，不含�
   const petCb = SRC.pet.slice(SRC.pet.lastIndexOf("window.I18N.onChange("));
   assert.equal(petCb.split("\n").filter((l) => l.trim() && !l.trim().startsWith("/") && !l.trim().startsWith("*")).length, 3, "pet.js 回调仅一行 placeholder 重放");
   assert.match(petCb, /inputEl\.placeholder = isRecording \? I18N\.t\("ui\.micRecording"\) : I18N\.t\("ui\.placeholder"\);/);
-  assert.match(SRC.terms, /function renderTermsHint\(\) \{\s*if \(!hint \|\| hintFailure\) return;/, "terms：失败文本是 state，locale 重绘不抹掉");
+  // 5-E1 起失败文本改为「存来源、重投影」：locale 切换不会抹掉失败态，但会把它重新本地化
+  assert.match(SRC.terms, /let hintFailure = null;/, "terms：失败文本是 state（不因 locale 切换被抹掉）");
+  assert.match(SRC.terms, /hintFailure\.key !== undefined \? t\(hintFailure\.key\) : presentError\(hintFailure\.result\)/,
+    "terms：失败态随 locale 重本地化，而不是冻结成旧语言文本");
+  assert.match(SRC.terms, /if \(window\.I18N && window\.I18N\.onChange\) window\.I18N\.onChange\(renderTermsHint\);/, "terms hint 单一 owner + locale 重绘");
   assert.match(SRC.docs, /if \(window\.I18N && window\.I18N\.onChange\) window\.I18N\.onChange\(renderDocsTitle\);/, "docs title 单一 owner");
 });
 

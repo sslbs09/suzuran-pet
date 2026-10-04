@@ -1386,7 +1386,7 @@ ipcMain.handle("pet:agree-terms", () => {
     const runtime = startNormalRuntimeOnce();
     if (runtime.state !== "started") {
       refreshTrayMenu();
-      return { ok: false, accepted: true, runtimeFailed: true, message: "已记录同意，但桌宠启动失败，请重启应用" };
+      return { ok: false, code: "INTERNAL", accepted: true, runtimeFailed: true, message: "已记录同意，但桌宠启动失败，请重启应用" };
     }
     refreshTrayMenu();
     sendToRenderer("pet:terms-agreed");
@@ -1394,7 +1394,7 @@ ipcMain.handle("pet:agree-terms", () => {
   } catch (e) {
     logTts("consent", "同意状态保存/确认失败: " + String(e && e.message || e));
     refreshTrayMenu();
-    return { ok: false, message: "保存同意状态失败，请重试" };
+    return { ok: false, code: "INTERNAL", message: "保存同意状态失败，请重试" };
   }
 });
 

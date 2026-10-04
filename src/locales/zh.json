@@ -592,6 +592,8 @@
   "page.terms.refuse": "✖ 拒绝（退出）",
   "page.terms.agree": "✔ 同意并开始使用",
   "page.terms.footHint": "点「同意」即确认接受全部条款",
+  "page.terms.runtimeFailedHint": "已记录同意，但桌宠启动失败，请重启应用",
+  "page.terms.saveFailedHint": "保存同意状态失败，请重试",
   "page.moods.title": "苏苏洛 · 表情管理",
   "page.moods.h1": "🎨 表情管理（换装）",
   "page.moods.sub": "每个情绪单独一个格子：点「选择 GIF」填入你自己的表情，随时可「恢复默认」。",

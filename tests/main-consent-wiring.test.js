@@ -164,26 +164,48 @@ test("production firstRun is deferred and scheduled only once", () => {
   assert.equal(h.cfg.firstRun, false); assert.equal(h.timers.filter(t => t.delay === 1200).length, 1);
 });
 
-function termsRenderer(result) {
+function termsRenderer(result, lang = "zh") {
   const callbacks = {}, hint = {}, button = {}, events = {};
   let closes = 0, refuses = 0, invokes = 0;
   button.addEventListener = (name, fn) => { callbacks[name] = fn; };
+  const i18n = require("../src/i18n");
+  // 5-E1：条款页失败提示改由 catalog 呈现，沙箱需提供真实 I18N 契约
+  const I18N = {
+    t: (key) => i18n.t(lang, key, key),
+    apply: () => {}, onChange: () => () => {}, ready: () => true, lang: () => lang
+  };
+  const presenter = require("../src/error-presenter");
   const context = { document: { getElementById(id) { return id === "btn-agree" ? button : { addEventListener() {} }; },
-    querySelector: () => hint }, window: { petAPI: { agreeTerms: async () => { invokes++; return result; },
-      refuseTerms: () => { refuses++; } }, close: () => { closes++; }, addEventListener(name, fn) { events[name] = fn; } } };
+    querySelector: () => hint },
+    window: { I18N, ErrorPresenter: presenter,
+      petAPI: { getI18n: async () => ({ lang, dict: i18n.getEffectiveDict(lang) }), onUiLangChanged() {},
+        agreeTerms: async () => { invokes++; return result; },
+      refuseTerms: () => { refuses++; } },
+      close: () => { closes++; }, addEventListener(name, fn) { events[name] = fn; } } };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(require.resolve("../renderer/terms.js"), "utf8"), context);
   return { click: callbacks.click, unload: () => events.beforeunload(), hint, button,
     state: () => ({ agreed: vm.runInContext("agreed", context), closes, refuses, invokes }) };
 }
 test("production terms renderer keeps saved consent on runtime failure and disables retries", async () => {
-  const h = termsRenderer({ ok: false, accepted: true, runtimeFailed: true });
+  const h = termsRenderer({ ok: false, code: "INTERNAL", accepted: true, runtimeFailed: true, message: "已记录同意，但桌宠启动失败，请重启应用" });
   await h.click(); await h.click(); h.unload();
   assert.deepEqual(h.state(), { agreed: true, closes: 0, refuses: 0, invokes: 1 });
-  assert.equal(h.button.disabled, true); assert.match(h.hint.textContent, /重启/);
+  assert.equal(h.button.disabled, true);
+  // 5-E1：文案来自 catalog，不再是硬编码中文字面量
+  assert.equal(h.hint.textContent, require("../src/i18n").t("zh", "page.terms.runtimeFailedHint"));
+  assert.match(h.hint.textContent, /重启/, "仍保留可操作的重启指引");
+});
+test("production terms renderer renders consent failure in the active locale", async () => {
+  for (const lang of ["zh", "en", "ja"]) {
+    const i18n = require("../src/i18n");
+    const h = termsRenderer({ ok: false, code: "INTERNAL", accepted: true, runtimeFailed: true }, lang);
+    await h.click();
+    assert.equal(h.hint.textContent, i18n.t(lang, "page.terms.runtimeFailedHint"), lang);
+  }
 });
 test("production terms renderer allows retry only for save failure", async () => {
-  const h = termsRenderer({ ok: false }); await h.click();
+  const h = termsRenderer({ ok: false, code: "INTERNAL" }); await h.click();
   assert.equal(h.state().agreed, false); assert.equal(h.button.disabled, false);
   assert.equal(h.state().closes, 0); h.unload(); assert.equal(h.state().refuses, 1);
 });

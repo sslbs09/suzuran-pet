@@ -592,6 +592,8 @@
   "page.terms.refuse": "✖ 拒否（終了）",
   "page.terms.agree": "✔ 同意して開始",
   "page.terms.footHint": "「同意」をクリックで全条項への同意を確認します",
+  "page.terms.runtimeFailedHint": "同意は記録されましたが、ペットを起動できませんでした。アプリを再起動してください。",
+  "page.terms.saveFailedHint": "同意状態を保存できませんでした。もう一度お試しください。",
   "page.moods.title": "ススロ · 表情管理",
   "page.moods.h1": "🎨 表情管理（着せ替え）",
   "page.moods.sub": "感情ごとに 1 枚のカード：「GIF を選択」で自分の表情を設定し、いつでも「既定に戻す」。",

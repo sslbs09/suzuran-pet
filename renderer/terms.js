@@ -10,17 +10,39 @@ let accepting = false;
 const agreeButton = document.getElementById("btn-agree");
 const hint = document.querySelector(".hint");
 
-/* Phase 4-B1：foot hint 唯一 owner = 本脚本。初始文案经 I18N 本地化；locale 变化时
- * 仅在无失败状态时重绘普通说明（失败文本是 runtime state，不被语言切换抹掉）。
- * result.message 为 main 侧已翻译文案，此处不做二次翻译（B1 错误边界）。 */
-let hintFailure = false;
+const t = (key) => (window.I18N && window.I18N.t(key)) || key;
+
+/* Phase 5-E1：条款页错误呈现与全应用同构（code/meta → ErrorPresenter → I18N → DOM）。
+ * 修复前这里把主进程 result.message 直接写进 DOM，绕过 presenter 与 i18n——这是
+ * 5-C/5-D 之后唯一仍在漏斗外的错误面。
+ * 无 code 时落 err.unknown 而不是回显 message：那正是本阶段要消灭的路径；
+ * 主进程 pet:agree-terms 已补 code，所以正常链路永远走 presenter 分支。 */
+const presentError = (result) => {
+  if (result && Object.prototype.hasOwnProperty.call(result, "code")) {
+    const p = window.ErrorPresenter.toPresentation({ code: result.code, meta: result.meta });
+    return window.I18N.t(p.key, p.params);
+  }
+  return window.I18N.t("err.unknown");
+};
+
+/* foot hint 唯一 owner = 本脚本。失败态存「来源」而非已渲染文本/布尔，
+ * 这样 locale 切换时失败提示也跟着重本地化（修复前 hintFailure=true 会把
+ * 失败文本永久冻结在旧语言）。零业务副作用、不发任何 IPC。
+ *   { key }    —— 本域已知状态，直接查 catalog
+ *   { result } —— 未知错误，保留原始结果供 presenter 重新呈现 */
+let hintFailure = null;
 function renderTermsHint() {
-  if (!hint || hintFailure) return;
-  const t = (key) => (window.I18N && I18N.t(key)) || key;
-  hint.textContent = t("page.terms.footHint");
+  if (!hint) return;
+  if (!hintFailure) { hint.textContent = t("page.terms.footHint"); return; }
+  hint.textContent = hintFailure.key !== undefined ? t(hintFailure.key) : presentError(hintFailure.result);
 }
 renderTermsHint();
 if (window.I18N && window.I18N.onChange) window.I18N.onChange(renderTermsHint);
+
+function showFailure(failure) {
+  hintFailure = failure;
+  renderTermsHint();
+}
 
 agreeButton.addEventListener("click", async () => {
   if (accepting) return;
@@ -30,18 +52,21 @@ agreeButton.addEventListener("click", async () => {
     const result = await window.petAPI.agreeTerms();
     if (result && result.accepted === true && result.runtimeFailed === true) {
       agreed = true;
-      if (hint) { hintFailure = true; hint.textContent = result.message || "已记录同意，但桌宠启动失败，请重启应用"; }
-      return; // 保持按钮禁用，不重试部分初始化的 runtime。
+      showFailure({ key: "page.terms.runtimeFailedHint" }); // 保持按钮禁用，不重试部分初始化的 runtime。
+      return;
     }
     if (result !== true && (!result || result.ok !== true)) {
-      throw new Error("consent save failed");
+      accepting = false;
+      agreeButton.disabled = false; // 保存失败/未知失败：允许重试（runtime 失败才禁止）
+      showFailure({ result }); // 主进程已带 code → presenter；绝不回显 result.message
+      return;
     }
     agreed = true;
     window.close();
   } catch {
     accepting = false;
     agreeButton.disabled = false;
-    if (hint) { hintFailure = true; hint.textContent = "保存同意状态失败，请重试"; }
+    showFailure({ result: { code: "INTERNAL" } }); // 传输层异常：归 INTERNAL，不泄漏异常文本
   }
 });
 

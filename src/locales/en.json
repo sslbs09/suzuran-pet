@@ -592,6 +592,8 @@
   "page.terms.refuse": "✖ Refuse (exit)",
   "page.terms.agree": "✔ Agree and start",
   "page.terms.footHint": "Clicking \"Agree\" confirms acceptance of all terms",
+  "page.terms.runtimeFailedHint": "Consent was recorded, but the desktop pet failed to start. Please restart the app.",
+  "page.terms.saveFailedHint": "Could not save your consent. Please try again.",
   "page.moods.title": "Sussurro · Mood Manager",
   "page.moods.h1": "🎨 Mood Manager (skins)",
   "page.moods.sub": "One card per emotion: click \"Choose GIF\" to use your own sprites, \"Restore default\" anytime.",
