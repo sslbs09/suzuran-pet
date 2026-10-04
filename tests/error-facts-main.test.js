@@ -116,6 +116,6 @@ test("main.js routes every error send through the single projection", () => {
 
 test("main.js does not re-implement code tables of its own", () => {
   assert.ok(!/const ERROR_CODES\s*=\s*\{/.test(mainSource), "no local error-code table in main.js");
-  assert.equal((mainSource.match(/errorFacts\.toPayload\(/g) || []).length, 3,
-    "pet:error + Agent 500 (inner + outer) all go through toPayload");
+  assert.ok((mainSource.match(/errorFacts\.toPayload\(/g) || []).length >= 3,
+    "pet:error + Agent 500 (inner + outer) and D2 boundaries go through toPayload");
 });

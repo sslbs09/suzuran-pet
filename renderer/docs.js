@@ -101,6 +101,13 @@ function mdToHtml(src) {
 
 /* ---------- 文档加载 ---------- */
 const $ = (id) => document.getElementById(id);
+const presentError = (result) => {
+  if (result && Object.prototype.hasOwnProperty.call(result, "code")) {
+    const p = window.ErrorPresenter.toPresentation({ code: result.code, meta: result.meta });
+    return window.I18N.t(p.key, p.params);
+  }
+  return result && typeof result.error === "string" && result.error ? result.error : window.I18N.t("err.unknown");
+};
 const DOCS_IFRAME_SCROLLBAR_STYLE = `<style id="suzuran-docs-scrollbar">
 html::-webkit-scrollbar { width: 9px; height: 9px; }
 html::-webkit-scrollbar-track { background: #f4f8f7; }
@@ -183,7 +190,7 @@ async function openDoc(doc, btn) {
   $("docs-loading").hidden = true;
   if (!r || !r.ok) {
     $("docs-content").hidden = false;
-    $("docs-content").innerHTML = '<p style="color:#c0392b">文档读取失败：' + (r && r.error ? esc(r.error) : "未知错误") + "</p>";
+    $("docs-content").innerHTML = '<p style="color:#c0392b">文档读取失败：' + esc(presentError(r)) + "</p>";
     return;
   }
   if (r.html) {

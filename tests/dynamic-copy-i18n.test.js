@@ -40,7 +40,7 @@ test("B2.1-RAW-KEPT: DATA / CHARACTER / TECHNICAL / INTERNAL 原文保持（防�
   assert.ok(PSD_JS.includes("dbg(\"开始解析 "), "dbg 日志=INTERNAL 不迁移");
   // 透传不二次翻译：main 已翻译 message 直接展示
   assert.ok(VOICE_JS.includes("r.ok ? r.message"), "voice apply 成功 message 透传");
-  assert.ok(MOODS_JS.includes("setMsg(r.message, r.ok)"), "moods 结果 message 透传");
+  assert.ok(MOODS_JS.includes("result && result.ok ? result.message") && MOODS_JS.includes("presentError(result)"), "moods 成功 message 透传，失败经 presenter");
 });
 
 test("B2.1-REPLAY-REGISTERED: 四个文件都经 I18N.onChange 注册重放（单一订阅，无再监听 ui-lang-changed）", () => {

@@ -82,8 +82,10 @@ test("PHASE2-NOLITERAL: main.js/tray-menu.js 被迁移的裸字面不得复活",
 
 test("PHASE2-CONCAT: update-check 失败不再做翻译字符串拼接", () => {
   assert.doesNotMatch(mainSource, /tray\.updateCheckFail"\) \+ d\.error/, "旧 t()+reason+）拼接已删除");
-  assert.match(mainSource, /i18n\.t\(lang, "tray\.updateCheckFail", \{ reason: d\.error \}\)/);
-  assert.match(mainSource, /i18n\.t\(locale\.normalizeLocale\(config\.getConfig\(\)\.uiLang\), "tray\.updateCheckFail", \{ reason: d\.error \}\)/);
+  const localizedReasons = mainSource.match(/i18n\.t\(lang, "tray\.updateCheckFail", \{ reason: localizedFailure\(d\.error, lang\) \}\)/g);
+  assert.equal(localizedReasons?.length, 2, "tray 与 renderer 更新检查都保留 catalog 上下文，并通过 presenter 翻译原因");
+  const rendererUpdateCheck = mainSource.slice(mainSource.indexOf('ipcMain.handle("pet:check-update"'));
+  assert.match(rendererUpdateCheck, /const lang = locale\.normalizeLocale\(config\.getConfig\(\)\.uiLang\);/);
 });
 
 test("PHASE2-TOASTWIRING: pet:toast 迁移点全部经 i18n.t（仍下发自然语言，协议不变）", () => {

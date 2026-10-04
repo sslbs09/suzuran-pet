@@ -5,7 +5,7 @@
  * - pet:set-mood-type：待机 ↔ 情绪 用途切换
  * - pet:add-mood / pet:remove-mood：自定义情绪（≤5 字，共 ≤30）
  * Phase 4-B2.1：动态产品文案走 I18N.t(key, params)；情绪名/label/GIF 文件名=用户数据原样展示；
- * setMsg 透传 main 侧已翻译 result.message，不做二次翻译。render() 为 moods 数组的纯投影，
+ * 成功 message 保留透传；失败经既有 presenter（无 code 保留兼容文案）。render() 为 moods 数组的纯投影，
  * locale 变化经 I18N.onChange 重放（dir-hint 与卡片文案同时更新，无业务副作用）。
  */
 "use strict";
@@ -14,6 +14,13 @@ const grid = document.getElementById("mood-grid");
 let moods = [];
 
 const L = (key, params) => (window.I18N && I18N.t(key, params)) || key;
+function presentError(result) {
+  if (result && Object.prototype.hasOwnProperty.call(result, "code")) {
+    const p = window.ErrorPresenter.toPresentation({ code: result.code, meta: result.meta });
+    return window.I18N.t(p.key, p.params);
+  }
+  return result && typeof result.message === "string" && result.message ? result.message : window.I18N.t("err.unknown");
+}
 
 function escapeHtml(value) {
   return String(value || "").replace(/[&<>'"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[ch]));
@@ -65,6 +72,9 @@ function setMsg(text, ok) {
   el.textContent = text || "";
   el.className = "result" + (ok ? " ok" : ok === false ? " err" : "");
 }
+function setResultMessage(result) {
+  setMsg(result && result.ok ? result.message : presentError(result), result && result.ok);
+}
 
 grid.addEventListener("click", async (e) => {
   const btn = e.target.closest("button");
@@ -77,27 +87,27 @@ grid.addEventListener("click", async (e) => {
 
   if (btn.classList.contains("btn-rename")) {
     const r = await window.petAPI.renameMood({ name, newLabel: input.value });
-    setMsg(r.message, r.ok);
+    setResultMessage(r);
     await refresh();
   } else if (btn.classList.contains("btn-type")) {
     const r = await window.petAPI.setMoodType({ name, emotion: !m.emotion });
-    setMsg(r.message, r.ok);
+    setResultMessage(r);
     await refresh();
   } else if (btn.classList.contains("btn-pick")) {
     const path = await window.petAPI.pickGif();
     if (!path) return;
     const r = await window.petAPI.applyGif({ name, filePath: path });
     if (r.ok) await refresh();
-    else setMsg(L("page.moods.applyFailed", { error: r.message }), false);
+    else setMsg(L("page.moods.applyFailed", { error: presentError(r) }), false);
   } else if (btn.classList.contains("btn-reset")) {
     const r = await window.petAPI.resetGif(name);
     if (r.ok) await refresh();
-    else setMsg(L("page.moods.restoreFailed", { error: r.message }), false);
+    else setMsg(L("page.moods.restoreFailed", { error: presentError(r) }), false);
   } else if (btn.classList.contains("btn-del")) {
     if (!confirm(L("page.moods.confirmDelete", { name: m ? m.label : name }))) return;
     const r = await window.petAPI.removeMood(name);
     if (r.ok) await refresh();
-    else setMsg(L("page.moods.deleteFailed", { error: r.message }), false);
+    else setMsg(L("page.moods.deleteFailed", { error: presentError(r) }), false);
   }
 });
 
@@ -114,7 +124,7 @@ document.getElementById("btn-add-mood").addEventListener("click", async () => {
   const label = input.value.trim();
   if (!label) { setMsg(L("page.moods.emptyWord"), false); return; }
   const r = await window.petAPI.addMood(label);
-  setMsg(r.message, r.ok);
+  setResultMessage(r);
   if (r.ok) {
     input.value = "";
     await refresh();

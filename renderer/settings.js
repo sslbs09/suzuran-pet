@@ -120,10 +120,10 @@ function renderBubbleWidthVal() { // 值=DOM 滑块状态，文案 set.auto 可�
   async function refresh() {
     try {
       const r = await window.petAPI.logRead(Number(linesSel.value) || 500);
-      if (!r || !r.ok) { setResult(resultEl, (r && r.error) || L("set.logdiagReadFail"), false); return; }
+      if (!r || !r.ok) { setResult(resultEl, presentResultError(r), false); return; }
       rawLines = r.lines || [];
       render();
-    } catch (e) { setResult(resultEl, String(e && e.message || e), false); }
+    } catch { setResult(resultEl, presentResultError(INTERNAL_FAILURE), false); }
   }
   $id("logdiag-refresh").addEventListener("click", refresh);
   linesSel.addEventListener("change", refresh);
@@ -140,8 +140,8 @@ function renderBubbleWidthVal() { // 值=DOM 滑块状态，文案 set.auto 可�
       const r = await window.petAPI.logExport(Number(linesSel.value) || 2000);
       if (r && r.ok) setResult(resultEl, L("set.logdiagExportDone") + " " + (r.path || ""), true);
       else if (r && r.canceled) setResult(resultEl, L("set.logdiagExportCancel"));
-      else setResult(resultEl, (r && r.error) || L("set.logdiagReadFail"), false);
-    } catch (e) { setResult(resultEl, String(e && e.message || e), false); }
+      else setResult(resultEl, presentResultError(r), false);
+    } catch { setResult(resultEl, presentResultError(INTERNAL_FAILURE), false); }
     btn.disabled = false;
   });
   window.addEventListener("beforeunload", () => { if (autoTimer) clearInterval(autoTimer); });
@@ -753,7 +753,7 @@ function renderFixedLinePool(status = fixedLineStatus) {
     const badge = document.createElement("span");
     badge.className = "fixed-line-state " + (item.state || "pending");
     badge.textContent = stateLabel(item.state);
-    if (item.errorCode) badge.title = item.errorCode;
+    if (item.errorCode) badge.title = presentResultError({ code: item.errorCode });
     // 单句重新生成（语音方案非系统时提供）：合成成功覆盖旧音频，失败保留旧音频
     if (profile.engine && profile.engine !== "system") {
       const btn = document.createElement("button");

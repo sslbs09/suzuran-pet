@@ -56,4 +56,48 @@
 - Controller verification: cross-phase targeted regression 101 passed, 0 failed; whitespace check passed. Touched-file lint: 0 errors, 1 existing settings warning.
 - No character/chat/motion ownership changes.
 
-5-D2 and 5-D3 pending.
+### 5-D2 decisions and review
+
+- A focused review identified and repaired three regressions before commit: raw voice HTTP response bodies must not be newly persisted by the logger; PSD status replay must retain error facts rather than previously translated text; actionable schedule validation must not become a generic internal error.
+- Voice HTTP failures consume the response as before, but log status only. User output retains the compatible message field and receives existing HTTP facts.
+- PSD retains the error result/fact in its existing status snapshot and resolves it through the presenter during each redraw. The existing locale redraw owner and business lifecycle stay in place.
+- `schedules.ValidationError` marks only existing source-owned title/date/time/recurrence/quota and workbook validation. Its legacy error/message text is preserved; filesystem/parser failures are coded. No new validation code, registry or protocol field was introduced.
+- Validation note: D2 product edits preceded the new regression tests. Verification subsequently compares real production behavior against the committed D1 baseline; this is baseline regression evidence, not a claim of test-first implementation.
+- Controller verification: 148 targeted tests passed, 0 failed. Against D1 (`2d58477`), the new behavior suite produced 13 actual-output failures and 1 intentional static-check skip; no missing-helper or extraction failure was used as regression evidence. A final empty PSD-result fallback adjustment passed all 22 affected closure/main-native tests.
+- The 14 closure tests execute production functions, registered IPC handlers, attached DOM/tooltips and the existing locale callbacks with controlled external boundaries. Focused review blockers were repaired. Touched-file lint has 0 errors and 5 existing warnings; whitespace verification passed. These are not real Electron/device execution claims.
+
+## Error ownership table
+
+| Source owner | Fact / compatibility boundary | User presentation owner | Diagnostic / contract distinction |
+| --- | --- | --- | --- |
+| Main GSV restart | Existing `{ok,code}`; four lowercase failure codes preserved | Settings `presentResultError` → shared presenter → I18N → result | Progress/success remain product status; restart lifecycle unchanged |
+| Main chat generation | Existing `errorFacts.toPayload` → `{id,code,meta,message}` | Pet `onError` → presenter → I18N → `showError` | Character prefix/speech unchanged; absent-code message is frozen legacy fallback |
+| Pet local ask rejection | Local `INTERNAL` fact | Same presenter/I18N and existing `showError` | Exception text is not interpolated into the bubble |
+| Main settings / auxiliary filesystem results | `projectedFailure` delegates to `toPayload`; original `error` or `message` field retained | Settings, add-character, docs, moods, PSD, schedule and voice adapters → same presenter/I18N | Adapters own no code-to-text map; legitimate static no-code validation remains compatible |
+| Settings log read/export failure | Main projected failure, original result fields preserved | Existing settings funnel → result summary | Log lines retain explicit sanitized/escaped diagnostic display; console/dbg/logTts remain diagnostic |
+| Fixed-line failure cache | Existing diagnostic `errorCode` data retained | Settings badge tooltip → presenter/I18N | Cached raw diagnostic strings are never displayed as tooltip text; unknown strings map to `err.unknown` |
+| Update check | Main error facts | Native dialog and settings result use the same presenter and active locale | Technical update reason remains diagnostic, not a dialog parameter |
+| Voice HTTP / readiness | Existing HTTP facts, `INTERNAL`, or `TIMEOUT`; old status fields retained | Voice result/status card → presenter/I18N | Remote `fail` is diagnostic data, not a legacy message fallback; body is not newly logged |
+| PSD local errors / IPC results | Controlled local fact or original result snapshot | Existing `renderStatus` resolves facts at each locale redraw | No new redraw state owner or business requests |
+| Schedule validation | Explicit source-owned `ValidationError` → old no-code error/message | Schedule result compatibility adapter | Only known user validation is legacy; genuine technical failures are coded |
+| Consent / policy | Existing static no-code messages retained | Existing legacy fallback / terms hint | No misleading new policy code; legal and character content unchanged |
+| Agent HTTP transport / busy / generation | Existing HTTP facts or `BUSY`; generation retains `toPayload` | External caller owns UI, if any | API `error` text/status/headers are contract data and are not replaced by locale catalog strings |
+| `pet:toast` | Existing localized product notices / fixed prompts | Existing toast sink | No technical exception/body/message interpolation found in active toast producers |
+
+## Protocol compatibility
+
+- Existing IPC channels, IDs, success responses and GSV lowercase code values are preserved.
+- Previously uncoded technical result envelopes gain `code/meta`; their old error/message field and additional result data remain present. Compatibility error strings may be redacted or reduced to safe HTTP status text.
+- Already coded Phase 5-B result behavior and Phase 5-A invalid-present-code rules are unchanged.
+- Explicit source-owned static validation and consent/policy responses retain absent-code legacy fields.
+- Agent additions preserve exact original status, error text and relevant response headers; no authentication, queue, stop, chat ownership or lifecycle changes.
+
+## Verification and remaining debt
+
+Final test totals, commits and changed-file inventory are pending final verification.
+
+- Intentional legacy fallback remains: an absent-code legacy message/error is still displayed verbatim. This prevents claiming that arbitrary forged legacy payloads are universally filtered; the closure claim concerns audited active technical exception paths.
+- Static validation/policy copy may remain in its original language; no new meaningless error codes were invented to translate it.
+- The old `set.gsv*` catalog keys remain for compatibility; the active failure path uses `err.gsv*`.
+- Existing diagnostic logger/cache data and explicitly sanitized log display remain. No broad logging/cache migration or deletion was performed.
+- Electron real-device/GSV service restart has not been exercised; tests isolate external processes and services. The restart implementation itself is unchanged.

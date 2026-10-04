@@ -4,6 +4,13 @@
 const btn = document.getElementById("btn-import");
 const statusEl = document.getElementById("status");
 const listEl = document.getElementById("model-list");
+const presentError = (result) => {
+  if (result && Object.prototype.hasOwnProperty.call(result, "code")) {
+    const p = window.ErrorPresenter.toPresentation({ code: result.code, meta: result.meta });
+    return window.I18N.t(p.key, p.params);
+  }
+  return result && typeof result.error === "string" && result.error ? result.error : window.I18N.t("err.unknown");
+};
 
 async function renderList() {
   try {
@@ -35,10 +42,10 @@ if (btn) {
         statusEl.textContent = "✅ 已导入「" + r.name + "」并切换（" + r.id + "）";
         renderList();
       } else {
-        statusEl.textContent = "❌ " + ((r && r.error) || "导入失败");
+        statusEl.textContent = "❌ " + presentError(r);
       }
-    } catch (e) {
-      statusEl.textContent = "❌ " + (e && e.message || e);
+    } catch {
+      statusEl.textContent = "❌ " + presentError({ code: "INTERNAL" });
     }
   });
 }

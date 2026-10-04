@@ -11,6 +11,13 @@ const MAX_TITLE = 160;
 const MAX_NOTES = 1000;
 const RECURRING = new Set(["none", "daily", "weekly", "monthly"]);
 
+class ValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ValidationError";
+  }
+}
+
 let schedules = [];
 let timer = null;
 let dispatch = null;
@@ -34,7 +41,7 @@ function normalizeRecurrence(value) {
   if (weekly) return { kind: "weekly", weekdays: [...new Set(weekly[1].split(",").map(Number))].sort() };
   const monthly = raw.match(/^monthly:(3[01]|[12]\d|[1-9])$/);
   if (monthly) return { kind: "monthly", day: Number(monthly[1]) };
-  throw new Error("重复规则无效");
+  throw new ValidationError("重复规则无效");
 }
 function recurrenceLabel(record) {
   const r = record.recurrence || { kind: "none" };
@@ -71,11 +78,11 @@ function nextAt(record, after = Date.now()) {
 }
 function normalize(input, source = { type: "manual" }) {
   const title = String(input.title || "").trim();
-  if (!title || title.length > MAX_TITLE) throw new Error("日程标题不能为空且最多 160 字");
+  if (!title || title.length > MAX_TITLE) throw new ValidationError("日程标题不能为空且最多 160 字");
   const time = String(input.time || "").trim();
   const date = String(input.date || "").trim();
   const base = parseLocal(date, time);
-  if (!base) throw new Error("日期或时间无效，请使用 YYYY-MM-DD 和 HH:mm");
+  if (!base) throw new ValidationError("日期或时间无效，请使用 YYYY-MM-DD 和 HH:mm");
   const recurrence = normalizeRecurrence(input.recurrence);
   const enabled = input.enabled !== false && String(input.enabled).toLowerCase() !== "false";
   const emotion = /^[a-z][a-z0-9_-]{0,30}$/i.test(String(input.emotion || "idle")) ? String(input.emotion || "idle") : "idle";
@@ -136,7 +143,7 @@ function add(input, source) {
   const item = normalize(input, source);
   const index = schedules.findIndex((s) => s.id === item.id || s.externalId === item.externalId);
   if (index >= 0) schedules[index] = item; else {
-    if (schedules.length >= MAX_SCHEDULES) throw new Error("日程数量已达上限");
+    if (schedules.length >= MAX_SCHEDULES) throw new ValidationError("日程数量已达上限");
     schedules.push(item);
   }
   persist(); arm(); return item;
@@ -147,4 +154,4 @@ function snooze(id, minutes = 10) { const s = schedules.find((x) => x.id === id)
 function initialize(onDue) { dispatch = onDue; load(); }
 function stop() { clearTimeout(timer); timer = null; }
 
-module.exports = { initialize, stop, list, add, cancel, complete, snooze, normalize, nextAt, parseLocal, localParts, recurrenceLabel };
+module.exports = { initialize, stop, list, add, cancel, complete, snooze, normalize, nextAt, parseLocal, localParts, recurrenceLabel, ValidationError };

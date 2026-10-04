@@ -9,6 +9,14 @@
 
 const $ = (id) => document.getElementById(id);
 const L = (key, params) => (window.I18N && I18N.t(key, params)) || key;
+function presentError(result) {
+  if (result && Object.prototype.hasOwnProperty.call(result, "code")) {
+    const p = window.ErrorPresenter.toPresentation({ code: result.code, meta: result.meta });
+    return window.I18N.t(p.key, p.params);
+  }
+  return result && typeof result.message === "string" && result.message ? result.message : window.I18N.t("err.unknown");
+}
+const INTERNAL_FAILURE = Object.freeze({ code: "INTERNAL" });
 let psd = null;
 let sel = null;         // { node, parent, el } 当前选中的图层/组
 let edited = false;     // 是否做过图层改动（应用到桌宠时需走内存重序列化）
@@ -42,7 +50,7 @@ $("file").addEventListener("change", (e) => {
 
 /* Phase 4-B2.1：状态条/元信息/预览提示/rig 信息 = 最近一次事件的可重放投影
  * （存 key+params 而非译文，locale 变化经 renderX() 重放，零业务副作用）。
- * params 里的 layer 名、文件路径、error message、尺寸数字 = DATA 原样透传。 */
+ * layer 名、文件路径、尺寸数字 = DATA；错误事实在重放时经 presenter 翻译。 */
 let _lastStatus = null; // { key, params, isErr }
 let _lastMeta = null;   // { w, h, total, canvas }
 let _parseHint = false; // 解析完成后 preview-wrap 显示静态提示（无预览图时）
@@ -55,7 +63,9 @@ function setStatusL(key, params, isErr) {
 function renderStatus() {
   if (!_lastStatus) return;
   const s = $("status");
-  s.textContent = L(_lastStatus.key, _lastStatus.params);
+  const params = _lastStatus.params && typeof _lastStatus.params === "object" ? { ..._lastStatus.params } : _lastStatus.params;
+  if (params && Object.prototype.hasOwnProperty.call(params, "error") && typeof params.error !== "string") params.error = presentError(params.error);
+  s.textContent = L(_lastStatus.key, params);
   s.className = _lastStatus.isErr ? "err" : "";
 }
 function dbg(msg) { try { window.petAPI && window.petAPI.playback("[psd] " + msg); } catch { /* 忽略 */ } } // INTERNAL：不翻译
@@ -389,7 +399,7 @@ async function addLayerFile(file) {
     if (rigRuntime) refreshRigSoon();
     setStatusL("page.psd.addedLayer", { name: file.name, w: n.width, h: n.height });
   } catch (e) {
-    setStatusL("page.psd.importLayerFailed", { error: (e && e.message) || e }, true);
+    setStatusL("page.psd.importLayerFailed", { error: INTERNAL_FAILURE }, true);
   }
 }
 
@@ -471,7 +481,7 @@ async function loadFile(file) {
   } catch (e) {
     psd = null;
     dbg("解析失败: " + (e && e.message || e));
-    setStatusL("page.psd.parseFailed", { error: (e && e.message) || e }, true);
+    setStatusL("page.psd.parseFailed", { error: INTERNAL_FAILURE }, true);
   }
 }
 
@@ -510,7 +520,7 @@ function doFlatten() {
     else setStatusL("page.psd.previewEmptyWarn", null, true);
   } catch (e) {
     dbg("扁平化失败: " + (e && e.message || e));
-    setStatusL("page.psd.flattenFailed", { error: (e && e.message) || e }, true);
+    setStatusL("page.psd.flattenFailed", { error: INTERNAL_FAILURE }, true);
   }
 }
 
@@ -523,9 +533,9 @@ $("btn-export").addEventListener("click", async () => {
   try {
     const res = await window.petAPI.psdSave(img.src, psd.width + "x" + psd.height);
     if (res && res.ok) setStatusL("page.psd.exported", { path: res.path });
-    else setStatusL("page.psd.exportFailed", { error: (res && res.message) || L("page.psd.unknownError") }, true);
+    else setStatusL("page.psd.exportFailed", { error: res }, true);
   } catch (e) {
-    setStatusL("page.psd.exportFailed", { error: (e && e.message) || e }, true);
+    setStatusL("page.psd.exportFailed", { error: INTERNAL_FAILURE }, true);
   }
 });
 
@@ -562,7 +572,7 @@ function doRigPreview() {
     setStatusL("page.psd.rigRefreshed", null);
   } catch (e) {
     dbg("2.5D 刷新失败: " + (e && e.message || e));
-    setStatusL("page.psd.rigRefreshFailed", { error: (e && e.message) || e }, true);
+    setStatusL("page.psd.rigRefreshFailed", { error: INTERNAL_FAILURE }, true);
   }
 }
 
@@ -592,7 +602,7 @@ $("btn-rig").addEventListener("click", async () => {
     setStatusL("page.psd.rigStarted", null);
   } catch (e) {
     dbg("2.5D 装配失败: " + (e && e.message || e));
-    setStatusL("page.psd.rigFailed", { error: (e && e.message) || e }, true);
+    setStatusL("page.psd.rigFailed", { error: INTERNAL_FAILURE }, true);
   }
 });
 
@@ -613,7 +623,7 @@ $("btn-apply-rig").addEventListener("click", async () => {
       if (!lastPsdPath) { setStatusL("page.psd.noFilePath", null, true); return; }
       const res = await window.petAPI.rigApply(lastPsdPath);
       if (res && res.ok) setStatusL("page.psd.applied", { id: res.id });
-      else setStatusL("page.psd.applyFailed", { error: (res && res.message) || L("page.psd.unknownError") }, true);
+      else setStatusL("page.psd.applyFailed", { error: res }, true);
       return;
     }
     // 编辑过：用 ag-psd 把内存图层树序列化回 .psd，主进程落盘为当前皮肤（保留图层结构）
@@ -624,9 +634,9 @@ $("btn-apply-rig").addEventListener("click", async () => {
     const b64 = await blobToBase64(new Blob([buf], { type: "application/octet-stream" }));
     const res = await window.petAPI.rigApplyBuffer(name, b64);
     if (res && res.ok) setStatusL("page.psd.appliedEdited", { id: res.id });
-    else setStatusL("page.psd.applyFailed", { error: (res && res.message) || L("page.psd.unknownError") }, true);
+    else setStatusL("page.psd.applyFailed", { error: res }, true);
   } catch (e) {
-    setStatusL("page.psd.applyFailed", { error: (e && e.message) || e }, true);
+    setStatusL("page.psd.applyFailed", { error: INTERNAL_FAILURE }, true);
   }
 });
 

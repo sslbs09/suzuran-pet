@@ -6,13 +6,21 @@
  * - 应用音色（pet:applyVoice：热切换服务器默认参考音频 + 持久化）
  * Phase 4-B2.1：状态卡 = _voiceStatus 快照的纯投影（renderStatus），locale 变化经
  * I18N.onChange 重放且保留真实服务状态；已选路径与示例路径=DATA 原样；
- * 成功/失败 message 为 main 侧已翻译文本，透传不二次翻译；文件名参数（训练指南.html 等）
+ * 成功 message 保留透传；失败经既有 presenter（无 code 保留兼容文案）；文件名参数（训练指南.html 等）
  * 为技术标识不迁移。
  */
 "use strict";
 
 const $ = (id) => document.getElementById(id);
 const L = (key, params) => (window.I18N && I18N.t(key, params)) || key;
+function presentError(result) {
+  if (result && Object.prototype.hasOwnProperty.call(result, "code")) {
+    const p = window.ErrorPresenter.toPresentation({ code: result.code, meta: result.meta });
+    return window.I18N.t(p.key, p.params);
+  }
+  return result && typeof result.message === "string" && result.message ? result.message : window.I18N.t("err.unknown");
+}
+const INTERNAL_FAILURE = Object.freeze({ code: "INTERNAL" });
 
 const SAMPLE_REF_PATH = "语音部署与训练指南\\example_audio\\ref_sussurro.wav"; // DATA：文档内固定路径标识，不翻译
 let selectedPath = "";
@@ -48,7 +56,10 @@ function renderStatus() { // 纯投影：_voiceStatus(null=检查中) + selected
     $("not-deployed").style.display = "none";
   } else {
     card.className = "status-card no";
-    card.textContent = L("page.voice.statusNotReady", { reason: _voiceStatus.fail || L("page.voice.unknownReason") });
+    const reason = _voiceStatus && Object.prototype.hasOwnProperty.call(_voiceStatus, "code")
+      ? presentError(_voiceStatus)
+      : L("page.voice.unknownReason");
+    card.textContent = L("page.voice.statusNotReady", { reason });
     $("clone-form").classList.add("disabled");
     $("not-deployed").style.display = "block";
   }
@@ -78,15 +89,15 @@ $("btn-preview").addEventListener("click", async () => {
     refAudio: selectedPath,
     refText: $("ref-text").value.trim()
   });
-  if (!r.ok) { setResult(L("page.voice.synthFailed", { error: r.message }), false); return; } // r.message=main 文本透传
+  if (!r.ok) { setResult(L("page.voice.synthFailed", { error: presentError(r) }), false); return; }
   try {
     const audio = new Audio("data:audio/wav;base64," + r.b64);
     audio.volume = 1;
     await audio.play();
     setResult(L("page.voice.playing"), true);
     audio.onended = () => setResult(L("page.voice.playDone"), true);
-  } catch (e) {
-    setResult(L("page.voice.playFailed", { error: String(e.message || e) }), false);
+  } catch {
+    setResult(L("page.voice.playFailed", { error: presentError(INTERNAL_FAILURE) }), false);
   }
 });
 
@@ -97,7 +108,7 @@ $("btn-apply").addEventListener("click", async () => {
     audioPath: selectedPath,
     text: $("ref-text").value.trim()
   });
-  setResult(r.ok ? r.message : L("page.voice.applyFailed", { error: r.message }), r.ok); // 成功 message=main 已翻译，透传
+  setResult(r.ok ? r.message : L("page.voice.applyFailed", { error: presentError(r) }), r.ok); // 成功 message=main 已翻译，透传
   if (r.ok) refreshStatus();
 });
 

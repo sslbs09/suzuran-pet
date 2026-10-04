@@ -94,6 +94,19 @@ const { isConsentAccepted, canUseRuntime, acceptConsent } = require("./src/conse
 const { createOnceRunner } = require("./src/runtime-lifecycle");
 const { createConversationService } = require("./src/conversation-service"); // TD-4：会话单写者（统一任务ID/取消/错误码）
 const errorFacts = require("./src/error-facts"); // Phase 5-C：跨进程唯一投影 {code,meta,message}，detail 在此丢弃
+const errorPresenter = require("./src/error-presenter");
+function projectedFailure(error, field = "message") {
+  if (error instanceof schedules.ValidationError) return { ok: false, [field]: error.message };
+  const fact = errorFacts.toPayload(error);
+  return { ok: false, [field]: fact.message, code: fact.code, meta: fact.meta };
+}
+function localizedFailure(error, lang) {
+  const fact = error && typeof error === "object"
+    ? errorFacts.toPayload(error)
+    : errorFacts.toPayload(new Error(String(error || "")));
+  const p = errorPresenter.toPresentation(fact);
+  return i18n.t(lang, p.key, p.params);
+}
 const { createChatOwnership } = require("./src/chat-ownership"); // 「角色进入聊天交互」的 ownership 单一权威（所有 chat ingress 共享，见下方 chatOwnership）
 const { createLineGate } = require("./src/line-gate");
 const { transitionSleep, createWorkflowSignalState, recordWorkflowSignal, consumeWorkflowSignal, requeueWorkflowSignal } = require("./src/dialogue-state");
@@ -842,7 +855,7 @@ async function trayCheckUpdate() {
     noteUpdateChecked();
     if (!d.ok) { // 2026-09-03 审计：网络失败不再误报"已是最新"
       logTts("update", "检查更新失败: " + d.error);
-      dialog.showMessageBox({ type: "error", message: i18n.t(lang, "tray.updateCheckFail", { reason: d.error }) });
+      dialog.showMessageBox({ type: "error", message: i18n.t(lang, "tray.updateCheckFail", { reason: localizedFailure(d.error, lang) }) });
       return;
     }
     if (!d.plan && !d.fullPlan) { dialog.showMessageBox({ type: "info", title: "苏苏洛桌宠", message: i18n.t(lang, "tray.alreadyLatest") }); return; }
@@ -864,11 +877,15 @@ ipcMain.handle("pet:check-update", async () => { // 设置页「检查更新」�
   try {
     const d = await updater.checkForUpdateDetailed(app.getVersion());
     noteUpdateChecked();
-    if (!d.ok) return { ok: false, message: i18n.t(locale.normalizeLocale(config.getConfig().uiLang), "tray.updateCheckFail", { reason: d.error }) };
+    if (!d.ok) {
+      const fact = errorFacts.toPayload(new Error(String(d.error || "")));
+      const lang = locale.normalizeLocale(config.getConfig().uiLang);
+      return { ok: false, message: i18n.t(lang, "tray.updateCheckFail", { reason: localizedFailure(d.error, lang) }), code: fact.code, meta: fact.meta };
+    }
     if (!d.plan && !d.fullPlan) return { ok: true, updateAvailable: false, current: app.getVersion() };
     const r = await runUpdateFlow(d);
     return { ok: true, updateAvailable: true, current: app.getVersion(), latest: (d.fullPlan || d.plan).version, ...r };
-  } catch (e) { return { ok: false, message: String(e && e.message || e) }; }
+  } catch (e) { return projectedFailure(e); }
 });
 
 /** zip 覆盖解压升级兜底（2026-09-03 审计）：发布包用 --asar=false 打包，最终用户首次安装运行
@@ -953,7 +970,7 @@ ipcMain.handle("docs:read", (_e, key) => {
     if (!it) return { ok: false, error: "文档不存在" };
     if (it.html) return { ok: true, html: true, srcdoc: fs.readFileSync(it.file, "utf8") }; // srcdoc 直接注入内容，绕开 file:// 中文路径的各类兼容坑
     return { ok: true, html: false, text: fs.readFileSync(it.file, "utf8") };
-  } catch (e) { return { ok: false, error: e && e.message }; }
+  } catch (e) { return projectedFailure(e, "error"); }
 });
 ipcMain.handle("pet:open-docs", () => { openDocs(); return true; });
 
@@ -1099,9 +1116,7 @@ ipcMain.handle("pet:psd-save", (_e, dataUrl, label) => { // 保存扁平化 PNG 
     fs.writeFileSync(file, Buffer.from(m[1], "base64"));
     logTts("psd", "导出: " + file);
     return { ok: true, path: file };
-  } catch (e) {
-    return { ok: false, message: String(e.message || e) };
-  }
+  } catch (e) { return projectedFailure(e); }
 });
 
 /* ---------- 表情管理（换装，动态情绪表） ---------- */
@@ -1160,9 +1175,7 @@ ipcMain.handle("pet:import-spine", async () => {
     if (entry) setSpineSkin(entry.id); // 导入后自动切换
     logTts("spine", "导入人物: " + dirName + "/" + base + " ← " + dir);
     return { ok: true, id: entry ? entry.id : dirName + "/" + base, name: entry ? entry.name : base, list: list.map((m) => ({ id: m.id, name: m.name })) };
-  } catch (e) {
-    return { ok: false, error: String(e.message || e) };
-  }
+  } catch (e) { return projectedFailure(e, "error"); }
 });
 function openMoodManager() {
   if (moodWin && !moodWin.isDestroyed()) { moodWin.focus(); return; }
@@ -1242,9 +1255,7 @@ ipcMain.handle("pet:apply-gif", (_e, { name, filePath }) => {
     fs.copyFileSync(realSrc, path.join(SPRITE_USER_DIR, name + ".gif"));
     sendToRenderer("pet:sprites-changed", { name, moods: getMoodList() });
     return { ok: true, message: "已应用 ✅" };
-  } catch (e) {
-    return { ok: false, message: String(e.message || e) };
-  }
+  } catch (e) { return projectedFailure(e); }
 });
 
 ipcMain.handle("pet:reset-gif", (_e, name) => {
@@ -1255,9 +1266,7 @@ ipcMain.handle("pet:reset-gif", (_e, name) => {
     fs.copyFileSync(from, path.join(SPRITE_USER_DIR, name + ".gif"));
     sendToRenderer("pet:sprites-changed", { name, moods: getMoodList() });
     return { ok: true, message: "已恢复默认 ✅" };
-  } catch (e) {
-    return { ok: false, message: String(e.message || e) };
-  }
+  } catch (e) { return projectedFailure(e); }
 });
 
 ipcMain.handle("pet:add-mood", (_e, label) => {
@@ -1273,9 +1282,7 @@ ipcMain.handle("pet:add-mood", (_e, label) => {
     config.saveConfig({ moods: list });
     sendToRenderer("pet:sprites-changed", { name: clean, moods: list });
     return { ok: true, message: "已添加情绪「" + clean + "」，去选一个 GIF 吧" };
-  } catch (e) {
-    return { ok: false, message: String(e.message || e) };
-  }
+  } catch (e) { return projectedFailure(e); }
 });
 
 ipcMain.handle("pet:remove-mood", (_e, name) => {
@@ -1297,9 +1304,7 @@ ipcMain.handle("pet:remove-mood", (_e, name) => {
     fs.unlink(path.join(SPRITE_USER_DIR, name + ".gif"), () => {});
     sendToRenderer("pet:sprites-changed", { name, moods: list2 });
     return { ok: true, message: "已删除情绪「" + m.label + "」" };
-  } catch (e) {
-    return { ok: false, message: String(e.message || e) };
-  }
+  } catch (e) { return projectedFailure(e); }
 });
 
 ipcMain.handle("pet:rename-mood", (_e, { name, newLabel }) => {
@@ -1316,9 +1321,7 @@ ipcMain.handle("pet:rename-mood", (_e, { name, newLabel }) => {
     config.saveConfig({ moods: list });
     sendToRenderer("pet:sprites-changed", { name, moods: list });
     return { ok: true, message: "已改名为「" + clean + "」" };
-  } catch (e) {
-    return { ok: false, message: String(e.message || e) };
-  }
+  } catch (e) { return projectedFailure(e); }
 });
 
 ipcMain.handle("pet:set-mood-type", (_e, { name, emotion }) => {
@@ -1336,9 +1339,7 @@ ipcMain.handle("pet:set-mood-type", (_e, { name, emotion }) => {
     config.saveConfig({ moods: list });
     sendToRenderer("pet:sprites-changed", { name, moods: list });
     return { ok: true, message: isEmotion ? "已设为「情绪」（AI 会用它）" : "已设为「待机」（休息循环用）" };
-  } catch (e) {
-    return { ok: false, message: String(e.message || e) };
-  }
+  } catch (e) { return projectedFailure(e); }
 });
 
 /* ---------- 使用条款强制确认 ---------- */
@@ -1734,9 +1735,12 @@ ipcMain.handle("pet:voice-status", async () => {
   const ping = async (timeoutMs) => {
     try {
       const r = await fetch(base + "/status", { signal: AbortSignal.timeout(timeoutMs) });
-      if (!r.ok) return { deployed: true, ready: false, fail: "服务器 HTTP " + r.status };
+      if (!r.ok) {
+        const fact = errorFacts.codeForHttpStatus(r.status);
+        return { deployed: true, ready: false, fail: "服务器 HTTP " + r.status, code: fact.code, meta: fact.meta };
+      }
       const j = await r.json();
-      return { deployed: true, ready: !!j.ready, character: j.character || "", fail: j.fail || "" };
+      return { deployed: true, ready: !!j.ready, character: j.character || "", fail: j.fail || "", ...(j.fail ? { code: "INTERNAL", meta: {} } : {}) };
     } catch { return null; }
   };
   const quick = await ping(3000);
@@ -1746,7 +1750,7 @@ ipcMain.handle("pet:voice-status", async () => {
   try { tts.ensureGenieServer(g).catch(() => {}); } catch { /* 忽略 */ }
   const after = await ping(8000);
   if (after) return after;
-  return { deployed: true, ready: false, fail: "服务器未响应，已尝试拉起（模型加载约 1~2 分钟，稍后重试；持续失败请查看 engines/genie/server.log）" };
+  return { deployed: true, ready: false, code: "TIMEOUT", meta: {}, fail: "服务器未响应，已尝试拉起（模型加载约 1~2 分钟，稍后重试；持续失败请查看 engines/genie/server.log）" };
 });
 
 ipcMain.handle("pet:apply-voice", async (_e, { audioPath, text }) => {
@@ -1770,16 +1774,16 @@ ipcMain.handle("pet:apply-voice", async (_e, { audioPath, text }) => {
       signal: AbortSignal.timeout(30000)
     }, { allowLoopback: endpoint.loopback });
     if (!resp.ok) {
-      const t = (await resp.text()).slice(0, 200);
-      return { ok: false, message: "服务器返回 " + resp.status + ": " + t };
+      await resp.text();
+      const fact = errorFacts.codeForHttpStatus(resp.status);
+      logTts("genie", "set_reference HTTP " + resp.status);
+      return { ok: false, message: "服务器返回 " + resp.status, code: fact.code, meta: fact.meta };
     }
     // 同步桌宠配置，让 /tts 请求也带新参考音频
     config.saveConfig({ ttsGenie: { refAudio: audioPath, refText: cleanText } });
     logTts("genie", "音色已应用: " + audioPath);
     return { ok: true, message: "音色已应用 ✅" };
-  } catch (e) {
-    return { ok: false, message: String(e.message || e) };
-  }
+  } catch (e) { return projectedFailure(e); }
 });
 
 ipcMain.handle("pet:open-voice-studio", () => { openVoiceStudio(); return true; });
@@ -1809,15 +1813,15 @@ ipcMain.handle("pet:tts-preview", async (_e, { text, refAudio, refText }) => {
       signal: AbortSignal.timeout(120000)
     }, { allowLoopback: endpoint.loopback });
     if (!resp.ok) {
-      const t = (await resp.text()).slice(0, 200);
-      return { ok: false, message: "HTTP " + resp.status + ": " + t };
+      await resp.text();
+      const fact = errorFacts.codeForHttpStatus(resp.status);
+      logTts("genie", "tts preview HTTP " + resp.status);
+      return { ok: false, message: "HTTP " + resp.status, code: fact.code, meta: fact.meta };
     }
     const buf = Buffer.from(await resp.arrayBuffer());
     if (buf.length < 100) return { ok: false, message: "合成结果为空" };
     return { ok: true, b64: buf.toString("base64") };
-  } catch (e) {
-    return { ok: false, message: String(e.message || e) };
-  }
+  } catch (e) { return projectedFailure(e); }
 });
 
 /* ---------- 语音部署与训练指南 ---------- */
@@ -2519,7 +2523,7 @@ ipcMain.handle("pet:remove-agent-client", (_e, name) => {
     const clients = (Array.isArray(cfg.agentApi.clients) ? cfg.agentApi.clients : []).filter((c) => c.name !== String(name || ""));
     config.saveConfig({ agentApi: { ...(cfg.agentApi || {}), clients } });
     return { ok: true };
-  } catch (e) { return { ok: false, message: String(e && e.message || e) }; }
+  } catch (e) { return projectedFailure(e); }
 });
 ipcMain.handle("pet:get-settings", () => {
   const view = config.buildSettingsView();
@@ -2582,7 +2586,7 @@ ipcMain.handle("pet:save-settings", (_e, patch) => {
     if ((after.netProxy || "") !== (before.netProxy || "")) applyNetProxy(); // O8：代理即时生效（独立于模式切换）
     return true;
   } catch (e) {
-    return { ok: false, message: String(e.message || e) };
+    return projectedFailure(e);
   }
 });
 ipcMain.on("pet:render-mode-outcome", (event, outcome) => {
@@ -2826,7 +2830,7 @@ ipcMain.handle("pet:rig-apply", (_e, srcPath) => { // 从 PSD 工具导入：复
     sendToRenderer("pet:rig-skin-changed", id);
     logTts("rig", "应用 2.5D 皮肤: " + id);
     return { ok: true, id };
-  } catch (e) { return { ok: false, message: String(e.message || e) }; }
+  } catch (e) { return projectedFailure(e); }
 });
 ipcMain.handle("pet:rig-apply-buffer", (_e, name, b64) => { // PSD 工具图层编辑后：内存重序列化 → 落盘 rigUser 并设为当前
   try {
@@ -2844,7 +2848,7 @@ ipcMain.handle("pet:rig-apply-buffer", (_e, name, b64) => { // PSD 工具图层�
     sendToRenderer("pet:rig-skin-changed", nm);
     logTts("rig", "应用编辑后 2.5D 皮肤: " + nm + " (" + buf.length + "B)");
     return { ok: true, id: nm };
-  } catch (e) { return { ok: false, message: String(e.message || e) }; }
+  } catch (e) { return projectedFailure(e); }
 });
 ipcMain.handle("pet:rig-set", (_e, id) => { // 切换已导入皮肤（""=关闭 2.5D）
   const ok = setRigSkin(id);
@@ -2861,7 +2865,7 @@ ipcMain.handle("pet:rig-delete", (_e, id) => { // 删除已导入 2.5D 皮肤（
       sendToRenderer("pet:rig-skin-changed", "");
     }
     return { ok: true, clearedCurrent: plan.clearCurrent };
-  } catch (e) { return { ok: false, message: String(e.message || e) }; }
+  } catch (e) { return projectedFailure(e); }
 });
 ipcMain.on("pet:set-rig-scale", (_e, v) => { // 2.5D 角色大小（实时生效）
   const s = Math.max(0.3, Math.min(1.5, Number(v) || 1));
@@ -3082,7 +3086,7 @@ function runDllGuard() {
     }
   } catch (e) { logTts("security", "DLL 自检异常: " + (e && e.message || e)); }
 }
-ipcMain.handle("pet:add-schedule", (_e, item) => { try { return { ok: true, item: schedules.add(item) }; } catch (err) { return { ok: false, error: String(err.message || err) }; } });
+ipcMain.handle("pet:add-schedule", (_e, item) => { try { return { ok: true, item: schedules.add(item) }; } catch (err) { return projectedFailure(err, "error"); } });
 ipcMain.handle("pet:cancel-schedule", (_e, id) => schedules.cancel(String(id || "")));
 ipcMain.handle("pet:complete-schedule", (_e, id) => schedules.complete(String(id || "")));
 ipcMain.handle("pet:snooze-schedule", (_e, { id, minutes }) => schedules.snooze(String(id || ""), minutes));
@@ -3093,7 +3097,7 @@ ipcMain.handle("pet:set-reminder", (_e, { text, at }) => {
   try {
     const item = schedules.add({ title: text, date: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`, time: `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`, recurrence: "none", emotion: "happy" }, { type: "chat" });
     return { ok: true, message: "提醒已保存", item };
-  } catch (err) { return { ok: false, message: String(err.message || err) }; }
+  } catch (err) { return projectedFailure(err); }
 });
 ipcMain.handle("pet:get-reminders", () => schedules.list().filter((s) => s.source?.type === "chat"));
 ipcMain.handle("pet:cancel-reminder", (_e, id) => schedules.cancel(String(id || "")));
@@ -3103,11 +3107,11 @@ ipcMain.handle("pet:pick-schedule-workbook", async () => {
   return r.canceled ? "" : r.filePaths[0];
 });
 function parseScheduleWorkbook(filePath) {
-  if (!filePath || path.extname(filePath).toLowerCase() !== ".xlsx" || !fs.existsSync(filePath) || fs.statSync(filePath).size > 5 * 1024 * 1024) throw new Error("Excel 文件无效或超过 5MB");
+  if (!filePath || path.extname(filePath).toLowerCase() !== ".xlsx" || !fs.existsSync(filePath) || fs.statSync(filePath).size > 5 * 1024 * 1024) throw new schedules.ValidationError("Excel 文件无效或超过 5MB");
   const wb = XLSX.readFile(filePath, { cellFormula: false, cellHTML: false, cellText: true });
-  if (wb.SheetNames.length !== 1) throw new Error("Excel 必须只包含一个工作表");
+  if (wb.SheetNames.length !== 1) throw new schedules.ValidationError("Excel 必须只包含一个工作表");
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "", raw: false });
-  if (!rows.length || rows.length > 500) throw new Error("Excel 需包含 1~500 条日程");
+  if (!rows.length || rows.length > 500) throw new schedules.ValidationError("Excel 需包含 1~500 条日程");
   return rows.map((r, i) => ({ title: r.title, date: r.date, time: r.time, recurrence: r.recurrence || "none", enabled: r.enabled, emotion: r.emotion || "happy", notes: r.notes || "", externalId: r.externalId || `xlsx-${i + 2}` }));
 }
 ipcMain.handle("pet:import-schedule-workbook", (_e, filePath) => {
@@ -3115,14 +3119,14 @@ ipcMain.handle("pet:import-schedule-workbook", (_e, filePath) => {
     const items = parseScheduleWorkbook(filePath);
     const saved = items.map((item) => schedules.add(item, { type: "xlsx", fileName: path.basename(filePath), row: items.indexOf(item) + 2 }));
     return { ok: true, count: saved.length };
-  } catch (e) { return { ok: false, error: String(e.message || e) }; }
+  } catch (e) { return projectedFailure(e, "error"); }
 });
 ipcMain.handle("pet:preview-schedule-workbook", (_e, filePath) => {
   try {
     const items = parseScheduleWorkbook(filePath);
     const rows = items.slice(0, 20).map((it, i) => ({ row: i + 2, title: it.title, date: it.date, time: it.time, recurrence: it.recurrence, emotion: it.emotion, notes: it.notes }));
     return { ok: true, fileName: path.basename(filePath), total: items.length, rows };
-  } catch (e) { return { ok: false, error: String(e.message || e) }; }
+  } catch (e) { return projectedFailure(e, "error"); }
 });
 ipcMain.handle("pet:export-schedule-template", async () => {
   const r = await dialog.showSaveDialog(scheduleWin || win, { title: "保存日程 Excel 模板", defaultPath: "日程模板.xlsx", filters: [{ name: "Excel", extensions: ["xlsx"] }] });
@@ -5241,7 +5245,7 @@ ipcMain.handle("pet:set-fixed-only", async (_e, on) => {
       logTts("voice", "固定台词离线模式关闭：引擎按配置重新拉起");
     }
     return { ok: true };
-  } catch (e) { return { ok: false, message: String(e && (e.message || e)) }; }
+  } catch (e) { return projectedFailure(e); }
 });
 ipcMain.on("pet:set-ground-gap", (_e, px, meta = {}) => {
   const mode = config.getConfig().renderMode;
@@ -5305,17 +5309,17 @@ const logDiag = require("./src/log-diag");
 ipcMain.handle("pet:log-read", (_e, maxLines) => {
   try {
     const r = logDiag.readLogTail(config.STORAGE.logs, Number(maxLines) || 500);
-    if (!r.ok) return r;
+    if (!r.ok) return { ...r, ...projectedFailure(new Error(String(r.error || "")), "error") };
     // 脱敏后才出主进程：称呼取自 config（name/nickname 等），与导出同一套规则
     return { ...r, lines: logDiag.sanitizeLines(r.lines, { userNames: logDiag.collectUserNames(config.getConfig()) }) };
   } catch (e) {
-    return { ok: false, error: String((e && e.message) || e), lines: [] };
+    return { ...projectedFailure(e, "error"), lines: [] };
   }
 });
 ipcMain.handle("pet:log-export", async (_e, maxLines) => {
   try {
     const r = logDiag.readLogTail(config.STORAGE.logs, Number(maxLines) || 2000);
-    if (!r.ok) return r;
+    if (!r.ok) return { ...r, ...projectedFailure(new Error(String(r.error || "")), "error") };
     let appVersion = "?";
     try { appVersion = JSON.parse(fs.readFileSync(path.join(config.APP_DIR, "package.json"), "utf8")).version || "?"; } catch { /* 忽略 */ }
     const payload = logDiag.buildExport(r, { appVersion, userNames: logDiag.collectUserNames(config.getConfig()) });
@@ -5329,7 +5333,7 @@ ipcMain.handle("pet:log-export", async (_e, maxLines) => {
     logTts("settings", "日志已导出（脱敏）: 行数=" + r.lines.length + " 错误=" + payload.stats.error + " 警告=" + payload.stats.warn);
     return { ok: true, path: filePath, lines: r.lines.length, stats: payload.stats };
   } catch (e) {
-    return { ok: false, error: String((e && e.message) || e) };
+    return projectedFailure(e, "error");
   }
 });
 ipcMain.handle("pet:set-walk-timing", (_e, patch) => {

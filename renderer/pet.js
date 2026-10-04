@@ -8,6 +8,7 @@
 "use strict";
 
 const petEl = document.getElementById("pet");
+const INTERNAL_FAILURE = Object.freeze({ code: "INTERNAL" });
 
 /* ---------- 渲染层未捕获错误上报（临时诊断：渲染层启动即挂时能在 tts.log 看到原因） ---------- */
 window.addEventListener("error", (e) => {
@@ -2704,8 +2705,9 @@ async function sendText(text) {
   showThinking();
   try {
     await window.petAPI.ask(text);
-  } catch (e) {
-    showError(String(e));
+  } catch {
+    const presentation = window.ErrorPresenter.toPresentation(INTERNAL_FAILURE);
+    showError(window.I18N.t(presentation.key, presentation.params));
   }
 }
 

@@ -1,5 +1,12 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
+function presentError(result) {
+  if (result && Object.prototype.hasOwnProperty.call(result, "code")) {
+    const p = window.ErrorPresenter.toPresentation({ code: result.code, meta: result.meta });
+    return window.I18N.t(p.key, p.params);
+  }
+  return result && typeof result.error === "string" && result.error ? result.error : window.I18N.t("err.unknown");
+}
 function fmt(s) { return s.display ? `${s.display.date} ${s.display.time}` : s.status; }
 async function refresh() {
   const items = await window.petAPI.getSchedules();
@@ -15,15 +22,15 @@ async function refresh() {
     el.append(meta, actions); return el;
   }));
 }
-$("add").onclick = async () => { const r = await window.petAPI.addSchedule({ title: $("title").value, date: $("date").value, time: $("time").value, recurrence: $("recurrence").value, emotion: $("emotion").value, notes: $("notes").value }); $("result").textContent = r.ok ? "已添加" : r.error; if (r.ok) { $("title").value = ""; $("notes").value = ""; refresh(); } };
+$("add").onclick = async () => { const r = await window.petAPI.addSchedule({ title: $("title").value, date: $("date").value, time: $("time").value, recurrence: $("recurrence").value, emotion: $("emotion").value, notes: $("notes").value }); $("result").textContent = r.ok ? "已添加" : presentError(r); if (r.ok) { $("title").value = ""; $("notes").value = ""; refresh(); } };
 $("import").onclick = async () => {
   const file = await window.petAPI.pickScheduleWorkbook();
   if (!file) return;
   const p = await window.petAPI.previewScheduleWorkbook(file);
-  if (!p.ok) { $("import-result").textContent = p.error; return; }
+  if (!p.ok) { $("import-result").textContent = presentError(p); return; }
   showImportPreview(p, async () => {
     const r = await window.petAPI.importScheduleWorkbook(file);
-    $("import-result").textContent = r.ok ? `已导入 ${r.count} 条日程` : r.error;
+    $("import-result").textContent = r.ok ? `已导入 ${r.count} 条日程` : presentError(r);
     if (r.ok) refresh();
   });
 };
