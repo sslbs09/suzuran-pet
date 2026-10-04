@@ -3572,24 +3572,27 @@ function updateControls() {
 }
 
 function updateChip() {
+  // Phase 5-G3：title 是 PRODUCT_UI 文案，改由 catalog 呈现；本函数仍是「既有 state → DOM」的
+  // 纯投影（只读 zcodeEnabled / forcedMode），因此可被 locale 变化安全重放，不触发任何业务动作。
+  // modeChip.textContent 的 💬 / ⚡ 是图标而非文案，保持不动。
   if (!zcodeEnabled) {
     modeChip.textContent = "💬";
     modeChip.className = "mode-chip";
-    modeChip.title = "日常聊天";
+    modeChip.title = I18N.t("pet.modeTitle.chat");
     return;
   }
   if (forcedMode === "zcode") {
     modeChip.textContent = "⚡";
     modeChip.className = "mode-chip zcode";
-    modeChip.title = "强制任务模式：点此恢复自动";
+    modeChip.title = I18N.t("pet.modeTitle.forceZcode");
   } else if (forcedMode === "chat") {
     modeChip.textContent = "💬";
     modeChip.className = "mode-chip";
-    modeChip.title = "强制聊天模式：点此恢复自动";
+    modeChip.title = I18N.t("pet.modeTitle.forceChat");
   } else {
     modeChip.textContent = "💬";
     modeChip.className = "mode-chip";
-    modeChip.title = "自动路由：/zcode 或 /任务 开头自动执行任务";
+    modeChip.title = I18N.t("pet.modeTitle.auto");
   }
 }
 
@@ -3763,10 +3766,12 @@ if (window.petAPI && window.petAPI.onProactive) {
 /* ---------- TTS 开关按钮 ---------- */
 const btnTts = document.getElementById("btn-tts");
 function updateTtsButton() {
+  // Phase 5-G3：title 走 catalog；本函数只读 ttsConfig.enabled 并写 DOM，是纯投影，
+  // locale 变化时重放不会触发 stopTts / petAPI.setTts 等业务动作（那些只在 click 里）。
   if (!btnTts) return;
   btnTts.textContent = ttsConfig.enabled ? "🔊" : "🔇";
   btnTts.classList.toggle("off", !ttsConfig.enabled);
-  btnTts.title = ttsConfig.enabled ? "语音：开（点此关闭）" : "语音：关（点此开启）";
+  btnTts.title = I18N.t(ttsConfig.enabled ? "pet.ttsTitleOn" : "pet.ttsTitleOff");
 }
 if (btnTts) {
   btnTts.addEventListener("click", () => {
@@ -4451,11 +4456,17 @@ if (!window.__renderLifecycleTestMode) (async function init() {
 })();
 
 /* ---------- Phase 4-B1：locale 变化的动态重绘（单一订阅，零业务副作用） ----------
- * input placeholder 是唯一受语言影响的运行时动态属性：录音状态必须保留
+ * input placeholder 是受语言影响的运行时动态属性：录音状态必须保留
  * （recording 中切语言仍显示"录音中…"，空闲显示本地化普通占位符）。
  * 本注册同时覆盖 i18n 首次 ready 的初始本地化（ready 后回调立即安全执行一次）。
  * sprite alt（值=自定义宠物名，DATA）由 applyPetName 拥有；窗口标题由主进程拥有——
- * 5-F1 起本文件不再写这两者，三者各自唯一 owner，locale apply 不再覆盖 runtime state。 */
+ * 5-F1 起本文件不再写这两者，三者各自唯一 owner，locale apply 不再覆盖 runtime state。
+ *
+ * Phase 5-G3：modeChip.title / btnTts.title 也改为 catalog 文案，二者由既有的
+ * updateChip() / updateTtsButton() 重投影——这两处都是「既有 state → DOM」的纯投影，
+ * 不发 IPC、不切模式、不停 TTS。仍然只有这一个 I18N.onChange 订阅，未新增第二个。 */
 if (window.I18N && window.I18N.onChange) window.I18N.onChange(() => {
   inputEl.placeholder = isRecording ? I18N.t("ui.micRecording") : I18N.t("ui.placeholder");
+  updateChip();
+  updateTtsButton();
 });

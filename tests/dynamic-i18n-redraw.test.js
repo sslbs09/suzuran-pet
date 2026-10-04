@@ -62,8 +62,15 @@ test("B1-NO-SIDE-EFFECTS: 各页 onChange 回调仅重绘 presentation，不含�
   for (const f of FORBIDDEN) assert.ok(!settingsCbBody.includes(f), "settings onChange 不得含业务动作: " + f);
   assert.match(settingsCbBody, /renderVersion\(\);[\s\S]*renderKeySource\(\);[\s\S]*renderOnboard\(S\)[\s\S]*applyRenderModeUI\(rm\.value\)[\s\S]*renderFixedLinePool\(\);/, "重绘链 = 既有 state 的纯 render");
   const petCb = SRC.pet.slice(SRC.pet.lastIndexOf("window.I18N.onChange("));
-  assert.equal(petCb.split("\n").filter((l) => l.trim() && !l.trim().startsWith("/") && !l.trim().startsWith("*")).length, 3, "pet.js 回调仅一行 placeholder 重放");
+  // 5-G3：pet.js 回调重放三项纯投影（placeholder + modeChip.title + btnTts.title），仍是唯一订阅
+  assert.equal((SRC.pet.match(/window\.I18N\.onChange\(/g) || []).length, 1, "pet.js 仍只有既有那一个 onChange 订阅");
+  const petCbBody = petCb.slice(0, petCb.indexOf("});") + 3);
+  assert.equal(petCbBody.split("\n").filter((l) => l.trim() && !l.trim().startsWith("/") && !l.trim().startsWith("*")).length, 5,
+    "pet.js 回调 = 3 行重投影 + onChange 头尾（placeholder / modeChip.title / btnTts.title）");
+  for (const f of FORBIDDEN) assert.ok(!petCbBody.includes(f), "pet onChange 不得含业务动作: " + f);
   assert.match(petCb, /inputEl\.placeholder = isRecording \? I18N\.t\("ui\.micRecording"\) : I18N\.t\("ui\.placeholder"\);/);
+  assert.match(petCbBody, /updateChip\(\);[\s\S]*updateTtsButton\(\);/, "chip/tts title 由既有纯投影重放");
+  assert.ok(petCbBody.length < 600, "pet onChange 回调仍极小（纯重投影）");
   // 5-E1 起失败文本改为「存来源、重投影」：locale 切换不会抹掉失败态，但会把它重新本地化
   assert.match(SRC.terms, /let hintFailure = null;/, "terms：失败文本是 state（不因 locale 切换被抹掉）");
   assert.match(SRC.terms, /hintFailure\.key !== undefined \? t\(hintFailure\.key\) : presentError\(hintFailure\.result\)/,
