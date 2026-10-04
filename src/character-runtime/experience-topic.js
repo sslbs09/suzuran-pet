@@ -18,6 +18,12 @@
  *     三处都依赖左项先求值；提前取值或复用共享随机数都会改变生产概率。
  *  2. 台词池数组必须**每次调用新建**——lines.pick 用 WeakMap 按数组实例记录最近选取，
  *     把它提升为模块常量会让 recentPicks 跨调用生效，从而改变生产选句行为。
+ *
+ * Phase 7-E 增量：在所有既有分支之后新增 history recall 分支（branch:"history"）。
+ * 识别依据是 type 的 "history:" 命名空间前缀（如 history:ev-001，已完成历史经历的
+ * 受控表示）；anchor 是展示分组概念，不作行为身份判定。纪律：只有 history:* 事实
+ * 存在时才消费新增的一次 random——没有 history:* 事实时，既有四分支的 random
+ * 次数与顺序逐位不变（characterization 与差分测试强制）。
  */
 
 /** 生日命中：优先级最高，且该分支不消费 random（"今天一定开口"）。 */
@@ -56,6 +62,9 @@ function nameLines(name) {
 const HEALTH_CHANCE = 0.3;
 const EVENT_CHANCE = 0.25;
 const NAME_CHANCE = 0.2;
+// EXPERIMENTAL COMPLETED-HISTORY CAUSAL PROBE — NOT PERSONALITY TUNING：
+// Phase 7-E 因果实验用的回忆概率，该取值本身不是产品研究结论。
+const HISTORY_RECALL_CHANCE = 0.2;
 
 /** 与 memory.hasHealthFact() 等价：同一批事实，只看 type==="health"。 */
 function hasHealthFact(facts) {
@@ -80,6 +89,24 @@ function nameFactCallname(facts) {
   return (nm && (String(nm.text || "").match(/「(.+?)」/) || [])[1]) || null;
 }
 
+/** Phase 7-E：历史经历事实识别——只认 type 的 "history:" 命名空间前缀（如 history:ev-001）。
+ *  不用 anchor==="EVENT" 判定：那是展示分组概念，且与生日共用。多条时与 event 分支
+ *  同款 filter().pop() 取最后一条，不引入排序框架。 */
+function lastHistoryFact(facts) {
+  return facts.filter((f) => f && typeof f.type === "string" && f.type.startsWith("history:")).pop() || null;
+}
+
+/** 已完成历史经历的回忆台词。语义必须是「回忆已经发生过、已结束的事」，
+ *  禁止未来计划语义（快到了/准备得怎么样）。与其它分支相同：每次调用新建数组
+ *  （lines.pick 按 WeakMap 数组实例记录最近选取，共享常量池会改变 cross-call 选句行为）。 */
+function historyLines(text) {
+  return [
+    "（想起之前那件事）「" + text + "」——已经结束啦，现在想起来还很清楚呢。",
+    "博士，上次「" + text + "」……我一直记得哦。",
+    "（翻着记忆的小本子）「" + text + "」，虽然那件事已经结束了，想起来还是觉得很踏实。",
+  ];
+}
+
 /**
  * 记忆由头决策。
  *
@@ -87,7 +114,7 @@ function nameFactCallname(facts) {
  *   - facts: memory.getFactsList() 的形状 [{id,type,text,anchor}]（旧实现同样只在 facts 非空时决策）
  *   - random: () => [0,1)，生产传 Math.random；测试传确定性序列
  *   - now: Date，仅生日分支使用
- * @returns {{branch: "birthday"|"health"|"event"|"name", lines: string[]}|null}
+ * @returns {{branch: "birthday"|"health"|"event"|"name"|"history", lines: string[]}|null}
  *   null = 本次没有记忆由头，调用方走原有 fallback（第二信号源 / 常规台词）路径。
  */
 function chooseExperienceTopic({ facts, random, now } = {}) {
@@ -107,6 +134,16 @@ function chooseExperienceTopic({ facts, random, now } = {}) {
   const name = nameFactCallname(list);
   if (name && random() < NAME_CHANCE) return { branch: "name", lines: nameLines(name) };
 
+  // EXPERIMENTAL COMPLETED-HISTORY CAUSAL PROBE — NOT PERSONALITY TUNING：
+  // 已完成历史经历在原本即将 fallback 时提供一次回忆由头（Phase 7-E）。
+  // 纪律：history 事实不存在时 && 短路，random 不被消费——既有用户的
+  // random 序列逐位不变（tests/experience-topic-characterization.test.js 强制）。
+  const hist = lastHistoryFact(list);
+  if (hist && random() < HISTORY_RECALL_CHANCE) {
+    const text = String(hist.text || "").trim() || "那件已经结束的事";
+    return { branch: "history", lines: historyLines(text) };
+  }
+
   return null;
 }
 
@@ -115,5 +152,6 @@ module.exports = {
   // 导出阈值供测试锁定；生产不需要
   HEALTH_CHANCE,
   EVENT_CHANCE,
-  NAME_CHANCE
+  NAME_CHANCE,
+  HISTORY_RECALL_CHANCE
 };

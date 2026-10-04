@@ -243,7 +243,10 @@ test("characterization: 差分保真——转写旧实现 vs 提取后纯函数�
     { name: "全未中", facts: [HEALTH_FACT, EVENT_FACT, NAME_FACT], health: true, rand: [0.9, 0.9, 0.9] },
     { name: "health 存在但仅此一条", facts: [HEALTH_FACT], health: false, rand: [0.0] },
     { name: "health 阈值 0.29", facts: [HEALTH_FACT], health: true, rand: [0.29] },
-    { name: "health 阈值 0.3", facts: [HEALTH_FACT], health: true, rand: [0.3] }
+    { name: "health 阈值 0.3", facts: [HEALTH_FACT], health: true, rand: [0.3] },
+    // Phase 7-E 前置锁定：未知动态 type（非 history 前缀）在加分支前后都必须直通
+    { name: "未知动态类型直通", facts: [fact("manual-lz8x2k", "设置页手动添加的一条"), fact("joy", "TEST_ONLY_X")], health: false, rand: [0.0] },
+    { name: "未知类型混入 health", facts: [fact("manual-lz8x2k", "x"), HEALTH_FACT], health: true, rand: [0.0] }
   ];
 
   for (const c of CASES) {
@@ -312,4 +315,30 @@ test("characterization: 因此台词池必须每次调用新建（现状即如�
   const r2 = legacyDecision({ facts: [HEALTH_FACT], random: seq([0.0]), now: TODAY, hasHealthFact: true });
   assert.notEqual(r1.lines, r2.lines, "两次调用必须返回不同数组实例");
   assert.deepEqual(r1.lines, r2.lines, "但内容完全一致");
+});
+
+/* ================= 9. 未知动态 type 直通（Phase 7-E 前置锁定） ================= */
+
+test("characterization: 未知动态 type（非 history 前缀）不命中任何分支，零 random 消费", () => {
+  const { chooseExperienceTopic } = require("../src/character-runtime/experience-topic");
+  // 设置页生产路径早已存在 manual-<ts> 动态 type（v2.5.3 起）；它们对决策必须不可见。
+  // 此锁定在 Phase 7-E 新增 history 分支前后都必须成立：history 分支只认 "history:" 前缀。
+  const random = seq([0.0]);
+  const got = chooseExperienceTopic({
+    facts: [fact("manual-lz8x2k", "设置页手动添加的一条"), fact("joy", "TEST_ONLY_X")],
+    random, now: TODAY,
+  });
+  assert.equal(got, null);
+  assert.equal(random.consumed(), 0, "未知 type 不得消费任何 random");
+});
+
+test("characterization: 未知动态 type 混入既有 fixture，不改变分支与 random 消费次数", () => {
+  const { chooseExperienceTopic } = require("../src/character-runtime/experience-topic");
+  const random = seq([0.0]);
+  const got = chooseExperienceTopic({
+    facts: [fact("manual-lz8x2k", "x"), HEALTH_FACT],
+    random, now: TODAY,
+  });
+  assert.equal(got.branch, "health");
+  assert.equal(random.consumed(), 1, "混入未知 type 不得改变既有分支的 random 计数");
 });
