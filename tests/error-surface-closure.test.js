@@ -121,7 +121,10 @@ function main(overrides = {}) {
     ipcMain: { handle: (channel, callback) => handlers.set(channel, callback) }, ...overrides
   };
   vm.createContext(s);
-  for (const marker of ["function projectedFailure(", "function localizedFailure("]) vm.runInContext(fn(read("main.js"), marker), s);
+  // 5-E2：native 对话框/窗口标题改走 i18n.t(currentUiLang(), …)，本 harness 需提供该取名函数
+  for (const marker of ["function projectedFailure(", "function localizedFailure(", "function currentUiLang("]) {
+    vm.runInContext(fn(read("main.js"), marker), s);
+  }
   return { s, logs, handler(channel) {
     vm.runInContext(statement(source("main.js"), `ipcMain.handle(${JSON.stringify(channel)}`), s);
     assert.ok(handlers.has(channel), `${channel} actually registered`);

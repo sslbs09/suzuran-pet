@@ -398,7 +398,7 @@ function createWindow() {
   win = new BrowserWindow({
     width: w,
     height: h,
-    title: config.fillTokens("{{petName}}桌宠"),
+    title: i18n.t(currentUiLang(), "ui.petWindowTitle", { name: config.fillTokens("{{petName}}") }),
     x: cfg.window.x ?? undefined,
     y: cfg.window.y ?? undefined,
     transparent: true,
@@ -561,7 +561,7 @@ function openHelp() {
     minWidth: 420,
     minHeight: 520,
     resizable: true,
-    title: "苏苏洛使用说明",
+    title: i18n.t(currentUiLang(), "page.help.title"),
     autoHideMenuBar: true,
     webPreferences: winChild.childWebPrefs(config.APP_DIR) // v2.5.26：补 preload（其余窗口均有），让 theme-init 能读主题
   });
@@ -580,7 +580,7 @@ function openQuickstart() {
     minWidth: 520,
     minHeight: 560,
     resizable: true,
-    title: "苏苏洛 · 快速开始（新手教程）",
+    title: i18n.t(currentUiLang(), "page.quickstart.title"),
     autoHideMenuBar: true,
     webPreferences: winChild.childWebPrefs(config.APP_DIR)
   });
@@ -664,6 +664,7 @@ ipcMain.handle("pet:set-ui-lang", (_e, lang) => {
   if (!locale.isAdmittedLocale(v)) return false; // ko/未知值拒绝准入：不写 config、不广播（Phase 6 开放 ko）
   config.saveConfig({ uiLang: v });
   refreshTrayMenu();
+  applyNativeWindowTitles(); // 5-E2：native 窗口标题随 locale 同步（只 setTitle，不重建窗口）
   sendToAllWindows("pet:ui-lang-changed", v);
   return true;
 });
@@ -678,7 +679,7 @@ function openSettings() {
     minWidth: 700,
     minHeight: 620,
     resizable: true,
-    title: "苏苏洛 · 设置",
+    title: i18n.t(currentUiLang(), "page.settings.title"),
     autoHideMenuBar: true,
     backgroundColor: "#1b2226", // 深色底：消除打开瞬间白闪（v2.5.28）
     webPreferences: winChild.childWebPrefs(config.APP_DIR)
@@ -699,7 +700,7 @@ attachCrashDiag(settingsWin, "settings");
 
 function openSchedule() {
   if (scheduleWin && !scheduleWin.isDestroyed()) { scheduleWin.focus(); return; }
-  scheduleWin = new BrowserWindow({ width: 820, height: 700, minWidth: 620, minHeight: 520, resizable: true, title: "苏苏洛 · 日程安排", autoHideMenuBar: true,
+  scheduleWin = new BrowserWindow({ width: 820, height: 700, minWidth: 620, minHeight: 520, resizable: true, title: i18n.t(currentUiLang(), "page.schedule.title"), autoHideMenuBar: true,
     webPreferences: winChild.childWebPrefs(config.APP_DIR) });
   scheduleWin.setMenuBarVisibility(false);
   scheduleWin.loadFile(path.join(config.APP_DIR, "renderer", "schedule.html"));
@@ -709,7 +710,7 @@ attachCrashDiag(scheduleWin, "schedule");
 
 function openPsdWindow() {
   if (psdWin && !psdWin.isDestroyed()) { psdWin.focus(); return; }
-  psdWin = new BrowserWindow({ width: 860, height: 720, minWidth: 640, minHeight: 520, resizable: true, title: "苏苏洛 · PSD 角色工具", autoHideMenuBar: true,
+  psdWin = new BrowserWindow({ width: 860, height: 720, minWidth: 640, minHeight: 520, resizable: true, title: i18n.t(currentUiLang(), "page.psd.title"), autoHideMenuBar: true,
     webPreferences: winChild.childWebPrefs(config.APP_DIR) });
   psdWin.setMenuBarVisibility(false);
   psdWin.loadFile(path.join(config.APP_DIR, "renderer", "psd.html"));
@@ -759,7 +760,7 @@ function docsManifest() {
 
 function openDocs() {
   if (docsWin && !docsWin.isDestroyed()) { docsWin.focus(); return; }
-  docsWin = new BrowserWindow({ width: 940, height: 720, minWidth: 700, minHeight: 520, resizable: true, title: "苏苏洛 · 文档中心", autoHideMenuBar: true,
+  docsWin = new BrowserWindow({ width: 940, height: 720, minWidth: 700, minHeight: 520, resizable: true, title: i18n.t(currentUiLang(), "page.docs.title"), autoHideMenuBar: true,
     webPreferences: winChild.childWebPrefs(config.APP_DIR) });
   docsWin.setMenuBarVisibility(false);
   docsWin.loadFile(path.join(config.APP_DIR, "renderer", "docs.html"));
@@ -858,7 +859,7 @@ async function trayCheckUpdate() {
       dialog.showMessageBox({ type: "error", message: i18n.t(lang, "tray.updateCheckFail", { reason: localizedFailure(d.error, lang) }) });
       return;
     }
-    if (!d.plan && !d.fullPlan) { dialog.showMessageBox({ type: "info", title: "苏苏洛桌宠", message: i18n.t(lang, "tray.alreadyLatest") }); return; }
+    if (!d.plan && !d.fullPlan) { dialog.showMessageBox({ type: "info", title: i18n.t(lang, "app.brandName"), message: i18n.t(lang, "tray.alreadyLatest") }); return; }
     await runUpdateFlow(d);
   } catch (e) { logTts("update", "检查更新异常: " + (e && e.message || e)); }
 }
@@ -1139,7 +1140,7 @@ function openAddChar() {
     minWidth: 520,
     minHeight: 400,
     resizable: true,
-    title: "苏苏洛 · 添加人物",
+    title: i18n.t(currentUiLang(), "page.addchar.title"),
     autoHideMenuBar: true,
     webPreferences: winChild.childWebPrefs(config.APP_DIR)
   });
@@ -1151,7 +1152,7 @@ attachCrashDiag(addCharWin, "addchar");
 ipcMain.handle("pet:import-spine", async () => {
   try {
     const r = await dialog.showOpenDialog(addCharWin || win, {
-      title: "选择包含人物模型文件的文件夹（.atlas + .skel/.json + .png）",
+      title: i18n.t(currentUiLang(), "page.addchar.pickTitle"),
       properties: ["openDirectory"]
     });
     if (r.canceled || !r.filePaths || !r.filePaths.length) return { ok: false, error: "已取消" };
@@ -1185,7 +1186,7 @@ function openMoodManager() {
     minWidth: 560,
     minHeight: 520,
     resizable: true,
-    title: "苏苏洛 · 表情管理",
+    title: i18n.t(currentUiLang(), "page.moods.title"),
     autoHideMenuBar: true,
     webPreferences: winChild.childWebPrefs(config.APP_DIR)
   });
@@ -1229,7 +1230,7 @@ ipcMain.handle("pet:pick-gif", async () => {
   const parent = (moodWin && !moodWin.isDestroyed()) ? moodWin : win;
   const r = await dialog.showOpenDialog(parent, {
     properties: ["openFile"],
-    title: "选择表情 GIF（透明背景）",
+    title: i18n.t(currentUiLang(), "page.moods.pickGifTitle"),
     filters: [
       { name: "GIF 表情", extensions: ["gif"] },
       { name: "图片", extensions: ["png", "webp", "jpg", "jpeg"] },
@@ -1357,7 +1358,7 @@ function openTerms() {
     minWidth: 520,
     minHeight: 560,
     resizable: true,
-    title: "苏苏洛 · 使用条款与隐私政策",
+    title: i18n.t(currentUiLang(), "page.terms.title"),
     autoHideMenuBar: true,
     webPreferences: winChild.childWebPrefs(config.APP_DIR)
   });
@@ -1703,7 +1704,7 @@ function openVoiceStudio() {
     minWidth: 540,
     minHeight: 560,
     resizable: true,
-    title: "苏苏洛 · 音色克隆与训练",
+    title: i18n.t(currentUiLang(), "page.voice.title"),
     autoHideMenuBar: true,
     webPreferences: winChild.childWebPrefs(config.APP_DIR)
   });
@@ -1718,7 +1719,7 @@ ipcMain.handle("pet:pick-file", async () => {
   const parent = (voiceWin && !voiceWin.isDestroyed()) ? voiceWin : (settingsWin && !settingsWin.isDestroyed()) ? settingsWin : win;
   const r = await dialog.showOpenDialog(parent, {
     properties: ["openFile"],
-    title: "选择参考音频（3~10 秒干净人声）",
+    title: i18n.t(currentUiLang(), "page.voice.pickAudioTitle"),
     filters: [
       { name: "音频文件", extensions: ["wav", "flac", "ogg", "aiff", "aif", "mp3"] },
       { name: "所有文件", extensions: ["*"] }
@@ -2494,10 +2495,38 @@ ipcMain.handle("pet:reload-persona", () => {
 ipcMain.handle("pet:open-config", () => shell.openPath(config.CONFIG_PATH));
 
 function refreshPetName() {
+  applyPetWindowTitle();
   const name = config.fillTokens("{{petName}}");
-  if (win && !win.isDestroyed()) win.setTitle(i18n.t(currentUiLang(), "ui.petWindowTitle", { name }));
   if (tray) tray.setToolTip(i18n.t(currentUiLang(), "tray.tooltipNormal", { name }));
   sendToAllWindows("pet:name-changed", name);
+}
+
+/* Phase 5-E2：native 表面（窗口/系统对话框）标题的唯一来源是 catalog。
+ * 窗口创建时取当前 locale；locale 变化时对已打开窗口重设标题。
+ * 与 refreshPetName 同源复用，不新建第二套 native translator。 */
+function applyPetWindowTitle() {
+  if (!win || win.isDestroyed()) return;
+  const name = config.fillTokens("{{petName}}");
+  win.setTitle(i18n.t(currentUiLang(), "ui.petWindowTitle", { name }));
+}
+function applyNativeWindowTitles() {
+  const lang = currentUiLang();
+  for (const [getWin, key] of [
+    [() => helpWin, "page.help.title"],
+    [() => quickstartWin, "page.quickstart.title"],
+    [() => settingsWin, "page.settings.title"],
+    [() => scheduleWin, "page.schedule.title"],
+    [() => psdWin, "page.psd.title"],
+    [() => docsWin, "page.docs.title"],
+    [() => addCharWin, "page.addchar.title"],
+    [() => moodWin, "page.moods.title"],
+    [() => termsWin, "page.terms.title"],
+    [() => voiceWin, "page.voice.title"]
+  ]) {
+    const w = getWin();
+    if (w && !w.isDestroyed()) { try { w.setTitle(i18n.t(lang, key)); } catch { /* 窗口可能正在销毁 */ } }
+  }
+  applyPetWindowTitle();
 }
 
 /* ---------- 设置窗口 IPC ---------- */
@@ -3103,7 +3132,7 @@ ipcMain.handle("pet:get-reminders", () => schedules.list().filter((s) => s.sourc
 ipcMain.handle("pet:cancel-reminder", (_e, id) => schedules.cancel(String(id || "")));
 
 ipcMain.handle("pet:pick-schedule-workbook", async () => {
-  const r = await dialog.showOpenDialog(scheduleWin || win, { title: "选择日程 Excel", filters: [{ name: "Excel", extensions: ["xlsx"] }], properties: ["openFile"] });
+  const r = await dialog.showOpenDialog(scheduleWin || win, { title: i18n.t(currentUiLang(), "page.schedule.excelImportTitle"), filters: [{ name: "Excel", extensions: ["xlsx"] }], properties: ["openFile"] });
   return r.canceled ? "" : r.filePaths[0];
 });
 function parseScheduleWorkbook(filePath) {
@@ -3129,7 +3158,7 @@ ipcMain.handle("pet:preview-schedule-workbook", (_e, filePath) => {
   } catch (e) { return projectedFailure(e, "error"); }
 });
 ipcMain.handle("pet:export-schedule-template", async () => {
-  const r = await dialog.showSaveDialog(scheduleWin || win, { title: "保存日程 Excel 模板", defaultPath: "日程模板.xlsx", filters: [{ name: "Excel", extensions: ["xlsx"] }] });
+  const r = await dialog.showSaveDialog(scheduleWin || win, { title: i18n.t(currentUiLang(), "page.schedule.excelExportTitle"), defaultPath: "日程模板.xlsx", filters: [{ name: "Excel", extensions: ["xlsx"] }] });
   if (r.canceled || !r.filePath) return false;
   const ws = XLSX.utils.json_to_sheet([{ title: "喝药", date: "2026-08-25", time: "09:30", recurrence: "daily", enabled: "true", emotion: "happy", notes: "饭后服用", externalId: "med-001" }]);
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "日程"); XLSX.writeFile(wb, r.filePath); return true;
@@ -5324,7 +5353,7 @@ ipcMain.handle("pet:log-export", async (_e, maxLines) => {
     try { appVersion = JSON.parse(fs.readFileSync(path.join(config.APP_DIR, "package.json"), "utf8")).version || "?"; } catch { /* 忽略 */ }
     const payload = logDiag.buildExport(r, { appVersion, userNames: logDiag.collectUserNames(config.getConfig()) });
     const { canceled, filePath } = await dialog.showSaveDialog(win, {
-      title: "导出脱敏日志",
+      title: i18n.t(currentUiLang(), "set.logdiagExportTitle"),
       defaultPath: "suzuran-log-" + new Date().toISOString().slice(0, 10) + "-sanitized.txt",
       filters: [{ name: "Text", extensions: ["txt"] }]
     });
@@ -5370,7 +5399,7 @@ ipcMain.handle("pet:set-appearance", (_e, patch) => {
 ipcMain.handle("pet:import-font", async () => { // 选本地字体文件→复制到 renderer/fonts/user/→记入配置
   if (!win || win.isDestroyed()) return null;
   const r = await dialog.showOpenDialog(win, {
-    title: "选择字体文件",
+    title: i18n.t(currentUiLang(), "set.importFontTitle"),
     filters: [{ name: "字体文件", extensions: ["ttf", "otf", "woff", "woff2"] }],
     properties: ["openFile"]
   });

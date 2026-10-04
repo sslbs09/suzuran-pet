@@ -33,9 +33,12 @@ function boot(agreed, options = {}) {
       saveConfig(patch) { if (options.saveFailure) throw new Error("save failure"); hit("persist"); Object.assign(cfg, patch); },
       initializeSecretStorage: () => ({}), getPersonaText: () => "" },
     logTts() {}, refreshTrayMenu: stub("refreshMenu"), sendToRenderer: stub("send"),
+    // 5-E2：窗口 title 改走 catalog，本 harness 需提供 i18n / currentUiLang / setTitle
+    i18n: { t: (lang, key) => key },
+    locale: { normalizeLocale: (v) => v || "zh", isAdmittedLocale: () => true },
     createTray() { hit(cfg.agreed === true ? "normalTray" : "pendingTray"); },
     createWindow() { hit("createWindow"); context.win = { isDestroyed: () => false, isVisible: () => false,
-      show: stub("show"), focus: stub("focus"), setIgnoreMouseEvents() {} }; },
+      show: stub("show"), focus: stub("focus"), setIgnoreMouseEvents() {}, setTitle() {} }; },
     applyNetProxy() { hit("runtime"); if (options.runtimeFailure) throw new Error("injected startup failure"); },
     memory: { init() {}, load() {}, wasTampered: () => false },
     screen: { on: stub("screenListener") }, schedules: { initialize: stub("schedule") },
@@ -57,13 +60,15 @@ function boot(agreed, options = {}) {
       restore() { this.minimized = false; hit("restoreTerms"); }
       show() { hit("showTerms"); }
       focus() { hit("focusTerms"); }
+      setTitle() {}
       on(name, fn) { this.handlers[name] = fn; }
       setMenuBarVisibility() {}
       loadFile() {}
     }, winChild: { childWebPrefs: () => ({}) }, attachCrashDiag() {}
   };
   for (const name of ["syncNativeTheme", "relaunchIfAppDirNewer", "registerUserAssetProtocol", "startupUpdateCheck",
-    "sendScheduleDue", "refreshPetName", "scheduleDisplayClamp", "refreshWinBarriers", "syncWalkingEngine",
+    "sendScheduleDue", "refreshPetName", "applyPetWindowTitle", "applyNativeWindowTitles", "currentUiLang",
+    "scheduleDisplayClamp", "refreshWinBarriers", "syncWalkingEngine",
     "walkDiag", "setFileGuard", "runDllGuard", "startAgentApi", "sendProactive", "proactiveStateFn",
     "startFocusWatch", "startWeatherWatch", "startWorkspaceWatch", "openSettings", "applyLayer", "clearDragPause",
     "cancelFlight", "cancelWalkJump"]) context[name] = stub(name);
