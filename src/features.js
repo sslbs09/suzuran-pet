@@ -93,46 +93,12 @@ function startProactive(sendFn, intervalMin = PROACTIVE_DEFAULTS.intervalMin, ch
     try {
       const mem = require("./memory");
       const facts = mem.getFactsList() || [];
-      if (facts.length) {
-        // ① 生日：今天正好是 → 一定开口（优先级最高）
-        const now = new Date();
-        const bd = facts.find((f) => f.type === "birthday" && (f.text.match(/(\d{1,2})月(\d{1,2})日/) || []).slice(1).join("|") === (now.getMonth() + 1) + "|" + now.getDate());
-        if (bd) {
-          prompt = lines.pick([
-            "（咦，今天好像是博士的生日？）生日快乐呀博士！要好好犒劳一下自己哦～",
-            "（捧着小蛋糕）博士生日快乐！今天的愿望，我会帮你一起记着的～",
-            "（认真脸）博士的生日我可没忘——今天不许加班太久，听到没？",
-          ], banned);
-        } else if (mem.hasHealthFact() && Math.random() < 0.3) {
-          prompt = lines.pick([
-            "（想起你之前说不太舒服）……博士，身体还好吗？别忘了多喝热水，不舒服要跟我说。",
-            "（小声）博士，今天身体怎么样？有没有比昨天好一点？",
-            "（递热水）记得你说过不太舒服——今天好点了吗？别硬撑哦。",
-          ], banned);
-        } else {
-          // ② 近期安排：考试/面试/答辩/加班… → 助威系
-          const ev = facts.filter((f) => f.type === "event").pop();
-          if (ev && Math.random() < 0.25) {
-            const what = (ev.text.match(/「(.+?)」/) || [])[1] || "那件重要的事";
-            prompt = lines.pick([
-              "（记得你最近有" + what + "的安排）博士加油呀～我会在旁边给你打气的！",
-              what + " 准备得怎么样啦？别太累，慢慢来～",
-              "（掰手指算日子）" + what + " 快到了吧？博士一定没问题的！",
-            ], banned);
-          } else {
-            // ③ 称谓：博士希望被这样称呼时偶尔用
-            const nm = facts.find((f) => f.type === "name");
-            const name = nm && (nm.text.match(/「(.+?)」/) || [])[1];
-            if (name && Math.random() < 0.2) {
-              prompt = lines.pick([
-                "（今天也记得要这样叫博士）" + name + "～有没有按时喝水呀？",
-                name + "～忙归忙，眼睛要休息哦。",
-                "（清了清嗓子）" + name + "！……没什么，就是想叫叫你～",
-              ], banned);
-            }
-          }
-        }
-      }
+      const { chooseExperienceTopic } = require("./character-runtime/experience-topic");
+      // Phase 7-C：决策本体抽到 src/character-runtime/experience-topic.js（纯函数，可单测）。
+      // 这里是 behavior-preserving extraction：分支优先级、random 次数与顺序、台词池新建语义全部不变，
+      // 连仍由 lines.pick(arr, banned) 完成实际选句。try/catch 与「记忆不可用走常规台词」的兜底也照旧。
+      const choice = chooseExperienceTopic({ facts, random: Math.random, now: new Date() });
+      if (choice) prompt = lines.pick(choice.lines, banned);
     } catch { /* 记忆不可用则走常规台词 */ }
     // B-3 由头第二信号源：番茄钟快结束 / 日程临近（轻量运行信号；无信号返回 null 不打扰）
     if (!prompt) {
