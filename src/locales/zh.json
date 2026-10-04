@@ -947,5 +947,9 @@
   "err.cancelled": "请求已取消。",
   "err.busy": "当前正在处理其他请求。请稍后重试。",
   "err.internal": "发生意外错误。请稍后重试。",
+  "err.gsvTimeout": "❌ 重启失败：服务未能在超时内就绪（详见 tts.log）",
+  "err.gsvSynthFail": "❌ 服务已启动但试合成失败（详见 tts.log）",
+  "err.gsvDisabled": "日语语音服务未启用或配置不完整",
+  "err.gsvNoPath": "语音引擎路径不存在（首次安装未配置）：请在语音设置里填写 Python 路径与服务脚本",
   "err.unknown": "暂时无法完成请求。请稍后重试。"
 }

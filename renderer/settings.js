@@ -632,14 +632,7 @@ $("btn-restart-gsv").addEventListener("click", async () => {
   let r;
   try { r = await window.petAPI.restartGsv(); } catch { r = { ok: false, code: "timeout" }; }
   btn.disabled = false;
-  const msgs = {
-    success: L("set.gsvOk"),
-    timeout: L("set.gsvTimeout"),
-    synth: L("set.gsvSynthFail"),
-    disabled: L("set.gsvDisabled"),
-    nopath: L("set.gsvNoPath")
-  };
-  setResult(out, msgs[r && r.code] || L("set.gsvTimeout"), !!(r && r.ok));
+  setResult(out, r && r.ok ? L("set.gsvOk") : presentResultError(r), !!(r && r.ok));
 });
 
 $("btn-save-voice").addEventListener("click", async () => { await doSaveVoice(); });

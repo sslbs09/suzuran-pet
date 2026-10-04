@@ -947,5 +947,9 @@
   "err.cancelled": "The request was cancelled.",
   "err.busy": "Another request is being processed. Please try again later.",
   "err.internal": "An unexpected error occurred. Please try again later.",
+  "err.gsvTimeout": "❌ Restart failed: service not ready in time (see tts.log)",
+  "err.gsvSynthFail": "❌ Server started but test synthesis failed (see tts.log)",
+  "err.gsvDisabled": "Japanese TTS service is disabled or misconfigured",
+  "err.gsvNoPath": "Engine path not found (fresh install, not configured): set Python path & server script in voice settings",
   "err.unknown": "The request could not be completed. Please try again later."
 }

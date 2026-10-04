@@ -66,6 +66,77 @@ async function createSettings(lang) {
   return sandbox;
 }
 
+async function createGsvRestartHandler(lang, outcome) {
+  const elements = new Map();
+  for (const id of ["btn-restart-gsv", "gsv-result"]) {
+    elements.set(id, { disabled: false, textContent: "", className: "" });
+  }
+  const callbacks = {};
+  const sandbox = {
+    console,
+    document: { documentElement: {}, querySelectorAll: () => [], getElementById: (id) => elements.get(id) },
+    window: null,
+    petAPI: {
+      getI18n: async () => ({ lang, dict: i18n.getEffectiveDict(lang) }),
+      onUiLangChanged() {},
+      restartGsv: async () => {
+        if (outcome instanceof Error) throw outcome;
+        return outcome;
+      }
+    },
+    setTimeout,
+    clearTimeout
+  };
+  sandbox.window = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(presenterSource, sandbox, { filename: "src/error-presenter.js" });
+  vm.runInContext(rendererI18nSource, sandbox, { filename: "renderer/i18n.js" });
+  await new Promise((resolve) => setImmediate(resolve));
+  sandbox.$ = (id) => elements.get(id);
+  sandbox.L = (key, params) => sandbox.I18N.t(key, params);
+  vm.runInContext(extractFunction(settingsSource, "function setResult(el, text, ok)"), sandbox, { filename: "renderer/settings.js" });
+  vm.runInContext(extractFunction(settingsSource, "function presentResultError(result)"), sandbox, { filename: "renderer/settings.js" });
+  const start = settingsSource.indexOf('$("btn-restart-gsv").addEventListener');
+  const end = settingsSource.indexOf('$("btn-save-voice")', start);
+  assert.ok(start !== -1 && end > start, "production restartGsv click handler found");
+  sandbox.$("btn-restart-gsv").addEventListener = (event, cb) => { callbacks[event] = cb; };
+  vm.runInContext(settingsSource.slice(start, end), sandbox, { filename: "renderer/settings.js" });
+  return { elements, callbacks };
+}
+
+test("production restartGsv handler presents all four failure codes and preserves lifecycle", async () => {
+  const cases = [
+    ["timeout", "err.gsvTimeout"],
+    ["synth", "err.gsvSynthFail"],
+    ["disabled", "err.gsvDisabled"],
+    ["nopath", "err.gsvNoPath"]
+  ];
+  for (const lang of ["zh", "en", "ja"]) {
+    for (const [code, key] of cases) {
+      const h = await createGsvRestartHandler(lang, { ok: false, code, message: "hostile technical detail" });
+      const btn = h.elements.get("btn-restart-gsv");
+      const out = h.elements.get("gsv-result");
+      const run = h.callbacks.click();
+      assert.equal(btn.disabled, true, `${lang} ${code} disables during restart`);
+      await run;
+      assert.equal(btn.disabled, false, `${lang} ${code} re-enables after restart`);
+      assert.equal(out.textContent, i18n.t(lang, key));
+      assert.equal(out.className, "result err");
+      assert.ok(!out.textContent.includes("hostile"));
+    }
+    const success = await createGsvRestartHandler(lang, { ok: true, code: "success" });
+    await success.callbacks.click();
+    assert.equal(success.elements.get("gsv-result").textContent, i18n.t(lang, "set.gsvOk"));
+    assert.equal(success.elements.get("gsv-result").className, "result ok");
+    const rejected = await createGsvRestartHandler(lang, new Error("private stack/path"));
+    await rejected.callbacks.click();
+    assert.equal(rejected.elements.get("gsv-result").textContent, i18n.t(lang, "err.gsvTimeout"));
+    const malformed = await createGsvRestartHandler(lang, { ok: false, code: "bad", message: "private detail" });
+    await malformed.callbacks.click();
+    assert.equal(malformed.elements.get("gsv-result").textContent, i18n.t(lang, "err.unknown"));
+  }
+});
+
 /* 1) settings error code → error-presenter */
 test("settings helper routes every coded result through the shared presenter", async () => {
   const cases = [
@@ -79,6 +150,10 @@ test("settings helper routes every coded result through the shared presenter", a
     ["CANCELLED", {}, "err.cancelled"],
     ["BUSY", {}, "err.busy"],
     ["INTERNAL", {}, "err.internal"],
+    ["timeout", {}, "err.gsvTimeout"],
+    ["synth", {}, "err.gsvSynthFail"],
+    ["disabled", {}, "err.gsvDisabled"],
+    ["nopath", {}, "err.gsvNoPath"],
     ["HTTP_ERROR", { status: 503 }, "err.http"]
   ];
   for (const lang of ["zh", "en", "ja"]) {

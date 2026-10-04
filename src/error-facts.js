@@ -14,8 +14,8 @@
  *   { key, params } → I18N.t()
  *
  * 不变量：
- *  - code 只能取下面 11 个，与 src/error-presenter.js 的 ERROR_PRESENTATIONS 严格同集合。
- *    本文件不得新增 code；词表扩展属于 error-presenter 的范围。
+ *  - code 只能取下面 15 个，与 src/error-presenter.js 的 ERROR_PRESENTATIONS 严格同集合。
+ *    Phase 5-D 仅收编四个既有 GSV 失败码；词表扩展必须与 presenter 同步。
  *  - meta 走白名单，且仅 HTTP_ERROR 允许携带 status（与 presenter 的 err.http / err.httpGeneric 规则对齐）。
  *  - message 保留兼容用途，但经过 redactMessage 脱敏：禁止携带 provider body、完整 URL、
  *    token、stack、敏感配置。原始全文只进 detail（仅诊断投影，日志专用）。
@@ -33,7 +33,11 @@ const ERROR_CODES = Object.freeze({
   HTTP_ERROR: "HTTP_ERROR",
   CANCELLED: "CANCELLED",
   BUSY: "BUSY",
-  INTERNAL: "INTERNAL"
+  INTERNAL: "INTERNAL",
+  timeout: "timeout",
+  synth: "synth",
+  disabled: "disabled",
+  nopath: "nopath"
 });
 
 /** meta 白名单：只允许 status，且必须与 presenter 的校验规则一致（整数 100..599）。 */
@@ -137,7 +141,7 @@ function redactMessage(text) {
 
 class ErrorWithCode extends Error {
   /**
-   * @param {string} code 11 个白名单 code 之一；非法值归一为 INTERNAL
+   * @param {string} code 15 个白名单 code 之一；非法值归一为 INTERNAL
    * @param {{meta?:object, message?:string, detail?:string}} [opts]
    *   meta    仅 status（100..599 整数）可用，其余字段被白名单丢弃
    *   message 用户/日志可读文案，自动脱敏
@@ -172,10 +176,10 @@ const LEGACY_STATUS_RE = /(?:^|[^\w])((?:API|HTTP|status)\s*)(\d{3})/i;
  * 把任意异常归类为统一 code。
  * 优先级（事实优先，regex 仅最后兜底）：
  *   1. AbortError → CANCELLED
- *   2. 已有 11 码之一 → 采用
+ *   2. 已有 15 码之一 → 采用
  *   3. Node/undici errno → 映射（ENOTFOUND/ECONNREFUSED → NETWORK_ERROR 等）
  *   4. 整数 status 字段 → httpStatusToCode
- *   5. 旧 message 文本 → 仅作为历史兼容，产出 11 码之一
+ *   5. 旧 message 文本 → 仅作为历史兼容，产出 15 码之一
  */
 function classifyError(err) {
   if (!err) return ERROR_CODES.INTERNAL;

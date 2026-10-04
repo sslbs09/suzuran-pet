@@ -23,7 +23,11 @@ const CODE_KEYS = {
   HTTP_ERROR: "err.http",
   CANCELLED: "err.cancelled",
   BUSY: "err.busy",
-  INTERNAL: "err.internal"
+  INTERNAL: "err.internal",
+  timeout: "err.gsvTimeout",
+  synth: "err.gsvSynthFail",
+  disabled: "err.gsvDisabled",
+  nopath: "err.gsvNoPath"
 };
 
 function extractFunction(source, signature) {
