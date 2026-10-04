@@ -15,13 +15,14 @@ const presenter = require(require("node:path").join(root, "src/error-presenter.j
 
 const APPROVED_CODES = [
   "NO_API_KEY", "AUTH_INVALID", "QUOTA_EXCEEDED", "TIMEOUT", "NETWORK_ERROR",
-  "SSRF_BLOCKED", "BAD_URL", "HTTP_ERROR", "CANCELLED", "BUSY", "INTERNAL",
-  "timeout", "synth", "disabled", "nopath"
+  "SSRF_BLOCKED", "BAD_URL", "HTTP_ERROR", "CANCELLED", "BUSY", "INTERNAL"
 ];
+/** Phase 5-G1：GSV 引擎专属小写码不属于通用错误码词表 */
+const GSV_ONLY_CODES = ["timeout", "synth", "disabled", "nopath"];
 
 /* ---------- 词表锁定 ---------- */
 
-test("error-facts exposes exactly the 15 approved codes and no others", () => {
+test("error-facts exposes exactly the 11 approved codes and no others", () => {
   assert.deepEqual(Object.keys(facts.ERROR_CODES).sort(), [...APPROVED_CODES].sort());
   assert.ok(Object.isFrozen(facts.ERROR_CODES));
   for (const code of ["RATE_LIMIT", "PROVIDER_UNAVAILABLE", "INVALID_RESPONSE", "EMPTY"]) {
@@ -30,11 +31,27 @@ test("error-facts exposes exactly the 15 approved codes and no others", () => {
   }
 });
 
+test("Phase 5-G1: GSV lowercase codes are not part of the general error vocabulary", () => {
+  for (const code of GSV_ONLY_CODES) {
+    assert.equal(facts.ERROR_CODES[code], undefined, `${code} must not be a general error code`);
+    assert.equal(facts.normalizeCode(code), "INTERNAL", `${code} must normalize to INTERNAL`);
+    const e = new facts.ErrorWithCode(code, { message: "gsv failure" });
+    assert.equal(e.code, "INTERNAL", `ErrorWithCode must reject ${code}`);
+    assert.deepEqual(facts.toPayload(e).code, "INTERNAL");
+  }
+});
+
 test("code vocabulary stays in lockstep with the Phase 5-A error-presenter", () => {
   // ERROR_PRESENTATIONS 的键就是 code，值是 err.* 文案键
   const presenterCodes = new Set(Object.keys(presenter.ERROR_PRESENTATIONS));
   assert.deepEqual([...presenterCodes].sort(), [...APPROVED_CODES].sort(),
-    "error-facts 与 error-presenter 必须共用同一份 15 码词表");
+    "error-facts 与 error-presenter 必须共用同一份 11 码词表");
+  // GSV 小写码改由独立命名空间承载，且与通用词表零交集
+  const gsvCodes = new Set(Object.keys(presenter.GSV_PRESENTATIONS));
+  assert.deepEqual([...gsvCodes].sort(), [...GSV_ONLY_CODES].sort());
+  for (const code of gsvCodes) {
+    assert.ok(!presenterCodes.has(code), `${code} must not appear in the general vocabulary`);
+  }
   // presenter 只多不少（err.unknown / err.httpGeneric 是兜底文案，不是错误码）
   for (const value of Object.values(presenter.ERROR_PRESENTATIONS)) {
     assert.ok(typeof value === "string" && value.startsWith("err."), `${value} is an err.* catalog key`);

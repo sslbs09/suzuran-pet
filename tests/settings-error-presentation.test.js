@@ -96,6 +96,9 @@ async function createGsvRestartHandler(lang, outcome) {
   sandbox.L = (key, params) => sandbox.I18N.t(key, params);
   vm.runInContext(extractFunction(settingsSource, "function setResult(el, text, ok)"), sandbox, { filename: "renderer/settings.js" });
   vm.runInContext(extractFunction(settingsSource, "function presentResultError(result)"), sandbox, { filename: "renderer/settings.js" });
+  // 5-G1：restartGsv 的 GSV 分流助手（声明在监听器之前，需与点击处理器一并装载）
+  vm.runInContext(extractFunction(settingsSource, "function presentGsvError(result)"), sandbox, { filename: "renderer/settings.js" });
+  vm.runInContext(extractFunction(settingsSource, "function isGsvCode(result)"), sandbox, { filename: "renderer/settings.js" });
   const start = settingsSource.indexOf('$("btn-restart-gsv").addEventListener');
   const end = settingsSource.indexOf('$("btn-save-voice")', start);
   assert.ok(start !== -1 && end > start, "production restartGsv click handler found");
@@ -150,10 +153,6 @@ test("settings helper routes every coded result through the shared presenter", a
     ["CANCELLED", {}, "err.cancelled"],
     ["BUSY", {}, "err.busy"],
     ["INTERNAL", {}, "err.internal"],
-    ["timeout", {}, "err.gsvTimeout"],
-    ["synth", {}, "err.gsvSynthFail"],
-    ["disabled", {}, "err.gsvDisabled"],
-    ["nopath", {}, "err.gsvNoPath"],
     ["HTTP_ERROR", { status: 503 }, "err.http"]
   ];
   for (const lang of ["zh", "en", "ja"]) {
@@ -162,6 +161,17 @@ test("settings helper routes every coded result through the shared presenter", a
       const got = s.presentResultError({ ok: false, code, meta });
       assert.equal(got, i18n.t(lang, key, code === "HTTP_ERROR" ? { status: 503 } : {}), `${lang} ${code}`);
       assert.ok(got && got !== key, `${lang} ${code} resolves to catalog text, not the bare key`);
+    }
+  }
+});
+
+test("settings helper no longer resolves GSV codes — they belong to their own namespace (5-G1)", async () => {
+  for (const lang of ["zh", "en", "ja"]) {
+    const s = await createSettings(lang);
+    for (const code of ["timeout", "synth", "disabled", "nopath"]) {
+      assert.equal(s.presentResultError({ ok: false, code, message: "legacy text" }),
+        i18n.t(lang, "err.unknown"),
+        `${lang} ${code} must not resolve through the general funnel`);
     }
   }
 });

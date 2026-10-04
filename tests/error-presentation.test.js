@@ -23,7 +23,11 @@ const CODE_KEYS = {
   HTTP_ERROR: "err.http",
   CANCELLED: "err.cancelled",
   BUSY: "err.busy",
-  INTERNAL: "err.internal",
+  INTERNAL: "err.internal"
+};
+
+/* 5-G1：GSV 引擎专属码，独立命名空间，不参与通用词表 */
+const GSV_CODE_KEYS = {
   timeout: "err.gsvTimeout",
   synth: "err.gsvSynthFail",
   disabled: "err.gsvDisabled",
@@ -103,12 +107,22 @@ test("presenter maps every approved code and rejects inherited property names", 
     const meta = code === "HTTP_ERROR" ? { status: 500 } : {};
     assert.deepEqual(api.toPresentation({ code, meta }), code === "HTTP_ERROR" ? { key, params: { status: 500 } } : { key, params: {} }, code);
   }
+  // 5-G1：GSV 小写码不再属于通用命名空间，通用入口一律不认
+  for (const [code, key] of Object.entries(GSV_CODE_KEYS)) {
+    assert.equal(api.ERROR_PRESENTATIONS[code], undefined, `${code} must not sit in the general table`);
+    assert.equal(api.GSV_PRESENTATIONS[code], key, `${code} must sit in the GSV table`);
+    assert.deepEqual(api.toPresentation({ code }), { key: "err.unknown", params: {} }, `general ${code}`);
+    assert.deepEqual(api.toGsvPresentation({ code }), { key, params: {} }, `gsv ${code}`);
+  }
   for (const code of ["unknown", "", null, undefined, "__proto__", "constructor", "toString"]) {
     assert.deepEqual(api.toPresentation({ code }), { key: "err.unknown", params: {} }, String(code));
+    assert.deepEqual(api.toGsvPresentation({ code }), { key: "err.unknown", params: {} }, `gsv ${String(code)}`);
   }
   assert.ok(Object.isFrozen(api.ERROR_PRESENTATIONS), "presentation mapping is immutable");
+  assert.ok(Object.isFrozen(api.GSV_PRESENTATIONS), "GSV mapping is immutable");
   for (const input of [null, undefined, 7, "INTERNAL", true]) {
     assert.deepEqual(api.toPresentation(input), { key: "err.unknown", params: {} });
+    assert.deepEqual(api.toGsvPresentation(input), { key: "err.unknown", params: {} });
   }
   assert.equal(globalThis.ErrorPresenter, priorGlobalPresenter, "CommonJS require does not install a global presenter");
 });
@@ -132,7 +146,7 @@ test("presenter accepts only integer HTTP status and never echoes message or arb
 });
 
 test("error catalog has the same keys and placeholder names in zh/en/ja", () => {
-  const expected = [...Object.values(CODE_KEYS), "err.unknown", "err.httpGeneric"].sort();
+  const expected = [...Object.values(CODE_KEYS), ...Object.values(GSV_CODE_KEYS), "err.unknown", "err.httpGeneric"].sort();
   for (const lang of ["zh", "en", "ja"]) {
     const actual = Object.keys(i18n.DICT[lang]).filter((key) => key.startsWith("err.")).sort();
     assert.deepEqual(actual, expected, `${lang} err.* key set`);

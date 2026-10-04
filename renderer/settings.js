@@ -623,7 +623,19 @@ $("btn-clear-trcache").addEventListener("click", async () => {
   } catch { setResult(out, "❌ " + presentResultError(INTERNAL_FAILURE)); }
 });
 
-/* ---------- 一键重启日语 TTS ---------- */
+/* ---------- 一键重启日语 TTS ----------
+ * Phase 5-G1：restartGsv 返回的是 GSV 引擎专属小写码（timeout/synth/disabled/nopath），
+ * 它们刻意留在 error-presenter 的 GSV 专用命名空间，不再进入通用 ERROR_PRESENTATIONS。
+ * 因此这里显式分流：属于 GSV 命名空间 → toGsvPresentation；其余（含大写通用码）
+ * 一律走上面的 presentResultError，通用错误事实流完全不变。 */
+function presentGsvError(result) {
+  const p = window.ErrorPresenter.toGsvPresentation({ code: result && result.code });
+  return window.I18N.t(p.key, p.params);
+}
+function isGsvCode(result) {
+  return !!(result && Object.prototype.hasOwnProperty.call(result, "code") &&
+    Object.prototype.hasOwnProperty.call(window.ErrorPresenter.GSV_PRESENTATIONS, result.code));
+}
 $("btn-restart-gsv").addEventListener("click", async () => {
   const btn = $("btn-restart-gsv");
   const out = $("gsv-result");
@@ -632,7 +644,8 @@ $("btn-restart-gsv").addEventListener("click", async () => {
   let r;
   try { r = await window.petAPI.restartGsv(); } catch { r = { ok: false, code: "timeout" }; }
   btn.disabled = false;
-  setResult(out, r && r.ok ? L("set.gsvOk") : presentResultError(r), !!(r && r.ok));
+  const shown = r && r.ok ? L("set.gsvOk") : (isGsvCode(r) ? presentGsvError(r) : presentResultError(r));
+  setResult(out, shown, !!(r && r.ok));
 });
 
 $("btn-save-voice").addEventListener("click", async () => { await doSaveVoice(); });

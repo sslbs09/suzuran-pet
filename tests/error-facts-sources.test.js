@@ -19,8 +19,7 @@ const taskQueue = require(require("node:path").join(root, "src/task-queue.js"));
 const chatClient = require(require("node:path").join(root, "src/chat-client.js"));
 
 const APPROVED = ["NO_API_KEY", "AUTH_INVALID", "QUOTA_EXCEEDED", "TIMEOUT", "NETWORK_ERROR",
-  "SSRF_BLOCKED", "BAD_URL", "HTTP_ERROR", "CANCELLED", "BUSY", "INTERNAL",
-  "timeout", "synth", "disabled", "nopath"];
+  "SSRF_BLOCKED", "BAD_URL", "HTTP_ERROR", "CANCELLED", "BUSY", "INTERNAL"];
 
 /** 抓取被抛出的错误事实（含 code/meta/detail）。 */
 async function caught(fn) {
@@ -234,9 +233,13 @@ test("readSSE: normal stream still concatenates content", async () => {
 
 /* ---------------- conversation-service 兼容 ---------------- */
 
-test("conversation-service: ERROR_CODES is now the shared 15-code vocabulary", () => {
+test("conversation-service: ERROR_CODES is now the shared 11-code vocabulary", () => {
   assert.deepEqual(Object.keys(conversation.ERROR_CODES).sort(), [...APPROVED].sort());
   assert.equal(conversation.ERROR_CODES.EMPTY, undefined, "EMPTY is not an approved code");
+  // 5-G1：GSV 小写码已移出通用词表
+  for (const code of ["timeout", "synth", "disabled", "nopath"]) {
+    assert.equal(conversation.ERROR_CODES[code], undefined, `${code} is a GSV-only code, not a general one`);
+  }
   assert.equal(conversation.ERROR_CODES, facts.ERROR_CODES, "single source of truth");
 });
 
@@ -251,6 +254,14 @@ test("conversation-service: legacy classifyError assertions still hold", () => {
 test("conversation-service: classifyError now understands coded facts", () => {
   for (const code of APPROVED) {
     assert.equal(conversation.classifyError(new facts.ErrorWithCode(code, { message: "opaque text" })), code);
+  }
+});
+
+test("conversation-service: GSV lowercase codes never classify as themselves (5-G1)", () => {
+  for (const code of ["timeout", "synth", "disabled", "nopath"]) {
+    assert.equal(conversation.classifyError(new facts.ErrorWithCode(code, { message: "opaque" })), "INTERNAL");
+    assert.equal(conversation.classifyError({ code }), "INTERNAL",
+      `a bare {code:"${code}"} must not be trusted as a general error fact`);
   }
 });
 

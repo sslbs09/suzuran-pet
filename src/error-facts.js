@@ -14,8 +14,10 @@
  *   { key, params } → I18N.t()
  *
  * 不变量：
- *  - code 只能取下面 15 个，与 src/error-presenter.js 的 ERROR_PRESENTATIONS 严格同集合。
- *    Phase 5-D 仅收编四个既有 GSV 失败码；词表扩展必须与 presenter 同步。
+ *  - code 只能取下面 11 个（大写），与 src/error-presenter.js 的 ERROR_PRESENTATIONS 严格同集合。
+ *    Phase 5-G1 已把 Phase 5-D 收编的四个 GSV 小写码（timeout/synth/disabled/nopath）
+ *    移出本词表——它们是 pet:restart-gsv 的引擎专属失败码，不属于通用错误事实，
+ *    现由 error-presenter 的 GSV_PRESENTATIONS 单独承载。小写 code 一律归一为 INTERNAL。
  *  - meta 走白名单，且仅 HTTP_ERROR 允许携带 status（与 presenter 的 err.http / err.httpGeneric 规则对齐）。
  *  - message 保留兼容用途，但经过 redactMessage 脱敏：禁止携带 provider body、完整 URL、
  *    token、stack、敏感配置。原始全文只进 detail（仅诊断投影，日志专用）。
@@ -33,11 +35,7 @@ const ERROR_CODES = Object.freeze({
   HTTP_ERROR: "HTTP_ERROR",
   CANCELLED: "CANCELLED",
   BUSY: "BUSY",
-  INTERNAL: "INTERNAL",
-  timeout: "timeout",
-  synth: "synth",
-  disabled: "disabled",
-  nopath: "nopath"
+  INTERNAL: "INTERNAL"
 });
 
 /** meta 白名单：只允许 status，且必须与 presenter 的校验规则一致（整数 100..599）。 */

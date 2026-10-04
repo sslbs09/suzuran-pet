@@ -56,12 +56,15 @@ test("the replacements those keys deferred to are still present", () => {
   }
 });
 
-test("the GSV replacement keys are still reachable from a presenter code", () => {
+test("the GSV replacement keys are still reachable — from the GSV namespace", () => {
   const presenter = require(path.join(root, "src/error-presenter.js"));
   for (const [code, key] of [["timeout", "err.gsvTimeout"], ["synth", "err.gsvSynthFail"],
     ["disabled", "err.gsvDisabled"], ["nopath", "err.gsvNoPath"]]) {
-    assert.equal(presenter.ERROR_PRESENTATIONS[code], key, `code "${code}" must still map to ${key}`);
-    assert.deepEqual(presenter.toPresentation({ code }), { key, params: {} }, code);
+    // Phase 5-G1：改由 GSV 专用命名空间承载，且不再出现在通用 ERROR_PRESENTATIONS
+    assert.equal(presenter.GSV_PRESENTATIONS[code], key, `code "${code}" must map to ${key}`);
+    assert.equal(presenter.ERROR_PRESENTATIONS[code], undefined,
+      `${code} must NOT be in the general presentation vocabulary`);
+    assert.deepEqual(presenter.toGsvPresentation({ code }), { key, params: {} }, code);
   }
 });
 
