@@ -4288,11 +4288,16 @@ if (window.petAPI.onCursorRecovery) { // B-2 自锁断路器：穿透期 forward
   window.petAPI.onCursorRecovery((p) => clickability.onNativeCursorPush(p)); // 恢复判定不依赖 renderer 能否收到鼠标事件；不聚焦、不抢鼠标、不动窗口
 }
 
+/* Phase 5-F1：收敛本文件的 ownership，消除三处双写。
+ *  - document.title ：owner 是主进程 applyPetWindowTitle（5-E2 已覆盖「改名」与「切语言」两条路径）。
+ *                      renderer 侧再写一次属于重复 ownership，且会硬编码中文后缀「桌宠」。
+ *  - input.placeholder：owner 是本文件末尾唯一的 I18N.onChange（locale 驱动的动态属性）。
+ *                      此前本函数用「和<名字>说点什么…」硬编码覆写，与 onChange 互相踩。
+ *  - spriteEl.alt ：DATA（值=用户自定义宠物名），保留在本函数——它不是文案，是数据。
+ * 宠物名本身的解析逻辑（trim / 空值回落「苏苏洛」）完全未改动。 */
 function applyPetName(name) {
   const value = String(name || "苏苏洛").trim() || "苏苏洛";
-  document.title = value + "桌宠";
   spriteEl.alt = value;
-  inputEl.placeholder = "和" + value + "说点什么…";
 }
 
 // 仅供 lifecycle contract tests 注入依赖并调用真实 production switch 生命周期。
@@ -4455,8 +4460,8 @@ if (!window.__renderLifecycleTestMode) (async function init() {
  * input placeholder 是唯一受语言影响的运行时动态属性：录音状态必须保留
  * （recording 中切语言仍显示"录音中…"，空闲显示本地化普通占位符）。
  * 本注册同时覆盖 i18n 首次 ready 的初始本地化（ready 后回调立即安全执行一次）。
- * sprite alt（值=自定义宠物名，DATA）、modeChip/btnTts 运行时 title（值=forced-mode /
- * tts state，其文本本地化收口属 B2）均已解除静态绑定，locale apply 不再覆盖 runtime state。 */
+ * sprite alt（值=自定义宠物名，DATA）由 applyPetName 拥有；窗口标题由主进程拥有——
+ * 5-F1 起本文件不再写这两者，三者各自唯一 owner，locale apply 不再覆盖 runtime state。 */
 if (window.I18N && window.I18N.onChange) window.I18N.onChange(() => {
   inputEl.placeholder = isRecording ? I18N.t("ui.micRecording") : I18N.t("ui.placeholder");
 });
