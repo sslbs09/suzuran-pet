@@ -61,29 +61,46 @@ const VOLATILE_FILE_RE = /^(DIPS|DIPS-wal|SharedStorage|SharedStorage-wal|DevToo
 
 /**
  * 只读内容哈希清单：对每个候选路径递归枚举常规文件，按归一化相对路径排序，
- * 记录 { size, sha256 }。读取失败绝不静默跳过——记录显式 sentinel（errors 非空即判定失败）。
- * 输出中不含任何文件内容。
+ * 记录 { size, sha256 }。输出中不含任何文件内容。
+ *
+ * 跨平台状态语义（Phase 9-B.1 CI portability 修复）：
+ *   present=true  → 产品 userData 根存在，必须建立完整清单；任何读取/枚举/哈希失败
+ *                   都记录为显式 error（errors 非空即判定失败，绝不静默跳过）。
+ *   present=false → 产品 userData 根**不存在**：这是干净 CI / 非 Windows runner 的
+ *                   合法前置状态，不是安全失败，也绝不写入 errors。
+ * 注意：present=false 只表示"没有可哈希的产品状态"，绝不降低 present=true 时的严格度。
  */
-function captureCharacterStateManifest() {
-  const files = {};
+function captureRealCharacterStateManifest(rootOverride) {
+  const root = rootOverride === undefined ? (PROD_USERDATA_DIR || null) : rootOverride;
+  const entries = {};
   const errors = [];
-  const rootTag = PROD_USERDATA_DIR || "<no-appdata>";
+  const relOf = (rel) => rel.replace(/\\/g, "/");
+
+  if (!root) return { present: false, root: null, entries, errors };
+  let rootStat = null;
+  try { rootStat = fs.statSync(root); } catch (e) {
+    if (e && e.code === "ENOENT") return { present: false, root, entries, errors };
+    return { present: true, root, entries, errors: ["<root>:" + String((e && e.code) || "STAT_FAILED")] };
+  }
+  if (!rootStat.isDirectory()) {
+    return { present: true, root, entries, errors: ["<root>:UNEXPECTED_TYPE"] };
+  }
 
   const addFile = (abs, rel) => {
     try {
       const buf = fs.readFileSync(abs);
-      files[rel.replace(/\\/g, "/")] = { size: buf.length, sha256: crypto.createHash("sha256").update(buf).digest("hex") };
+      entries[relOf(rel)] = { size: buf.length, sha256: crypto.createHash("sha256").update(buf).digest("hex") };
     } catch (e) {
-      errors.push(rel.replace(/\\/g, "/") + ":" + String((e && e.code) || "READ_FAILED"));
+      errors.push(relOf(rel) + ":" + String((e && e.code) || "READ_FAILED"));
     }
   };
   const walk = (dir, rel) => {
-    let entries = [];
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) {
-      errors.push(rel.replace(/\\/g, "/") + ":" + String((e && e.code) || "READDIR_FAILED"));
+    let children = [];
+    try { children = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) {
+      errors.push(relOf(rel) + ":" + String((e && e.code) || "READDIR_FAILED"));
       return;
     }
-    for (const ent of entries) {
+    for (const ent of children) {
       const childRel = rel ? rel + "/" + ent.name : ent.name;
       const abs = path.join(dir, ent.name);
       if (ent.isDirectory()) {
@@ -96,60 +113,206 @@ function captureCharacterStateManifest() {
     }
   };
 
-  if (!PROD_USERDATA_DIR || !fs.existsSync(PROD_USERDATA_DIR)) {
-    return { root: rootTag, files, errors: errors.concat("<product-userData-absent>") };
-  }
   for (const [rel, isDir] of CHARACTER_STATE_ITEMS) {
-    const abs = path.join(PROD_USERDATA_DIR, rel);
+    const abs = path.join(root, rel);
     let stat = null;
     try { stat = fs.statSync(abs); } catch (e) {
-      if (e && e.code !== "ENOENT") errors.push(rel + ":" + e.code);
-      continue; // 不存在是合法状态（清单只记录实际存在的状态文件）
+      if (e && e.code !== "ENOENT") errors.push(rel + ":" + String(e.code)); // 不存在是合法状态；其它错误不静默
+      continue;
     }
     if (isDir && stat.isDirectory()) walk(abs, rel);
     else if (stat.isFile()) addFile(abs, rel);
     else errors.push(rel + ":UNEXPECTED_TYPE");
   }
-  return { root: rootTag, files, errors };
+  return { present: true, root, entries, errors };
 }
 
-/** 清单比较：逐条列出 added / removed / changed / errors，便于失败时定位；不打印内容。 */
-function compareCharacterStateManifests(before, after) {
+/**
+ * 清单比较与判定（纯函数，便于用 temp fixture 覆盖全部状态）。
+ * ok 的充要条件：前后 present 状态一致 + 两侧根路径一致 + 两侧 errors 为空
+ * + 无 added / removed / changed。
+ * 于是四种状态自动落位：absent→absent PASS；absent→present FAIL；present→absent FAIL；
+ * present→present 且清单全等 PASS、任一差异 FAIL。
+ */
+function compareRealCharacterStateManifests(before, after) {
   const added = [];
   const removed = [];
   const changed = [];
-  for (const key of Object.keys(after.files)) {
-    if (!(key in before.files)) added.push(key);
-    else if (before.files[key].sha256 !== after.files[key].sha256 || before.files[key].size !== after.files[key].size) changed.push(key);
+  for (const key of Object.keys(after.entries)) {
+    if (!(key in before.entries)) added.push(key);
+    else if (before.entries[key].sha256 !== after.entries[key].sha256
+      || before.entries[key].size !== after.entries[key].size) changed.push(key);
   }
-  for (const key of Object.keys(before.files)) if (!(key in after.files)) removed.push(key);
+  for (const key of Object.keys(before.entries)) if (!(key in after.entries)) removed.push(key);
+
+  const rootAppeared = before.present === false && after.present === true;
+  const rootDisappeared = before.present === true && after.present === false;
+  const rootPathDrifted = before.present && after.present
+    && path.resolve(String(before.root)) !== path.resolve(String(after.root));
+  const errors = before.errors.slice().concat(after.errors.slice());
+  const ok = before.present === after.present && !rootPathDrifted && errors.length === 0
+    && added.length === 0 && removed.length === 0 && changed.length === 0;
   return {
+    ok,
+    state: before.present ? "PRODUCT_ROOT_PRESENT" : "PRODUCT_ROOT_ABSENT",
+    beforePresent: before.present,
+    afterPresent: after.present,
+    rootAppeared,
+    rootDisappeared,
+    rootPathDrifted,
     added: added.sort(),
     removed: removed.sort(),
     changed: changed.sort(),
-    beforeErrors: before.errors.slice(),
-    afterErrors: after.errors.slice()
+    errors
   };
 }
 
-const characterStateBefore = captureCharacterStateManifest();
+const characterStateBefore = captureRealCharacterStateManifest();
 
-/** 真实角色状态零改动断言（fail-closed：清单错误、根路径漂移、任何增删改一律失败）。 */
+/** 真实角色状态零改动断言（fail-closed；失败信息可定位，且不含任何文件内容）。 */
 function assertRealCharacterStateUnchanged(label) {
-  const after = captureCharacterStateManifest();
-  const diff = compareCharacterStateManifests(characterStateBefore, after);
-  const detail = "root=" + after.root
+  const after = captureRealCharacterStateManifest();
+  const diff = compareRealCharacterStateManifests(characterStateBefore, after);
+  const detail = "state=" + diff.state
+    + " present=" + diff.beforePresent + "->" + diff.afterPresent
+    + " root=" + String(after.root)
     + " added=[" + diff.added.join(",") + "]"
     + " removed=[" + diff.removed.join(",") + "]"
     + " changed=[" + diff.changed.join(",") + "]"
-    + " beforeErrors=[" + diff.beforeErrors.join(",") + "]"
-    + " afterErrors=[" + diff.afterErrors.join(",") + "]";
-  assert.strictEqual(after.root, characterStateBefore.root, label + "：产品 userData 根路径漂移（" + detail + "）");
-  assert.deepStrictEqual(after.errors, [], label + "：哈希清单存在读取失败（fail-closed，不得静默跳过）（" + detail + "）");
-  assert.deepStrictEqual(diff.beforeErrors, [], label + "：BEFORE 清单存在读取失败（" + detail + "）");
+    + " errors=[" + diff.errors.join(",") + "]";
+  assert.strictEqual(diff.rootAppeared, false, label + "：原本不存在的真实产品 userData 在测试期间被创建（" + detail + "）");
+  assert.strictEqual(diff.rootDisappeared, false, label + "：真实产品 userData 在测试期间消失（" + detail + "）");
+  assert.strictEqual(diff.rootPathDrifted, false, label + "：产品 userData 根路径漂移（" + detail + "）");
+  assert.deepStrictEqual(diff.errors, [], label + "：哈希清单存在读取/枚举/哈希失败（fail-closed，不得静默跳过）（" + detail + "）");
   assert.deepStrictEqual(diff.added, [], label + "：真实角色状态出现新增文件（" + detail + "）");
   assert.deepStrictEqual(diff.removed, [], label + "：真实角色状态出现文件丢失（" + detail + "）");
   assert.deepStrictEqual(diff.changed, [], label + "：真实角色状态内容 SHA-256 发生变化（" + detail + "）");
+  assert.strictEqual(diff.ok, true, label + "：真实角色状态判定未通过（" + detail + "）");
+}
+
+/* ---------- 跨平台状态模型单测（temp fixture；绝不触碰真实 Character state） ---------- */
+
+/*
+ * CI（Ubuntu）上没有 Windows 产品 userData，这是合法前置状态而不是安全读取失败。
+ * 下面用 temp fixture 明确覆盖 A–H 八种状态，其中"根不存在"两类完全不依赖真实 APPDATA。
+ */
+function mkStateFixture(tag) {
+  const dir = fs.mkdtempSync(path.join(TMP_ROOT, "wm-state-fixture-" + tag + "-"));
+  return dir;
+}
+function rmStateFixture(dir) {
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 40 }); } catch { /* 清理失败不掩盖断言 */ }
+}
+/** 断言某次判定必须失败，返回失败信息便于二次断言语义。 */
+function expectStateFail(label, before, after) {
+  const diff = compareRealCharacterStateManifests(before, after);
+  assert.strictEqual(diff.ok, false, label + "：必须判定为失败（实际 ok=true）");
+  return diff;
+}
+function expectStatePass(label, before, after) {
+  const diff = compareRealCharacterStateManifests(before, after);
+  assert.strictEqual(diff.ok, true, label + "：必须判定为通过（实际：" + JSON.stringify({ state: diff.state, added: diff.added, removed: diff.removed, changed: diff.changed, errors: diff.errors }) + "）");
+  return diff;
+}
+
+// A) absent → absent（干净 CI / 非 Windows runner）必须 PASS，且 present 语义显式、errors 为空
+{
+  const before = captureRealCharacterStateManifest(path.join(TMP_ROOT, "wm-absent-before-" + process.pid));
+  const after = captureRealCharacterStateManifest(path.join(TMP_ROOT, "wm-absent-after-" + process.pid));
+  assert.strictEqual(before.present, false, "A: 不存在的根必须 present=false");
+  assert.strictEqual(after.present, false, "A: 不存在的根必须 present=false");
+  assert.deepStrictEqual(before.errors, [], "A: 根不存在不是 error（不得再塞 absent sentinel）");
+  assert.deepStrictEqual(before.entries, {}, "A: present=false 时清单必须为空");
+  expectStatePass("A: absent → absent", before, after);
+}
+
+// B) absent → present 必须 FAIL（工装不得凭空创建 production 位置）
+{
+  const appearedDir = mkStateFixture("appear");
+  try {
+    fs.writeFileSync(path.join(appearedDir, "config.json"), "{}", "utf8");
+    const before = captureRealCharacterStateManifest(path.join(TMP_ROOT, "wm-absent-b-" + process.pid));
+    const after = captureRealCharacterStateManifest(appearedDir);
+    const diff = expectStateFail("B: absent → present", before, after);
+    assert.strictEqual(diff.rootAppeared, true, "B: 必须标记 rootAppeared=true");
+  } finally { rmStateFixture(appearedDir); }
+}
+
+// C) present → present 且清单全等必须 PASS
+// D) present → present 但同长度不同字节必须 FAIL（旧结构指纹的盲点）
+// E) present → present 但新增相关文件必须 FAIL
+// F) present → present 但删除相关文件必须 FAIL
+{
+  const dir = mkStateFixture("present");
+  try {
+    fs.writeFileSync(path.join(dir, "config.json"), "{\"agreed\":true}", "utf8");
+    fs.writeFileSync(path.join(dir, "bond.json"), "exp=0", "utf8");
+    fs.mkdirSync(path.join(dir, "history"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "history", "history.jsonl"), "line1\n", "utf8");
+    fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "logs", "tts.log"), "volatile", "utf8"); // 易变非状态：必须不影响判定
+
+    const before = captureRealCharacterStateManifest(dir);
+    assert.strictEqual(before.present, true, "C: 存在的根必须 present=true");
+    assert.deepStrictEqual(Object.keys(before.entries).sort(),
+      ["bond.json", "config.json", "history/history.jsonl"],
+      "C: 必须枚举出全部状态文件（含 history/ 递归），且排除易变的 logs/**");
+    assert.deepStrictEqual(before.errors, [], "C: 可读 fixture 不得有 errors");
+    expectStatePass("C: present → 相同清单", before, captureRealCharacterStateManifest(dir));
+
+    // D) 同长度、不同字节
+    const bondPath = path.join(dir, "bond.json");
+    const originalBond = fs.readFileSync(bondPath);
+    const mutated = Buffer.from(originalBond);
+    mutated[mutated.length - 1] = mutated[mutated.length - 1] ^ 0x01;
+    fs.writeFileSync(bondPath, mutated);
+    assert.strictEqual(fs.statSync(bondPath).size, originalBond.length, "D: fixture 必须保持同长度");
+    const diffD = expectStateFail("D: 同长度内容变更", before, captureRealCharacterStateManifest(dir));
+    assert.deepStrictEqual(diffD.changed, ["bond.json"], "D: 必须且只必须报出 bond.json 内容变更");
+    fs.writeFileSync(bondPath, originalBond); // 还原 fixture
+
+    // E) 新增相关文件
+    fs.writeFileSync(path.join(dir, "memory.json"), "{}", "utf8");
+    const diffE = expectStateFail("E: 新增相关文件", before, captureRealCharacterStateManifest(dir));
+    assert.deepStrictEqual(diffE.added, ["memory.json"], "E: 必须报出新增文件");
+    fs.rmSync(path.join(dir, "memory.json"));
+
+    // F) 删除相关文件
+    fs.rmSync(path.join(dir, "history", "history.jsonl"));
+    const diffF = expectStateFail("F: 删除相关文件", before, captureRealCharacterStateManifest(dir));
+    assert.deepStrictEqual(diffF.removed, ["history/history.jsonl"], "F: 必须报出丢失文件");
+    fs.writeFileSync(path.join(dir, "history", "history.jsonl"), "line1\n", "utf8");
+
+    // G) present 状态下的 error 必须 FAIL（不降低严重度）：errors 非空 ⇒ ok=false
+    const manifestWithError = captureRealCharacterStateManifest(dir);
+    manifestWithError.errors.push("config.json:EACCES");
+    expectStateFail("G: 已存在文件的读取/哈希失败", before, manifestWithError);
+
+    expectStatePass("C': 还原后仍必须 PASS", before, captureRealCharacterStateManifest(dir));
+  } finally { rmStateFixture(dir); }
+}
+
+// G2) 根存在但不可枚举（把根做成常规文件）→ present=true + error ⇒ FAIL
+{
+  const fakeRoot = path.join(mkStateFixture("notdir"), "product-root-file");
+  try {
+    fs.writeFileSync(fakeRoot, "not a directory", "utf8");
+    const m = captureRealCharacterStateManifest(fakeRoot);
+    assert.strictEqual(m.present, true, "G2: 路径存在但不是目录时必须 present=true 以便报错");
+    assert.deepStrictEqual(m.errors, ["<root>:UNEXPECTED_TYPE"], "G2: 必须显式记录不可枚举错误");
+    expectStateFail("G2: 根不可枚举", m, m);
+  } finally { rmStateFixture(path.dirname(fakeRoot)); }
+}
+
+// H) present → absent 必须 FAIL（真实根在测试期间消失）
+{
+  const dir = mkStateFixture("disappear");
+  fs.writeFileSync(path.join(dir, "config.json"), "{}", "utf8");
+  const before = captureRealCharacterStateManifest(dir);
+  rmStateFixture(dir);
+  const after = captureRealCharacterStateManifest(dir);
+  const diff = expectStateFail("H: present → absent", before, after);
+  assert.strictEqual(diff.rootDisappeared, true, "H: 必须标记 rootDisappeared=true");
 }
 
 /* ---------- 测试 workspace：必须位于允许实验根之下 ---------- */
@@ -160,7 +323,8 @@ function mkWorkspace(tag) {
 }
 
 function rmWorkspace(dir) {
-  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* 清理失败不掩盖断言 */ }
+  // CI 上 Electron 退出后可能短暂持有文件句柄：带重试删除，清理失败不掩盖断言。
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* 忽略 */ }
 }
 
 function freshModules(userDir) {
@@ -563,18 +727,15 @@ assert.ok(String(prodEnvRun.stdout + prodEnvRun.stderr).indexOf("PERCEPTION_ISOL
 const electronLauncher = require("../scripts/perception/electron-launcher");
 const savedTestUserDir = process.env.SUZURAN_TEST_USERDIR;
 const savedUdd = process.env.SUZURAN_WM_USERDATA_DIR;
+// 当前平台/检出是否有 Electron 可执行文件（干净 CI 通常没有 → Electron 面判为"未验证"，不伪造通过）
+const electronBinaryAvailable = electronLauncher.electronBinaryAvailable(process.env);
+console.log("electron-binary-available: " + electronBinaryAvailable);
 
 // "只设 UDD、漏设 SUZURAN_TEST_USERDIR"（上一轮事故形态）必须被拒
 delete process.env.SUZURAN_TEST_USERDIR;
 process.env.SUZURAN_WM_USERDATA_DIR = uddA;
 expectRefused("只设 UDD、漏设 SUZURAN_TEST_USERDIR", () => electronLauncher.buildElectronArgs({ command: process.execPath }));
 process.env.SUZURAN_TEST_USERDIR = savedTestUserDir;
-
-// 合法计划：env 必须被注入到子进程（防"只设了一半"），argv 必须带同 workspace 的 UDD
-const plan = electronLauncher.buildElectronArgs({ snapshotRoot: allowedRun, argv: ["--user-data-dir=" + uddA], command: process.execPath });
-assert.strictEqual(plan.options.env[isolation.USERDIR_ENV], path.resolve(allowedRun), "启动计划必须把 snapshot root 注入子进程 env");
-assert.strictEqual(plan.options.env[isolation.EXPERIMENT_ENV], "1", "启动计划必须声明实验模式（产品侧闸门据此生效）");
-assert.ok(plan.args.indexOf("--user-data-dir=" + path.resolve(uddA)) >= 0, "argv 必须携带隔离 UDD");
 
 // spawn 面：注入 spawn 记录器（opts.spawnFn），被记录的 command/args/env 就是 launchElectron
 // 会交给操作系统的内容；同时证明"被拒绝的启动一次 spawn 都不会发生"。
@@ -584,19 +745,46 @@ function recordingSpawn(command, args, options) {
   return { status: 0, signal: null, stdout: "", stderr: "" };
 }
 
-const launch = electronLauncher.launchElectron({
-  snapshotRoot: allowedRun, argv: ["--user-data-dir=" + uddA], spawnFn: recordingSpawn
-});
-assert.strictEqual(launch.status, 0, "启动计划必须返回成功状态");
-assert.strictEqual(spawnLog.length, 1, "launchElectron 必须恰好发起一次 spawn");
-const spawned = spawnLog[0];
-assert.ok(spawned.args.indexOf("--user-data-dir=" + path.resolve(uddA)) >= 0,
-  "真实 spawn argv 必须带隔离 UDD（实际：" + spawned.args.join(" ") + "）");
-assert.strictEqual(spawned.args[0], APP_DIR, "argv[0] 必须是产品入口目录");
-assert.strictEqual(spawned.env[isolation.USERDIR_ENV], path.resolve(allowedRun), "spawn env 必须带正确 snapshot root");
-assert.strictEqual(spawned.env[isolation.EXPERIMENT_ENV], "1", "spawn env 必须声明实验模式");
+if (electronBinaryAvailable) {
+  // 合法计划：env 必须被注入到子进程（防"只设了一半"），argv 必须带同 workspace 的 UDD
+  const plan = electronLauncher.buildElectronArgs({ snapshotRoot: allowedRun, argv: ["--user-data-dir=" + uddA], command: process.execPath });
+  assert.strictEqual(plan.options.env[isolation.USERDIR_ENV], path.resolve(allowedRun), "启动计划必须把 snapshot root 注入子进程 env");
+  assert.strictEqual(plan.options.env[isolation.EXPERIMENT_ENV], "1", "启动计划必须声明实验模式（产品侧闸门据此生效）");
+  assert.ok(plan.args.indexOf("--user-data-dir=" + path.resolve(uddA)) >= 0, "argv 必须携带隔离 UDD");
 
-// 守卫先于 spawn：UDD 跨界时 spawn 一次都不该被调用
+  const launch = electronLauncher.launchElectron({
+    snapshotRoot: allowedRun, argv: ["--user-data-dir=" + uddA], spawnFn: recordingSpawn
+  });
+  assert.strictEqual(launch.status, 0, "启动计划必须返回成功状态");
+  assert.strictEqual(spawnLog.length, 1, "launchElectron 必须恰好发起一次 spawn");
+  const spawned = spawnLog[0];
+  assert.ok(spawned.args.indexOf("--user-data-dir=" + path.resolve(uddA)) >= 0,
+    "真实 spawn argv 必须带隔离 UDD（实际：" + spawned.args.join(" ") + "）");
+  assert.strictEqual(spawned.args[0], APP_DIR, "argv[0] 必须是产品入口目录");
+  assert.strictEqual(spawned.env[isolation.USERDIR_ENV], path.resolve(allowedRun), "spawn env 必须带正确 snapshot root");
+  assert.strictEqual(spawned.env[isolation.EXPERIMENT_ENV], "1", "spawn env 必须声明实验模式");
+} else {
+  // 无 Electron 二进制时不得伪造通过：plan 面显式记为未验证，但"无 fallback"与隔离拒绝仍须成立。
+  // 显式构造无 UDD 的环境对象，避免机器级残留 env 让判定变得不确定。
+  console.log("electron-plan-check: NOT_VERIFIED (no electron binary on this platform)");
+  const noBinNoUddEnv = { ...process.env };
+  delete noBinNoUddEnv[isolation.UDD_ENV];
+  let planMessage = null;
+  try { electronLauncher.buildElectronArgs({ snapshotRoot: allowedRun, argv: [APP_DIR], env: noBinNoUddEnv }); }
+  catch (e) { planMessage = String((e && e.message) || e); }
+  assert.ok(planMessage !== null, "无 Electron 二进制且无 UDD 时必须显式拒绝计划（不得静默回退）");
+  assert.ok(planMessage.indexOf("PERCEPTION_ISOLATION_REFUSED") >= 0,
+    "无 UDD 时隔离必须优先失败（实际：" + planMessage + "）");
+
+  let missingBinaryMessage = null;
+  try { electronLauncher.buildElectronArgs({ snapshotRoot: allowedRun, argv: ["--user-data-dir=" + uddA], env: noBinNoUddEnv }); }
+  catch (e) { missingBinaryMessage = String((e && e.message) || e); }
+  assert.ok(missingBinaryMessage !== null, "隔离合法但无 Electron 二进制时必须显式拒绝（不得静默换用系统 electron）");
+  assert.ok(/Electron|electron/.test(missingBinaryMessage) && missingBinaryMessage.indexOf("PERCEPTION_ISOLATION_REFUSED") < 0,
+    "该拒绝原因必须指向 Electron 可执行文件（实际：" + missingBinaryMessage + "）");
+}
+
+// 守卫先于 spawn：UDD 跨界时 spawn 一次都不该被调用（不依赖 Electron 二进制是否存在）
 expectRefused("UDD 跨界时必须在 spawn 之前拒绝", () => electronLauncher.launchElectron({
   snapshotRoot: allowedRun, argv: ["--user-data-dir=" + path.join(WORK, "udd-X")], spawnFn: recordingSpawn
 }));
@@ -607,7 +795,7 @@ expectRefused("缺 UDD（argv 与 env 都没有）时必须在 spawn 之前拒�
   snapshotRoot: allowedRun, argv: [APP_DIR], spawnFn: recordingSpawn
 }));
 if (uddEnvBefore === undefined) delete process.env[isolation.UDD_ENV]; else process.env[isolation.UDD_ENV] = uddEnvBefore;
-assert.strictEqual(spawnLog.length, 1, "被拒绝的启动绝不允许调用 spawnFn");
+assert.strictEqual(spawnLog.length, electronBinaryAvailable ? 1 : 0, "被拒绝的启动绝不允许调用 spawnFn");
 assertRealCharacterStateUnchanged("Electron 计划 + spawn 记录之后");
 
 /* ============ 11) 真实 Electron 最短冒烟：startup → isolated write → restart → shutdown ==== */
@@ -617,9 +805,9 @@ assertRealCharacterStateUnchanged("Electron 计划 + spawn 记录之后");
 const SMOKE_HARNESS = path.join(APP_DIR, "scripts", "perception", "fixtures", "electron-smoke");
 const smokeUdd = path.join(WORK, "udd-smoke");
 const smokeMarkerDir = path.join(WORK, "smoke-marker");
-const electronBinary = electronLauncher.DEFAULT_ELECTRON_BIN;
 let electronSmoke = "NOT_RUN";
-if (!fs.existsSync(electronBinary)) {
+// 与 plan 面同一个可用性判定（含 SUZURAN_WM_ELECTRON_BIN 覆盖），避免"判定可用但实际不可启"
+if (!electronBinaryAvailable) {
   electronSmoke = "SKIPPED_NO_ELECTRON_BINARY";
 } else {
   const smokeEnv = { ...process.env };
@@ -655,8 +843,9 @@ if (!fs.existsSync(electronBinary)) {
   assert.ok(markerLines.some((l) => l.indexOf(path.resolve(smokeUdd)) >= 0), "探针记录的 userData 必须指向实验 workspace");
   assert.ok(markerLines.filter((l) => l === "quit").length >= 2, "两次启动都必须正常 shutdown（写 quit 标记）");
   electronSmoke = "PASS";
-  assertRealCharacterStateUnchanged("真实 Electron 冒烟之后");
 }
+// 无论冒烟是否可执行（无 Electron 二进制时为 NOT_VERIFIED），真实角色状态不变式都必须成立
+assertRealCharacterStateUnchanged("Electron 冒烟段之后");
 console.log("electron-smoke: " + electronSmoke);
 
 if (savedUdd === undefined) delete process.env.SUZURAN_WM_USERDATA_DIR; else process.env.SUZURAN_WM_USERDATA_DIR = savedUdd;

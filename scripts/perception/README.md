@@ -82,3 +82,13 @@ fs 操作**，也绝不触碰真实 userData。
 - 正式 protocol 只认 repo 内版本化的 tooling；临时目录里的诊断脚本不算协议组成。
 - 生成的 snapshot / 素材 / 回放产物一律落在实验 workspace，**禁止提交进仓库**。
 - 不修改 `src/storage.js` 的产品默认行为；本目录只在研究侧收紧路径策略。
+
+## 6. 跨平台语义（CI）
+
+- **真实产品 userData 根不存在**（干净 CI / 非 Windows runner）是合法前置状态，不是安全失败：
+  测试把清单表示为 `present:false`，并要求测试结束后仍然 `present:false`
+  （即 protocol tooling 不能凭空创建 production 位置）。根若在测试期间出现或消失，判定 FAIL。
+- **当前平台没有 Electron 可执行文件**时，Electron 面（启动计划 / 冒烟）记录为
+  `NOT_VERIFIED` / `SKIPPED_NO_ELECTRON_BINARY`，**不伪造通过**；隔离 guard 的拒绝路径
+  与真实角色状态不变式仍然全部照常断言。
+- 需要在本机显式指定 Electron 时用 `SUZURAN_WM_ELECTRON_BIN=<绝对路径>`。

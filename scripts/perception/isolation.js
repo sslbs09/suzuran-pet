@@ -184,13 +184,16 @@ function assertElectronIsolation(opts) {
   const snapshotRoot = assertPerceptionIsolation({ userDir: o.snapshotRoot, requireExists: false });
 
   const argvDir = parseUserDataDirArg(o.argv || []);
+  // UDD 来源必须与"传给子进程的 env"同源：显式 opts.env 优先，否则回落到 process.env。
+  // 不允许把 opts.env 与 process.env 混用（否则残留 env 会覆盖显式配置，判定变得不确定）。
+  const env = o.env || process.env;
   let uddRaw;
   if (argvDir !== null) {
     uddRaw = argvDir;
   } else if (o.userDataDir) {
     uddRaw = o.userDataDir;
-  } else if (process.env[UDD_ENV]) {
-    uddRaw = process.env[UDD_ENV];
+  } else if (env[UDD_ENV]) {
+    uddRaw = env[UDD_ENV];
   } else {
     fail("Electron 启动缺少 --user-data-dir（或 " + UDD_ENV + "）：研究者工装禁止使用产品默认 userData");
   }

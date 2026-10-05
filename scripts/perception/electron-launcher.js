@@ -31,7 +31,9 @@ const APP_DIR = path.resolve(__dirname, "..", "..");
 const DEFAULT_ELECTRON_BIN = path.join(APP_DIR, "node_modules", "electron", "dist", "electron.exe");
 const SMOKE_HARNESS_DIR = path.join(__dirname, "fixtures", "electron-smoke");
 
-/** Electron 可执行文件来源：显式 env → 仓库内 electron 包 → 拒绝（绝不静默换用系统 electron）。 */
+/** Electron 可执行文件来源：显式 env → 仓库内 electron 包 → null（当前平台无 Electron 二进制）。
+ *  返回 null 只表示"本平台/本检出没有 Electron 可执行文件"（干净 CI 的合法状态）；
+ *  真正需要启动时由 buildElectronArgs 显式拒绝，绝不静默换用系统 electron。 */
 function electronBinaryFromEnv(env) {
   const e = env || process.env;
   const explicit = e.SUZURAN_WM_ELECTRON_BIN;
@@ -39,7 +41,14 @@ function electronBinaryFromEnv(env) {
     if (!path.isAbsolute(explicit)) throw new Error("SUZURAN_WM_ELECTRON_BIN 必须是绝对路径");
     return path.resolve(explicit);
   }
-  return DEFAULT_ELECTRON_BIN;
+  return fs.existsSync(DEFAULT_ELECTRON_BIN) ? DEFAULT_ELECTRON_BIN : null;
+}
+
+/** 当前环境是否存在可用的 Electron 可执行文件（CI 可据此把 Electron 面判为"未验证"而非"通过"）。
+ *  注意必须连同文件存在性一起判定：仅有默认路径字符串并不等于可启动。 */
+function electronBinaryAvailable(env) {
+  const bin = electronBinaryFromEnv(env);
+  return bin !== null && fs.existsSync(bin);
 }
 
 /**
@@ -56,10 +65,15 @@ function buildElectronArgs(opts) {
   const pair = isolation.assertElectronIsolation({
     snapshotRoot,
     argv: o.argv || [],
-    userDataDir: o.userDataDir
+    userDataDir: o.userDataDir,
+    env // 与下方注入子进程的 env 同源：避免"显式 env 说一套、process.env 说另一套"
   });
 
   const command = o.command || electronBinaryFromEnv(env);
+  if (!command) {
+    throw new Error("当前平台缺少 Electron 可执行文件（" + DEFAULT_ELECTRON_BIN
+      + "）：无可启动的 Electron；researcher 可用 SUZURAN_WM_ELECTRON_BIN 显式指定绝对路径");
+  }
   if (!fs.existsSync(command)) throw new Error("Electron 可执行文件不存在: " + command);
 
   const appTarget = o.appTarget === false ? null : (o.appTarget ? path.resolve(o.appTarget) : APP_DIR);
@@ -138,4 +152,7 @@ if (require.main === module) {
   }
 }
 
-module.exports = { buildElectronArgs, launchElectron, runElectronSmoke, electronBinaryFromEnv, DEFAULT_ELECTRON_BIN, SMOKE_HARNESS_DIR };
+module.exports = {
+  buildElectronArgs, launchElectron, runElectronSmoke,
+  electronBinaryFromEnv, electronBinaryAvailable, DEFAULT_ELECTRON_BIN, SMOKE_HARNESS_DIR
+};
