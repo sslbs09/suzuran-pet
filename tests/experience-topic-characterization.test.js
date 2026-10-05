@@ -200,8 +200,12 @@ test("characterization: 有事实但全未命中 → null（走原有 fallback �
 
 test("characterization: features.js 决策已委托给纯函数，概率阈值随之内移", () => {
   const code = featuresSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-  // 外层门不得被改动（chance=0.18、idle 间隔、proactiveEnabled）
-  assert.match(code, /if \(Math\.random\(\) > proactiveCfg\.chance\) return;/, "外层 0.18 概率门必须原样保留");
+  // 外层门：仍是一次 Math.random() 比较（Phase 8-D 起概率**取值**委托给 proactive-initiation
+  // 纯模块，默认 OFF 时逐位等同 baseline——逐位冻结见
+  // tests/proactive-initiation-characterization.test.js；baseChance 0.18 本身不动）
+  assert.match(code, /if \(Math\.random\(\) > proactiveOuterChance\(\)\) return;/, "外层门必须仍是一次 random 比较，概率来源为 policy");
+  assert.match(code, /effectiveInitiateChance\(\{ facts, baseChance: base, enabled: true \}\)/, "有效发起概率必须委托给纯 policy 模块");
+  assert.match(code, /characterRuntimePlanInitiationV0Enabled\(config\.getConfig\(\)\)/, "实验 gate 必须在调用侧从 config 解析");
   assert.match(code, /if \(idle < intervalMs\) return;/, "idle 间隔门必须原样保留");
   // 决策本体已移出，改为调用纯函数；实际选句仍由 lines.pick 承担
   assert.match(code, /chooseExperienceTopic\(\{ facts, random: Math\.random, now: new Date\(\) \}\)/,

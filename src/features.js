@@ -73,6 +73,25 @@ function setProactiveEnabled(on) {
 
 const PROACTIVE_DEFAULTS = Object.freeze({ intervalMin: 12, chance: 0.18 });
 
+/**
+ * Phase 8-D 外层门有效发起概率（ACT vs NO_ACT）：EXPERIMENTAL CAUSAL PROBE — NOT PERSONALITY TUNING。
+ * 默认（gate OFF / 无 PLAN / 读取失败）原样返回 proactiveCfg.chance，逐位等同 baseline；
+ * 仅当 config 实验开关为 true 且 memory 里存在未完成 PLAN（type:"event"，Phase 7-F 单槽）时，
+ * 由纯 policy 模块 src/character-runtime/proactive-initiation.js 给出提升后的 effective chance。
+ * 决策本体在纯模块里（可单测），这里只负责按既有 lazy-require 风格喂输入：
+ * OFF 时不读 memory、不额外消费任何 random，tick 内仍是同一次 `Math.random() > chance` 比较。
+ */
+function proactiveOuterChance() {
+  const base = proactiveCfg.chance;
+  try {
+    const { effectiveInitiateChance, characterRuntimePlanInitiationV0Enabled } =
+      require("./character-runtime/proactive-initiation");
+    if (!characterRuntimePlanInitiationV0Enabled(config.getConfig())) return base; // OFF：连 memory 都不读
+    const facts = require("./memory").getFactsList() || [];
+    return effectiveInitiateChance({ facts, baseChance: base, enabled: true });
+  } catch { return base; } // 配置/记忆不可用 → baseline 概率（与 tick 内其它兜底同风格）
+}
+
 function startProactive(sendFn, intervalMin = PROACTIVE_DEFAULTS.intervalMin, chance = PROACTIVE_DEFAULTS.chance, stateFn = null) {
   proactiveCfg = { sendFn, intervalMin, chance, stateFn };
   stopProactive();
@@ -82,7 +101,10 @@ function startProactive(sendFn, intervalMin = PROACTIVE_DEFAULTS.intervalMin, ch
     const idle = Date.now() - lastChatTs;
     if (idle < intervalMs) return;
     // 18% 概率触发：达到闲置阈值后仍保持低频，避免持续打扰
-    if (Math.random() > proactiveCfg.chance) return;
+    // Phase 8-D：外层 ACT/NO_ACT 概率改由 policy 决定（默认 OFF 逐位等同 baseline）。
+    // 只换这一个概率的取值——每个 eligible tick 仍恰好消费 1 次 Math.random，
+    // 内联级联（说什么）与 main.js 投递安全闸门（能不能送达）零改动。
+    if (Math.random() > proactiveOuterChance()) return;
     const lines = require("./lines");
     let prompt;
     let proactiveMood = "温柔"; // 台词情绪→GSV 音色分档默认温柔（v2.5.26，随由头分支覆盖）
