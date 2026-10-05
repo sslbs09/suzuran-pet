@@ -1,0 +1,7 @@
+{
+  "name": "wm-perception-9b-electron-probe",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Phase 9-B researcher-only Electron probe harness (loads the real product main.js under isolation guard).",
+  "main": "main.js"
+}
