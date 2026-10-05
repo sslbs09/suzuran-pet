@@ -82,6 +82,7 @@ const { replayCrashRecovery } = require("./src/crash-recovery"); // 崩溃恢复
 const { createCrashBudget } = require("./src/crash-budget"); // crash 自愈预算按逻辑窗口分桶（H2，可单测）
 const walkState = require("./src/walk-state"); // 行走几何决策纯函数（v2.5.26 收敛①）
 const characterSleepIntent = require("./src/character-runtime/sleep-intent"); // Phase 6-D.3：今日心情→入睡阈值（意图参数）纯策略，双端共用
+const { resolvePlanCompletion } = require("./src/character-runtime/plan-completion"); // Phase 7-F1：PLAN→已完成历史 生命周期判定纯函数（显式确认唯一 authority）
 const runtimeShadow = require("./src/runtime-shadow"); // Runtime V2 Shadow Slice v0.1（只读 shadow，默认关闭）
 const runtimeV2Module = require("./src/runtime-v2");
 const stateCore = require("./src/state-core"); // WhiteMoon State Core v0.1（canonical state；与 locomotion 同 gate） // Runtime V2 Locomotion Cutover v0.1（production，默认关闭）
@@ -2348,6 +2349,17 @@ async function handleAskInner(sender, { id, text, askGen }) {
   history.append({ ts: Date.now(), mode, role: "user", content: clean });
   // 长期记忆（v2.5）：规则式提取事实（称谓/喜好/生日/健康/近期安排），仅本机存储
   if (config.getConfig().features && config.getConfig().features.longTermMemory) {
+    // Phase 7-F1：显式完成确认 → PLAN 生命周期转换。**必须先于 extractFacts**：
+    // completion 针对的是「用户发言前已存在」的计划；若顺序反过来，同一条消息里
+    // 新出现的安排表述会先覆盖 type:"event" 单槽位，transition 将作用在错对象上。
+    // 本模块是纯函数：只判定并给出待写入 history 事实的描述，mutation 仍走 memory 既有 API。
+    try {
+      const completion = resolvePlanCompletion({ facts: memory.getFactsList(), userText: clean });
+      if (completion) {
+        memory.deleteFact(completion.matchedPlan.id);   // PLAN 退场：不再注入「计划」分组
+        memory.addFacts([completion.history]);          // HISTORY 进场：history:<planFact.id>
+      }
+    } catch { /* 生命周期转换失败不影响对话 */ }
     try { memory.addFacts(memory.extractFacts(clean)); } catch { /* 记忆失败不影响对话 */ }
     // 显式记忆指令（RP 深化）："记住/帮我记一下 xxx" → 必记，不受规则提取宁缺毋滥影响
     const mm = String(clean || "").match(/^(?:请你?|帮我?|麻烦)?(?:记住|记一下|记牢|记着)[：:，,。！!\s]*(.{2,120})$/);
