@@ -59,6 +59,8 @@ function makeHarness(options = {}) {
     historyGeneration: 1,
     historyAppends: [],
     log: [],
+    speakCalls: [],
+    speakResult: options.speakResult !== false,
   };
 
   const config = {
@@ -130,6 +132,11 @@ function makeHarness(options = {}) {
     chatClient,
     maybeWorkflowComment: () => { state.wakeCalls++; },
     errorFacts: ERROR_FACTS,
+    // Phase 10-B：/speak 直显入口的内部说话路径（main.js 模块作用域函数，区段外定义 → 测试内注入）
+    sendProactive: (text, emotion, opts) => {
+      state.speakCalls.push({ text, emotion, opts });
+      return state.speakResult;
+    },
   };
   vm.runInNewContext(extractProductionAgentFns(fs.readFileSync(MAIN, "utf8")), context, { filename: MAIN });
   context.startAgentApi();
@@ -376,5 +383,42 @@ test("health/status/stop compatibility remains available at their original bound
     assert.equal(stop.status, 200);
     assert.deepEqual(stop.json, { ok: true, cancelled: 3 });
     assert.equal(h.state.cancelled, 1);
+  });
+});
+
+test("/speak dispatches the given line through the internal speak path without touching chat", async () => {
+  await withHarness({}, async (h, port) => {
+    const r = await request(port, { method: "POST", pathname: "/speak", headers: { "Content-Type": "application/json" }, body: { text: "博士，考试已经结束了。", emotion: "happy" } });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.json, { ok: true, dispatched: true });
+    assert.equal(h.state.speakCalls.length, 1);
+    assert.equal(h.state.speakCalls[0].text, "博士，考试已经结束了。");
+    assert.equal(h.state.speakCalls[0].emotion, "happy");
+    assert.equal(h.state.speakCalls[0].opts.force, true);
+    assert.equal(h.state.calls, 0); // 不走 LLM
+    assert.equal(h.state.historyAppends.length, 0); // 不写历史
+    assert.equal(h.state.enqueued, 0); // 不进任务队列
+  });
+});
+
+test("/speak reports the line gate rejection honestly instead of faking success", async () => {
+  await withHarness({ speakResult: false }, async (h, port) => {
+    const r = await request(port, { method: "POST", pathname: "/speak", headers: { "Content-Type": "application/json" }, body: { text: "同一句话" } });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.json, { ok: false, error: "台词闸门未放行（30s 冷却/近期重复），未下发", reason: "line-gate-rejected" });
+    assert.equal(h.state.speakCalls.length, 1);
+    assert.equal(h.state.calls, 0);
+  });
+});
+
+test("/speak requires auth and rejects empty text", async () => {
+  await withHarness({}, async (h, port) => {
+    const unauth = await request(port, { method: "POST", pathname: "/speak", token: null, headers: { "Content-Type": "application/json" }, body: { text: "hi" } });
+    assert.equal(unauth.status, 401);
+
+    const empty = await request(port, { method: "POST", pathname: "/speak", headers: { "Content-Type": "application/json" }, body: { text: "   " } });
+    assert.equal(empty.status, 400);
+    assert.deepEqual(empty.json, { ok: false, error: "text 不能为空", code: "HTTP_ERROR", meta: { status: 400 } });
+    assert.equal(h.state.speakCalls.length, 0);
   });
 });

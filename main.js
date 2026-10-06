@@ -1564,7 +1564,7 @@ function startAgentApi() {
     };
     try {
       const url = new URL(req.url || "/", "http://127.0.0.1");
-      if (url.search || !["/health", "/chat", "/stop", "/status"].includes(url.pathname)) { send(404, { ok: false, error: "not found", ...errorFacts.codeForHttpStatus(404) }); return; }
+      if (url.search || !["/health", "/chat", "/stop", "/status", "/speak"].includes(url.pathname)) { send(404, { ok: false, error: "not found", ...errorFacts.codeForHttpStatus(404) }); return; }
       const allowed = (url.pathname === "/health" || url.pathname === "/status") ? "GET" : "POST";
       if (req.method !== allowed) { send(405, { ok: false, error: "method not allowed", ...errorFacts.codeForHttpStatus(405) }, { Allow: allowed }); return; }
       const cfg = config.getConfig();
@@ -1580,7 +1580,7 @@ function startAgentApi() {
       // 优化建议 P0：#3 写操作（/chat /stop 消耗 LLM 额度/改状态）始终要求认证——
       // 即使 master/clients 全空（如自动生成 token 失败）也不开放无认证写入；
       // /health 只读健康探测放行（供接入方探活），其余读操作维持原鉴权
-      const isWrite = url.pathname === "/chat" || url.pathname === "/stop";
+      const isWrite = url.pathname === "/chat" || url.pathname === "/stop" || url.pathname === "/speak";
       const needsAuth = url.pathname === "/health" ? false : (isWrite || !!master || sanitizeClients(rawClients).length > 0);
       const authOk = !!provided && (safeTokenEqual(provided, master) || clientIndex >= 0);
       if (needsAuth && !authOk) { send(401, { ok: false, error: "unauthorized", ...errorFacts.codeForHttpStatus(401) }, { "WWW-Authenticate": "Bearer" }); return; }
@@ -1623,6 +1623,23 @@ function startAgentApi() {
       const maxBytes = Math.max(1024, Math.min(1024 * 1024, Number(apiCfg.maxBodyBytes) || 65536));
       const parsed = await readAgentJson(req, maxBytes);
       if (parsed.error) { send(parsed.error, { ok: false, error: parsed.error === 413 ? "payload too large" : "invalid json", ...errorFacts.codeForHttpStatus(parsed.error) }); return; }
+      // Phase 10-B（WhiteMoon 桥接）：外部 speak 直显入口——body-owned 最小 ingress。
+      // 不走 LLM、不写 history、不产生任何角色决策：调用方给定的一行台词交给内部统一
+      // 说话路径 sendProactive（台词闸门 → 气泡/语音/情绪）。台词闸门未放行时如实返回
+      // ok:false（30s 冷却/近期重复），绝不假装已说出口。与 /chat 同受 consent 与鉴权约束。
+      if (url.pathname === "/speak") {
+        const speakText = String(parsed.body.text || "").trim();
+        if (!speakText) { send(400, { ok: false, error: "text 不能为空", ...errorFacts.codeForHttpStatus(400) }); return; }
+        if (speakText.length > 500) { send(400, { ok: false, error: "text 过长（上限 500 字）", ...errorFacts.codeForHttpStatus(400) }); return; }
+        const speakEmotion = String(parsed.body.emotion || "").trim() || undefined;
+        const dispatched = sendProactive(speakText, speakEmotion, { force: parsed.body.force !== false });
+        if (!dispatched) {
+          send(200, { ok: false, error: "台词闸门未放行（30s 冷却/近期重复），未下发", reason: "line-gate-rejected" });
+          return;
+        }
+        send(200, { ok: true, dispatched: true });
+        return;
+      }
       let text = String(parsed.body.text || "").trim();
       if (apiCfg.invokeWord) {
         const w = String(apiCfg.invokeWord).trim();
