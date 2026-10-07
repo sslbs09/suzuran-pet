@@ -11,6 +11,7 @@
     "lint:css": "stylelint \"renderer/*.css\"",
     "lint:md": "markdownlint-cli2 README.md",
     "test": "node scripts/run-tests.cjs",
+    "e2e:whitemoon-ui": "node scripts/e2e-whitemoon-ui.js",
     "check:assets": "node scripts/check-assets.mjs",
     "test:visual": "playwright test",
     "test:chat": "node src/chat-client.js --test",

@@ -6,6 +6,9 @@ node_modules/
 data/
 *.log
 
+# Phase 11-E.1 真实用户 E2E 的临时目录（独立 userdir + Host 临时 dataDir，绝不入库）
+.whitemoon-e2e/
+
 # 系统文件
 .DS_Store
 Thumbs.db
