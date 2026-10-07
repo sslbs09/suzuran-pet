@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld("petAPI", {
   walkingPause: (b, source, interactionId) => ipcRenderer.send("pet:walking-pause", !!b, source || "drag", interactionId === undefined ? null : interactionId, bodyDocumentIdentity), // interactionId：State Core pause lease 身份（leaseId）
   walkingEngineStop: () => ipcRenderer.send("pet:walking-engine-stop", bodyDocumentIdentity),
   onWalking: (cb) => ipcRenderer.on("pet:walking", (_e, s) => cb(s)),
+  onObservedBodyRequest: (cb) => ipcRenderer.on("pet:observed-body-request", (_e, requestId) => cb(requestId)),
+  reportObservedBodyTruth: (truth) => ipcRenderer.send("pet:observed-body-truth", Object.assign({}, truth, { bodyIdentity: bodyDocumentIdentity })),
   onRenderModeChanged: (cb) => ipcRenderer.on("pet:render-mode-changed", (_e, m) => cb(m)),
   reportRenderModeOutcome: (outcome) => ipcRenderer.send("pet:render-mode-outcome", Object.assign({}, outcome, { bodyIdentity: bodyDocumentIdentity })),
   reportRenderModeCorrection: (correction) => ipcRenderer.send("pet:render-mode-correction", Object.assign({}, correction, { bodyIdentity: bodyDocumentIdentity })),

@@ -135,6 +135,27 @@ function isCurrentRenderRequest(context, mode = context && context.mode) {
   return !!context && context.generation === renderSwitchGeneration && requestedRenderMode === mode;
 }
 
+/* M3: finite pull requests observe the current owner after its natural screen draw. */
+const observedBodySampler = window.ObservedBodySampler && window.petAPI.reportObservedBodyTruth
+  ? window.ObservedBodySampler.createObservedBodySampler({
+    getCurrent: () => {
+      const owner = spineRuntimeOwner, view = owner && owner.view;
+      const viewStyle = view && window.getComputedStyle(view);
+      const petStyle = window.getComputedStyle(petEl);
+      return {
+        mode: activeRenderMode, renderModeSeq: currentMainRenderModeSeq,
+        generation: activeRenderGeneration, ready: renderRuntimeReady && renderSwitchStatus === "ready",
+        owner, app: spineApp, obj: spineObj, bootstrapPending: spineBootstrapPending,
+        visible: !!(view && view.isConnected && !view.classList.contains("hidden")
+          && viewStyle.display !== "none" && viewStyle.visibility !== "hidden" && viewStyle.visibility !== "collapse"
+          && petStyle.display !== "none" && petStyle.visibility !== "hidden" && petStyle.visibility !== "collapse"
+          && document.visibilityState !== "hidden" && spineObj && spineObj.visible !== false
+          && spineObj.renderable !== false)
+      };
+    },
+    reply: (truth) => window.petAPI.reportObservedBodyTruth(truth)
+  }) : null;
+
 function cleanupRigOwner(owner) {
   if (!owner) return;
   try { if (owner.runtime) owner.runtime.destroy(); } catch { /* 忽略 */ }
@@ -1693,6 +1714,7 @@ function destroySpineOwner(owner) {
   const committed = spineRuntimeOwner === owner || spineApp === owner.app || spineObj === owner.obj;
   const pending = spinePendingOwner === owner;
   if (committed) {
+    if (observedBodySampler) observedBodySampler.invalidate();
     if (seatExitY?.owner === owner.obj) releaseSeatExitY("owner-destroyed");
     if (SEAT_EXIT_FORENSIC && seatExitForensicSession && (!seatExitForensicSession.owner || seatExitForensicSession.owner === owner.obj)) seatExitForensicFlush("owner-teardown");
     pokeFeedbackGen += 1; // 在移除 ticker / destroy 之前失效 delayed local-Y callbacks。
@@ -1923,6 +1945,7 @@ function resetVisualState() {
 }
 
 function teardownAll() {
+  if (observedBodySampler) observedBodySampler.invalidate();
   // 只复用 A-3 已有的安全取消语义，不改变拖拽算法。
   if (dragState) finishDrag("render-mode-switch");
   teardownSpineRuntime();
@@ -3337,6 +3360,16 @@ if (window.petAPI.onNameChanged) {
 }
 
 /* ---------- 桌面行走 / 渲染模式切换（主进程 → 渲染层） ---------- */
+if (window.petAPI.onObservedBodyRequest) {
+  window.petAPI.onObservedBodyRequest((requestId) => {
+    if (observedBodySampler) { observedBodySampler.request(requestId); return; }
+    if (window.petAPI.reportObservedBodyTruth) window.petAPI.reportObservedBodyTruth({
+      requestId, renderModeSeq: currentMainRenderModeSeq, committedMode: activeRenderMode,
+      animation: { status: "unknown", mode: activeRenderMode, clip: null, sampledAt: null }
+    });
+  });
+}
+if (observedBodySampler) window.addEventListener("pagehide", () => observedBodySampler.destroy());
 if (window.petAPI.onWalking) {
   window.petAPI.onWalking((s) => {
     if (s && s.shadow) { // Shadow 只读：shadow meta → 惰性创建/激活 observer（strict OFF 时永不发生）

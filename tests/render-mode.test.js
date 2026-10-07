@@ -703,6 +703,8 @@ function createMainRenderModeProtocolHarness({ seq = 40, intent = "rig", configM
       let renderModeIntentMode = ${JSON.stringify(intent)};
       const bodyIdentity = { docEpoch: 1, bodyGeneration: 1 };
       let renderModeCorrectionMeta = null;
+      let acceptedRenderModeSeq = null;
+      let acceptedRenderMode = null;
       const dispatches = [];
       function dispatchRenderModeIntent(mode) {
         renderModeCorrectionMeta = null;

@@ -144,6 +144,7 @@ function loadMain(options = {}) {
   const electron = makeElectron();
   const config = configStub();
   const canonical = {
+    "./src/observed-body-truth": require(path.join(ROOT, "src/observed-body-truth")),
     "./src/state-core": require(path.join(ROOT, "src/state-core")),
     "./src/runtime-v2": require(path.join(ROOT, "src/runtime-v2")),
     "./src/walk-geo": require(path.join(ROOT, "src/walk-geo")),
@@ -168,7 +169,8 @@ function loadMain(options = {}) {
     "./src/i18n": { t: (_l, key) => key, DICT: { zh: {}, en: {}, ja: {} } },
     "./src/locale": { normalizeLocale: (x) => x || "zh", isAdmittedLocale: () => true },
     "./src/windows": { childWebPrefs: () => ({}) },
-    ...canonical
+    ...canonical,
+    ...(options.requireOverrides || {})
   };
   const requireStub = (request) => {
     if (explicit[request]) return explicit[request];

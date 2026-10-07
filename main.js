@@ -118,6 +118,7 @@ const { createLineGate } = require("./src/line-gate");
 const actionProtocol = require("./src/action-protocol");
 const { createIntentIdempotencyStore } = require("./src/action-idempotency");
 const { buildBodyCapabilities, findSupportedAction } = require("./src/body-capabilities");
+const { createObservedBodyTruth } = require("./src/observed-body-truth");
 const { transitionSleep, createWorkflowSignalState, recordWorkflowSignal, consumeWorkflowSignal, requeueWorkflowSignal } = require("./src/dialogue-state");
 const { hashToken, safeTokenEqual, tokenMatches, sanitizeClients } = require("./src/agent-auth");
 const { createDebounceBuffer } = require("./src/message-buffer"); // 消息生成防抖缓冲（2026-08-27 提取，可单测）
@@ -205,7 +206,8 @@ let renderModeIntentMode = null;
 let renderModeCorrectionMeta = null;
 let acceptedRenderModeSeq = null;
 let acceptedRenderMode = null;
-let bodyIdentityCounter = 0;
+// Keep the existing M1 issuer/schema; process lifetimes begin in a fresh safe-integer range.
+let bodyIdentityCounter = crypto.randomInt(1, 2 ** 48 - 1);
 let bodyIdentity = null;
 
 function beginBodyDocument(reason = "document") {
@@ -216,6 +218,7 @@ function beginBodyDocument(reason = "document") {
     const current = v2StateCore.lifecycle.current();
     bodyIdentity = { docEpoch: current.docEpoch, bodyGeneration: current.bodyGeneration };
   }
+  if (typeof observedBodyTruth !== "undefined" && observedBodyTruth) observedBodyTruth.invalidate();
   return Object.assign({}, bodyIdentity);
 }
 
@@ -243,11 +246,42 @@ function isCurrentSettingsMutation(event) {
     && event.senderFrame === settingsWin.webContents.mainFrame);
 }
 
+const observedBodyTruth = createObservedBodyTruth({
+  getCurrent: () => {
+    if (!win || win.isDestroyed()) return null;
+    const identity = currentBodyIdentity();
+    return {
+      window: win, identity, renderModeSeq, acceptedRenderModeSeq,
+      mode: acceptedRenderModeSeq === renderModeSeq ? acceptedRenderMode : null,
+      ready: !!(v2StateCore && v2StateCore.lifecycle.usable(identity))
+    };
+  },
+  readPosture: () => {
+    const lease = v2StateCore && v2StateCore.pause.leaseOf("drag");
+    const session = v2Drag && v2Drag.active() ? v2Drag.snapshot() : null;
+    const dragging = !!(lease && lease.domain === "renderer" && lease.leaseId !== null
+      && session && session.kind === "drag" && session.docEpoch === renderModeSeq
+      && session.senderId === win.webContents.id && v2Drag.isCurrentExternalToken(session.token));
+    return { sleeping: walk.sleeping === true, dragging };
+  },
+  sendRequest: (targetWindow, requestId) => targetWindow.webContents.send("pet:observed-body-request", requestId),
+  newRequestId: () => crypto.randomUUID(), now: () => Date.now(),
+  setTimer: (callback, delay) => setTimeout(callback, delay), clearTimer: (timer) => clearTimeout(timer)
+});
+
+function getObservedBodyTruth(deliver) { return observedBodyTruth.read(deliver); }
+
+ipcMain.on("pet:observed-body-truth", (event, payload) => {
+  if (!isCurrentBodyMutation(event, payload && payload.bodyIdentity)) return false;
+  return observedBodyTruth.accept(payload);
+});
+
 function beginRenderModeIntent(mode) {
   const normalized = renderModeMod.renderModeOf(mode);
   renderModeSeq += 1;
   renderModeIntentMode = normalized;
   if (typeof v2StateCore !== "undefined" && v2StateCore) v2StateCore.lifecycle.resetReady("render-mode-intent");
+  if (typeof observedBodyTruth !== "undefined" && observedBodyTruth) observedBodyTruth.invalidate();
   return { mode: normalized, seq: renderModeSeq };
 }
 
@@ -493,7 +527,7 @@ function createWindow() {
   applyLayer();
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.on("will-navigate", (event) => event.preventDefault());
-  win.webContents.on("did-start-navigation", (_event, details) => {
+  win.webContents.on("did-start-navigation", (details) => {
     if (win !== createdWindow || !details || details.isMainFrame !== true || details.isSameDocument === true) return;
     beginBodyDocument("main-navigation");
     clearDragPause("main-navigation");
@@ -510,6 +544,7 @@ function createWindow() {
   // 渲染进程异常退出（崩溃/OOM/被系统回收）：自动重载恢复，防桌宠无声消失；60s 内连续 3 次则停止自愈
   win.webContents.on("render-process-gone", (_e, details) => {
     if (win !== createdWindow) return;
+    observedBodyTruth.invalidate();
     clearDragPause("renderer-crash");
   if (typeof v2StateCore !== "undefined" && v2StateCore) { v2StateCore.lifecycle.invalidate("renderer-crash", "render-process-gone"); v2StateCore.pause.revokeByDomain("renderer", "renderer-crash"); v2StateCore.posture.invalidateSupport("crash"); v2StateCore.syncPauseProjection(); }
     const now = Date.now();
@@ -588,6 +623,7 @@ function createWindow() {
       v2StateCore.lifecycle.resetReady("window-closed");
     }
     clearDragPause("window-closed"); win = null; bodyIdentity = null;
+    observedBodyTruth.invalidate();
   });
 
   // 启动即隐藏（仅托盘运行）
@@ -1722,8 +1758,8 @@ function startAgentApi() {
       // interrupt carries the intentId IN THE PATH - the contract has no
       // "stop everything" (§22); the legacy /stop chat-queue semantics stay separate.
       const interruptMatch = url.pathname.match(/^\/actions\/([^/?]+)\/interrupt$/);
-      const isGetRoute = url.pathname === "/health" || url.pathname === "/status" || url.pathname === "/capabilities";
-      if (url.search || (!["/health", "/chat", "/stop", "/status", "/speak", "/capabilities", "/actions"].includes(url.pathname) && !interruptMatch)) { send(404, { ok: false, error: "not found", ...errorFacts.codeForHttpStatus(404) }); return; }
+      const isGetRoute = url.pathname === "/health" || url.pathname === "/status" || url.pathname === "/capabilities" || url.pathname === "/observed-state";
+      if (url.search || (!["/health", "/chat", "/stop", "/status", "/speak", "/capabilities", "/actions", "/observed-state"].includes(url.pathname) && !interruptMatch)) { send(404, { ok: false, error: "not found", ...errorFacts.codeForHttpStatus(404) }); return; }
       const allowed = isGetRoute ? "GET" : "POST";
       if (req.method !== allowed) { send(405, { ok: false, error: "method not allowed", ...errorFacts.codeForHttpStatus(405) }, { Allow: allowed }); return; }
       const cfg = config.getConfig();
@@ -1740,7 +1776,7 @@ function startAgentApi() {
       // 即使 master/clients 全空（如自动生成 token 失败）也不开放无认证写入；
       // /health 只读健康探测放行（供接入方探活），其余读操作维持原鉴权
       const isWrite = url.pathname === "/chat" || url.pathname === "/stop" || url.pathname === "/speak" || url.pathname === "/actions" || !!interruptMatch;
-      const needsAuth = url.pathname === "/health" ? false : (isWrite || !!master || sanitizeClients(rawClients).length > 0);
+      const needsAuth = url.pathname === "/health" ? false : (url.pathname === "/observed-state" || isWrite || !!master || sanitizeClients(rawClients).length > 0);
       const authOk = !!provided && (safeTokenEqual(provided, master) || clientIndex >= 0);
       if (needsAuth && !authOk) { send(401, { ok: false, error: "unauthorized", ...errorFacts.codeForHttpStatus(401) }, { "WWW-Authenticate": "Bearer" }); return; }
       if (clientHit) { // 接入名单：记录该 agent 最近活跃（在线状态展示）
@@ -1754,6 +1790,12 @@ function startAgentApi() {
       }
       if (url.pathname === "/health") {
         send(200, { ok: true, name: (cfg.pet || {}).name || "苏苏洛", invokeWord: apiCfg.invokeWord || "", authRequired: needsAuth }); // v2.6 收敛：不暴露 agreed
+        return;
+      }
+      if (url.pathname === "/observed-state") {
+        // Publish synchronously with the final M1 identity/native read, avoiding
+        // an extra await between constructing a snapshot and writing the response.
+        await getObservedBodyTruth((snapshot) => send(snapshot.ok ? 200 : 503, snapshot));
         return;
       }
       if (url.pathname === "/status") {
@@ -2993,6 +3035,8 @@ ipcMain.on("pet:render-mode-outcome", (event, outcome) => {
     const before = config.getConfig();
     if (before.renderMode !== decision.committedMode) config.saveConfig({ renderMode: decision.committedMode });
     renderModeIntentMode = decision.committedMode;
+    if ((acceptedRenderModeSeq !== decision.seq || acceptedRenderMode !== decision.committedMode)
+      && typeof observedBodyTruth !== "undefined" && observedBodyTruth) observedBodyTruth.invalidate();
     acceptedRenderModeSeq = decision.seq;
     acceptedRenderMode = decision.committedMode;
     refreshTrayMenu();
