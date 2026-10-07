@@ -116,7 +116,7 @@ test("backward compatibility: calls without docEpoch/epochFloor behave exactly l
 
 test("wiring contracts: floor advances exactly at the three document-regeneration boundaries; meta carries epoch", () => {
   const gone = main.slice(main.indexOf('win.webContents.on("render-process-gone"'), main.indexOf("}, 3000);"));
-  assert.match(gone, /bumpRenderModeIntentForRecovery\(\);\n      win\.reload\(\);/, "崩溃自愈：bump→reload 原序（H1/H2 邻接不动）");
+  assert.match(gone, /bumpRenderModeIntentForRecovery\(\);\n      beginBodyDocument\("renderer-crash"\);\n      createdWindow\.reload\(\);/, "崩溃自愈：bump→新文档→captured reload 原序（H1/H2 邻接不动）");
   const goneTail = main.slice(main.indexOf('win.webContents.on("render-process-gone"'));
   assert.match(goneTail, /\}, 3000\);\n      groundGapDocFloor = renderModeSeq;[^\n]*\n    \} catch \(e2\)/, "崩溃自愈：floor 与 reload 同一同步块内推进（早于任何新 IPC）");
   const rStart = main.indexOf('ipcMain.handle("pet:reload-renderer"');

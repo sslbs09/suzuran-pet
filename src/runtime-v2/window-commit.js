@@ -4,7 +4,7 @@
  * §8：谁提交 / 属于哪个 episode-or-drag-session / commit kind / x,y / 使用哪份 geometry dependency /
  * ownership 是否仍有效 / 成功失败 / 写后 host rect（必要时才读）。
  *
- * 两类 admission（共享同一 coordinate guard + 写入 + notify，只是 ownership 校验与 writer 不同）：
+ * 三类 admission（共享同一 coordinate guard + 写入 + notify，只是 ownership 校验与 writer 不同）：
  * - commitPosition：V2 locomotion（authority.isCurrent(token, episodeId)）——STAND_UP/MOVE/ENTER_SIT。
  *   writer=writePosition（含 applyLayerThrottled，与 V1 walkSetPosition 语义对齐）；
  * - commitExternal：EXTERNAL_DRAG（authority.isExternalCurrent(externalToken)）——拖拽位移。
@@ -80,7 +80,23 @@ function createWindowCommit({ authority, writePosition, writePositionExternal, r
     return guardedWrite(Object.assign({ external: true }, ctx));
   }
 
-  return { commitPosition, commitExternal, stats };
+  /**
+   * Legacy/V1 geometry commit.  The executor and trajectory remain in main;
+   * this wrapper gives every legacy write the same admission and write kernel.
+   * NONE is intentionally admitted by MotionAuthority for non-locomotion
+   * placement writes (drag remains EXTERNAL when a drag session is active).
+   */
+  function commitLegacy(ctx) {
+    const kind = String((ctx && ctx.kind) || "legacy");
+    const adm = authority.positionAdmit("legacy", ctx || {});
+    if (!adm.ok) {
+      stats.denied += 1;
+      return { ok: false, reason: adm.reason || "legacy-not-owner", outcome: "denied", kind };
+    }
+    return guardedWrite(Object.assign({ external: false }, ctx || {}, { kind }));
+  }
+
+  return { commitPosition, commitExternal, commitLegacy, stats };
 }
 
 module.exports = { createWindowCommit };

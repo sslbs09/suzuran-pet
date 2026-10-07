@@ -11,8 +11,9 @@
  * posture 保持 seated —— 状态模型诚实表达「坐姿语义仍在、支撑证据已过期」，
  * 而不是谎称一切正确。（真正修复 taskbar re-anchor 属后续 milestone。）
  *
- * 写入方向合同：legacy walk 字段（walk.seated 等）是 LEGACY POLICY STATE，
- * 只能经 adapter（main 的 observeWalk 调用）单向写入本模块；本模块永不回写 walk 字段。
+ * 写入方向合同：canonical posture/support 由本模块持有；main 的
+ * setBodyPosture/applyBodyPatch 接收语义命令，再把兼容字段单向投影回 walk。
+ * observeWalk 仅保留为 legacy/diagnostic adapter，不是 production authority。
  * airborne 语义上不可能同时持有 valid 的 seated/taskbar 支撑（模块内强制失效）。
  */
 "use strict";
@@ -27,6 +28,30 @@ function createPostureSupport() {
     invalidations: 0,
     lastSupportInvalidation: null
   };
+  const bodyPose = {
+    airborne: false,
+    seated: false,
+    perched: false,
+    iconRest: false,
+    gotoPerch: false,
+    returning: false,
+    iconTarget: false,
+    freeStand: false
+  };
+
+  function postureForBody() {
+    if (bodyPose.airborne) return "airborne";
+    if (bodyPose.seated || bodyPose.perched) return "seated";
+    if (bodyPose.gotoPerch || bodyPose.returning || bodyPose.iconTarget) return "transition";
+    return "standing";
+  }
+
+  function supportKindForBody() {
+    if (bodyPose.iconRest || bodyPose.iconTarget) return "icon";
+    if (bodyPose.perched) return "window-top";
+    if (bodyPose.seated) return "taskbar";
+    return "none";
+  }
 
   function supportValidFor() {
     if (state.posture.state === "airborne") return false; // 离地语义下无有效支撑
@@ -55,6 +80,41 @@ function createPostureSupport() {
       const p = POSTURES.includes(next) ? next : "unknown";
       const r = applyPosture(p, meta);
       return Object.assign({ ok: true }, r);
+    },
+    /**
+     * Canonical body pose command.  Legacy walk flags are projections of this
+     * state; this method never mutates the legacy object.
+     */
+    applyBodyPatch(patch, meta) {
+      const p = patch && typeof patch === "object" ? patch : {};
+      for (const key of Object.keys(bodyPose)) {
+        if (Object.prototype.hasOwnProperty.call(p, key)) bodyPose[key] = !!p[key];
+      }
+      if (Object.prototype.hasOwnProperty.call(p, "airborne")) {
+        const posture = postureForBody();
+        applyPosture(posture, meta);
+      } else if (state.posture.state !== "airborne") {
+        applyPosture(postureForBody(), meta);
+      }
+      const kind = supportKindForBody();
+      if (Object.prototype.hasOwnProperty.call(p, "supportValid") || Object.prototype.hasOwnProperty.call(p, "supportKind")) {
+        const valid = Object.prototype.hasOwnProperty.call(p, "supportValid") ? !!p.supportValid : state.support.valid;
+        const anchorStatus = p.anchorStatus || (valid ? "anchored" : "unknown");
+        const generation = Object.prototype.hasOwnProperty.call(p, "generation") ? p.generation : state.support.generation;
+        const marked = this.markSupport(p.supportKind || kind, { valid, anchorStatus, generation });
+        return { ok: true, posture: state.posture.state, kind: marked.kind, postureChanged: true, projection: this.walkProjection() };
+      }
+      if (state.support.kind !== kind) {
+        state.support.kind = kind;
+        state.support.valid = false;
+        state.support.anchorStatus = "stale";
+        state.support.staleReason = "body-pose-kind-change";
+      }
+      return { ok: true, posture: state.posture.state, kind, projection: this.walkProjection() };
+    },
+    /** Compatibility projection for the legacy walk object. */
+    walkProjection() {
+      return Object.assign({}, bodyPose);
     },
     /**
      * adapter：从 legacy walk 字段单向派生语义 posture + support kind。

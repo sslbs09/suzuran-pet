@@ -89,13 +89,13 @@ test("BUSY-RELEASE-REFIRE-ONCE: owner 释放后缓冲恰好补发一次；重复
 
 test("BUSY-RELEASE-REFIRE-ONCE-2: owner 完成事件接线——ask finally 与 regenerate finally 都 drain", () => {
   assert.match(askFn, /drainAskBuffer\("ask-complete"\);/, "ask owner 释放后兑现补发");
-  assert.match(mainSource, /finally \{ conversation\.finish\(task\.id\); drainAskBuffer\("regen-complete"\); \}/, "regen owner 释放后同样补发");
+  assert.match(mainSource, /finally \{ chatPauseWalk\(false, chatLease\); conversation\.finish\(task\.id\); drainAskBuffer\("regen-complete"\); \}/, "regen owner 释放后同样补发");
 });
 
 /* ---------------- 3. PAUSE-OWNERSHIP ---------------- */
 
 test("PAUSE-OWNERSHIP-1: chat pause 只在真实执行路径 acquire，completion 后 release（finally 配对，含异常路径）", () => {
-  assert.match(askFn, /chatPauseWalk\(true\);\s*try \{\s*await handleAskInner\(sender, payload\);\s*\} finally \{\s*chatPauseWalk\(false\);/, "acquire→try→finally release 结构完整");
+  assert.match(askFn, /const chatLease = chatPauseWalk\(true\);[\s\S]*try \{\s*await handleAskInner\(sender, payload\);\s*\} finally \{\s*chatPauseWalk\(false, chatLease\);/, "captured lease acquire→try→finally release 结构完整");
   assert.ok(askFn.indexOf("chatPauseWalk(false)") < askFn.indexOf("drainAskBuffer(\"ask-complete\")"), "先释放 pause 再补发（补发请求自己重新 acquire）");
 });
 

@@ -105,7 +105,7 @@ test("DRAG-SEPARATION-1: 真 drag（过阈值 admit）结束走 drag 分支，�
 
 test("DRAG-SEPARATION-2: admission IPC 顺序合同不变——justAdmitted 先 walkingPause(true,\"drag\",id) 再 moveWindow", () => {
   const pm = renderer.slice(renderer.indexOf('window.addEventListener("pointermove"'), renderer.indexOf('window.addEventListener("pointerup"'));
-  assert.ok(pm.indexOf('walkingPause(true, "drag", step.interactionId)') < pm.indexOf("moveWindow(step.dx, step.dy)"), "pause+motion 前置 IPC 先于位移");
+  assert.ok(pm.indexOf('walkingPause(true, "drag", step.interactionId)') < pm.indexOf("moveWindow(step.dx, step.dy, step.interactionId)"), "pause+motion 前置 IPC 先于位移");
 });
 
 /* ---------------- 4. CLEANUP ---------------- */
@@ -140,7 +140,12 @@ test("CLEANUP-2: hover 全程无 accepted session——revokeByDomain 无 render
   assert.equal(pause.isPaused("chat"), true, "main-owned lease 不受影响");
 });
 
-test("CLEANUP-3: interact resume 释放仍显式区分 source（preload undefined→\"drag\" 归一化不得吞掉它）", () => {
-  assert.match(finish, /if \(!dragState\) window\.petAPI\.walkingPause\(false, "interact"\);/, "poke/互动 resume 显式 \"interact\" source");
-  assert.match(mainSource, /poke\/互动 resume 发/, "main 侧 source 门控注释锚点保留");
+test("CLEANUP-3: body-local head-pat 只做本地视觉收尾，不伪造 drag lease release", () => {
+  const tapBlock = finish.slice(finish.indexOf("if (!wasDrag)"), finish.indexOf("} else if (velocity"));
+  assert.doesNotMatch(tapBlock, /walkingPause\(false,\s*[\"']interact[\"']/,
+    "tap/head-pat 不得发送匿名 interact release");
+  assert.match(tapBlock, /reconcileSpineAnimation\("interact-end"\)/,
+    "body-local 互动仍通过本地 reconcile 收尾");
+  assert.match(finish, /walkingPause\(false, "drag", interactionId\)/,
+    "只有真实 drag 结束才携带匹配 interactionId 释放");
 });

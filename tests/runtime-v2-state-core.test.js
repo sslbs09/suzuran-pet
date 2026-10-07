@@ -296,7 +296,7 @@ test("LIFE-19: 旧文档纪元事件被 isCurrent 拒绝；代际只前进不回
 
 test("COMPAT-20/22: gate OFF——State Core 不存在，legacy pause 字段即 canonical（源码合同）", () => {
   assert.match(mainSource, /const v2StateCore = RUNTIME_V2_LOCOMOTION_ENABLED \? \(\(\) => \{/);
-  assert.match(mainSource, /\}\)\(\) : null;\n\nfunction cancelFlight/, "gate OFF：v2StateCore=null（门位内联三元走 legacy compute）");
+  assert.match(mainSource, /\}\)\(\) : null;\n\n\/\* Canonical body pose command\/projection boundary[\s\S]*?function setBodyPosture/, "gate OFF：v2StateCore=null（门位内联三元走 legacy compute）");
   // CANON 三元 = v2StateCore ? effectivePaused() : 三布尔——gate OFF 分支与 V1 逐字等价
   const canonTernary = /\(typeof v2StateCore !== "undefined" && v2StateCore \? v2StateCore\.pause\.effectivePaused\(\) : \(walk\.dragPaused \|\| walk\.chatPaused \|\| walk\.zoomPaused\)\)/g;
   assert.ok((mainSource.match(canonTernary) || []).length >= 4, "主门位全部经 CANON 三元（>=4 处）");
@@ -328,5 +328,5 @@ test("STATE-CORE 源码合同：renderer 分类器接入 drag 流；preload 透�
   assert.match(petSource, /dragInteraction\.begin\(\{ pointerId: e\.pointerId, x: e\.screenX, y: e\.screenY \}\)/, "pointerdown=candidate 零 IPC");
   assert.match(petSource, /if \(step\.justAdmitted\) window\.petAPI\.walkingPause\(true, "drag", step\.interactionId\);/, "admission 先发 pause+motion 前置 IPC");
   assert.match(petSource, /const ended = dragInteraction\.end\(\);/);
-  assert.match(preloadSource, /walkingPause: \(b, source, interactionId\) => ipcRenderer\.send\("pet:walking-pause", !!b, source \|\| "drag", interactionId === undefined \? null : interactionId\)/);
+  assert.match(preloadSource, /walkingPause: \(b, source, interactionId\) => ipcRenderer\.send\("pet:walking-pause", !!b, source \|\| "drag", interactionId === undefined \? null : interactionId, bodyDocumentIdentity\)/);
 });

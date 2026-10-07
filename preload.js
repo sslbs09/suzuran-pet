@@ -4,6 +4,9 @@
 "use strict";
 
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
+const bodyDocumentIdentity = (() => {
+  try { return ipcRenderer.sendSync("pet:body-document-sync"); } catch { return null; }
+})();
 
 contextBridge.exposeInMainWorld("petAPI", {
   // 应用版本号（设置页显示，单一来源=package.json）。2026-09-06 修复：app 是主进程模块，
@@ -11,17 +14,17 @@ contextBridge.exposeInMainWorld("petAPI", {
   appVersion: (() => { try { return ipcRenderer.sendSync("pet:get-app-version-sync"); } catch { return ""; } })(),
   checkForUpdate: () => ipcRenderer.invoke("pet:check-update"), // 设置页「检查更新」
   onUpdateProgress: (cb) => ipcRenderer.on("pet:update-progress", (_e, pct) => cb(pct)),
-  ask: (text) => ipcRenderer.invoke("pet:ask", { id: crypto.randomUUID(), text }),
-  stop: () => ipcRenderer.send("pet:stop"),
+  ask: (text, requestId) => { const id = requestId || crypto.randomUUID(); return ipcRenderer.invoke("pet:ask", { id, text, bodyIdentity: bodyDocumentIdentity }); },
+  stop: (requestId) => ipcRenderer.send("pet:stop", requestId || null, bodyDocumentIdentity),
   onStopped: (cb) => ipcRenderer.on("pet:stopped", (_e, d) => cb(d)), // v2.6 主动停止通知（渲染层复位 busy）
   getState: () => ipcRenderer.invoke("pet:get-state"),
   setMode: (mode) => ipcRenderer.invoke("pet:set-mode", mode),
   reloadPersona: () => ipcRenderer.invoke("pet:reload-persona"),
   openConfig: () => ipcRenderer.invoke("pet:open-config"),
-  moveWindow: (dx, dy) => ipcRenderer.send("pet:move", dx, dy),
+  moveWindow: (dx, dy, interactionId) => ipcRenderer.send("pet:move", dx, dy, interactionId === undefined ? null : interactionId, bodyDocumentIdentity),
   hideWindow: () => ipcRenderer.send("pet:hide"),
-  setSize: (w, h, source) => ipcRenderer.send("pet:set-size", w, h, source),
-  setClickable: (v) => ipcRenderer.send("pet:set-clickable", !!v),
+  setSize: (w, h, source) => ipcRenderer.send("pet:set-size", w, h, source, bodyDocumentIdentity),
+  setClickable: (v) => ipcRenderer.send("pet:set-clickable", !!v, bodyDocumentIdentity),
   setTts: (enabled) => ipcRenderer.invoke("pet:set-tts", enabled),
   setRate: (rate) => ipcRenderer.invoke("pet:set-rate", rate),
   setSpeakJa: (v) => ipcRenderer.invoke("pet:set-speak-ja", !!v),
@@ -31,17 +34,17 @@ contextBridge.exposeInMainWorld("petAPI", {
   setSpineSkin: (id) => ipcRenderer.invoke("pet:set-spine-skin", id),
   onSpineSkinChanged: (cb) => ipcRenderer.on("pet:spine-skin-changed", (_e, id) => cb(id)),
   onPlayAnim: (cb) => ipcRenderer.on("pet:play-anim", (_e, name) => cb(name)),
-  setSleeping: (v) => ipcRenderer.send("pet:set-sleeping", !!v),
-  setHasSit: (v) => ipcRenderer.send("pet:set-has-sit", !!v), // 皮肤有无坐下动画上报（无则坐姿不下沉，防"站着脚陷进任务栏"）
-  setGroundGap: (px, meta) => ipcRenderer.send("pet:set-ground-gap", px, meta || null),
+  setSleeping: (v) => ipcRenderer.send("pet:set-sleeping", !!v, bodyDocumentIdentity),
+  setHasSit: (v) => ipcRenderer.send("pet:set-has-sit", !!v, bodyDocumentIdentity), // 皮肤有无坐下动画上报（无则坐姿不下沉，防"站着脚陷进任务栏"）
+  setGroundGap: (px, meta) => ipcRenderer.send("pet:set-ground-gap", px, meta || null, bodyDocumentIdentity),
   reportShadowEvidence: (ev) => ipcRenderer.send("pet:shadow-evidence", ev || null), // Shadow v0.1（默认关）：渲染层 body 证据上行；main 侧 gate OFF 时零消费
   setWalking: (on) => ipcRenderer.invoke("pet:set-walking", !!on),
-  walkingPause: (b, source, interactionId) => ipcRenderer.send("pet:walking-pause", !!b, source || "drag", interactionId === undefined ? null : interactionId), // interactionId：State Core pause lease 身份（leaseId）
-  walkingEngineStop: () => ipcRenderer.send("pet:walking-engine-stop"),
+  walkingPause: (b, source, interactionId) => ipcRenderer.send("pet:walking-pause", !!b, source || "drag", interactionId === undefined ? null : interactionId, bodyDocumentIdentity), // interactionId：State Core pause lease 身份（leaseId）
+  walkingEngineStop: () => ipcRenderer.send("pet:walking-engine-stop", bodyDocumentIdentity),
   onWalking: (cb) => ipcRenderer.on("pet:walking", (_e, s) => cb(s)),
   onRenderModeChanged: (cb) => ipcRenderer.on("pet:render-mode-changed", (_e, m) => cb(m)),
-  reportRenderModeOutcome: (outcome) => ipcRenderer.send("pet:render-mode-outcome", outcome),
-  reportRenderModeCorrection: (correction) => ipcRenderer.send("pet:render-mode-correction", correction),
+  reportRenderModeOutcome: (outcome) => ipcRenderer.send("pet:render-mode-outcome", Object.assign({}, outcome, { bodyIdentity: bodyDocumentIdentity })),
+  reportRenderModeCorrection: (correction) => ipcRenderer.send("pet:render-mode-correction", Object.assign({}, correction, { bodyIdentity: bodyDocumentIdentity })),
   onRenderModeOutcome: (cb) => ipcRenderer.on("pet:render-mode-outcome", (_e, outcome) => cb(outcome)),
   setUiLang: (lang) => ipcRenderer.invoke("pet:set-ui-lang", lang),
   getI18n: () => ipcRenderer.invoke("pet:get-i18n"),
@@ -52,11 +55,11 @@ contextBridge.exposeInMainWorld("petAPI", {
   getWeatherCfg: () => ipcRenderer.invoke("pet:get-weather-cfg"),
   setWeather: (patch) => ipcRenderer.invoke("pet:set-weather", patch),
   setSeatSink: (px) => ipcRenderer.invoke("pet:set-seat-sink", px),
-  setCharInset: (px) => ipcRenderer.send("pet:set-char-inset", px),
+  setCharInset: (px) => ipcRenderer.send("pet:set-char-inset", px, bodyDocumentIdentity),
   onUiEdgeCompact: (cb) => ipcRenderer.on("pet:ui-edge-compact", (_e, v) => cb(v)),
   onSetDim: (cb) => ipcRenderer.on("pet:set-dim", (_e, v) => cb(v)), // 半透明模式开关
   onNameChanged: (cb) => ipcRenderer.on("pet:name-changed", (_e, name) => cb(name)),
-  throwPet: (vx, vy) => ipcRenderer.send("pet:throw", Number(vx) || 0, Number(vy) || 0), // 拖拽抛掷
+  throwPet: (vx, vy, interactionId) => ipcRenderer.send("pet:throw", Number(vx) || 0, Number(vy) || 0, interactionId === undefined ? null : interactionId, bodyDocumentIdentity), // 拖拽抛掷
   onDropped: (cb) => ipcRenderer.on("pet:dropped", () => cb()), // 抛掷落地通知
   getWalkTiming: () => ipcRenderer.invoke("pet:get-walk-timing"),
   setWalkTiming: (patch) => ipcRenderer.invoke("pet:set-walk-timing", patch),
@@ -86,12 +89,13 @@ contextBridge.exposeInMainWorld("petAPI", {
   openDocs: () => ipcRenderer.invoke("pet:open-docs"),
   live2dList: () => ipcRenderer.invoke("pet:live2d-list"), // Live2D 模型扫描（v2.5.1）
   live2dCapability: () => ipcRenderer.invoke("pet:live2d-capability"),
-  reloadRenderer: () => ipcRenderer.invoke("pet:reload-renderer"), // 渲染层自愈
+  reloadRenderer: () => ipcRenderer.invoke("pet:reload-renderer", bodyDocumentIdentity), // 渲染层自愈
   setTheme: (theme) => ipcRenderer.invoke("pet:set-theme", theme),
   swipeMove: (dir) => ipcRenderer.invoke("pet:swipe-move", dir),
-  regenerate: () => ipcRenderer.invoke("pet:regenerate"),
+  regenerate: (requestId) => ipcRenderer.invoke("pet:regenerate", requestId || crypto.randomUUID(), bodyDocumentIdentity),
   onSwipeChanged: (cb) => ipcRenderer.on("pet:swipe-changed", (_e, s) => cb(s)),
   onThemeChanged: (cb) => ipcRenderer.on("pet:theme-changed", (_e, th) => cb(th)),
+  onSleepAutoWake: (cb) => ipcRenderer.on("pet:sleep-auto-wake", (_e, payload) => cb(payload)),
   live2dSelect: (id) => ipcRenderer.invoke("pet:live2d-select", id),
   onLive2dChanged: (cb) => ipcRenderer.on("pet:live2d-changed", (_e, id) => cb(id)),
   setLive2dScale: (v) => ipcRenderer.send("pet:set-live2d-scale", v),
@@ -114,7 +118,9 @@ contextBridge.exposeInMainWorld("petAPI", {
   onEmotionVoiceChanged: (cb) => ipcRenderer.on("pet:emotion-voice-changed", (_e, ev) => cb(ev)),
   onRigMouseFollowChanged: (cb) => ipcRenderer.on("pet:rig-mouse-follow-changed", (_e, v) => cb(v)),
   setMouseTrackGlobal: (on) => ipcRenderer.send("pet:set-mouse-track-global", on),
-  setCatToy: (on) => ipcRenderer.send("pet:set-cat-toy", on),
+  setCatToy: (on) => ipcRenderer.send("pet:set-cat-toy", on, bodyDocumentIdentity),
+  bodyDocumentIdentity,
+  bodyReady: (meta) => ipcRenderer.send("pet:body-ready", Object.assign({}, bodyDocumentIdentity, meta && typeof meta === "object" ? meta : {})),
   setFileGuard: (on) => ipcRenderer.send("pet:set-file-guard", on),
   // v2.5.7 添加人物
   importSpine: () => ipcRenderer.invoke("pet:import-spine"),

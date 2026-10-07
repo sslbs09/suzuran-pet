@@ -19,7 +19,7 @@ const { createLifecycleProjection } = require("./lifecycle-projection");
 
 function stateCoreGateEnabled(env) {
   const e = env || (typeof process !== "undefined" ? process.env : {});
-  return e.SUSSURRO_RUNTIME_V2_LOCOMOTION === "1"; // 与 Motion cutover 同 gate：OFF 时 State Core 不存在，V1 字段即 canonical
+  return e.SUSSURRO_RUNTIME_V2_LOCOMOTION !== "0"; // 默认 canonical ON；显式 0 仅保留兼容降级
 }
 
 module.exports = {

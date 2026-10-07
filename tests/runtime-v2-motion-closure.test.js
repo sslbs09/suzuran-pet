@@ -50,11 +50,12 @@ function buildClamp(authority, bounds, writes) {
   const walk = { seated: false, perched: false, flight: false, jump: false, dragPaused: false, groundGap: 10 };
   const api = new Function(
     "win", "walk", "walkGeo", "screen", "walkMinX", "walkState", "applySeatPosition", "applyLayer", "logTts",
-    "v2LegacyPositionBlocked", "v2NoteDeferredClamp",
+    "v2LegacyPositionBlocked", "v2NoteDeferredClamp", "commitLegacyPosition",
     block("function clampPetToWorkArea(", "\nlet displayClampTimer") + "; return clampPetToWorkArea;"
   )(win, walk, walkGeo, { getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }), getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }) },
     () => 0, require("../src/walk-state"), () => {}, () => {}, () => {},
-    adm.v2LegacyPositionBlocked, adm.v2NoteDeferredClamp);
+    adm.v2LegacyPositionBlocked, adm.v2NoteDeferredClamp,
+    (x, y) => { const r = authority.positionAdmit("legacy"); if (!r.ok) return r; win.setPosition(x, y); return { ok: true }; });
   return { clamp: () => api("test"), writes, adm, bounds };
 }
 
@@ -193,9 +194,10 @@ test("G11: Flight/Jump legacy writer 在 V2 owner 下被拒", () => {
   const writes = [];
   const win = { isDestroyed: () => false, setPosition: (x, y) => writes.push({ x, y }) };
   const walkSetPosition = new Function(
-    "win", "logTts", "applyLayerThrottled", "v2Locomotion",
+    "win", "logTts", "applyLayerThrottled", "v2Locomotion", "commitLegacyPosition",
     block("function walkSetPosition", "\nfunction walkBroadcast") + "; return walkSetPosition;"
-  )(win, () => {}, () => {}, v2Locomotion);
+  )(win, () => {}, () => {}, v2Locomotion,
+    (x, y) => { const r = authority.positionAdmit("legacy"); if (!r.ok) return r; win.setPosition(x, y); return { ok: true }; });
   authority.acquire("ep-fly");
   assert.equal(walkSetPosition(300, 300, "flight-move"), false, "V2 持有：flight legacy writer 被拒");
   assert.equal(writes.length, 0);

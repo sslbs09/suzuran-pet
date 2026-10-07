@@ -212,7 +212,10 @@ test("production pet rejection renders INTERNAL and keeps bubble lifecycle", asy
     let asks = 0;
     Object.assign(s, { agreed: true, isSpeakingAudio: false, ttsConfig: { enabled: false }, inputEl: { value: "hello" }, replyBuffer: "", bubbleText: bubble, bubbleEl: bubble, busy: true, wake() {}, setMood() {}, showBubble() {}, hideThinking() {}, showThinking() {}, updateControls() {}, scheduleBubbleHide() {} });
     s.petAPI.ask = async () => { asks++; throw new Error(hostile); };
-    functions(s, "renderer/pet.js", ["function showError(", "async function sendText("]);
+    // sendText owns the task before IPC; keep the extracted fixture on the
+    // same production owner/id path so the rejection reaches its real catch.
+    vm.runInContext("let chatTaskId = null; let chatTaskRevision = 0; let chatTaskSeq = 0;", s);
+    functions(s, "renderer/pet.js", ["function beginChatTask(", "function showError(", "async function sendText("]);
     await vm.runInContext("sendText('hello')", s);
     assert.equal(bubble.textContent, "苏苏洛委屈地撇撇嘴：" + expected(lang, "INTERNAL"));
     safe(bubble.textContent);

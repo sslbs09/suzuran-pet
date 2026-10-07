@@ -36,18 +36,28 @@ const SPRITE_BASE = "pet-user://sprites/user/";
  * pointerdown 只是 candidate（零 IPC）；位移超过阈值才 admit DRAG（此后才发 walkingPause(true,"drag")+
  * moveWindow）；pointerup 未过阈值 = tap/headpat body-local interaction（不 acquire Motion）。
  * renderer reload / document replacement 由新文档自然重建候选（旧 candidate 随页消亡）。 */
+let fallbackInteractionSeq = 0;
+let fallbackInteractionId = null;
 const dragInteraction = window.StateCoreInteraction
   ? window.StateCoreInteraction.createInteractionState({ threshold: 3, now: () => Date.now() })
   : { // 兜底：模块缺失时保持 1d2da8f 行为（pointerdown 立即 admission）
-      begin: () => { window.petAPI.walkingPause(true, "drag"); return { ok: true }; },
+      begin: () => {
+        fallbackInteractionId = "fallback-drag-" + (++fallbackInteractionSeq);
+        window.petAPI.walkingPause(true, "drag", fallbackInteractionId);
+        return { ok: true, interactionId: fallbackInteractionId };
+      },
       move: (x, y) => {
         const dx = x - dragState.sx, dy = y - dragState.sy;
         const crossed = Math.abs(dx) > 3 || Math.abs(dy) > 3;
         if (crossed && dragState) { dragState.sx = x; dragState.sy = y; }
-        return { crossed, moved: !!(dragState && dragState.moved), justAdmitted: false, interactionId: null, dx, dy };
+        return { crossed, moved: !!(dragState && dragState.moved), justAdmitted: false, interactionId: fallbackInteractionId, dx, dy };
       },
-      end: () => ({ wasDrag: !!(dragState && dragState.moved), interactionId: null }),
-      invalidate: () => ({ ok: false, noop: true })
+      end: () => {
+        const interactionId = fallbackInteractionId;
+        fallbackInteractionId = null;
+        return { wasDrag: !!(dragState && dragState.moved), interactionId };
+      },
+      invalidate: () => { fallbackInteractionId = null; return { ok: false, noop: true }; }
     };
 
 /* ---------- Spine 渲染系统（可切换 GIF/Spine；支持桌面行走） ---------- */
@@ -2167,11 +2177,20 @@ function applyWalkState(s) {
     inputBar.classList.add("hidden");
     inputEl.blur();
   }
+  const nextSleeping = walkState.sleeping === true;
   if (typeof walkState.sleeping === "boolean" && walkState.sleeping !== wasSleeping) {
-    isSleeping = walkState.sleeping;
+    isSleeping = nextSleeping;
     awake = !isSleeping;
-    if (isSleeping) setSpineMood("sleep");
-    else setSpineMood("idle");
+    if (isSleeping) {
+      wakeRequested = false;
+      if (activeRenderMode === "spine") setSpineMood("sleep");
+      else setMood("sleep", { acceptedSleep: true, preserveSleep: true });
+    } else {
+      const wakeMood = wakeRequested ? "surprised" : "idle";
+      wakeRequested = false;
+      if (activeRenderMode === "spine") setSpineMood(wakeMood);
+      else setMood(wakeMood, { acceptedSleep: true, preserveSleep: true });
+    }
   }
   // 行走激活瞬间恢复标准窗口：气泡加宽（ensureWindowWidthFor）的大窗口会破坏行走几何（charInset 超上限→出屏“闪现”）。
   // v2.5.10：宽皮肤按其窗口宽度恢复，否则会顶掉 460 宽的宽模型布局。
@@ -2462,6 +2481,9 @@ function labelToName(label) {
 function idleNames() { return MOODS.filter((m) => !m.emotion).map((m) => m.name); }
 
 let busy = false;
+let chatTaskId = null;
+let chatTaskRevision = 0;
+let chatTaskSeq = 0;
 let currentMode = "chat";
 let forcedMode = "auto";
 let zcodeEnabled = false; // 任务模式是否可用（默认关闭）
@@ -2474,9 +2496,10 @@ let moodTimer = null;      // 心情自动回落定时器
 let sleepTimer = null;     // 闲置睡觉定时器
 let awake = true;
 let isSleeping = false;    // 睡觉状态（同步给行走引擎暂停移动）
+let wakeRequested = false; // main accepted sleep projection consumes this one-shot visual intent
 let idleIdx = 0;
 
-function setMood(mood, { preserveSleep = false } = {}) {
+function setMood(mood, { preserveSleep = false, acceptedSleep = false } = {}) {
   // mood = 内部状态名（happy/think/sleep/…或自定义情绪名）；"idle"/未知 → 从待机池轮换
   const names = moodNames();
   const idles = idleNames();
@@ -2485,16 +2508,18 @@ function setMood(mood, { preserveSleep = false } = {}) {
   else pool = [mood];
   if (!pool.length) return;
   const file = pool.length > 1 ? pool[++idleIdx % pool.length] : pool[0];
+  // Sleep is a canonical main-owned projection. Ordinary mood updates may
+  // still update text/TTS callers, but must not replace the sleeping visual
+  // until main accepts the wake edge and applyWalkState clears isSleeping.
+  if (isSleeping && !acceptedSleep && mood !== "sleep") return;
   lastMood = mood;
 
   // 睡觉/醒来同步行走引擎（睡着后不再移动）；程序消息不应隐式唤醒
   if (mood === "sleep") {
-    if (!isSleeping) { isSleeping = true; awake = false; window.petAPI.setSleeping(true); armSleepAutoWake(); }
-  } else if (!preserveSleep && isSleeping) {
-    isSleeping = false;
-    awake = true;
-    window.petAPI.setSleeping(false);
-    disarmSleepAutoWake();
+    if (!acceptedSleep) {
+      if (!isSleeping) window.petAPI.setSleeping(true);
+      return;
+    }
   }
 
   // PSD 2.5D 角色（v2.2）：情绪 → 表情预设（独立于 Spine）
@@ -2565,11 +2590,8 @@ function scheduleMoodReset(mood) {
 
 function wake() {
   if (isSleeping || !awake) {
-    isSleeping = false;
-    awake = true;
+    wakeRequested = true;
     window.petAPI.setSleeping(false);
-    disarmSleepAutoWake();
-    if (!busy) setMood("surprised"); // 被叫醒
   }
   resetSleepTimer();
 }
@@ -2595,27 +2617,7 @@ function resetSleepTimer() {
   sleepTimer = setTimeout(() => { if (!busy) setMood("sleep"); }, sleepIdleThresholdMs);
 }
 
-/* ---------- 睡眠自动唤醒上限（v2.5.28）：睡满 25 分钟自己醒来散步/说话，闲了再睡 ----------
- *  此前入睡无上限，用户离开电脑后她一睡一下午：相位机冻结、闲话消失、观感"消失"。
- *  放渲染层而非主进程：wake() 自带 IPC+情绪+5min 计时器重启，醒后"闲了再睡"循环完整；
- *  主进程侧做只能清 walk.sleeping，渲染层入睡计时器不会被重启，会变成"醒一次就再也不睡"。 */
-const SLEEP_AUTO_WAKE_MS = 25 * 60 * 1000;
-let sleepAutoWakeTimer = null;
-function armSleepAutoWake() {
-  if (sleepAutoWakeTimer) clearTimeout(sleepAutoWakeTimer);
-  sleepAutoWakeTimer = setTimeout(() => {
-    sleepAutoWakeTimer = null;
-    if (isSleeping && !busy) {
-      try { window.petAPI.playback && window.petAPI.playback("[anim] 睡眠自动唤醒（25min 上限）"); } catch { /* 忽略 */ }
-      wake(); // 主进程 walk 边沿自带 35% 概率 wake 台词；醒后相位机恢复，闲 5 分钟再睡
-    } else {
-      resetSleepTimer(); // 已被唤醒/忙碌中：重启闲时入睡循环
-    }
-  }, SLEEP_AUTO_WAKE_MS);
-}
-function disarmSleepAutoWake() {
-  if (sleepAutoWakeTimer) { clearTimeout(sleepAutoWakeTimer); sleepAutoWakeTimer = null; }
-}
+if (window.petAPI.onSleepAutoWake) window.petAPI.onSleepAutoWake(() => wake());
 
 /* ---------- 气泡 ---------- */
 function showBubble() {
@@ -2666,6 +2668,21 @@ function hideThinking() {
 // 消息生成防抖（v2.6）：生成/合成中来的消息先缓冲（窗口内只留最后一条），当前回合结束自动补发，避免丢消息/合成堆叠
 let pendingSendText = "";
 let pendingSendTimer = null;
+function beginChatTask() {
+  chatTaskSeq += 1;
+  chatTaskId = "renderer-task-" + Date.now() + "-" + chatTaskSeq;
+  chatTaskRevision += 1;
+  busy = true;
+  return chatTaskId;
+}
+function rejectChatTask(requestId) {
+  if (chatTaskId !== requestId) return;
+  ++chatTaskRevision;
+  chatTaskId = null;
+  busy = false;
+  hideThinking();
+  updateControls();
+}
 function maybeFlushPendingSend() {
   if (busy || !pendingSendText) return;
   clearTimeout(pendingSendTimer);
@@ -2707,6 +2724,7 @@ async function sendText(text) {
   if (isSpeakingAudio && ttsConfig.enabled) {
     try { speak("啊……好好好，你先说，我听着呢！", "surprised"); } catch { /* 打断反应失败不影响主流程 */ }
   }
+  const requestId = beginChatTask();
   inputEl.value = "";
   replyBuffer = "";
   wake();
@@ -2721,9 +2739,14 @@ async function sendText(text) {
   bubbleText.textContent = "…";
   showThinking();
   try {
-    await window.petAPI.ask(text);
+    await window.petAPI.ask(text, requestId);
   } catch {
-    showError(window.ErrorPresent.presentError(INTERNAL_FAILURE));
+    if (chatTaskId === requestId) {
+      ++chatTaskRevision;
+      busy = false;
+      chatTaskId = null;
+      showError(window.ErrorPresent.presentError(INTERNAL_FAILURE));
+    }
   }
 }
 
@@ -2733,7 +2756,6 @@ function showError(msg) {
   showBubble();
   bubbleEl.classList.add("error");
   bubbleText.textContent = "苏苏洛委屈地撇撇嘴：" + msg;
-  busy = false;
   updateControls();
   setTimeout(() => { bubbleEl.classList.remove("error"); }, 6000);
   scheduleBubbleHide(10000); // 错误气泡：等“唔……出错了”播完再隐藏，避免残留
@@ -3081,7 +3103,9 @@ zoomBtn.addEventListener("click", () => {
   enlarged = !enlarged;
   document.body.classList.toggle("enlarged", enlarged);
   // 放大聊天框暂停行走：窗口尺寸剧变会打乱行走几何（charInset/minX 全变），且放大窗口下拖动后易位置错乱/消失；还原恢复
-  window.petAPI.walkingPause && window.petAPI.walkingPause(enlarged, "zoom");
+  if (enlarged && !zoomInteractionId) zoomInteractionId = "zoom-" + (++zoomInteractionSeq);
+  window.petAPI.walkingPause && window.petAPI.walkingPause(enlarged, "zoom", zoomInteractionId);
+  if (!enlarged) zoomInteractionId = null;
   if (activeRenderMode === "rig" && rigRuntime) {
     // rig 模式：放大按钮只放大气泡，不改变窗口（rig 窗口由大小滑杆 rigScale 控制，避免角色跟着放大）
     zoomBtn.textContent = enlarged ? "⤡" : "⤢";
@@ -3163,7 +3187,13 @@ function applyAppearance(a) {
 if (window.petAPI.onAppearanceChanged) window.petAPI.onAppearanceChanged(applyAppearance);
 
 /* 事件绑定 */
-window.petAPI.onThinking(({ mode }) => {
+window.petAPI.onThinking(({ id, mode }) => {
+  const nextId = id === undefined || id === null ? null : String(id);
+  // Every renderer initiated request claims its id before IPC. A late thinking
+  // event must not create a new busy owner after the request already ended.
+  if (chatTaskId === null || nextId !== chatTaskId) return;
+  chatTaskId = nextId;
+  chatTaskRevision += 1;
   busy = true;
   currentMode = mode;
   setBubbleMode(mode);
@@ -3180,7 +3210,8 @@ window.petAPI.onThinking(({ mode }) => {
 });
 
 window.petAPI.onChunk(({ id, mode, text }) => {
-  if (!busy) { busy = true; setBubbleMode(mode); updateControls(); }
+  const eventId = id === undefined || id === null ? null : String(id);
+  if (eventId !== chatTaskId || !busy) return;
   hideThinking();
   replyBuffer += text;
   if (mode !== "zcode") {
@@ -3209,9 +3240,13 @@ function renderSwipeBar() {
   if (prev) prev.style.visibility = multi && swipeState.index > 0 ? "" : "hidden";
   if (next) next.style.visibility = multi && swipeState.index < swipeState.total - 1 ? "" : "hidden";
 }
-window.petAPI.onDone(({ mode, full, emotion, swipes, swipeIndex }) => {
+window.petAPI.onDone(({ id, mode, full, emotion, swipes, swipeIndex }) => {
+  const eventId = id === undefined || id === null ? null : String(id);
+  if (eventId !== chatTaskId || !busy) return;
+  const completionRevision = ++chatTaskRevision;
   hideThinking();
   busy = false;
+  chatTaskId = null;
   if (SPEECH_DIAG && diagThinkingId) { speechDiagLog("THINKING_END", diagThinkingId, mode); speechDiagEnd(diagThinkingId); diagThinkingId = 0; }
   maybeFlushPendingSend(); // 生成防抖：回合结束，补发等待中的新消息
   const emoLabel = emotion ? String(emotion).trim() : "";
@@ -3230,7 +3265,7 @@ window.petAPI.onDone(({ mode, full, emotion, swipes, swipeIndex }) => {
   // 模型理解出的情绪 → 对应 GIF（没有匹配就用开心）
   const nm = emotion ? labelToName(String(emotion).trim()) : "";
   setMood(nm || "happy");
-  setTimeout(() => { if (!busy) setMood("idle"); }, 2600);
+  setTimeout(() => { if (!busy && chatTaskRevision === completionRevision) setMood("idle"); }, 2600);
   scheduleBubbleHide(90000); // 回复气泡：等语音播完再隐藏，防止提前消失
   updateControls();
   setTimeout(flushPendingAmbient, 250);
@@ -3238,6 +3273,11 @@ window.petAPI.onDone(({ mode, full, emotion, swipes, swipeIndex }) => {
 });
 
 window.petAPI.onError((payload) => {
+  const eventId = payload && payload.id !== undefined && payload.id !== null ? String(payload.id) : null;
+  if (eventId !== chatTaskId || !busy) return;
+  ++chatTaskRevision;
+  busy = false;
+  chatTaskId = null;
   // Phase 5-G2：与设置页等 8 个页面共用同一适配器。语义不变——有 code 走 presenter，
   // 无 code 的旧 payload 保留原文兼容（仅新 code 路径承诺过滤技术详情）。
   showError(window.ErrorPresent.presentError(payload));
@@ -3249,10 +3289,14 @@ window.petAPI.onError((payload) => {
 
 // v2.6 主动停止：主进程中止路径不再发 done/error，收到 stopped 才复位 busy/语音，丢弃防抖缓冲
 if (window.petAPI.onStopped) {
-  window.petAPI.onStopped(() => {
+  window.petAPI.onStopped((payload = {}) => {
+    const eventId = payload.id === undefined || payload.id === null ? null : String(payload.id);
+    if (eventId !== chatTaskId || !busy) return;
+    ++chatTaskRevision;
     stopTts();
     clearPendingSend(); // 用户要静默：不补发缓冲中的消息
     busy = false;
+    chatTaskId = null;
     if (SPEECH_DIAG && diagThinkingId) { speechDiagLog("THINKING_END", diagThinkingId, "stopped"); speechDiagEnd(diagThinkingId); diagThinkingId = 0; }
     updateControls();
     hideThinking();
@@ -3310,7 +3354,12 @@ if (window.petAPI.onDropped) {
   document.getElementById("swipe-regen").addEventListener("click", () => {
     if (busy) return;
     showThinking();
-    window.petAPI.regenerate();
+    const requestId = beginChatTask();
+    try {
+      Promise.resolve(window.petAPI.regenerate(requestId)).then((accepted) => {
+        if (accepted === null || accepted === false || accepted === undefined) rejectChatTask(requestId);
+      }, () => rejectChatTask(requestId));
+    } catch { rejectChatTask(requestId); }
   });
 }
 if (window.petAPI.onSwipeChanged) {
@@ -3348,6 +3397,13 @@ async function reportRenderModeOutcome(mainSeq, requestedMode, result, isCurrent
       error: renderModeErrorText(result.error)
     });
   } catch { /* IPC 窗口销毁等瞬时错误忽略 */ }
+  try {
+    window.petAPI.bodyReady && window.petAPI.bodyReady({
+      seq: mainSeq,
+      committedMode: result.committedMode,
+      usable: true
+    });
+  } catch { /* 窗口销毁等瞬时错误忽略 */ }
 }
 function reportRenderModeCorrection(baseSeq, sourceMode, result, isCurrent) {
   if (!Number.isSafeInteger(baseSeq) || !isCurrent() || !result || result.fallback !== true ||
@@ -3398,7 +3454,8 @@ if (window.petAPI.onRenderModeChanged) {
       enlarged = false;
       document.body.classList.remove("enlarged");
       zoomBtn.textContent = "⤢";
-      window.petAPI.walkingPause && window.petAPI.walkingPause(false, "zoom");
+      window.petAPI.walkingPause && window.petAPI.walkingPause(false, "zoom", zoomInteractionId);
+      zoomInteractionId = null;
     }
     const mode = RENDER_MODES.includes(request.mode) ? request.mode : "gif";
     const mainSeq = Number.isSafeInteger(request.seq) ? request.seq : null;
@@ -3614,7 +3671,7 @@ function updateChip() {
 }
 
 btnSend.addEventListener("click", send);
-btnStop.addEventListener("click", () => { window.petAPI.stop(); });
+btnStop.addEventListener("click", () => { if (chatTaskId !== null) window.petAPI.stop(chatTaskId); });
 inputEl.addEventListener("keydown", (e) => { if (e.key === "Enter") send(); });
 inputEl.addEventListener("input", () => { lastInputAt = Date.now(); });
 modeChip.addEventListener("click", () => {
@@ -4048,6 +4105,8 @@ window.petAPI.onTermsAgreed(() => {
 let dragState = null;
 let pokeResumeTimer = null; // 戳一戳后的原地站立计时
 let dragReleaseTimer = null;
+let zoomInteractionId = null;
+let zoomInteractionSeq = 0;
 const THROW_SAMPLE_WINDOW_MS = 80;
 const THROW_MIN_SPEED = 200;
 function addDragSample(state, e) {
@@ -4141,10 +4200,12 @@ function finishDrag(reason = "cancel") {
     }
     // 戳一戳/摸头时原地站定：等互动动作播完再继续散步
     clearTimeout(pokeResumeTimer);
-    pokeResumeTimer = setTimeout(() => { if (!dragState) window.petAPI.walkingPause(false, "interact"); }, 2600); // "interact"=非拖拽恢复：main 只对显式 drag 做落点定格；不得省略（preload 会把 undefined 归一化成 "drag"）
+    pokeResumeTimer = setTimeout(() => {
+      if (!dragState && activeRenderMode === "spine") reconcileSpineAnimation("interact-end");
+    }, 2600); // body-local interaction 只收尾视觉，不发送匿名 pause release
   } else if (velocity && speed > THROW_MIN_SPEED) {
     try {
-      window.petAPI.throwPet(velocity.vx, velocity.vy);
+      window.petAPI.throwPet(velocity.vx, velocity.vy, interactionId);
       scheduleDizzyFeedback(); // 被抛出去：落地时晕乎/抗议
     } catch {
       // IPC 发送失败时也立即解除 drag pause，不能把恢复交给 watchdog。
@@ -4214,7 +4275,7 @@ window.addEventListener("pointermove", (e) => {
     dragState.moved = true;
     try { window.petAPI.playback("[ui] 判定为拖动 dx=" + Math.round(step.dx) + " dy=" + Math.round(step.dy)); } catch { /* 忽略 */ }
     petEl.classList.add("dragging");
-    window.petAPI.moveWindow(step.dx, step.dy);
+    window.petAPI.moveWindow(step.dx, step.dy, step.interactionId);
   }
 });
 window.addEventListener("pointerup", (e) => {
@@ -4445,6 +4506,14 @@ if (!window.__renderLifecycleTestMode) (async function init() {
   });
   if ((initialResult.status === "ready" || initialResult.status === "noop") && initialMode === "spine" && state.walkState) {
     applyWalkState(state.walkState);
+  }
+  // The initial main snapshot may already carry sleeping=true. At this point
+  // no prior walking edge exists, so seed the renderer projection explicitly.
+  if (state.walkState && state.walkState.sleeping === true && !isSleeping) {
+    isSleeping = true;
+    awake = false;
+    if (activeRenderMode === "spine") setSpineMood("sleep");
+    else setMood("sleep", { acceptedSleep: true, preserveSleep: true });
   }
   // v2.5.24 修复：渲染层 reload 自愈（WebGL context lost）后穿透状态不随页面恢复——
   // init 完成立即放行鼠标（角色在窗口内，初始可交互合理），后续 mousemove 再按命中精细重判

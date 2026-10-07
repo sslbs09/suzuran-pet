@@ -94,13 +94,19 @@ async function createRenderer(lang) {
   vm.runInContext(adapterSource, sandbox, { filename: "renderer/error-present.js" }); // 5-G2
   vm.runInContext(i18nSource, sandbox, { filename: "renderer/i18n.js" });
   await new Promise((resolve) => setImmediate(resolve));
+  // The production error listener only accepts the current renderer task.
+  // Install the same task owner used by sendText so these tests exercise the
+  // real current-id gate rather than bypassing it with a guessed id.
+  vm.runInContext("let chatTaskId = null; let chatTaskRevision = 0; let chatTaskSeq = 0;", sandbox);
+  vm.runInContext(extractFunction(petSource, "function beginChatTask()"), sandbox, { filename: "renderer/pet.js" });
   vm.runInContext(extractFunction(petSource, "function showError(msg)"), sandbox, { filename: "renderer/pet.js" });
   const handlerStart = petSource.indexOf("window.petAPI.onError(");
   const handlerEnd = petSource.indexOf("// v2.6 主动停止", handlerStart);
   assert.ok(handlerStart !== -1 && handlerEnd > handlerStart, "production pet:error handler region found");
   vm.runInContext(petSource.slice(handlerStart, handlerEnd), sandbox, { filename: "renderer/pet.js" });
   assert.equal(typeof callbacks.error, "function", "production onError callback registered");
-  return { callbacks, bubbleText, effects, sandbox, classes };
+  return { callbacks, bubbleText, effects, sandbox, classes,
+    beginTask: () => vm.runInContext("beginChatTask()", sandbox) };
 }
 
 test("presenter maps every approved code and rejects inherited property names", () => {
@@ -175,6 +181,7 @@ test("real renderer onError localizes code and excludes untrusted message/meta i
       { payload: { id: "x" }, key: "err.unknown", params: {} }
     ]) {
       const h = await createRenderer(lang);
+      payload.id = h.beginTask();
       h.callbacks.error(payload);
       assert.equal(h.bubbleText.textContent, `苏苏洛委屈地撇撇嘴：${i18n.t(lang, key, params)}`);
       assert.ok(!h.bubbleText.textContent.includes("stack"));
@@ -194,7 +201,7 @@ test("real renderer treats every present but invalid code as coded and never fal
   const hostile = "private C:\\secret\\token.json sk-fake 203.0.113.8";
   for (const code of ["", null, undefined, false, 0, {}]) {
     const h = await createRenderer("en");
-    h.callbacks.error({ id: "x", code, message: hostile });
+    h.callbacks.error({ id: h.beginTask(), code, message: hostile });
     assert.equal(h.bubbleText.textContent, `苏苏洛委屈地撇撇嘴：${i18n.t("en", "err.unknown")}`);
     assert.ok(!h.bubbleText.textContent.includes("private"));
     assert.ok(!h.bubbleText.textContent.includes("sk-fake"));
@@ -205,17 +212,17 @@ test("real renderer treats every present but invalid code as coded and never fal
 test("real renderer preserves exact legacy message when pet:error has no code", async () => {
   const legacy = "legacy provider failure: C:\\old\\path.js";
   const h = await createRenderer("en");
-  h.callbacks.error({ id: "x", message: legacy });
+  h.callbacks.error({ id: h.beginTask(), message: legacy });
   assert.equal(h.bubbleText.textContent, `苏苏洛委屈地撇撇嘴：${legacy}`);
   const malformed = await createRenderer("en");
-  malformed.callbacks.error({ id: "x" });
+  malformed.callbacks.error({ id: malformed.beginTask() });
   assert.equal(malformed.bubbleText.textContent, `苏苏洛委屈地撇撇嘴：${i18n.t("en", "err.unknown")}`);
 });
 
 test("real renderer translates presentation text through active locale", async () => {
   for (const lang of ["zh", "en", "ja"]) {
     const h = await createRenderer(lang);
-    h.callbacks.error({ code: "TIMEOUT" });
+    h.callbacks.error({ id: h.beginTask(), code: "TIMEOUT" });
     assert.equal(h.bubbleText.textContent, `苏苏洛委屈地撇撇嘴：${i18n.t(lang, "err.timeout")}`);
   }
 });

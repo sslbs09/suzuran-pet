@@ -1,5 +1,7 @@
 # 睡眠状态与工作流信号聚合交接记录（2026-09-02）
 
+> 历史快照。本文关于 renderer `setMood()` / `wake()` 直接维护 sleeping truth 的描述已被 Foundation M1 的 main-owned sleep 接线替代。当前 owner、请求与投影边界及验证状态见 [runtime-foundation-v1.md](../runtime-foundation-v1.md)；以下原文保留为当时的实现证据。
+
 > 本批处理两个问题：普通主动消息误唤醒睡眠角色；Agent workflow 与 workspace watcher 连续抢话。未部署正式版、未推送远程、未删除 userData。
 
 ## 一、本批已完成

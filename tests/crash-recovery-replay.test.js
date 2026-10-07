@@ -113,7 +113,7 @@ test("T6 replay never rethrows on any branch, protecting the quit cleanup chain"
     assert.equal(threw, false, `${w === null ? "null window" : "hostile window"} 分支不得 throw`);
   }
   // 接线契约：gone 处理器捕获身份且旧裸用 win 的写法已消失；3s 节奏与外层 catch 不变
-  assert.match(main, /const recoveryWindow = win;[\s\S]{0,80}setTimeout\(\(\) => \{\s*replayCrashRecovery\(recoveryWindow, \{/);
+  assert.match(main, /const recoveryWindow = createdWindow;[\s\S]{0,120}setTimeout\(\(\) => \{\s*replayCrashRecovery\(recoveryWindow, \{/);
   assert.doesNotMatch(main, /updateUiEdgeCompactFromBounds\(win\.getBounds\(\)/, "延迟体内不再有对模块级 win 的裸 native 访问");
   assert.match(main, /\}, 3000\);/);
   assert.match(main, /catch \(e2\) \{ logTts\("render", "自动重载失败/);

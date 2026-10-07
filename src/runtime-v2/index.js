@@ -2,7 +2,7 @@
  * index.js — Runtime V2 Locomotion Cutover v0.1 统一入口。
  *
  * Production slice：真实接管 Stable Sit → StandUp → Move → EnterSit → Stable Sit。
- * gate：env SUSSURRO_RUNTIME_V2_LOCOMOTION=1（默认 OFF=完全走 V1，零 V2 运行时对象）。
+ * gate：默认 ON；仅显式 env SUSSURRO_RUNTIME_V2_LOCOMOTION=0 保留兼容降级。
  */
 "use strict";
 
@@ -13,7 +13,7 @@ const { createDragSession } = require("./drag-session");
 
 function locomotionGateEnabled(env) {
   const e = env || (typeof process !== "undefined" ? process.env : {});
-  return e.SUSSURRO_RUNTIME_V2_LOCOMOTION === "1";
+  return e.SUSSURRO_RUNTIME_V2_LOCOMOTION !== "0";
 }
 
 module.exports = {

@@ -94,7 +94,7 @@ test("T4 main watchdog wiring: single native write site, 200ms poll, visible-onl
   assert.match(main, /if \(!p\) return;[\s\S]*?win\.webContents\.send\("pet:cursor-recovery", p\);/, "窗口外不推送");
   assert.match(main, /nativeIgnore\.reset\(\);[\s\S]{0,120}applyNativeIgnore\(win, true\);/, "createWindow：重置+初始穿透");
   assert.match(main, /function showWindow[\s\S]{0,200}applyNativeIgnore\(win, false\)/, "托盘恢复强制解除穿透");
-  assert.match(main, /ipcMain\.on\("pet:set-clickable", \(_e, clickable\) => \{[\s\S]*?applyNativeIgnore\(win, !clickable\);/);
+  assert.match(main, /ipcMain\.on\("pet:set-clickable", \(_e, clickable, identity\) => \{[\s\S]*?isCurrentBodyMutation\(_e, identity\)[\s\S]*?applyNativeIgnore\(win, !clickable\);/);
   assert.match(preload, /onCursorRecovery: \(cb\) => ipcRenderer\.on\("pet:cursor-recovery", \(_e, p\) => cb\(p\)\)/);
   assert.ok(indexHtml.indexOf("clickability.js") < indexHtml.indexOf("\"pet.js\""), "clickability.js 先于 pet.js 加载");
 });

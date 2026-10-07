@@ -89,7 +89,7 @@ test("T10 no double-count for the main pet crash", () => {
   assert.equal((main.match(/crashBudget\.record\("pet", now\)/g) || []).length, 1, "pet 域每次崩溃只记一次");
 });
 test("T11 within quota the pet recovery chain order is untouched (bump → reload → H1 delayed replay)", () => {
-  assert.match(main, /const budget = crashBudget\.record\("pet", now\);[\s\S]*?if \(budget\.limited\)[\s\S]*?return; \}\n\s*try \{\n\s*bumpRenderModeIntentForRecovery\(\);\n\s*win\.reload\(\);\n\s*const recoveryWindow = win;/);
+  assert.match(main, /const budget = crashBudget\.record\("pet", now\);[\s\S]*?if \(budget\.limited\)[\s\S]*?return; \}\n\s*try \{\n\s*bumpRenderModeIntentForRecovery\(\);\n\s*beginBodyDocument\("renderer-crash"\);\n\s*createdWindow\.reload\(\);\n\s*const recoveryWindow = createdWindow;/);
   assert.match(main, /replayCrashRecovery\(recoveryWindow, \{/);
   assert.match(main, /attachCrashDiag\(w, label\)[\s\S]{0,300}crashBudget\.record\(label, now\)/, "辅助窗沿用既有 label 作 domain");
 });

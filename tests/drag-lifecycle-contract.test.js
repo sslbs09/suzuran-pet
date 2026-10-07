@@ -92,7 +92,7 @@ test("cancel resumes only drag pause and cannot invoke click or throw", () => {
 test("buttons=0 cancels before sampling or moving the window", () => {
   const move = renderer.slice(renderer.indexOf('window.addEventListener("pointermove"'), renderer.indexOf('window.addEventListener("pointerup"'));
   assert.ok(move.indexOf("finishDrag(\"buttons\")") < move.indexOf("addDragSample(dragState, e)"));
-  assert.ok(move.indexOf("finishDrag(\"buttons\")") < move.indexOf("moveWindow(step.dx, step.dy)"));
+  assert.ok(move.indexOf("finishDrag(\"buttons\")") < move.indexOf("moveWindow(step.dx, step.dy, step.interactionId)"));
   assert.match(move, /if \(!\(e\.buttons & 1\)\)/);
 });
 

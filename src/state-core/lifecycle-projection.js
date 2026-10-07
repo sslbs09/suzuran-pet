@@ -20,6 +20,7 @@ const INVALIDATION_LEDGER_MAX = 16;
 
 function createLifecycleProjection() {
   let generation = { docEpoch: null, bodyGeneration: null, revision: 0 };
+  let readiness = { ready: false, identity: null };
   const ledger = []; // 有界失效台账 {kind, reason, revision}
 
   function revision() { return generation.revision; }
@@ -38,18 +39,41 @@ function createLifecycleProjection() {
       }
       if (de !== null && generation.docEpoch !== de) { generation.docEpoch = de; changed = true; }
       if (bg !== null && Number.isFinite(bg) && generation.bodyGeneration !== bg) { generation.bodyGeneration = bg; changed = true; }
-      if (changed) generation.revision += 1;
+      if (changed) {
+        generation.revision += 1;
+        readiness = { ready: false, identity: null };
+      }
       return { changed, revision: generation.revision };
     },
     revision,
     current() { return Object.assign({}, generation); },
     /** 旧文档纪元的事件不再被接受（isCurrent 合同；不因「晚收到」本身拒绝，只按纪元比较）。 */
     isCurrent(docEpoch) {
+      if (docEpoch && typeof docEpoch === "object") {
+        const de = Number(docEpoch.docEpoch), bg = Number(docEpoch.bodyGeneration);
+        if (!Number.isSafeInteger(de) || !Number.isSafeInteger(bg)) return false;
+        return generation.docEpoch === de && generation.bodyGeneration === bg;
+      }
       if (docEpoch === null || docEpoch === undefined) return true; // 无纪元事件不参与纪元判定
       const de = Number(docEpoch);
       if (!Number.isFinite(de)) return true;
       if (generation.docEpoch === null) return true; // 代际未知：不妄拒（身份由各 domain 自证）
       return de >= generation.docEpoch;
+    },
+    /** Mark the actual visual owner usable for the current exact identity. */
+    markReady(identity) {
+      if (!identity || typeof identity !== "object"
+        || !Number.isSafeInteger(Number(identity.docEpoch))
+        || !Number.isSafeInteger(Number(identity.bodyGeneration))
+        || !this.isCurrent(identity)) return { ok: false, reason: "stale-or-missing-identity" };
+      readiness = { ready: true, identity: { docEpoch: Number(identity.docEpoch), bodyGeneration: Number(identity.bodyGeneration) } };
+      return { ok: true, identity: Object.assign({}, readiness.identity) };
+    },
+    ready() { return readiness.ready; },
+    usable(identity) { return readiness.ready && this.isCurrent(identity || readiness.identity); },
+    resetReady(reason) {
+      readiness = { ready: false, identity: readiness.identity };
+      return { ok: true, reason: String(reason || "reset") };
     },
     /** 记录一次失效（有界台账；actual 动作由组合层执行）。 */
     invalidate(kind, reason) {

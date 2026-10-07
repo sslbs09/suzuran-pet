@@ -250,8 +250,8 @@ test("E3: chatPauseWalk 互斥闩源码合同——重复 enter / 无主 exit �
     mainSource.indexOf("function chatPauseWalk"),
     mainSource.indexOf("async function handleAsk(sender")
   );
-  assert.match(body, /if \(chatPauseHeld\) return; chatPauseHeld = true;/, "重复 enter 被闩挡住");
-  assert.match(body, /if \(!chatPauseHeld\) return; chatPauseHeld = false;/, "无主 exit 被闩挡住");
+  assert.match(body, /if \(p\) \{ if \(chatPauseHeld\) return \{ ok: false, reason: "already-held" \}; chatPauseHeld = true; \}/, "重复 enter 被闩挡住");
+  assert.match(body, /!chatPauseHeld \|\| !handle/, "无 token exit 被闩挡住");
   // COMPAT-22 原有合同不得丢
   assert.match(body, /v2StateCore\.chatLease\.(acquire|release)\(\)/);
   assert.match(body, /v2StateCore\.syncPauseProjection\(\)/);
@@ -264,7 +264,7 @@ test("F1: UI chat 路径保持 0b1f48e 的 acquire→try→finally→release→d
     mainSource.indexOf("async function handleAsk(sender"),
     mainSource.indexOf("async function handleAskInner")
   );
-  assert.match(askFn, /chatPauseWalk\(true\);\s*try \{\s*await handleAskInner\(sender, payload\);\s*\} finally \{\s*chatPauseWalk\(false\);/,
+  assert.match(askFn, /const chatLease = chatPauseWalk\(true\);[\s\S]*try \{\s*await handleAskInner\(sender, payload\);\s*\} finally \{\s*chatPauseWalk\(false, chatLease\);/,
     "UI chat ownership 结构未被本次改动破坏");
   assert.ok(askFn.indexOf("chatPauseWalk(false)") < askFn.indexOf('drainAskBuffer("ask-complete")'),
     "先释放 pause 再补发");

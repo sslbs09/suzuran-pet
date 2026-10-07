@@ -55,8 +55,7 @@ function createChatOwnership({ conversation = null, pauseWalk, now = Date.now, w
   function enter(source) {
     if (held !== null) return { ok: false, reason: "already-held", owner: current() };
     seq += 1;
-    held = { token: seq, source: String(source || "unknown"), at: now() };
-    pauseWalk(true);
+    held = { token: seq, source: String(source || "unknown"), at: now(), pauseHandle: pauseWalk(true) };
     return { ok: true, token: held.token, source: held.source };
   }
 
@@ -66,12 +65,16 @@ function createChatOwnership({ conversation = null, pauseWalk, now = Date.now, w
    */
   function exit(token) {
     if (held === null) return { ok: false, noop: true };
-    if (token !== undefined && token !== null && token !== held.token) {
+    if (token === undefined || token === null) {
+      return { ok: false, reason: "missing-release-token", owner: current() };
+    }
+    if (token !== held.token) {
       return { ok: false, reason: "stale-release", owner: current() };
     }
     const released = held.token;
+    const pauseHandle = held.pauseHandle;
     held = null;
-    pauseWalk(false);
+    pauseWalk(false, pauseHandle);
     return { ok: true, token: released };
   }
 

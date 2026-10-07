@@ -26,6 +26,7 @@ function createMotionAuthority() {
     episodeId: null,        // V2 持有时的 episodeId
     attemptId: 0,
     externalKind: null,     // EXTERNAL 持有时的占用类型（"drag"）
+    externalPreviousOwner: null,
     lastTransition: null    // {from,to,token,reason}（诊断交接顺序）
   };
   const denyCounts = {};
@@ -84,20 +85,21 @@ function createMotionAuthority() {
         return { ok: false, reason: "external-busy:" + state.externalKind };
       }
       if (state.owner === OWNERS.V2) return { ok: false, reason: "must-interrupt-v2-first" }; // 强制交接顺序
-      if (state.owner === OWNERS.NONE) return { ok: false, reason: "engine-off" };
       const from = state.owner;
       const token = state.token + 1;
       transition(OWNERS.EXTERNAL, token, "external-acquire:" + k);
       state.externalKind = k;
+      state.externalPreviousOwner = from;
       state.episodeId = null;
       return { ok: true, token, from };
     },
     /** 外部占用释放：回到 LEGACY（供下一次行为选择重新评估 canEnterSlice）。 */
     externalRelease(reason) {
       if (state.owner !== OWNERS.EXTERNAL) return { token: state.token, noop: true };
-      transition(OWNERS.LEGACY, undefined, "external-release:" + (reason || ""));
+      transition(state.externalPreviousOwner || OWNERS.LEGACY, undefined, "external-release:" + (reason || ""));
       const t = state.token;
       state.externalKind = null;
+      state.externalPreviousOwner = null;
       return { token: t, reason: reason || null };
     },
     /** 当前 V2 ownership 是否仍属于该 token+episode（commit/legacy-writer 的准入查询）。 */
@@ -145,7 +147,7 @@ function createMotionAuthority() {
       denyCounts[k] = (denyCounts[k] || 0) + 1;
       return true;
     },
-    engineOff() { if (state.owner === OWNERS.V2 || state.owner === OWNERS.EXTERNAL) { /* 上层先 release */ } transition(OWNERS.NONE, undefined, "engine-off"); state.episodeId = null; state.externalKind = null; },
+    engineOff() { if (state.owner === OWNERS.V2 || state.owner === OWNERS.EXTERNAL) { /* 上层先 release */ } transition(OWNERS.NONE, undefined, "engine-off"); state.episodeId = null; state.externalKind = null; state.externalPreviousOwner = null; },
     engineOn() { if (state.owner === OWNERS.NONE) state.owner = OWNERS.LEGACY; }
   };
 }

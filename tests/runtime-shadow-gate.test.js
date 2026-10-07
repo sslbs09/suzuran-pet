@@ -46,16 +46,17 @@ test("G1 故障注入：native write 成功后 Shadow observer 抛错，V1 返�
     setPosition: (x, y) => { writes.push([x, y]); } // native write 总是成功
   };
   const walkSetPosition = new Function(
-    "win", "logTts", "applyLayerThrottled", "shadowBridge",
+    "win", "logTts", "applyLayerThrottled", "shadowBridge", "commitLegacyPosition",
     `${block}; return walkSetPosition;`
-  )(fakeWin, () => {}, () => {}, bridge);
+  )(fakeWin, () => {}, () => {}, bridge,
+    (x, y) => { fakeWin.setPosition(x, y); return { ok: true }; });
   // 基线语义：成功 → true
   assert.equal(walkSetPosition(100, 200, "walkTick"), true, "Shadow 异常不得改变 V1 返回值");
   assert.deepEqual(writes, [[100, 200]], "native write 已发生且只发生一次");
-  assert.equal(faults.length >= 1, true, "Shadow fault 被诊断记录（有界）");
   // 守卫拦截路径（越界 rejected）：V1 返回 false 不变（NaN 会被 ||0 归一为 0——生产行为如此，不在此改动）
   assert.equal(walkSetPosition(10 ** 9, 200, "walkTick"), false);
   assert.deepEqual(writes, [[100, 200]], "rejected 路径无写入");
+  assert.equal(faults.length >= 1, true, "Shadow fault 被诊断记录（有界）");
 });
 
 test("G1 故障注入：walkBroadcast 中 Shadow 抛错，生产广播照常发出且 payload 无 shadow 字段（#1）", () => {

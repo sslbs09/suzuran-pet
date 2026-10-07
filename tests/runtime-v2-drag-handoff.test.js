@@ -94,10 +94,11 @@ function buildPetMove(v2Drag, docEpoch) {
   const state = { nativeWrites: () => nativeWrites };
   const dragSeatUpdate = () => { state.snap = (state.snap || 0) + 1; };
   new Function(
-    "on", "win", "v2Drag", "v2Perf", "renderModeSeq", "dragSeatUpdate",
+    "on", "win", "v2Drag", "v2Perf", "renderModeSeq", "dragSeatUpdate", "hasCurrentDragLease", "commitLegacyPosition",
     `const ipcMain = { on }; let dbgLastMoveTs = 0;\n${sourceBlock('ipcMain.on("pet:move"', "let dbgLastMoveTs", "pet:move")}`
-  )((ch, fn) => { state.fn = fn; }, win, v2Drag, null, docEpoch, dragSeatUpdate);
-  return { fire: (dx, dy) => state.fn(null, dx, dy), state };
+  )((ch, fn) => { state.fn = fn; }, win, v2Drag, null, docEpoch, dragSeatUpdate, () => true,
+    (x, y) => { win.setPosition(x, y); return { ok: true }; });
+  return { fire: (dx, dy, interactionId = "test-drag") => state.fn(null, dx, dy, interactionId, { docEpoch, bodyGeneration: docEpoch }), state };
 }
 
 /* ---------------- A/B/C/D/E/F：ownership handoff 主链 ---------------- */

@@ -149,7 +149,7 @@ function createSitOnTaskbarHarness({ gap, bounds, workArea } = {}) {
   const config = { getConfig: () => ({ renderMode: "gif" }) };
   const fn = new Function(
     "win", "walkGeo", "screen", "config", "walk", "gifVisualGroundGap", "renderModeMod", "walkMinX",
-    "showWindow", "skinHasSit", "applySeatPosition", "walkBroadcast", "logTts",
+    "showWindow", "skinHasSit", "applySeatPosition", "walkBroadcast", "logTts", "commitLegacyPosition", "setBodyPosture",
     `${sourceBlock(mainSource, "function sitOnTaskbar", 'ipcMain.handle("pet:sit-taskbar"', "sitOnTaskbar")}; return sitOnTaskbar;`
   )(
     fakeWin,
@@ -164,6 +164,8 @@ function createSitOnTaskbarHarness({ gap, bounds, workArea } = {}) {
     true,
     () => {},
     () => {},
+    () => {},
+    (x, y) => { calls.push({ type: "commitLegacyPosition", x, y }); currentBounds.x = x; currentBounds.y = y; return { ok: true }; },
     () => {}
   );
   return { calls, get bounds() { return { ...currentBounds }; }, run: fn };
@@ -174,26 +176,26 @@ function assertSitOnTaskbarWiring(source = mainSource) {
   assert.match(block, /const groundGap = renderModeMod\.effectiveGroundGap\(mode, walk\.groundGap, gifVisualGroundGap\);/, "sitOnTaskbar 保存 mode-aware gap");
   assert.match(block, /const targetY = renderModeMod\.groundAlign\(b, wa, groundGap\)\.y \|\| 0;/, "sitOnTaskbar 复用统一 native y 取整");
   assert.doesNotMatch(block, /const targetY = wa\.y \+ wa\.height \+ groundGap - b\.height;/, "sitOnTaskbar 不把 fractional y 直接交给 native API");
-  const setPositionStart = block.indexOf("win.setPosition(");
-  const setPositionEnd = block.indexOf(");", setPositionStart);
-  const setPosition = block.slice(setPositionStart, setPositionEnd);
-  assert.match(setPosition, /Math\.round\(/, "sitOnTaskbar native x 坐标归一化");
-  assert.match(setPosition, /targetY/, "sitOnTaskbar native y 使用归一化结果");
-  assert.doesNotMatch(setPosition, /calculatedY|groundGap/, "sitOnTaskbar native 调用不直接消费 fractional 公式");
+  const commitStart = block.indexOf("commitLegacyPosition(");
+  const commitEnd = block.indexOf(");", commitStart);
+  const commit = block.slice(commitStart, commitEnd);
+  assert.match(commit, /Math\.round\(/, "sitOnTaskbar canonical commit 归一化 x 坐标");
+  assert.match(commit, /targetY/, "sitOnTaskbar canonical commit 使用归一化 y");
+  assert.doesNotMatch(commit, /calculatedY|groundGap/, "sitOnTaskbar commit 不直接消费 fractional 公式");
 }
 
 function assertOutOfScreenGuardWiring(source = mainSource) {
   const block = sourceBlock(source, "function outOfScreenGuard", "function walkTick", "outOfScreenGuard");
   assert.match(block, /const groundGap = renderModeMod\.effectiveGroundGap\(config\.getConfig\(\)\.renderMode, walk\.groundGap, gifVisualGroundGap\);/, "outOfScreenGuard 保存 mode-aware gap");
   assert.match(block, /const groundY = Math\.max\(wa\.y, wa\.y \+ wa\.height - b\.height\) \+ groundGap;/, "outOfScreenGuard groundY 公式消费局部 groundGap");
-  assert.match(block, /win\.setPosition\(b\.x, Math\.round\(groundY\)\);/, "outOfScreenGuard native y 坐标归一化");
+  assert.match(block, /commitLegacyPosition\(b\.x, Math\.round\(groundY\), "out-of-screen-y"\);/, "outOfScreenGuard canonical y 坐标归一化");
   assert.doesNotMatch(block, /const groundY = Math\.max\(wa\.y, wa\.y \+ wa\.height - b\.height\) \+ \(walk\.groundGap \|\| 0\);/, "outOfScreenGuard groundY 公式不消费 raw gap");
 }
 
 function assertDragSeatNativeWiring(source = mainSource) {
   const block = sourceBlock(source, "function dragSeatUpdate", "/* ---------- 桌面行走 v2", "dragSeatUpdate");
   assert.doesNotMatch(block, /[+\-]\s*walk\.groundGap/, "dragSeatUpdate 不直接消费 raw groundGap");
-  assert.match(block, /win\.setPosition\(Math\.round\(nx\), Math\.round\(ny\)\);/, "dragSeatUpdate native 坐标归一化");
+  assert.match(block, /v2DragCommitLanding\(nx, ny\)/, "dragSeatUpdate 经 canonical landing commit");
 }
 
 function expectMutationToFail(name, mutate, check) {
@@ -596,8 +598,8 @@ assert.match(mainSource, /sendToRenderer\("pet:render-mode-changed", request\)/,
 assert.match(mainSource, /delete ordinaryPatch\.renderMode/, "renderMode intent 不提前持久化");
 assert.match(mainSource, /renderModeOutcomeDecision\(/, "main 校验 renderer outcome");
 assert.match(renderModeSource, /msg\.seq !== currentSeq/, "旧 seq outcome 被拒绝");
-assert.match(preloadSource, /reportRenderModeOutcome: \(outcome\) => ipcRenderer\.send\("pet:render-mode-outcome", outcome\)/, "renderer→main outcome bridge");
-assert.match(preloadSource, /reportRenderModeCorrection: \(correction\) => ipcRenderer\.send\("pet:render-mode-correction", correction\)/, "internal correction bridge");
+assert.match(preloadSource, /reportRenderModeOutcome: \(outcome\) => ipcRenderer\.send\("pet:render-mode-outcome", Object\.assign/, "renderer→main outcome bridge carries body identity");
+assert.match(preloadSource, /reportRenderModeCorrection: \(correction\) => ipcRenderer\.send\("pet:render-mode-correction", Object\.assign/, "internal correction bridge carries body identity");
 assert.match(settingsSource, /onRenderModeOutcome/, "settings listens for accepted outcome");
 assert.match(settingsSource, /outcome\.requestedMode !== committed/, "settings distinguishes fallback from success");
 assert.match(settingsSource, /L\("set\.rmSwitched"\)/, "settings shows success only after outcome (B2.1: 文案经 key)");
@@ -623,7 +625,7 @@ assert.match(correctionBlock, /dispatchRenderModeIntent\("gif"\)/, "correction s
 assert.doesNotMatch(correctionBlock, /config\.saveConfig\(/, "correction does not write config directly");
 const reloadBlock = mainSource.slice(mainSource.indexOf('ipcMain.handle("pet:reload-renderer"'), mainSource.indexOf('app.whenReady()'));
 assert.match(reloadBlock, /bumpRenderModeIntentForRecovery\(\)/, "manual reload bumps seq before reload");
-assert.match(mainSource, /bumpRenderModeIntentForRecovery\(\);\n      win\.reload\(\)/, "render-process-gone recovery bumps seq");
+assert.match(mainSource, /bumpRenderModeIntentForRecovery\(\);\r?\n      (?:beginBodyDocument\("renderer-crash"\);\r?\n      )?createdWindow\.reload\(\)/, "render-process-gone recovery bumps seq");
 const recoveryHelperStart = mainSource.indexOf("function bumpRenderModeIntentForRecovery");
 const recoveryHelperEnd = mainSource.indexOf("/** §14 追加 102", recoveryHelperStart);
 const recoveryHelper = mainSource.slice(recoveryHelperStart, recoveryHelperEnd);
@@ -643,7 +645,7 @@ assert.match(mainSource, /if \(report\.changed && wasGrounded\) repositionAfterW
 assert.match(mainSource, /if \(decision\.type === "seat"\) \{\s*applySeatPosition\(\);/, "Spine 坐姿尺寸提交调用 applySeatPosition");
 assert.match(mainSource, /const rawTargetY = walk\.seated \? baseY \+ effectiveSeatSink\(\) : baseY/, "坐姿仍保留 seatSink（Phase1 改名为 rawTargetY，sink 语义不变）");
 assert.match(mainSource, /const targetY = seatExit \? rawTargetY \+ seatExitOffsetY\(\) : rawTargetY;/, "seatExit 期 applySeatPosition 走瞬态偏移叠加（M-P1）");
-assert.match(preloadSource, /setSize: \(w, h, source\) => ipcRenderer\.send\("pet:set-size", w, h, source\)/, "现有 preload bridge 透传可选 resize source");
+assert.match(preloadSource, /setSize: \(w, h, source\) => ipcRenderer\.send\("pet:set-size", w, h, source, bodyDocumentIdentity\)/, "现有 preload bridge 透传 resize source 与 body identity");
 const commitStart = rendererSource.indexOf("function commitRenderMode");
 const commitEnd = rendererSource.indexOf("async function switchRenderMode", commitStart);
 const commitBlock = rendererSource.slice(commitStart, commitEnd);
@@ -672,7 +674,9 @@ function createMainRenderModeProtocolHarness({ seq = 40, intent = "rig", configM
   let trayRefreshes = 0;
   let walkingSyncs = 0;
   let persistedMode = configMode;
-  const ipcMain = { on: (channel, handler) => { handlers[channel] = handler; } };
+  const ipcMain = { on: (channel, handler) => {
+    handlers[channel] = (event, payload) => handler(event, Object.assign({ bodyIdentity: { docEpoch: 1, bodyGeneration: 1 } }, payload || {}));
+  } };
   const config = {
     getConfig: () => ({ renderMode: persistedMode }),
     saveConfig: (patch) => {
@@ -692,11 +696,12 @@ function createMainRenderModeProtocolHarness({ seq = 40, intent = "rig", configM
         ? "Spine 初始化失败，已回退到 GIF"
         : "渲染模式初始化失败，已回退到 GIF";
   const registered = new Function(
-    "ipcMain", "renderModeMod", "isCurrentPetRendererSender", "config", "refreshTrayMenu",
+    "ipcMain", "renderModeMod", "isCurrentPetRendererSender", "isCurrentBodyMutation", "config", "refreshTrayMenu",
     "syncWalkingEngine", "settingsWin", "sendToRenderer", "logTts", "renderModeFallbackToast",
     `
       let renderModeSeq = ${seq};
       let renderModeIntentMode = ${JSON.stringify(intent)};
+      const bodyIdentity = { docEpoch: 1, bodyGeneration: 1 };
       let renderModeCorrectionMeta = null;
       const dispatches = [];
       function dispatchRenderModeIntent(mode) {
@@ -719,6 +724,7 @@ function createMainRenderModeProtocolHarness({ seq = 40, intent = "rig", configM
     ipcMain,
     RM,
     (event) => !!event && event.sender === currentSender,
+    (event, identity) => !!event && event.sender === currentSender && identity && identity.docEpoch === 1 && identity.bodyGeneration === 1,
     config,
     () => { trayRefreshes += 1; },
     () => { walkingSyncs += 1; },
@@ -758,6 +764,17 @@ m2.handlers["pet:render-mode-correction"]({ sender: m2.otherSender }, {
 });
 assertEq("M2 非当前 sender 不 dispatch", m2.dispatches, []);
 assertEq("M2 非当前 sender 不写 config", m2.saves, []);
+
+const staleBody = createMainRenderModeProtocolHarness({ seq: 40, intent: "rig", configMode: "rig" });
+staleBody.handlers["pet:render-mode-outcome"]({ sender: staleBody.currentSender }, {
+  bodyIdentity: { docEpoch: 0, bodyGeneration: 1 }, seq: 40, requestedMode: "rig", committedMode: "rig", ok: true
+});
+assertEq("M2b 旧 document outcome 不得改新 body", staleBody.saves, []);
+const staleCorrection = createMainRenderModeProtocolHarness({ seq: 40, intent: "rig", configMode: "rig" });
+staleCorrection.handlers["pet:render-mode-correction"]({ sender: staleCorrection.currentSender }, {
+  bodyIdentity: { docEpoch: 0, bodyGeneration: 1 }, baseSeq: 40, sourceMode: "rig", committedMode: "gif"
+});
+assertEq("M2c 旧 document correction 不得改新 body", staleCorrection.dispatches, []);
 
 const m3 = createMainRenderModeProtocolHarness({ seq: 40, intent: "rig", configMode: "rig" });
 m3.handlers["pet:render-mode-correction"]({ sender: m3.currentSender }, {
@@ -968,7 +985,7 @@ expectMutationToFail("MUT-6", removeSpineModeGuard, assertSpineModeGuard);
 
 const sitFractional = createSitOnTaskbarHarness({ gap: 19.5 });
 sitFractional.run();
-assertEq("sitOnTaskbar GIF gap=19.5 native y=782", sitFractional.calls[0], { type: "setPosition", x: 638, y: 782 });
+assertEq("sitOnTaskbar GIF gap=19.5 canonical y=782", sitFractional.calls[0], { type: "commitLegacyPosition", x: 638, y: 782 });
 assert.equal(Number.isInteger(sitFractional.calls[0].y), true, "sitOnTaskbar fractional y 不抛异常且传入整数");
 
 const sitFractionalLarge = createSitOnTaskbarHarness({ gap: 32.5, bounds: { x: 638, y: 600, width: 325, height: 250 } });
@@ -986,7 +1003,7 @@ const sitNegativeDisplay = createSitOnTaskbarHarness({
   workArea: { x: -1920, y: -100, width: 1920, height: 1080 }
 });
 sitNegativeDisplay.run();
-assertEq("sitOnTaskbar 负坐标显示器 native 坐标仍为整数", sitNegativeDisplay.calls[0], { type: "setPosition", x: -300, y: 863 });
+assertEq("sitOnTaskbar 负坐标显示器 canonical 坐标仍为整数", sitNegativeDisplay.calls[0], { type: "commitLegacyPosition", x: -300, y: 863 });
 
 const scaleSequence = createScaleHarness({ width: 260, height: 200, resizable: false });
 scaleSequence.setScale(1.25);
@@ -1023,7 +1040,7 @@ assert.doesNotMatch(dragBlock, /[+\-]\s*walk\.groundGap/, "dragSeatUpdate 不直
 // 坐标归一化保证迁移到 v2DragCommitLanding 内——仍禁止裸未归一化 native 写。
 assert.match(dragBlock, /v2DragCommitLanding\(nx, ny\)/, "dragSeatUpdate 落座/半挂写经统一 admission 门面");
 const dragLandingHelper = mainSource.slice(mainSource.indexOf("function v2DragCommitLanding"), mainSource.indexOf("function cancelFlight"));
-assert.match(dragLandingHelper, /win\.setPosition\(Math\.round\(x\), Math\.round\(y\)\)/, "admission 门面 LEGACY 分支原生坐标归一化（保证未丢失）");
+assert.match(dragLandingHelper, /commitLegacyPosition\(x, y, "drag-landing", \{ applyLayer: false \}\)/, "admission 门面 LEGACY 分支经 canonical commit");
 assert.match(dragLandingHelper, /v2Drag\.commitMove\(/, "EXTERNAL 持有时 landing 经 external commit");
 
 const groundReportStart = rendererSource.indexOf("function reportGroundGap");
@@ -1041,7 +1058,7 @@ assert.match(rendererSource, /nextGifGeometryRevision\(\);\s*requestedRenderMode
 const scaleBlock = sourceBlock(rendererSource, "function applyScale(s)", "window.petAPI.onScaleChanged", "renderer applyScale");
 assert.match(scaleBlock, /nextGifGeometryRevision\(\)/, "CSS scale 使旧 GIF geometry callback 失效");
 assert.doesNotMatch(scaleBlock, /window\.petAPI\.setSize|win\.setSize/, "renderer applyScale 不负责 BrowserWindow resize");
-assert.match(preloadSource, /setGroundGap: \(px, meta\) => ipcRenderer\.send\("pet:set-ground-gap", px, meta \|\| null\)/, "ground-gap metadata 透传");
+assert.match(preloadSource, /setGroundGap: \(px, meta\) => ipcRenderer\.send\("pet:set-ground-gap", px, meta \|\| null, bodyDocumentIdentity\)/, "ground-gap metadata 透传与 body identity");
 
 // 9) mutation matrix：所有 mutation 只在内存 source 上执行，必须被精确 block 断言抓红。
 function mutateBlock(source, startMarker, endMarker, mutate) {
@@ -1077,8 +1094,8 @@ const removeSitPositionNormalization = (block) => block.replace(
   "  const targetY = renderModeMod.groundAlign(b, wa, groundGap).y || 0;\n",
   "  const targetY = calculatedY;\n"
 );
-const removeOutOfScreenNormalization = (block) => block.replace("win.setPosition(b.x, Math.round(groundY));", "win.setPosition(b.x, groundY);");
-const removeDragPositionNormalization = (block) => block.replace("win.setPosition(Math.round(nx), Math.round(ny));", "win.setPosition(nx, ny);");
+const removeOutOfScreenNormalization = (block) => block.replace("commitLegacyPosition(b.x, Math.round(groundY), \"out-of-screen-y\");", "commitLegacyPosition(b.x, groundY, \"out-of-screen-y\");");
+const removeDragPositionNormalization = (block) => block.split("v2DragCommitLanding(nx, ny)").join("win.setPosition(nx, ny)");
 
 expectMutationToFail("MUT-A", (source) => mutateBlock(source, 'ipcMain.on("pet:set-size"', 'ipcMain.handle("pet:tts-clone"', moveSetSizeCaptureAfterSetSize), assertSetSizeWiring);
 expectMutationToFail("MUT-B", (source) => mutateBlock(source, 'ipcMain.on("pet:set-size"', 'ipcMain.handle("pet:tts-clone"', removeSetSizeCapture), assertSetSizeWiring);
@@ -1128,7 +1145,7 @@ function createWalkEngineFixture({ skinHasSit = true, random = 0.99, walking = t
   const walk = { active: false, paused: false, dragPaused: false, chatPaused: false, zoomPaused: false, sleeping: false, face: 1, resting: true, perched: false, iconRest: false, iconTarget: false, seated: false, groundGap: 24, charInset: 0, edgeLeft: false, uiEdgeCompact: false, sunk: false, gotoPerch: false, returning: false, freeStand: false, pausedAt: 0, flight: null, jump: null, timer: null, phaseTimer: null };
   const api = new Function(
     "walk", "skinHasSit", "config", "win", "screen", "walkGeo", "applySeatPosition", "walkBroadcast", "walkSchedulePhase",
-    "applyLayer", "logTts", "randInt", "setInterval", "clearInterval", "clearTimeout", "walkTick", "cancelFlight", "cancelWalkJump", "enterRestPose", "WALK_TICK_MS", "Math",
+    "applyLayer", "logTts", "randInt", "setInterval", "clearInterval", "clearTimeout", "walkTick", "cancelFlight", "cancelWalkJump", "enterRestPose", "setBodyPosture", "WALK_TICK_MS", "Math",
     `${sourceBlock(mainSource, "function startWalkingEngine", "/* 行走状态变化诊断", "walkEngine")}; return { startWalkingEngine, stopWalkingEngine, syncWalkingEngine };`
   )(
     walk, skinHasSit,
@@ -1138,7 +1155,7 @@ function createWalkEngineFixture({ skinHasSit = true, random = 0.99, walking = t
     () => {},
     () => broadcasts.push({ active: walk.active, resting: walk.resting, seated: walk.seated, face: walk.face, paused: walk.paused, sleeping: walk.sleeping, perched: walk.perched }),
     () => {}, () => {},
-    (tag, msg) => logs.push(msg), () => 9000, () => 555, () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, 40,
+    (tag, msg) => logs.push(msg), () => 9000, () => 555, () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, (patch) => Object.assign(walk, patch), 40,
     { random: () => random }
   );
   return { api, walk, broadcasts, logs };
@@ -1220,7 +1237,7 @@ function createDragSeatFixture({ x = 100, y = 768, seated = true, layer = "alway
   };
   const api = new Function(
     "win", "walk", "config", "screen", "walkGeo", "renderModeMod", "effectiveSeatSink", "desktopIconMode", "desktopIconCache",
-    "walkSetPosition", "walkBroadcast", "applyLayer", "walkSchedulePhase", "clearTimeout", "randInt", "walkMinX", "PET_LOCAL_X", "gifVisualGroundGap", "v2DragCommitLanding",
+    "walkSetPosition", "walkBroadcast", "applyLayer", "walkSchedulePhase", "clearTimeout", "randInt", "walkMinX", "PET_LOCAL_X", "gifVisualGroundGap", "v2DragCommitLanding", "setBodyPosture", "commitLegacyPosition",
     `${/* 本夹具只测 seat 落位几何，不测 transition：注入恒零 seatExit 上下文（applySeatPosition 的 offset 层自然短路） */ ""}
      let seatExit = null; const seatExitOffsetY = () => 0;
      ${sourceBlock(mainSource, "function dragSeatUpdate", "/* ---------- 桌面行走 v2", "dragSeatUpdate")};
@@ -1239,7 +1256,9 @@ function createDragSeatFixture({ x = 100, y = 768, seated = true, layer = "alway
     () => broadcasts.push({ seated: walk.seated, resting: walk.resting }),
     () => {}, () => {}, () => {}, () => 7000, () => 0, 138, 0,
     // Closure 门面：本夹具无 drag session（LEGACY）→ 语义即归一化裸 setPosition（与真 helper LEGACY 分支一致）
-    (x, y) => { const px = Math.round(x), py = Math.round(y); bounds.x = px; bounds.y = py; posWrites.push({ x: px, y: py, via: "landing" }); return true; }
+    (x, y) => { const px = Math.round(x), py = Math.round(y); bounds.x = px; bounds.y = py; posWrites.push({ x: px, y: py, via: "landing" }); return true; },
+    (patch) => Object.assign(walk, patch),
+    (x, y) => { const px = Math.round(x), py = Math.round(y); bounds.x = px; bounds.y = py; posWrites.push({ x: px, y: py, via: "commit" }); return { ok: true }; }
   );
   return { api, walk, bounds, posWrites, broadcasts };
 }
@@ -1255,7 +1274,7 @@ function createWalkPauseFixture(opts = {}) {
   const bc = [];
   const handler = new Function(
     "walk", "win", "dragSeatUpdate", "desktopIconMode", "clearDragPause", "cancelFlight", "cancelWalkJump",
-    "maybePersonify", "walkBroadcast", "walkSchedulePhase", "clearTimeout", "randInt",
+    "maybePersonify", "walkBroadcast", "walkSchedulePhase", "clearTimeout", "randInt", "isCurrentBodyMutation",
     `let __h = null; const ipcMain = { on: (ch, fn) => { __h = fn; } };
      ${sourceBlock(mainSource, 'ipcMain.on("pet:walking-pause"', 'ipcMain.on("pet:throw"', "walking-pause handler")};
      return __h;`
@@ -1267,7 +1286,7 @@ function createWalkPauseFixture(opts = {}) {
     () => { seat.walk.dragPaused = false; if (!chatPaused && !zoomPaused) seat.walk.pausedAt = 0; seat.walk.paused = seat.walk.chatPaused || seat.walk.zoomPaused; },
     () => {}, () => {}, () => {},
     () => bc.push({ seated: seat.walk.seated, paused: seat.walk.paused }),
-    () => {}, () => {}, () => 7000
+    () => {}, () => {}, () => 7000, () => true
   );
   return { handler, seat, walk: seat.walk, bounds: seat.bounds, posWrites: seat.posWrites, seatCalls, bc };
 }
@@ -1310,20 +1329,20 @@ function createWalkPauseFixture(opts = {}) {
   assertEq("SEAT-A 暂停已清", f.walk.dragPaused, false);
   assertEq("SEAT-A 恢复广播发生", f.bc.length >= 1, true);
 }
-{ // B：source="interact"（poke resume 经 preload 契约后的真实值）→ clear 正常、定格零调用
+{ // B：source="interact"（poke resume 经 preload 契约后的真实值）→ 不得触碰 drag lease/session
   const f = createWalkPauseFixture({ dragPaused: true });
   f.handler({}, false, "interact");
   assertEq("SEAT-B interact resume 不重放 final 定格", f.seatCalls.length, 0);
-  assertEq("SEAT-B interact resume 仍清 dragPaused", f.walk.dragPaused, false);
-  assertEq("SEAT-B interact resume 仍恢复 walk.paused", f.walk.paused, false);
-  assertEq("SEAT-B interact resume 仍广播恢复", f.bc.length >= 1, true);
+  assertEq("SEAT-B interact resume 保留 dragPaused", f.walk.dragPaused, true);
+  assertEq("SEAT-B interact resume 保留 walk.paused", f.walk.paused, true);
+  assertEq("SEAT-B interact resume 不广播恢复", f.bc.length, 0);
 }
 { // B'：防御层——任何未知/缺失 source 都不得触发定格（preload "drag" 归一化被 renderer 显式源绕过后的最后保障）
   for (const s of [undefined, null, "", "something-else"]) {
     const f = createWalkPauseFixture({ dragPaused: true });
     f.handler({}, false, s);
     assertEq("SEAT-B' 未知 source 永不定格 s=" + JSON.stringify(s), f.seatCalls.length, 0);
-    assertEq("SEAT-B' 未知 source 仍清暂停 s=" + JSON.stringify(s), f.walk.dragPaused, false);
+    assertEq("SEAT-B' 未知 source 保留暂停 s=" + JSON.stringify(s), f.walk.dragPaused, true);
   }
 }
 { // C：source="zoom" → 不触发定格
@@ -1364,22 +1383,23 @@ function assertWalkPauseDragGateWiring(source = mainSource) {
   const block = sourceBlock(source, 'ipcMain.on("pet:walking-pause"', 'ipcMain.on("pet:throw"', "assertWalkPauseDragGateWiring");
   assert.match(block, /if \(source === "drag"\) \{[\s\S]{0,80}const sat = dragSeatUpdate\(true\);/, "final 定格只由真实 drag resume 触发");
   assert.equal((block.match(/dragSeatUpdate\(true\)/g) || []).length, 1, "handler 内 dragSeatUpdate(true) 单一调用点");
-  assert.match(block, /\} else if \(!p\) \{[\s\S]{0,240}clearDragPause\("walking-pause", false\);/, "非 zoom 恢复（含 interact/drag）仍走 clearDragPause（暂停解除不受定格门控影响；State Core 先按 leaseId 释放 drag lease）");
+  assert.match(block, /\} else if \(!p\) \{\s*if \(source !== "drag"\) return;[\s\S]{0,520}const released = v2StateCore\.pause\.release\("drag"/, "仅真实 drag 且 lease release 成功后才进入恢复路径");
+  assert.match(block, /if \(!released \|\| !released\.ok\) return;/, "失配或已撤销 lease 早退，不清 session");
 }
 assertWalkPauseDragGateWiring();
 assert.doesNotMatch(mainSource, /final && seated && magnet !== "icon" && !freeDragMode/, "v1 的 final&&seated 收口块已撤销：dragSeatUpdate 几何语义回归 HEAD");
 
 /* preload/renderer 契约层（v1 测试盲区：undefined source 被 preload 归一化成 "drag"） */
 function assertPokeInteractWiring(rendererSrc = rendererSource, preloadSrc = preloadSource) {
-  assert.match(preloadSrc, /walkingPause: \(b, source, interactionId\) => ipcRenderer\.send\("pet:walking-pause", !!b, source \|\| "drag", interactionId === undefined \? null : interactionId\)/, "preload 契约：无 source 归一化为 \"drag\" + interactionId lease 身份透传（State Core）");
-  assert.match(rendererSrc, /pokeResumeTimer = setTimeout\(\(\) => \{ if \(!dragState\) window\.petAPI\.walkingPause\(false, "interact"\); \}, 2600\);/, "poke/单击互动 resume 显式 source=\"interact\"（不得退回无 source）");
+  assert.match(preloadSrc, /walkingPause: \(b, source, interactionId\) => ipcRenderer\.send\("pet:walking-pause", !!b, source \|\| "drag", interactionId === undefined \? null : interactionId, bodyDocumentIdentity\)/, "preload 契约：source、interactionId 与 body identity 透传（State Core）");
+  assert.match(rendererSrc, /pokeResumeTimer = setTimeout\(\(\) => \{\s*if \(!dragState && activeRenderMode === "spine"\) reconcileSpineAnimation\("interact-end"\);\s*\}, 2600\);/, "poke/单击互动只做 body-local 视觉收尾，不发送匿名 release");
   assert.doesNotMatch(rendererSrc, /walkingPause\(false\)[;,)]/, "renderer 不再存在任何无 source 的 walkingPause(false) 调用");
 }
 assertPokeInteractWiring();
 
 expectMutationToFail("MUT-S", (source) => mutateBlock(source, 'ipcMain.on("pet:walking-pause"', 'ipcMain.on("pet:throw"',
   (block) => block.replace('if (source === "drag") {', "if (true) {")), assertWalkPauseDragGateWiring);
-expectMutationToFail("MUT-T", () => rendererSource.replace('walkingPause(false, "interact")', "walkingPause(false)"),
+expectMutationToFail("MUT-T", () => rendererSource.replace('reconcileSpineAnimation("interact-end")', 'walkingPause(false)'),
   (mutatedRenderer) => assertPokeInteractWiring(mutatedRenderer, preloadSource));
 
 /* ========== EDGE-C：EDGEDIAG turnId/量化字段的主进程侧契约（本探针轮未触碰 TDZ/时序/防抖的锁） ========== */
@@ -1409,11 +1429,12 @@ function createSeatExitFixture({ y = 768, x = 100, height = 300, width = 260, ga
   const logs = [];
   const walk = { groundGap: gap, seated: false, sleeping, paused: false, dragPaused: false };
   const win = { isDestroyed: () => false, getBounds: () => ({ ...bounds }), setPosition: (px, py) => { bounds.x = px; bounds.y = py; posWrites.push({ x: px, y: py }); } };
-  const api = new Function("win", "walk", "walkGeo", "screen", "config", "EDGE_DIAG", "logTts",
+  const api = new Function("win", "walk", "walkGeo", "screen", "config", "EDGE_DIAG", "logTts", "commitLegacyPosition",
     `${sourceBlock(mainSource, "const SEAT_EXIT_MS = 200;", "const WALK_SPEED = 1.2;", "seatExit block")}; return __seatExitTestHook;`)(
     win, walk,
     { workAreaOf: () => ({ x: 0, y: 0, width: 1920, height: 1040 }), groundLine: (wa, h, g) => wa.y + wa.height + (g || 0) - h },
-    {}, { getConfig: () => ({ walk: { sleepLift } }) }, edgeDiag, (ev, msg) => logs.push(`${ev} ${msg}`));
+    {}, { getConfig: () => ({ walk: { sleepLift } }) }, edgeDiag, (ev, msg) => logs.push(`${ev} ${msg}`),
+    (px, py) => { bounds.x = Math.round(px); bounds.y = Math.round(py); posWrites.push({ x: bounds.x, y: bounds.y }); return { ok: true }; });
   return { api, bounds, posWrites, logs, walk };
 }
 
@@ -1518,17 +1539,20 @@ for (const [height, gap, lift] of [[300, 0, 0], [300, 0, 0.1], [420, 7, 0.15]]) 
     walkGeo: { workAreaOf: () => area, groundLine: G.groundLine },
     ipcMain: { on: (_name, fn) => { sleepingHandler = fn; } },
     cancelFlight() {}, cancelWalkJump() {}, applySeatPosition() {}, walkBroadcast() {},
-    transitionSleep: () => null, maybePersonify() {}, logTts() {},
+    transitionSleep: () => null, maybePersonify() {}, logTts() {}, isCurrentBodyMutation: () => true,
+    setSleepTruth: (v) => { context.walk.sleeping = !!v; },
+    setBodyPosture: (patch) => Object.assign(context.walk, patch),
+    commitLegacyPosition: (x, y) => { bounds.x = Math.round(x); bounds.y = Math.round(y); writes.push(bounds.y); return { ok: true }; },
     setTimeout() { throw new Error("No new timer allowed"); },
     setInterval() { throw new Error("No new timer allowed"); }
   });
   vm.runInContext(sourceBlock(mainSource, "const SEAT_EXIT_MS = 200;", "const WALK_SPEED = 1.2;", "Phase1"), context);
   vm.runInContext(sourceBlock(mainSource, 'ipcMain.on("pet:set-sleeping",', 'ipcMain.on("pet:set-has-sit",', "sleep IPC"), context);
-  sleepingHandler(null, true);
+  sleepingHandler({}, true, {});
   const started = vm.runInContext("({ startTs: seatExit.startTs, durationMs: seatExit.durationMs })", context);
   now += 70; vm.runInContext('seatExitStep("sleepTick")', context);
   const mid = bounds.y;
-  sleepingHandler(null, false);
+  sleepingHandler({}, false, {});
   assert.ok(Math.abs(bounds.y - mid) <= 1, "Wake cannot jump to standY while offset is active");
   assert.equal(vm.runInContext("seatExit.startTs", context), started.startTs);
   assert.equal(vm.runInContext("seatExit.durationMs", context), started.durationMs);
@@ -1544,7 +1568,7 @@ for (const [height, gap, lift] of [[300, 0, 0], [300, 0, 0.1], [420, 7, 0.15]]) 
   const yWake0 = stand - Math.round(height * liftRatio);
   const wWake0 = writes.length;
   bounds.y = yWake0; context.walk.sleeping = true;
-  sleepingHandler(null, false);
+  sleepingHandler({}, false, {});
   assert.equal(bounds.y, stand, "FAST-15a：无 active transition 的 wake 落点=standY（现行为保持）");
   assert.equal(writes.length, wWake0 + (yWake0 !== stand ? 1 : 0), "FAST-15b：单帧一次写入（lift=0 时已在目标线，零写入）");
   assert.equal(stand - yWake0, Math.round(height * liftRatio), `FAST-15c：已知 wake 跳幅=liftPx=${Math.round(height * liftRatio)}（向上回地面线）`);

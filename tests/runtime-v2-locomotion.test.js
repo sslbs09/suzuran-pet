@@ -107,9 +107,10 @@ test("C+N: V2 持有期间，真实生产 walkSetPosition 块被 ownership 明�
   let nativeWrites = 0;
   const fakeWin = { isDestroyed: () => false, setPosition: () => { nativeWrites += 1; } };
   const walkSetPosition = new Function(
-    "win", "logTts", "applyLayerThrottled", "shadowBridge", "v2Locomotion",
+    "win", "logTts", "applyLayerThrottled", "shadowBridge", "v2Locomotion", "commitLegacyPosition",
     `${block}; return walkSetPosition;`
-  )(fakeWin, () => {}, () => {}, null, v2Locomotion);
+  )(fakeWin, () => {}, () => {}, null, v2Locomotion,
+    (x, y) => { const r = w.authority.positionAdmit("legacy"); if (!r.ok) return r; fakeWin.setPosition(x, y); return { ok: true }; });
   w.begin(); // V2 持有
   assert.equal(walkSetPosition(700, 600, "walkTick"), false, "legacy writer 被真实拒绝（不是碰巧没调用）");
   assert.equal(nativeWrites, 0);
@@ -267,7 +268,7 @@ test("L: direction/duration 全由 V1 传入；controller 无任何 Math.random�
 test("A: gate OFF——零 V2 运行时对象、所有 bypass 点 typeof 守卫、V1 路径完整保留", () => {
   assert.match(mainSource, /const RUNTIME_V2_LOCOMOTION_ENABLED = runtimeV2Module\.locomotionGateEnabled\(\);/);
   const v2IndexSource = fs.readFileSync(require.resolve("../src/runtime-v2/index.js"), "utf8");
-  assert.match(v2IndexSource, /SUSSURRO_RUNTIME_V2_LOCOMOTION === "1"/, "gate：env='1' 显式开启，默认 OFF");
+  assert.match(v2IndexSource, /SUSSURRO_RUNTIME_V2_LOCOMOTION !== "0"/, "gate：默认 ON，仅显式 env='0' 兼容降级");
   assert.match(mainSource, /const v2Geo = RUNTIME_V2_LOCOMOTION_ENABLED \? \{/);
   assert.match(mainSource, /const v2Authority = RUNTIME_V2_LOCOMOTION_ENABLED \? runtimeV2Module\.createMotionAuthority\(\) : null;/);
   assert.match(mainSource, /const v2Commit = RUNTIME_V2_LOCOMOTION_ENABLED \? runtimeV2Module\.createWindowCommit\(\{/);
@@ -285,7 +286,7 @@ test("A: gate OFF——零 V2 运行时对象、所有 bypass 点 typeof 守卫�
   assert.match(mainSource, /if \(typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion\.deniesLegacy\("seatExitStep"\)\) return;/);
   assert.match(mainSource, /const v2Take = typeof v2CanEnterSlice === "function" \? v2CanEnterSlice\(\) : \{ ok: false, reason: "gate-off" \};/);
   assert.match(mainSource, /if \(v2Take\.ok\) \{[\s\S]{0,160}walk\.dir = Math\.random\(\) < 0\.5 \? -1 : 1;[\s\S]{0,140}beginEpisode[\s\S]{0,80}if \(v2Res\.ok\) return;/, "方向/时长由 V1 选定；接管失败无缝回 V1");
-  assert.match(mainSource, /armSeatExit\("move", "phase"\);[\s\S]{0,60}walk\.seated = false;/, "V1 原 stand-beat 路径完整保留（fallback）");
+  assert.match(mainSource, /armSeatExit\("move", "phase"\);[\s\S]{0,100}setBodyPosture\(\{ seated: false/, "V1 原 stand-beat 路径完整保留（fallback）");
 });
 
 /* ---------------- 真实 V1 函数块 × V2：applySeatPosition deny ---------------- */
@@ -303,12 +304,13 @@ test("applySeatPosition 生产块：V2 持有时不写窗口；释放后照常",
   let layerCalls = 0;
   const applySeatPosition = new Function(
     "win", "config", "walk", "walkGeo", "screen", "effectiveSeatSink", "seatExitOffsetY", "applyLayer",
-    "shadowBridge", "v2Locomotion",
+    "shadowBridge", "v2Locomotion", "commitLegacyPosition",
     `let seatExit = null;
      ${block}; return applySeatPosition;`
   )(fakeWin, { getConfig: () => ({ renderMode: "spine" }) }, { groundGap: 10, seated: true, sunk: false, active: true },
     { workAreaOf: () => ({ x: 0, y: 0, width: 1536, height: 864 }) }, {}, () => 30, () => 0, () => { layerCalls += 1; },
-    null, v2Locomotion);
+    null, v2Locomotion,
+    (x, y) => { const r = w.authority.positionAdmit("legacy"); if (!r.ok) return r; fakeWin.setPosition(x, y); return { ok: true }; });
   applySeatPosition(); // LEGACY：正常锚定
   assert.equal(native, 1);
   w.begin(); // V2 持有

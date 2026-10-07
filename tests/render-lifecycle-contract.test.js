@@ -34,7 +34,7 @@ function wait(ms = 10) {
 
 function createPetLifecycleHarness(opts = {}) {
   const handlers = {};
-  const calls = { sizes: [], clickable: [], playback: [], outcomes: [], outcomeVis: [], corrections: [], fetches: 0 };
+  const calls = { sizes: [], clickable: [], playback: [], outcomes: [], outcomeVis: [], corrections: [], bodyReadies: [], asks: [], stops: [], regenerates: [], walkingPauses: [], regenerateResult: true, fetches: 0 };
   const elements = new Map();
   let sampleAlpha = 255; // T11：置 0 可造“永不产生有效轮廓”的异常模型（sample 恒 null → 无 TARGET）
   const nativeSetTimeout = setTimeout;
@@ -334,9 +334,12 @@ function createPetLifecycleHarness(opts = {}) {
     speechDiag: !!(opts && opts.speechDiag), // SPEECHDIAG：默认关（=生产路径）；SPEECH-D 用例传 {speechDiag:true} 开启
     seatExitForensic: !!(opts && opts.seatExitForensic), // E1：默认关；ON 只收集 bounded 只读记录
     standBeatPose: !!(opts && opts.standBeatPose), // E2：仅允许带 stand intent 的窄 pose admission
-    setGroundGap() {}, setCharInset() {}, setHasSit() {}, setSleeping() {}, walkingEngineStop() {},
-    walkingPause() {}, moveWindow() {}, hideWindow() {}, reloadRenderer() {}, pat() {}, throwPet() {},
-    ask: async () => {}, getAppearance: async () => null, getInfo: async () => ({})
+    setGroundGap() {}, setCharInset() {}, setHasSit() {}, setSleeping() {}, bodyReady(meta) { calls.bodyReadies.push(meta || null); }, walkingEngineStop() {},
+    ask: async (text, id) => { calls.asks.push({ text, id }); },
+    stop: (id) => { calls.stops.push(id); },
+    regenerate: (id) => { calls.regenerates.push(id); return calls.regenerateResult; },
+    walkingPause: (...args) => { calls.walkingPauses.push(args); }, moveWindow() {}, hideWindow() {}, reloadRenderer() {}, pat() {}, throwPet() {},
+    getAppearance: async () => null, getInfo: async () => ({})
   }, {
     get(target, property) {
       if (property in target) return target[property];
@@ -2762,7 +2765,7 @@ test("T3-D: 非 locomotion 场景 mood 语义零回归（active=false 允许 Def
   assert.equal(track0(sleep).animation.name, "Sleepd", "睡眠边沿真实动画照常上轨");
   sleep.lifecycle.setMood("温柔");
   await wait(8);
-  assert.equal(track0(sleep).animation.name, "Default", "sleeping 不在 locomotion 生命周期：mood 旧语义完整保留");
+  assert.equal(track0(sleep).animation.name, "Sleepd", "canonical sleeping projection must resist ordinary mood animation");
 });
 
 test("T3-E-contract: 判据结构与 T2/seat 未侵入锁定", () => {
@@ -3899,3 +3902,133 @@ test("Phase 6-D.3: renderer 只消费快照阈值，非法快照一律回落 300
 });
 
 console.log("render lifecycle contract 全部通过");
+
+test("M1 renderer chat callbacks reject stale task ids and delayed completion", async () => {
+  const h = createPetLifecycleHarness();
+  await wait(120);
+  h.lifecycle.setMoods([{ name: "idle", emotion: "" }, { name: "think", emotion: "" }, { name: "happy", emotion: "happy" }]);
+  const thinking = h.handlers.onThinking;
+  const chunk = h.handlers.onChunk;
+  const done = h.handlers.onDone;
+  const error = h.handlers.onError;
+  const stopped = h.handlers.onStopped;
+  h.sandbox.ErrorPresent = { presentError: () => "error" };
+  h.sandbox.window.ErrorPresent = h.sandbox.ErrorPresent;
+  const taskA = vm.runInNewContext("beginChatTask()", h.sandbox);
+  thinking({ id: taskA, mode: "chat" });
+  chunk({ id: taskA, mode: "chat", text: "A" });
+  thinking({ id: "task-b", mode: "chat" });
+  assert.equal(vm.runInNewContext("chatTaskId", h.sandbox), taskA);
+  done({ id: "task-b", mode: "zcode", full: "stale" });
+  assert.equal(vm.runInNewContext("busy", h.sandbox), true);
+  done({ id: taskA, mode: "zcode", full: "A" });
+  assert.equal(vm.runInNewContext("busy", h.sandbox), false);
+  const taskB = vm.runInNewContext("beginChatTask()", h.sandbox);
+  thinking({ id: taskB, mode: "chat" });
+  stopped({ id: taskA });
+  assert.equal(vm.runInNewContext("busy", h.sandbox), true);
+  error({ id: taskA, message: "stale" });
+  assert.equal(vm.runInNewContext("busy", h.sandbox), true);
+  done({ id: taskB, mode: "zcode", full: "B" });
+  assert.equal(vm.runInNewContext("busy", h.sandbox), false);
+  const taskC = vm.runInNewContext("beginChatTask()", h.sandbox);
+  thinking({ id: taskC, mode: "chat" });
+  assert.equal(vm.runInNewContext("chatTaskId", h.sandbox), taskC);
+  assert.equal(vm.runInNewContext("lastMood", h.sandbox), "think");
+  await wait(80);
+  assert.equal(vm.runInNewContext("lastMood", h.sandbox), "think",
+    "late completion mood reset must not clear a newer task mood");
+  error({ id: taskC, message: "current", code: "CURRENT" });
+  assert.equal(vm.runInNewContext("busy", h.sandbox), false);
+  const taskD = vm.runInNewContext("beginChatTask()", h.sandbox);
+  thinking({ id: taskD, mode: "chat" });
+  stopped({ id: taskC });
+  assert.equal(vm.runInNewContext("busy", h.sandbox), true);
+  stopped({ id: taskD });
+  assert.equal(vm.runInNewContext("busy", h.sandbox), false);
+});
+
+test("M1 renderer applies accepted sleep projection in GIF mode and reports current owner metadata", async () => {
+  const h = createPetLifecycleHarness();
+  await wait(30);
+  const walking = h.handlers.onWalking;
+  assert.equal(typeof walking, "function");
+  walking({ active: false, resting: true, seated: false, perched: false, paused: false, sleeping: true, face: 1 });
+  assert.equal(vm.runInNewContext("isSleeping", h.sandbox), true);
+  walking({ active: false, resting: true, seated: false, perched: false, paused: false, sleeping: false, face: 1 });
+  assert.equal(vm.runInNewContext("isSleeping", h.sandbox), false);
+  assert.ok(h.calls.bodyReadies.every((m) => m === null || m.usable === true));
+});
+
+test("M1 renderer keeps GIF sleep projection across ordinary moods until accepted wake", async () => {
+  const h = createPetLifecycleHarness();
+  await wait(120);
+  h.lifecycle.setMoods([{ name: "idle", emotion: "" }, { name: "sleep", emotion: "" }, { name: "happy", emotion: "happy" }]);
+  h.handlers.onWalking({ active: false, resting: true, seated: false, perched: false, paused: false, sleeping: true, face: 1 });
+  assert.equal(vm.runInNewContext("isSleeping", h.sandbox), true);
+  h.lifecycle.setMood("idle");
+  h.lifecycle.setMood("happy");
+  assert.equal(vm.runInNewContext("isSleeping", h.sandbox), true);
+  assert.equal(vm.runInNewContext("lastMood", h.sandbox), "sleep");
+  h.handlers.onWalking({ active: false, resting: false, seated: false, perched: false, paused: false, sleeping: false, face: 1 });
+  assert.equal(vm.runInNewContext("isSleeping", h.sandbox), false);
+  h.lifecycle.setMood("idle");
+  assert.equal(vm.runInNewContext("lastMood", h.sandbox), "idle");
+});
+
+test("M1 renderer request owner covers sendText early done/error, stop, and regenerate", async () => {
+  const h = createPetLifecycleHarness();
+  await wait(120);
+  h.lifecycle.setMoods([{ name: "idle", emotion: "" }, { name: "think", emotion: "" }, { name: "happy", emotion: "happy" }]);
+  vm.runInNewContext("agreed = true", h.sandbox);
+  h.sandbox.ErrorPresent = { presentError: () => "error" };
+  h.sandbox.window.ErrorPresent = h.sandbox.ErrorPresent;
+  const p1 = h.sandbox.sendText("quick");
+  const id1 = h.calls.asks.at(-1).id;
+  assert.ok(id1);
+  h.handlers.onDone({ id: id1, mode: "zcode", full: "quick" });
+  await p1;
+  assert.equal(vm.runInNewContext("busy", h.sandbox), false);
+
+  const p2 = h.sandbox.sendText("error");
+  const id2 = h.calls.asks.at(-1).id;
+  h.handlers.onError({ id: id2, code: "CURRENT", message: "error" });
+  await p2;
+  assert.equal(vm.runInNewContext("busy", h.sandbox), false);
+
+  const p3 = h.sandbox.sendText("stop");
+  const id3 = h.calls.asks.at(-1).id;
+  h.handlers.onStopped({ id: "old" });
+  assert.equal(vm.runInNewContext("busy", h.sandbox), true);
+  h.handlers.onStopped({ id: id3 });
+  await p3;
+  assert.equal(vm.runInNewContext("busy", h.sandbox), false);
+
+  h.elements.get("swipe-regen").dispatchEvent({ type: "click" });
+  const regenId = h.calls.regenerates.at(-1);
+  assert.ok(regenId);
+  assert.equal(vm.runInNewContext("chatTaskId", h.sandbox), regenId);
+  h.handlers.onDone({ id: regenId, mode: "zcode", full: "regen" });
+  assert.equal(vm.runInNewContext("busy", h.sandbox), false);
+
+  h.calls.regenerateResult = null;
+  h.elements.get("swipe-regen").dispatchEvent({ type: "click" });
+  await wait(0);
+  assert.equal(vm.runInNewContext("busy", h.sandbox), false,
+    "rejected/null regenerate must release only its captured owner");
+});
+
+test("M1 renderer zoom lease uses a per-document stable id and releases the captured id", async () => {
+  const h = createPetLifecycleHarness();
+  await wait(120);
+  const zoom = h.elements.get("btn-zoom");
+  zoom.dispatchEvent({ type: "click" });
+  const first = h.calls.walkingPauses.at(-1);
+  assert.ok(first && first[2], "zoom admission must carry an interaction id");
+  zoom.dispatchEvent({ type: "click" });
+  const release = h.calls.walkingPauses.at(-1);
+  assert.equal(release[2], first[2], "zoom release must use the captured lease id");
+  zoom.dispatchEvent({ type: "click" });
+  const second = h.calls.walkingPauses.at(-1);
+  assert.ok(second[2] && second[2] !== first[2], "reopened zoom must receive a fresh per-document id");
+});
