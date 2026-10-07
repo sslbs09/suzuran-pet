@@ -132,6 +132,13 @@ function makeHarness(options = {}) {
     chatClient,
     maybeWorkflowComment: () => { state.wakeCalls++; },
     errorFacts: ERROR_FACTS,
+    // M2：通用动作协议的纯模块 + 运行期幂等窗口（每个 harness 实例一个全新
+    // store，测试彼此隔离；生产 main.js 用同名模块作用域单例）。纯模块无 I/O，
+    // 与生产 require 的是同一份代码。
+    actionProtocol: require("../src/action-protocol.js"),
+    buildBodyCapabilities: require("../src/body-capabilities.js").buildBodyCapabilities,
+    findSupportedAction: require("../src/body-capabilities.js").findSupportedAction,
+    agentActionStore: require("../src/action-idempotency.js").createIntentIdempotencyStore(),
     // Phase 10-B：/speak 直显入口的内部说话路径（main.js 模块作用域函数，区段外定义 → 测试内注入）
     sendProactive: (text, emotion, opts) => {
       state.speakCalls.push({ text, emotion, opts });
@@ -420,5 +427,200 @@ test("/speak requires auth and rejects empty text", async () => {
     assert.equal(empty.status, 400);
     assert.deepEqual(empty.json, { ok: false, error: "text 不能为空", code: "HTTP_ERROR", meta: { status: 400 } });
     assert.equal(h.state.speakCalls.length, 0);
+  });
+});
+
+/* ================= M2 Foundation：通用动作协议路由契约 ================= */
+
+const M2_ACTION = (over = {}) => ({ protocolVersion: 1, intentId: "i-001", actionType: "speak", payload: { text: "博士，你好" }, ...over });
+const m2Speak = (port, body, extra = {}) =>
+  request(port, { method: "POST", pathname: "/actions", headers: { "Content-Type": "application/json" }, body, ...extra });
+
+test("M2 T1/T2/T3: GET /capabilities reports the honest v1 descriptor (speak ack-only, non-interruptible)", async () => {
+  await withHarness({}, async (_h, port) => {
+    const r = await request(port, { pathname: "/capabilities" });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.json, {
+      protocolVersion: 1,
+      bodyImplementationId: "suzuran-desktop-agent-v0.1",
+      supportedActions: [{ type: "speak", feedbackMode: "ack-only", interruptible: false, idempotency: "supported" }]
+    });
+    // 与既有 GET 路由同一鉴权口径（master 存在则要求 Bearer），方法钉死 GET
+    const noAuth = await request(port, { pathname: "/capabilities", token: null });
+    assert.equal(noAuth.status, 401);
+    const wrongMethod = await request(port, { method: "POST", pathname: "/capabilities", headers: { "Content-Type": "application/json" }, body: {} });
+    assert.equal(wrongMethod.status, 405);
+  });
+});
+
+test("M2 T5/T10: /actions speak dispatches through the single speak gate and answers accepted - never completed", async () => {
+  await withHarness({}, async (h, port) => {
+    const r = await m2Speak(port, M2_ACTION());
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.json, {
+      ok: true, protocolVersion: 1, intentId: "i-001", actionType: "speak",
+      result: "accepted", dispatched: true, feedbackMode: "ack-only"
+    });
+    assert.equal(h.state.speakCalls.length, 1);
+    assert.equal(h.state.speakCalls[0].text, "博士，你好");
+    assert.equal(h.state.speakCalls[0].opts.force, true, "force 默认沿用旧 /speak 语义（缺省即 true）");
+    // accepted 永远不等于 completed；也不走 LLM / 不写历史 / 不进队列
+    assert.notEqual(r.json.result, "completed");
+    assert.equal(h.state.calls, 0);
+    assert.equal(h.state.historyAppends.length, 0);
+    assert.equal(h.state.enqueued, 0);
+  });
+});
+
+test("M2 T9/E8: an undeclared actionType answers honest unsupported with zero dispatch", async () => {
+  await withHarness({}, async (h, port) => {
+    const r = await m2Speak(port, M2_ACTION({ actionType: "walk" }));
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.json, { ok: true, protocolVersion: 1, intentId: "i-001", actionType: "walk", result: "unsupported" });
+    assert.equal(h.state.speakCalls.length, 0);
+  });
+});
+
+test("M2: protocol envelope violations are refused 400 with structured reasons and zero side effects", async () => {
+  await withHarness({}, async (h, port) => {
+    const bads = [
+      [M2_ACTION({ protocolVersion: undefined }), "missing-protocol-version"],
+      [M2_ACTION({ protocolVersion: 2 }), "unsupported-protocol-version"],
+      [M2_ACTION({ protocolVersion: "1" }), "unsupported-protocol-version"],
+      [M2_ACTION({ intentId: "" }), "missing-intent-id"],
+      [M2_ACTION({ intentId: "x".repeat(129) }), "missing-intent-id"],
+      [M2_ACTION({ actionType: "" }), "missing-action-type"],
+      [M2_ACTION({ payload: [] }), "invalid-payload"],
+      [M2_ACTION({ payload: "raw text" }), "invalid-payload"]
+    ];
+    for (const [bad, reason] of bads) {
+      const r = await m2Speak(port, bad);
+      assert.equal(r.status, 400, JSON.stringify(bad));
+      assert.equal(r.json.ok, false);
+      assert.equal(r.json.result, "invalid-action");
+      assert.equal(r.json.reason, reason);
+    }
+    assert.equal(h.state.speakCalls.length, 0, "a refused envelope never dispatches");
+  });
+});
+
+test("M2: speak payload violations report honest 400 (no invented line), same text rules as legacy", async () => {
+  await withHarness({}, async (h, port) => {
+    const empty = await m2Speak(port, M2_ACTION({ payload: { text: "  " } }));
+    assert.equal(empty.status, 400);
+    assert.equal(empty.json.result, "invalid-payload");
+    assert.equal(empty.json.error, "text 不能为空");
+    assert.equal(h.state.speakCalls.length, 0);
+  });
+});
+
+test("M2: the line gate still owns rejection truth - reported as rejected, never faked accepted", async () => {
+  await withHarness({ speakResult: false }, async (h, port) => {
+    const r = await m2Speak(port, M2_ACTION());
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.json, {
+      ok: true, protocolVersion: 1, intentId: "i-001", actionType: "speak",
+      result: "rejected", reason: "line-gate-rejected", dispatched: false
+    });
+    assert.equal(h.state.speakCalls.length, 1);
+  });
+});
+
+test("M2 T6/E5: same intentId + same payload replay = duplicate with zero second side effect", async () => {
+  await withHarness({}, async (h, port) => {
+    const first = await m2Speak(port, M2_ACTION());
+    assert.equal(first.json.result, "accepted");
+    const replay = await m2Speak(port, M2_ACTION({ payload: { text: "博士，你好" } }));
+    assert.equal(replay.status, 200);
+    assert.deepEqual(replay.json, {
+      ok: true, protocolVersion: 1, intentId: "i-001", actionType: "speak",
+      result: "duplicate", originalResult: "accepted", dispatched: false
+    });
+    assert.equal(h.state.speakCalls.length, 1, "the replay short-circuits BEFORE the speak gate - provably no second dispatch");
+  });
+});
+
+test("M2 T7/E6: same intentId + different payload = 409 conflict, never executed as a new action", async () => {
+  await withHarness({}, async (h, port) => {
+    await m2Speak(port, M2_ACTION());
+    const conflict = await m2Speak(port, M2_ACTION({ payload: { text: "同标识换内容" } }));
+    assert.equal(conflict.status, 409);
+    assert.equal(conflict.json.result, "conflict");
+    assert.equal(h.state.speakCalls.length, 1, "a conflicting reuse must not dispatch");
+    // 冲突后原始受理记录仍完好：原样重放依旧是 duplicate
+    const replay = await m2Speak(port, M2_ACTION());
+    assert.equal(replay.json.result, "duplicate");
+  });
+});
+
+test("M2 T8/E7: different intentId + identical text is a fresh action - not killed by intent idempotency", async () => {
+  await withHarness({}, async (h, port) => {
+    await m2Speak(port, M2_ACTION({ intentId: "i-1" }));
+    const second = await m2Speak(port, M2_ACTION({ intentId: "i-2" }));
+    assert.equal(second.json.result, "accepted", "two distinct Intents with the same words are two distinct actions");
+    assert.notEqual(second.json.result, "duplicate");
+    assert.equal(h.state.speakCalls.length, 2);
+  });
+});
+
+test("M2 T17/T18/T19: interrupt targets a specific intentId; admitted speak is honestly not-interruptible; unknown is not-found", async () => {
+  await withHarness({}, async (h, port) => {
+    const interrupt = (intentId, body = { protocolVersion: 1 }, extra = {}) =>
+      request(port, { method: "POST", pathname: "/actions/" + intentId + "/interrupt", headers: { "Content-Type": "application/json" }, body, ...extra });
+
+    // 未受理过的 intentId → 明确 not-found
+    const ghost = await interrupt("never-admitted");
+    assert.equal(ghost.status, 200);
+    assert.deepEqual(ghost.json, { ok: true, protocolVersion: 1, intentId: "never-admitted", result: "not-found" });
+
+    // 受理过的 speak → 如实 not-interruptible（本 Build 无停止通道；interrupt 不伪造任何 terminal 事实）
+    await m2Speak(port, M2_ACTION());
+    const known = await interrupt("i-001");
+    assert.equal(known.status, 200);
+    assert.equal(known.json.result, "not-interruptible");
+    assert.equal(known.json.actionType, "speak");
+
+    // interrupt 也必须带 protocolVersion
+    const badEnvelope = await interrupt("i-001", {});
+    assert.equal(badEnvelope.status, 400);
+    assert.equal(badEnvelope.json.result, "invalid-action");
+
+    // unsupported 的 intentId 从未被受理 → not-found（不进入幂等窗口）
+    await m2Speak(port, M2_ACTION({ intentId: "i-walk", actionType: "walk" }));
+    const unsupportedGone = await interrupt("i-walk");
+    assert.equal(unsupportedGone.json.result, "not-found");
+
+    // 鉴权口径同其它写路由
+    const unauth = await interrupt("i-001", { protocolVersion: 1 }, { token: null });
+    assert.equal(unauth.status, 401);
+    assert.equal(h.state.speakCalls.length, 1, "interrupt never dispatches speech");
+  });
+});
+
+test("M2: /actions obeys auth + consent + content-type gates exactly like the existing write routes", async () => {
+  await withHarness({ consent: false }, async (_h, port) => {
+    const noConsent = await m2Speak(port, M2_ACTION());
+    assert.equal(noConsent.status, 403);
+    assert.deepEqual(noConsent.json, { ok: false, error: "请先同意《使用条款与隐私政策》" });
+  });
+  await withHarness({}, async (_h, port) => {
+    const noJson = await request(port, { method: "POST", pathname: "/actions", body: "protocolVersion=1" });
+    assert.equal(noJson.status, 415);
+    const wrongMethod = await request(port, { pathname: "/actions" });
+    assert.equal(wrongMethod.status, 405);
+    const unauth = await m2Speak(port, M2_ACTION(), { token: null });
+    assert.equal(unauth.status, 401);
+  });
+});
+
+test("M2 T28: the legacy /speak entry keeps its exact old contract and never grows idempotency semantics", async () => {
+  await withHarness({}, async (h, port) => {
+    const speakReq = (body) => request(port, { method: "POST", pathname: "/speak", headers: { "Content-Type": "application/json" }, body });
+    const a = await speakReq({ text: "重复的一句话" });
+    const b = await speakReq({ text: "重复的一句话" });
+    assert.deepEqual(a.json, { ok: true, dispatched: true });
+    assert.deepEqual(b.json, { ok: true, dispatched: true }, "legacy route has no intentId, so no duplicate semantics apply");
+    assert.equal(a.json.result, undefined);
+    assert.equal(h.state.speakCalls.length, 2);
   });
 });

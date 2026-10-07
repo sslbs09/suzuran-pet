@@ -112,6 +112,12 @@ function localizedFailure(error, lang) {
 }
 const { createChatOwnership } = require("./src/chat-ownership"); // 「角色进入聊天交互」的 ownership 单一权威（所有 chat ingress 共享，见下方 chatOwnership）
 const { createLineGate } = require("./src/line-gate");
+// M2 Foundation：通用 Body 动作协议（protocolVersion 1）——能力真实声明、
+// intentId 级动作幂等、信封纯校验。三者都是无 I/O 纯逻辑（可单测），
+// 角色语义绝不进入这一层；intentId 是 Core 的执行身份，Body 只透传/回显。
+const actionProtocol = require("./src/action-protocol");
+const { createIntentIdempotencyStore } = require("./src/action-idempotency");
+const { buildBodyCapabilities, findSupportedAction } = require("./src/body-capabilities");
 const { transitionSleep, createWorkflowSignalState, recordWorkflowSignal, consumeWorkflowSignal, requeueWorkflowSignal } = require("./src/dialogue-state");
 const { hashToken, safeTokenEqual, tokenMatches, sanitizeClients } = require("./src/agent-auth");
 const { createDebounceBuffer } = require("./src/message-buffer"); // 消息生成防抖缓冲（2026-08-27 提取，可单测）
@@ -170,6 +176,9 @@ let agentServer = null;
 let agentServerPort = 0;
 let agentServerState = "disabled";
 const lineGate = createLineGate();
+// M2：运行期 intentId 幂等窗口（有界 128 条 FIFO，纯内存、从不持久化——Body 不保存
+// 任何 Character 历史）。重启后窗口清空是如实的 v0.1 已知限制。
+const agentActionStore = createIntentIdempotencyStore({ maxEntries: 128 });
 const workflowSignal = createWorkflowSignalState();
 let workflowFlushTimer = null;
 let workflowPendingText = "";
@@ -1664,6 +1673,19 @@ function stopAgentApi(options = {}) {
   });
 }
 
+// /speak（兼容旧入口）与 /actions(speak) 共用的台词投递判定路径。
+// 唯一投递闸门仍是 sendProactive（窗口可见/离开/lineGate 闸门全在其中，不绕过、
+// 不复制）；本函数只做入参归一与结果分派，返回判别式结果，不直接写 HTTP 响应。
+function admitSpeakLine(requestBody) {
+  const speakText = String(requestBody.text || "").trim();
+  if (!speakText) return { outcome: "invalid", error: "text 不能为空" };
+  if (speakText.length > 500) return { outcome: "invalid", error: "text 过长（上限 500 字）" };
+  const speakEmotion = String(requestBody.emotion || "").trim() || undefined;
+  const dispatched = sendProactive(speakText, speakEmotion, { force: requestBody.force !== false });
+  if (!dispatched) return { outcome: "gate-rejected" };
+  return { outcome: "dispatched" };
+}
+
 function startAgentApi() {
   if (agentServer) return;
   const a = config.getConfig().agentApi || {};
@@ -1696,8 +1718,13 @@ function startAgentApi() {
     };
     try {
       const url = new URL(req.url || "/", "http://127.0.0.1");
-      if (url.search || !["/health", "/chat", "/stop", "/status", "/speak"].includes(url.pathname)) { send(404, { ok: false, error: "not found", ...errorFacts.codeForHttpStatus(404) }); return; }
-      const allowed = (url.pathname === "/health" || url.pathname === "/status") ? "GET" : "POST";
+      // M2: /capabilities (GET) + /actions (POST) + /actions/:intentId/interrupt (POST).
+      // interrupt carries the intentId IN THE PATH - the contract has no
+      // "stop everything" (§22); the legacy /stop chat-queue semantics stay separate.
+      const interruptMatch = url.pathname.match(/^\/actions\/([^/?]+)\/interrupt$/);
+      const isGetRoute = url.pathname === "/health" || url.pathname === "/status" || url.pathname === "/capabilities";
+      if (url.search || (!["/health", "/chat", "/stop", "/status", "/speak", "/capabilities", "/actions"].includes(url.pathname) && !interruptMatch)) { send(404, { ok: false, error: "not found", ...errorFacts.codeForHttpStatus(404) }); return; }
+      const allowed = isGetRoute ? "GET" : "POST";
       if (req.method !== allowed) { send(405, { ok: false, error: "method not allowed", ...errorFacts.codeForHttpStatus(405) }, { Allow: allowed }); return; }
       const cfg = config.getConfig();
       const apiCfg = cfg.agentApi || {};
@@ -1712,7 +1739,7 @@ function startAgentApi() {
       // 优化建议 P0：#3 写操作（/chat /stop 消耗 LLM 额度/改状态）始终要求认证——
       // 即使 master/clients 全空（如自动生成 token 失败）也不开放无认证写入；
       // /health 只读健康探测放行（供接入方探活），其余读操作维持原鉴权
-      const isWrite = url.pathname === "/chat" || url.pathname === "/stop" || url.pathname === "/speak";
+      const isWrite = url.pathname === "/chat" || url.pathname === "/stop" || url.pathname === "/speak" || url.pathname === "/actions" || !!interruptMatch;
       const needsAuth = url.pathname === "/health" ? false : (isWrite || !!master || sanitizeClients(rawClients).length > 0);
       const authOk = !!provided && (safeTokenEqual(provided, master) || clientIndex >= 0);
       if (needsAuth && !authOk) { send(401, { ok: false, error: "unauthorized", ...errorFacts.codeForHttpStatus(401) }, { "WWW-Authenticate": "Bearer" }); return; }
@@ -1744,6 +1771,13 @@ function startAgentApi() {
         });
         return;
       }
+      if (url.pathname === "/capabilities") {
+        // M2：Body 如实自报能力（当前实现：speak = ack-only 投递、不可中断、
+        // intentId 幂等 supported）。能力声明只描述本 Body 的真实行为，
+        // 不代表协议上限，也不含任何角色身份。
+        send(200, buildBodyCapabilities());
+        return;
+      }
       if (url.pathname === "/stop") {
         const cancelled = agentTaskQueue.cancelAll();
         if (agentApiAbort) agentApiAbort.abort();
@@ -1760,16 +1794,139 @@ function startAgentApi() {
       // 说话路径 sendProactive（台词闸门 → 气泡/语音/情绪）。台词闸门未放行时如实返回
       // ok:false（30s 冷却/近期重复），绝不假装已说出口。与 /chat 同受 consent 与鉴权约束。
       if (url.pathname === "/speak") {
-        const speakText = String(parsed.body.text || "").trim();
-        if (!speakText) { send(400, { ok: false, error: "text 不能为空", ...errorFacts.codeForHttpStatus(400) }); return; }
-        if (speakText.length > 500) { send(400, { ok: false, error: "text 过长（上限 500 字）", ...errorFacts.codeForHttpStatus(400) }); return; }
-        const speakEmotion = String(parsed.body.emotion || "").trim() || undefined;
-        const dispatched = sendProactive(speakText, speakEmotion, { force: parsed.body.force !== false });
-        if (!dispatched) {
+        // 兼容旧入口：响应形状逐字不变（既有契约测试深比较钉住）。
+        const legacy = admitSpeakLine(parsed.body);
+        if (legacy.outcome === "invalid") { send(400, { ok: false, error: legacy.error, ...errorFacts.codeForHttpStatus(400) }); return; }
+        if (legacy.outcome === "gate-rejected") {
           send(200, { ok: false, error: "台词闸门未放行（30s 冷却/近期重复），未下发", reason: "line-gate-rejected" });
           return;
         }
         send(200, { ok: true, dispatched: true });
+        return;
+      }
+      // ---------- M2：通用动作协议（protocolVersion 1） ----------
+      // Action Request = { protocolVersion, intentId, actionType, payload }。
+      // intentId 是 Core 铸造的执行身份：原样接收、原样回显，Body 绝不重铸；
+      // 它与 M1 的 docEpoch/bodyGeneration（文档/renderer 代次）是两套身份，互不混用。
+      // 同步响应只声明同步时点真正知道的事实（accepted/rejected/unsupported/
+      // duplicate/conflict），永不把「已投递」说成「已完成」（§12）。
+      if (url.pathname === "/actions") {
+        const act = actionProtocol.validateActionRequest(parsed.body);
+        if (!act.ok) {
+          send(400, { ok: false, error: act.error, result: "invalid-action", reason: act.reason, ...errorFacts.codeForHttpStatus(400) });
+          return;
+        }
+        const { intentId, actionType, payload } = act;
+        const caps = buildBodyCapabilities();
+        const supported = findSupportedAction(caps, actionType);
+        if (!supported) {
+          // 未声明的动作类型：诚实 unsupported（不影响任何既有 intentId 记录）。
+          send(200, { ok: true, protocolVersion: actionProtocol.PROTOCOL_VERSION, intentId, actionType, result: "unsupported" });
+          return;
+        }
+        const fingerprint = actionProtocol.payloadFingerprint(payload);
+        const decision = agentActionStore.classify(intentId, fingerprint);
+        if (decision === "conflict") {
+          // 同 intentId 换内容：显式冲突拒绝，绝不把它当成新动作执行。
+          send(409, {
+            ok: false,
+            protocolVersion: actionProtocol.PROTOCOL_VERSION,
+            intentId,
+            actionType,
+            result: "conflict",
+            error: `intentId "${intentId}" was already admitted with a different payload; refused`,
+            ...errorFacts.codeForHttpStatus(409)
+          });
+          return;
+        }
+        if (decision === "duplicate") {
+          // 同 intentId 同内容（传输重放）：不产生第二次实际副作用，回显首次诚实结果。
+          const first = agentActionStore.lookup(intentId);
+          send(200, {
+            ok: true,
+            protocolVersion: actionProtocol.PROTOCOL_VERSION,
+            intentId,
+            actionType,
+            result: "duplicate",
+            originalResult: first.result,
+            dispatched: false
+          });
+          return;
+        }
+        // 首次受理 → 与旧入口完全同一条投递路径。
+        const admission = actionType === "speak" ? admitSpeakLine(payload) : { outcome: "invalid", error: "no admission path for this action" };
+        if (admission.outcome === "invalid") {
+          send(400, {
+            ok: false,
+            protocolVersion: actionProtocol.PROTOCOL_VERSION,
+            intentId,
+            actionType,
+            result: "invalid-payload",
+            error: admission.error,
+            ...errorFacts.codeForHttpStatus(400)
+          });
+          return;
+        }
+        const result = admission.outcome === "dispatched" ? "accepted" : "rejected";
+        agentActionStore.record(intentId, fingerprint, { result, actionType });
+        if (result === "rejected") {
+          // 台词闸门未放行：如实报告，绝不假装已说出口（与旧入口同一诚实）。
+          send(200, {
+            ok: true,
+            protocolVersion: actionProtocol.PROTOCOL_VERSION,
+            intentId,
+            actionType,
+            result: "rejected",
+            reason: "line-gate-rejected",
+            dispatched: false
+          });
+          return;
+        }
+        send(200, {
+          ok: true,
+          protocolVersion: actionProtocol.PROTOCOL_VERSION,
+          intentId,
+          actionType,
+          result: "accepted",
+          dispatched: true,
+          feedbackMode: supported.feedbackMode
+        });
+        return;
+      }
+      // 按 intentId 的 interrupt：只回答本地执行状态（found/not-found/不可中断），
+      // 绝不在这里伪造或替代 terminal 事实；真正的 interrupted feedback 由具备
+      // 真实停止机制的执行方经 /execution-feedback 上报（本 Build 的 speak 无此
+      // 机制，故如实 not-interruptible）。
+      if (interruptMatch) {
+        const envelopeCheck = actionProtocol.validateInterruptRequest(parsed.body);
+        if (!envelopeCheck.ok) {
+          send(400, { ok: false, error: envelopeCheck.error, result: "invalid-action", reason: envelopeCheck.reason, ...errorFacts.codeForHttpStatus(400) });
+          return;
+        }
+        let targetId = "";
+        try { targetId = decodeURIComponent(interruptMatch[1]).trim(); } catch { targetId = ""; }
+        const admittedEntry = targetId ? agentActionStore.lookup(targetId) : undefined;
+        if (!admittedEntry) {
+          send(200, { ok: true, protocolVersion: actionProtocol.PROTOCOL_VERSION, intentId: targetId, result: "not-found" });
+          return;
+        }
+        const capsForInterrupt = buildBodyCapabilities();
+        const actionCap = findSupportedAction(capsForInterrupt, admittedEntry.actionType);
+        const interruptible = !!actionCap && actionCap.interruptible === true;
+        if (!interruptible) {
+          send(200, {
+            ok: true,
+            protocolVersion: actionProtocol.PROTOCOL_VERSION,
+            intentId: targetId,
+            actionType: admittedEntry.actionType,
+            result: "not-interruptible",
+            reason: "this body has no stop mechanism for the admitted action"
+          });
+          return;
+        }
+        // 本 Build 不存在可中断动作（capability 全为 false）；若未来动作声明
+        // interruptible:true，必须在这里接入真实停止机制后才允许返回 accepted。
+        send(200, { ok: true, protocolVersion: actionProtocol.PROTOCOL_VERSION, intentId: targetId, actionType: admittedEntry.actionType, result: "not-interruptible", reason: "no stop mechanism implemented in this build" });
         return;
       }
       let text = String(parsed.body.text || "").trim();
