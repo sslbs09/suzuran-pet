@@ -20,6 +20,7 @@ function buildTrayItems(deps) {
     setDimMode, sitOnTaskbar, setScale, clampScale, setWalkSpeed, setCatToy,
     setFileGuard,
     diagClick, openDocs, openSchedule, openSettings, openMoodManager, openVoiceStudio, openTtsGuide, openQuickstart, openHelp, openAddChar, checkUpdate,
+    openObservation, whitemoonEnabled = false, // Phase 11-E.1：记录观察（WhiteMoon 连接开启时才显示）
     reloadPersona, openConfigPath, openPersonaPath, quitApp
   } = deps;
 
@@ -201,6 +202,7 @@ function buildTrayItems(deps) {
     { label: i18n.t(lang, "tray.settings"), click: () => openSettings() },
   { label: i18n.t(lang, "tray.docsLabel"), click: () => openDocs() },
   { label: i18n.t(lang, "tray.scheduleLabel"), click: () => openSchedule() },
+    ...(whitemoonEnabled ? [{ label: i18n.t(lang, "tray.observationLabel"), click: () => openObservation() }] : []),
     { label: i18n.t(lang, "tray.moodManager"), click: () => openMoodManager() },
     { label: i18n.t(lang, "tray.quickstart"), click: () => openQuickstart() },
     { label: i18n.t(lang, "tray.help"), click: () => openHelp() },

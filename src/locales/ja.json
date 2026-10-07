@@ -949,7 +949,6 @@
   "err.gsvSynthFail": "❌ サーバーは起動したがテスト合成に失敗しました（tts.log 参照）",
   "err.gsvDisabled": "日本語音声サービスが無効か設定不完全です",
   "err.gsvNoPath": "音声エンジンのパスがありません（初回インストールで未設定）：音声設定で Python パスとサービススクリプトを設定してください",
-
   "page.schedule.summary": "日程 {n} 件・未発火 {p} 件",
   "page.schedule.btnDone": "完了",
   "page.schedule.btnSnooze": "10分後に再通知",
@@ -959,11 +958,27 @@
   "page.schedule.colRow": "行",
   "page.schedule.templateSaved": "テンプレートを保存しました",
   "page.schedule.templateCancelled": "キャンセルしました",
-
   "page.addchar.builtinOnly": "（内蔵のススロのみ）",
   "page.addchar.currentTag": "（現在）",
   "page.addchar.loadFail": "読み込み失敗",
   "page.addchar.pickHint": ".atlas / .skel/.json / .png を含むフォルダを選択…",
   "page.addchar.imported": "✅「{name}」をインポートして切り替えました（{id}）",
-  "err.unknown": "リクエストを完了できませんでした。時間をおいて再試行してください。"
+  "err.unknown": "リクエストを完了できませんでした。時間をおいて再試行してください。",
+  "tray.observationLabel": "📝 観察を記録…",
+  "page.observation.title": "観察を記録",
+  "page.observation.h1": "📝 観察を記録",
+  "page.observation.sub": "今日気づいたことを一言で記録します。あとで二人の共通の話題になるかもしれません。",
+  "page.observation.prompt": "今日は何を観察しましたか？",
+  "page.observation.ph": "例：窓辺のミントが芽を出した",
+  "page.observation.submit": "記録",
+  "page.observation.submitting": "送信中…",
+  "page.observation.ok": "記録しました ✅",
+  "page.observation.okDuplicate": "記録済み（重複提出を確認）✅",
+  "page.observation.invalidEmpty": "何か書いてから記録してください。",
+  "page.observation.invalid": "内容が検証を通過しませんでした。修正してから再試行してください（入力は保持されます）。",
+  "page.observation.conflict": "この提出は以前の提出と競合しています。内容を修正して新しい提出としてください（入力は保持されます）。",
+  "page.observation.unavailable": "未記録 - Runtime Host が起動していません。入力は保持され、そのまま再試行できます。",
+  "page.observation.unknown": "結果は不明です - 記録されているかもしれません。入力は保持され、再試行は同じ提出 ID を使います。",
+  "page.observation.failed": "未記録：{reason}",
+  "page.observation.disabled": "WhiteMoon 接続が無効です（設定で有効にしてください）。"
 }

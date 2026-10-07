@@ -949,7 +949,6 @@
   "err.gsvSynthFail": "❌ Server started but test synthesis failed (see tts.log)",
   "err.gsvDisabled": "Japanese TTS service is disabled or misconfigured",
   "err.gsvNoPath": "Engine path not found (fresh install, not configured): set Python path & server script in voice settings",
-
   "page.schedule.summary": "{n} schedules, {p} pending",
   "page.schedule.btnDone": "Done",
   "page.schedule.btnSnooze": "Snooze 10m",
@@ -959,11 +958,27 @@
   "page.schedule.colRow": "Row",
   "page.schedule.templateSaved": "Template saved",
   "page.schedule.templateCancelled": "Cancelled",
-
   "page.addchar.builtinOnly": "(only the built-in Sussurro)",
   "page.addchar.currentTag": "(current)",
   "page.addchar.loadFail": "Failed to load",
   "page.addchar.pickHint": "Choose a folder containing .atlas / .skel/.json / .png…",
   "page.addchar.imported": "✅ Imported “{name}” and switched ({id})",
-  "err.unknown": "The request could not be completed. Please try again later."
+  "err.unknown": "The request could not be completed. Please try again later.",
+  "tray.observationLabel": "📝 Record an observation…",
+  "page.observation.title": "Record Observation",
+  "page.observation.h1": "📝 Record Observation",
+  "page.observation.sub": "Write down one thing you noticed today; it may later become a shared topic.",
+  "page.observation.prompt": "What did you observe today?",
+  "page.observation.ph": "e.g. the mint on the windowsill sprouted",
+  "page.observation.submit": "Record",
+  "page.observation.submitting": "Submitting…",
+  "page.observation.ok": "Recorded ✅",
+  "page.observation.okDuplicate": "Recorded (duplicate confirmed) ✅",
+  "page.observation.invalidEmpty": "Write something first.",
+  "page.observation.invalid": "The content failed validation; please edit and retry (your text is kept).",
+  "page.observation.conflict": "This submission conflicts with an earlier one; edit it into a new submission (your text is kept).",
+  "page.observation.unavailable": "Not recorded - the Runtime Host is not running. Your text is kept; you can retry directly.",
+  "page.observation.unknown": "Outcome unknown - it may have been recorded. Your text is kept; a retry reuses the same submission id.",
+  "page.observation.failed": "Not recorded: {reason}",
+  "page.observation.disabled": "WhiteMoon connection is disabled (enable it in Settings first)."
 }

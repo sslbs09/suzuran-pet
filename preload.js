@@ -138,6 +138,10 @@ contextBridge.exposeInMainWorld("petAPI", {
   completeSchedule: (id) => ipcRenderer.invoke("pet:complete-schedule", id),
   snoozeSchedule: (id, minutes) => ipcRenderer.invoke("pet:snooze-schedule", { id, minutes }),
   openSchedule: () => ipcRenderer.invoke("pet:open-schedule"),
+  // 记录观察（Phase 11-E.1）：渲染层只提交笔记文本，actionId 与集成动作封装都在主进程
+  openObservation: () => ipcRenderer.invoke("pet:open-observation"),
+  submitObservation: (note) => ipcRenderer.invoke("pet:observation-submit", note),
+  getObservationState: () => ipcRenderer.invoke("pet:observation-state"),
   pickScheduleWorkbook: () => ipcRenderer.invoke("pet:pick-schedule-workbook"),
   importScheduleWorkbook: (filePath) => ipcRenderer.invoke("pet:import-schedule-workbook", filePath),
   previewScheduleWorkbook: (filePath) => ipcRenderer.invoke("pet:preview-schedule-workbook", filePath),

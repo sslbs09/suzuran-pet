@@ -160,6 +160,14 @@ const DEFAULTS = {
     emotionalVoice: true,     // 情绪语音：根据情绪调整语速/音调
     pomodoro: true,           // 番茄钟伴侣
     proactiveInterval: 8      // 主动搭话间隔（分钟）
+  },
+  whitemoonRuntime: {        // WhiteMoon Runtime Host 连接（Phase 11-E.1，默认关）
+    enabled: false,          // 开启后托盘出现「记录观察…」，提交走 Runtime Host 集成 ingress
+    baseUrl: "http://127.0.0.1:8790",
+    // ingress 能力 token 不落 config.json：DPAPI 密钥槽 whitemoonIngressToken
+    // （或环境变量 WHITEMOON_INGRESS_TOKEN）。本进程绝不持有 Runtime Host 的
+    // master token —— 那是通用写能力，本进程只需要「记录观察」这一种能力。
+    ingressToken: ""
   }
 };
 
@@ -253,6 +261,10 @@ function getConfig(force = false) {
   cfg.chat.apiKey = secrets.get("chatApiKey") || cfg.chat.apiKey || "";
   cfg.ttsCosy.apiKey = secrets.get("ttsCosyApiKey") || cfg.ttsCosy.apiKey || "";
   cfg.agentApi.bearerToken = secrets.get("agentBearerToken") || cfg.agentApi.bearerToken || "";
+  // Phase 11-E.1：WhiteMoon ingress 能力 token 只从 DPAPI 密钥服务或环境变量读取，
+  // 永不写回 config.json（saveConfig 会剥掉该字段）。
+  cfg.whitemoonRuntime.ingressToken =
+    secrets.get("whitemoonIngressToken") || process.env.WHITEMOON_INGRESS_TOKEN || "";
   if (!cfg.zcodeCli) cfg.zcodeCli = detectZcodeCli();
   cfg._keySource = cfg.chat.apiKey ? (secrets.status("chatApiKey").saved ? "安全本地存储" : "config.json") : "未配置（请在设置中填写或显式导入 API Key）";
   cfg._configPath = CONFIG_PATH;
@@ -317,6 +329,10 @@ function buildSettingsView() {
         hasToken: !!tokenHash
       }))
     }, // 不向 renderer 回传接入方 token 原值或 hash
+    whitemoonRuntime: {
+      ...cfg.whitemoonRuntime,
+      ingressToken: undefined // E.1：ingress token 原值不回传 renderer
+    },
     secretStatus: secrets.status(),
     security: cfg.security || { externalCredNoticeSeen: false },
     hotkey: cfg.hotkey,
@@ -371,6 +387,15 @@ function saveConfig(patch) {
   delete clean.chat.apiKey;
   delete clean.ttsCosy.apiKey;
   delete clean.agentApi.bearerToken;
+  if (clean.whitemoonRuntime) {
+    // E.1：whitemoonRuntime 落盘只允许 enabled/baseUrl 两个键——ingress token
+    // 只存 DPAPI 密钥服务；其他任何键（尤其任何 master token 形状）都不得进入
+    // config.json。
+    clean.whitemoonRuntime = {
+      enabled: clean.whitemoonRuntime.enabled === true,
+      baseUrl: String(clean.whitemoonRuntime.baseUrl || "")
+    };
+  }
   clean.agentApi.clients = sanitizeClients(clean.agentApi.clients);
   const raw = readConfigFile();
   if (!patch?.zcodeCli && !(raw.status === "ok" && raw.value && raw.value.zcodeCli)) clean.zcodeCli = "";

@@ -40,6 +40,7 @@ const { safeFetch } = require("./src/safe-url");
 // 回退继续用旧目录（app.setPath），任何情况下都不让用户数据丢失。
 (function migrateUserDataDirOnRename() {
   try {
+    if (process.env.SUZURAN_TEST_USERDIR) return; // 测试重定向：绝不触碰真实用户数据目录
     const OLD_NAME = "苏苏洛桌宠 1.1 正式版";
     const oldDir = path.join(app.getPath("appData"), OLD_NAME);
     const newDir = app.getPath("userData");
@@ -159,6 +160,7 @@ let voiceWin = null; // 音色克隆与训练窗口
 let moodWin = null; // 表情管理窗口
 let termsWin = null; // 使用条款确认窗口
 let scheduleWin = null; // 日程管理窗口
+let observationWin = null; // 记录观察窗口（Phase 11-E.1 WhiteMoon ingress）
 let psdWin = null;      // PSD 角色工具窗口（v2.1）
 let agentApiAbort = null; // 兼容旧状态读取；新 Agent 请求由 agentTaskQueue 按 task id 管理
 let agentLastSeenFlushAt = 0; // Agent lastSeen 落盘节流（P2-3：60s 内最多写一次 config.json）
@@ -545,6 +547,7 @@ function refreshTrayMenu() {
     setFileGuard,
     openSchedule, openSettings, openMoodManager, openVoiceStudio, openTtsGuide, openQuickstart, openHelp, openAddChar,
     openDocs, diagClick, checkUpdate: trayCheckUpdate,
+    openObservation, whitemoonEnabled: !!((cfg.whitemoonRuntime || {}).enabled),
     
     reloadPersona: () => { personaCache = config.getPersonaText(); sendToRenderer("pet:toast", i18n.t(lang, "tray.personaReloaded")); },
     openConfigPath: () => shell.openPath(config.CONFIG_PATH),
@@ -709,6 +712,44 @@ function openSchedule() {
 attachCrashDiag(scheduleWin, "schedule");
     scheduleWin.on("closed", () => { scheduleWin = null; });
 }
+
+/* ---------- 记录观察（Phase 11-E.1 WhiteMoon 集成 ingress）---------- */
+// Body 只产生「不透明集成动作」：渲染层只提交用户笔记文本 → 本进程铸造
+// actionId（首次提交尝试时）→ POST /integration-input。角色侧语义（它是什么
+// 类型、如何投影、进入哪个手账、条目计数）全部不进入本进程，映射在 Adapter
+// 的纯函数里。
+const whitemoonIngress = require("./src/whitemoon-ingress");
+const observationIngress = whitemoonIngress.createObservationIngress({
+  getEndpoint: () => {
+    const wm = (config.getConfig() || {}).whitemoonRuntime || {};
+    return { enabled: wm.enabled === true, baseUrl: String(wm.baseUrl || ""), token: String(wm.ingressToken || "") };
+  },
+  newActionId: () => crypto.randomUUID(),
+  log: (line) => logTts("whitemoon", line)
+});
+
+function openObservation() {
+  if (observationWin && !observationWin.isDestroyed()) { observationWin.focus(); return; }
+  observationWin = new BrowserWindow({
+    width: 420,
+    height: 360,
+    minWidth: 340,
+    minHeight: 300,
+    resizable: true,
+    title: i18n.t(currentUiLang(), "page.observation.title"),
+    autoHideMenuBar: true,
+    backgroundColor: "#1b2226",
+    webPreferences: winChild.childWebPrefs(config.APP_DIR)
+  });
+  observationWin.setMenuBarVisibility(false);
+  observationWin.loadFile(path.join(config.APP_DIR, "renderer", "observation.html"));
+  attachCrashDiag(observationWin, "observation");
+  observationWin.on("closed", () => { observationWin = null; });
+}
+ipcMain.handle("pet:open-observation", () => { openObservation(); return true; });
+// 渲染层只提交笔记文本；actionId/动作封装/传输全部在主进程（E.1 §4）。
+ipcMain.handle("pet:observation-submit", (_e, note) => observationIngress.submit(note));
+ipcMain.handle("pet:observation-state", () => observationIngress.pendingAction());
 
 function openPsdWindow() {
   if (psdWin && !psdWin.isDestroyed()) { psdWin.focus(); return; }
@@ -2755,7 +2796,7 @@ const credentialImport = require("./src/credential-import");
 ipcMain.handle("pet:scan-importable-credentials", () => credentialImport.scan());
 ipcMain.handle("pet:import-credential", (_e, req) => credentialImport.importCredential(req || {}));
 ipcMain.handle("pet:clear-secret", (_e, slot) => {
-  const map = { chat: "chatApiKey", ttsCosy: "ttsCosyApiKey", agent: "agentBearerToken" };
+  const map = { chat: "chatApiKey", ttsCosy: "ttsCosyApiKey", agent: "agentBearerToken", whitemoon: "whitemoonIngressToken" };
   const key = map[slot];
   if (!key) return { ok: false, message: "未知的密钥槽位" };
   try {

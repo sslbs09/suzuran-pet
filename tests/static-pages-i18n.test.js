@@ -24,6 +24,7 @@ const MOODS_HTML = fs.readFileSync(require.resolve("../renderer/moods.html"), "u
 const ADDCHAR_HTML = fs.readFileSync(require.resolve("../renderer/addchar.html"), "utf8");
 const SCHEDULE_HTML = fs.readFileSync(require.resolve("../renderer/schedule.html"), "utf8");
 const DOCS_HTML = fs.readFileSync(require.resolve("../renderer/docs.html"), "utf8");
+const OBSERVATION_HTML = fs.readFileSync(require.resolve("../renderer/observation.html"), "utf8");
 const BOOTSTRAP_JS = fs.readFileSync(require.resolve("../renderer/i18n.js"), "utf8");
 const PRELOAD_JS = fs.readFileSync(require.resolve("../preload.js"), "utf8");
 
@@ -37,7 +38,8 @@ const HTML = {
   moods: MOODS_HTML,
   addchar: ADDCHAR_HTML,
   schedule: SCHEDULE_HTML,
-  docs: DOCS_HTML
+  docs: DOCS_HTML,
+  observation: OBSERVATION_HTML
 };
 
 const TARGET_PAGES = Object.keys(HTML);

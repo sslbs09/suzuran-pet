@@ -15,7 +15,7 @@ const ALLOWED_TOP = new Set([
   "dimMode", "greetingOnStart", "security", "spineSkinId", "tts", "ttsCloud", "ttsCosy",
   "ttsGenie", "ttsGsv", "moods", "emotionalVoice", "emotionVoice", "live2dScale",
   "autoLaunch", "walkGlobal", "walkSpeed", "proactiveMin", "agentClients", "netProxy",
-  "secrets"
+  "secrets", "whitemoonRuntime"
 ]);
 
 /** 渲染层从不提交、仅 config.json 直改的键：禁止经 IPC 写入（P0-1 RCE 链封堵） */
@@ -40,13 +40,16 @@ function filterSettingsPatch(patch) {
     if (BLOCKED_TOP.has(key)) { delete out[key]; blocked.push(key); }
     else if (!ALLOWED_TOP.has(key)) { delete out[key]; unknown.push(key); }
   }
-  // secrets 提取：只认三个已知槽位 + replace action，其余忽略（不落盘不入 config）
+  // secrets 提取：只认四个已知槽位 + replace action，其余忽略（不落盘不入 config）。
+  // whitemoonIngressToken（E.1）只授权 Runtime Host 的「记录观察」ingress，
+  // 绝不承载 Host master token。
   const secretPatch = out.secrets && typeof out.secrets === "object" ? out.secrets : {};
   delete out.secrets;
   const secrets = {};
   if (secretPatch.chatApiKey && secretPatch.chatApiKey.action === "replace") secrets.chatApiKey = String(secretPatch.chatApiKey.value || "");
   if (secretPatch.ttsCosyApiKey && secretPatch.ttsCosyApiKey.action === "replace") secrets.ttsCosyApiKey = String(secretPatch.ttsCosyApiKey.value || "");
   if (secretPatch.agentBearerToken && secretPatch.agentBearerToken.action === "replace") secrets.agentBearerToken = String(secretPatch.agentBearerToken.value || "");
+  if (secretPatch.whitemoonIngressToken && secretPatch.whitemoonIngressToken.action === "replace") secrets.whitemoonIngressToken = String(secretPatch.whitemoonIngressToken.value || "");
   // 兼容：chat.apiKey / ttsCosy.apiKey / agentApi.bearerToken 顶层写法也挪进 secrets
   if (out.chat && Object.prototype.hasOwnProperty.call(out.chat, "apiKey")) {
     secrets.chatApiKey = String(out.chat.apiKey || "");
