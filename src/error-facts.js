@@ -37,7 +37,10 @@ const ERROR_CODES = Object.freeze({
   BUSY: "BUSY",
   INTERNAL: "INTERNAL",
   // P0-B1 §27 R8: formal mode 下 canonical 投影读取失败——明确失败，绝不伪装成功。
-  FORMAL_PROJECTION_UNAVAILABLE: "FORMAL_PROJECTION_UNAVAILABLE"
+  FORMAL_PROJECTION_UNAVAILABLE: "FORMAL_PROJECTION_UNAVAILABLE",
+  // P0-B2 §16/§17: HTTP 2xx 但没有有效 assistant 内容（空 2xx / malformed 流 /
+  // 流结束无文本）——强制失败语义，绝不落成功 turn（空 assistant 也是伪装成功）。
+  PROVIDER_EMPTY_RESPONSE: "PROVIDER_EMPTY_RESPONSE"
 });
 
 /** meta 白名单：只允许 status，且必须与 presenter 的校验规则一致（整数 100..599）。 */
@@ -187,6 +190,13 @@ function classifyError(err) {
   if (isCodedError(err)) return err.code;
   if (typeof err.code === "string" && Object.prototype.hasOwnProperty.call(SYSTEM_ERROR_CODES, err.code)) {
     return SYSTEM_ERROR_CODES[err.code];
+  }
+  // P0-B2 §16：流中途断连（undici 把真实 socket 错误包成 TypeError，errno/code 在 cause 下一层）
+  // ——事实优先：cause 的系统 errno 同样映射 NETWORK_ERROR/TIMEOUT，不落 INTERNAL。
+  const cause = err.cause;
+  if (cause && typeof cause === "object" && typeof cause.code === "string" &&
+      Object.prototype.hasOwnProperty.call(SYSTEM_ERROR_CODES, cause.code)) {
+    return SYSTEM_ERROR_CODES[cause.code];
   }
   const status = Number.isInteger(err.status) ? err.status : Number.isInteger(err.statusCode) ? err.statusCode : null;
   if (status !== null && status >= HTTP_STATUS_MIN && status <= HTTP_STATUS_MAX) return httpStatusToCode(status);

@@ -26,6 +26,7 @@ const inputEl = document.getElementById("input");
 const btnSend = document.getElementById("btn-send");
 const btnStop = document.getElementById("btn-stop");
 const modeChip = document.getElementById("mode-chip");
+const aliveBadge = document.getElementById("alive-badge"); // P0-B2 Minimum Alive 降级指示（正常态隐藏；只读投影）
 
 /* ---------- 情绪 → GIF 映射（动态：来自 config moods，可自定义增删） ---------- */
 let MOODS = []; // [{name,label,emotion,custom,exists}]
@@ -3044,6 +3045,13 @@ if (window.petAPI.onTtsPart) {
 
 const FIXED_ONLY_MISS = "__SUZURAN_FIXED_ONLY_MISS__";
 let speakSession = 0;   // 语音会话号：新消息的 speak 让旧消息的合成结果/part 作废（消息生成防抖）
+/* P0-B2 §24：语音真实播报结果上报主进程 VOICE 真相层（renderer-report）。
+ * 只在「文字回答已成功、声音这一路」的终局点上报：引擎成功=AVAILABLE，
+ * 引擎空返回/异常/固定台词缺失=DEGRADED。语音失败绝不改写认知层——
+ * 文字气泡已经正常显示（onDone 先于/独立于 speak）。 */
+function reportVoiceState(state, detail) {
+  try { if (window.petAPI.reportVoiceState) window.petAPI.reportVoiceState(state, detail || ""); } catch { /* 上报失败不影响播报 */ }
+}
 async function speak(text, emotion, lineId, fixedLine = false) {
   if (!ttsConfig.enabled) return;
   const toneOn = !(emotionVoiceCfg[emotion] === false); // 该情绪音色分档是否启用（停用 → 默认音色/默认语气）
@@ -3074,6 +3082,7 @@ async function speak(text, emotion, lineId, fixedLine = false) {
       if (b64 === FIXED_ONLY_MISS && fixedLine) {
         window.petAPI.playback("固定台词离线模式未命中缓存，保持静音，不回退系统音 lineId=" + String(lineId || "-"));
         toast("这句固定台词还没有预加载，离线模式下暂不播放；请在设置里重试失败项。");
+        reportVoiceState("DEGRADED", "fixed-line-miss"); // 语音未播：诚实降级（绝不假装播放成功，§24）
         return;
       }
 
@@ -3081,6 +3090,7 @@ async function speak(text, emotion, lineId, fixedLine = false) {
         // 已逐句流式播放：跳过整段合并音频，避免重复
         lastSpoken = { text: clean, ts: Date.now() };
         window.petAPI.playback("流式播放 parts=" + (ttsPartPlayedCount - partsBefore) + "（跳过合并段）");
+        reportVoiceState("AVAILABLE", "stream-parts");
         return;
       } else if (b64) {
         const isWav = b64.slice(0, 8) === "UklGRg==";
@@ -3114,15 +3124,18 @@ async function speak(text, emotion, lineId, fixedLine = false) {
         if (epoch === playbackEpoch) {
           lastSpoken = { text: clean, ts: Date.now() };
           window.petAPI.playback("云端音频播放完成 len=" + b64.length);
+          reportVoiceState("AVAILABLE", "merged-audio");
         }
         return;
       }
       window.petAPI.playback("speakClone 返回空");
+      reportVoiceState("DEGRADED", "engine-empty");
     } catch (e) {
       if (mySession !== speakSession) return; // 已被新消息取代：不再凑错误语音
       stopTts();
       console.error("云端语音播放失败:", e);
       window.petAPI.playback("播放失败: " + (e && e.message || e));
+      reportVoiceState("DEGRADED", "engine-error");
     }
   }
   if (mySession !== speakSession) return; // 等待/失败期间来了新消息：不回退（不然旧句会用兜底音补读）
@@ -3735,6 +3748,40 @@ function toggleInputBar() {
 function updateControls() {
   btnStop.classList.toggle("hidden", !busy);
   btnSend.disabled = busy;
+}
+
+/* ---------- P0-B2 Minimum Alive 降级指示（任务 §9/§29） ----------
+ * 小型指示条：正常态完全隐藏（无持续视觉噪声）；degraded 时明确说明是哪一层：
+ *   FORMAL CHARACTER 不可用（角色身体仍在）≠ COGNITION 不可用（Character 在，
+ *   暂时无法正常回答）≠ VOICE 降级。概念绝不混用（§29）。
+ * 「网络错误」绝不等于角色消失：BODY 层只要 renderer 在就是 READY，指示条不会
+ * 让身体层显示任何故障。纯投影：只读主进程推送的状态快照，不发 IPC、不做业务。 */
+let latestAliveStatus = null;
+function updateAliveBadge() {
+  if (!aliveBadge) return;
+  const s = latestAliveStatus;
+  const badgeOn = !!(s && (
+    (s.formal && (s.formal.state === "UNAVAILABLE" || s.formal.state === "PACKAGE_MISMATCH")) ||
+    (s.cognition && s.cognition.state === "UNAVAILABLE") ||
+    (s.body && s.body.state === "DEGRADED") ||
+    (s.voice && s.voice.state === "DEGRADED")
+  ));
+  if (!badgeOn) { aliveBadge.classList.add("hidden"); aliveBadge.textContent = ""; return; }
+  const parts = [];
+  if (s.formal && s.formal.state === "PACKAGE_MISMATCH") parts.push(I18N.t("alive.packageMismatch"));
+  else if (s.formal && s.formal.state === "UNAVAILABLE") parts.push(I18N.t("alive.formalUnavailable"));
+  if (s.cognition && s.cognition.state === "UNAVAILABLE") parts.push(I18N.t("alive.cognitionUnavailable"));
+  if (s.body && s.body.state === "DEGRADED") parts.push(I18N.t("alive.bodyDegraded"));
+  if (s.voice && s.voice.state === "DEGRADED") parts.push(I18N.t("alive.voiceDegraded"));
+  aliveBadge.textContent = "⚠ " + parts.join(" · ");
+  aliveBadge.classList.remove("hidden");
+}
+if (window.petAPI.onAliveStatus) {
+  window.petAPI.onAliveStatus((s) => { latestAliveStatus = s; updateAliveBadge(); });
+}
+// 初次渲染时拉一次当前真相（body-ready 推送可能早于本监听注册）。
+if (window.petAPI.getAliveStatus) {
+  Promise.resolve(window.petAPI.getAliveStatus()).then((s) => { latestAliveStatus = s; updateAliveBadge(); }).catch(() => { /* 主进程未就绪时保持隐藏 */ });
 }
 
 function updateChip() {
@@ -4652,4 +4699,5 @@ if (window.I18N && window.I18N.onChange) window.I18N.onChange(() => {
   inputEl.placeholder = isRecording ? I18N.t("ui.micRecording") : I18N.t("ui.placeholder");
   updateChip();
   updateTtsButton();
+  updateAliveBadge(); // P0-B2：badge 文案也是 catalog 键——locale 切换纯投影重绘，无业务副作用
 });

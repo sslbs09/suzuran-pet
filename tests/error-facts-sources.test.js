@@ -19,7 +19,8 @@ const taskQueue = require(require("node:path").join(root, "src/task-queue.js"));
 const chatClient = require(require("node:path").join(root, "src/chat-client.js"));
 
 const APPROVED = ["NO_API_KEY", "AUTH_INVALID", "QUOTA_EXCEEDED", "TIMEOUT", "NETWORK_ERROR",
-  "SSRF_BLOCKED", "BAD_URL", "HTTP_ERROR", "CANCELLED", "BUSY", "INTERNAL", "FORMAL_PROJECTION_UNAVAILABLE"];
+  "SSRF_BLOCKED", "BAD_URL", "HTTP_ERROR", "CANCELLED", "BUSY", "INTERNAL", "FORMAL_PROJECTION_UNAVAILABLE",
+  "PROVIDER_EMPTY_RESPONSE"];
 
 /** 抓取被抛出的错误事实（含 code/meta/detail）。 */
 async function caught(fn) {

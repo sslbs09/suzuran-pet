@@ -24,7 +24,8 @@ const CODE_KEYS = {
   CANCELLED: "err.cancelled",
   BUSY: "err.busy",
   INTERNAL: "err.internal",
-  FORMAL_PROJECTION_UNAVAILABLE: "err.formalProjection"
+  FORMAL_PROJECTION_UNAVAILABLE: "err.formalProjection",
+  PROVIDER_EMPTY_RESPONSE: "err.emptyResponse"
 };
 
 /* 5-G1：GSV 引擎专属码，独立命名空间，不参与通用词表 */

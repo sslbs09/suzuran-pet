@@ -99,6 +99,33 @@ html, body {
 }
 .bubble.hidden, .input-bar.hidden, .info-panel.hidden { opacity: 0; }
 
+/* ---------- P0-B2 Minimum Alive 降级指示条（§9/§29）----------
+   正常态隐藏（无持续视觉噪声）；degraded 时贴窗口顶缘一条细带，说明「哪一层」不可用。
+   文案由 catalog 键注入（pet.js updateAliveBadge），本文件零硬编码文案。 */
+.alive-badge {
+  position: absolute;
+  top: 2px;
+  left: 6px;
+  right: 6px;
+  z-index: 30; /* 盖过气泡/输入栏：降级状态第一眼可见 */
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  line-height: 1.35;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none; /* 不挡拖动/点击交互 */
+  color: #7a2f2f;
+  background: rgba(242, 200, 200, .92);
+  border: 1px solid rgba(180, 90, 90, .45);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+.alive-badge.hidden { display: none; }
+body.theme-dark .alive-badge { color: #ffd9d9; background: rgba(96, 34, 34, .82); border-color: rgba(242, 184, 184, .35); }
+
 /* ---------- 气泡 ---------- */
 .bubble {
   position: absolute;

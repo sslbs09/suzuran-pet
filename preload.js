@@ -18,6 +18,10 @@ contextBridge.exposeInMainWorld("petAPI", {
   stop: (requestId) => ipcRenderer.send("pet:stop", requestId || null, bodyDocumentIdentity),
   onStopped: (cb) => ipcRenderer.on("pet:stopped", (_e, d) => cb(d)), // v2.6 主动停止通知（渲染层复位 busy）
   getState: () => ipcRenderer.invoke("pet:get-state"),
+  // P0-B2 Minimum Alive：健康真相下行推送 + 初值拉取；语音播报结果上行（VOICE 层唯一事实来源）。
+  onAliveStatus: (cb) => ipcRenderer.on("pet:alive-status", (_e, s) => cb(s)),
+  getAliveStatus: () => ipcRenderer.invoke("pet:get-alive-status"),
+  reportVoiceState: (state, detail) => ipcRenderer.send("pet:voice-state", { state, detail, bodyIdentity: bodyDocumentIdentity }),
   setMode: (mode) => ipcRenderer.invoke("pet:set-mode", mode),
   reloadPersona: () => ipcRenderer.invoke("pet:reload-persona"),
   openConfig: () => ipcRenderer.invoke("pet:open-config"),

@@ -77,6 +77,9 @@ const fixedLinePreloader = require("./src/fixed-line-preloader");
 const fixedLines = require("./src/fixed-lines");
 const memory = require("./src/memory");
 const bond = require("./src/bond");
+const vectorMemory = require("./src/vector-memory"); // P0-B2 §11：vector 入库移出 provider 前，进 turn-commit 成功边界（顶层仅加载，不触盘）
+const { createAliveStatus } = require("./src/alive-status"); // P0-B2 最小健康真相模型（非全局 health framework）
+const { createTurnCommitBoundary } = require("./src/turn-commit"); // P0-B2 COGNITION TURN COMMIT BOUNDARY（§12/§14）
 const { randInt, easeImpact, clampScale, runPowerShell } = require("./src/utils");
 const walkGeo = require("./src/walk-geo"); // 行走几何纯函数（2026-08-27 收敛）
 const { replayCrashRecovery } = require("./src/crash-recovery"); // 崩溃恢复重放的窗口身份守卫纯函数（H1，可单测）
@@ -460,6 +463,12 @@ ipcMain.on("pet:body-ready", (event, identity) => {
     || identity.committedMode !== acceptedRenderMode) return;
   const ready = v2StateCore.lifecycle.markReady(identity);
   if (ready.ok) sendToRenderer("pet:body-ready-accepted", ready.identity);
+  // P0-B2 Minimum Alive：渲染层确认就绪 ⇒ BODY=READY（lifecycle-event）；
+  // 崩溃后 reload 会重新走到这里，恢复 READY。新就绪的 renderer 需要当前真相快照（非轮询）。
+  if (ready.ok) {
+    try { aliveStatus.noteBody("READY", "pet:body-ready"); } catch { /* alive-status 未初始化时忽略 */ }
+    try { event.sender.send("pet:alive-status", aliveStatus.snapshot()); } catch { /* 窗口销毁忽略 */ }
+  }
 });
 
 function clampPetToWorkArea(reason = "显示器变化") {
@@ -546,6 +555,8 @@ function createWindow() {
     if (win !== createdWindow) return;
     observedBodyTruth.invalidate();
     clearDragPause("renderer-crash");
+    // P0-B2：BODY=DEGRADED（lifecycle-event）。重载成功后 pet:body-ready 会恢复 READY。
+    try { aliveStatus.noteBody("DEGRADED", "render-process-gone"); } catch { /* 初始化时序保护 */ }
   if (typeof v2StateCore !== "undefined" && v2StateCore) { v2StateCore.lifecycle.invalidate("renderer-crash", "render-process-gone"); v2StateCore.pause.revokeByDomain("renderer", "renderer-crash"); v2StateCore.posture.invalidateSupport("crash"); v2StateCore.syncPauseProjection(); }
     const now = Date.now();
     const budget = crashBudget.record("pet", now); // 主 pet 独立预算域（H2）：辅助窗崩溃不再吃掉 pet 的自愈额度
@@ -874,6 +885,43 @@ const formalProjection = whitemoonProjection && typeof whitemoonProjection.creat
       }
     })
   : null;
+
+/* ---------- P0-B2 MINIMUM ALIVE STATUS（最小健康真相，任务 §6/§7/§8/§30/§31） ----------
+ * 四态分层互不掩盖：BODY / FORMAL CHARACTER / COGNITION / VOICE。
+ * 每个字段只有真实 observation 才能推进——API key 存在、Host 进程起过、上周成功
+ * 都不构成 AVAILABLE（§8 硬规则）。事件/turn 驱动更新，本文件不存在任何轮询循环（§31）。
+ * 不是 service registry / plugin health SDK：消费方仅 chat pipeline、projection 读取、
+ * renderer 生命周期与语音播报四处。 */
+// seam guard 与 formalProjection 构造同款模式：VM/测试 require 边界替换模块时降级为中性
+// no-op（不参与断言），生产环境恒走真实 createAliveStatus。
+const aliveStatus = (() => {
+  try {
+    const s = createAliveStatus({ now: () => Date.now(), log: (line) => logTts("alive-status", line) });
+    if (s && typeof s.subscribe === "function" && typeof s.snapshot === "function") return s;
+  } catch { /* require seam replaced */ }
+  const noop = () => {};
+  return {
+    snapshot: () => null, subscribe: () => noop,
+    setLayer: noop, noteProjection: noop, noteTurnStarted: noop, noteTurnSucceeded: noop,
+    noteTurnFailed: noop, noteTurnCancelled: noop, noteVoice: noop, noteBody: noop, noteFormalDisabled: noop
+  };
+})();
+// enabled=false 时 FORMAL 层是 DISABLED（非故障也不是健康——诚实的开关状态）。
+// 启用后初始为 UNAVAILABLE/never-observed：只有本轮实际读到投影才允许标 OK。
+if (!(((config.getConfig() || {}).whitemoonRuntime || {})).enabled) aliveStatus.noteFormalDisabled();
+// 状态迁移 → 渲染层（事件驱动；同状态刷新不打扰 UI，由 alive-status 模块内部判定）。
+aliveStatus.subscribe(() => {
+  try { sendToRenderer("pet:alive-status", aliveStatus.snapshot()); } catch { /* 窗口未建/已销毁 */ }
+});
+ipcMain.handle("pet:get-alive-status", () => aliveStatus.snapshot());
+// renderer 真实播报结果上报（§24）：只进 VOICE 层；文字认知成功不受语音失败改写。
+ipcMain.on("pet:voice-state", (event, payload) => {
+  if (!isCurrentBodyMutation(event, payload && payload.bodyIdentity)) return;
+  const s = payload && payload.state;
+  if (s === "AVAILABLE" || s === "DEGRADED" || s === "DISABLED") {
+    aliveStatus.noteVoice(s, String((payload && payload.detail) || ""));
+  }
+});
 
 function openObservation() {
   if (observationWin && !observationWin.isDestroyed()) { observationWin.focus(); return; }
@@ -1224,18 +1272,26 @@ ipcMain.handle("pet:regenerate", async (event, requestId, identity) => { // Swip
   if (!chatLease || chatLease.ok === false) { conversation.finish(task.id); return null; }
   sendToRenderer("pet:thinking", { id: requestId, mode: "chat" });
   const genAtRegen = history.generation(); // F-03：清史后迟到的重生成管线不得写回向量库
+  aliveStatus.noteTurnStarted(); // P0-B2：regenerate 同样进入真实 provider 调用，状态诚实记 WORKING
   try {
     const r = await chatClient.chat({
       persona: personaCache || config.getPersonaText(), history: hist, text,
       state: petStateNote(),
       signal: task.signal,
-      genGate: () => history.generation() === genAtRegen,
       onChunk: (d) => { if (task.isCurrent()) sendToRenderer("pet:chunk", { id: requestId, mode: "chat", text: d }); }
     });
     let newFull = r.text || "";
     const mi = newFull.indexOf("【情绪");
     if (mi >= 0) newFull = newFull.slice(0, mi);
-    if (!task.isCurrent()) return null; // 生成期间被取消：丢弃结果不写历史
+    if (!task.isCurrent()) { // P0-B2 §19：取消后迟到的重生成结果整体丢弃——不写 history、不发 done
+      aliveStatus.noteTurnCancelled("regenerate late result after cancel");
+      return null;
+    }
+    if (history.generation() !== genAtRegen) { // F-03：清史期间迟到的重生成不写回（代次栅栏与 chat 路径同语义）
+      aliveStatus.noteTurnCancelled("regenerate discarded after clear-history");
+      return null;
+    }
+    aliveStatus.noteTurnSucceeded(); // 真实成功 observation
     const entry = history.updateLast("chat", "assistant", (x) => {
       x.swipes = Array.isArray(x.swipes) && x.swipes.length ? x.swipes : [x.content];
       x.swipes.push(newFull);
@@ -1247,7 +1303,18 @@ ipcMain.handle("pet:regenerate", async (event, requestId, identity) => { // Swip
     sendToRenderer("pet:done", { id: requestId, mode: "chat", full: newFull, emotion: r.emotion || "",
       swipes: entry.swipes, swipeIndex: entry.swipeIndex });
     return { full: newFull };
-  } catch (e) { logTts("chat", "regenerate 失败: " + (e && e.message || e)); sendToRenderer("pet:done", { id: requestId, mode: "chat", full: "", emotion: "" }); return null; }
+  } catch (e) {
+    // P0-B2 §12/§23：重生成失败/取消绝不发送空 pet:done（旧实现把失败呈现成空回复）。
+    if (e && e.name === "AbortError") {
+      aliveStatus.noteTurnCancelled("regenerate cancelled");
+    } else if (task.isCurrent()) {
+      logTts("chat", "regenerate 失败: " + (e && e.message || e));
+      const fact = errorFacts.toPayload(e);
+      aliveStatus.noteTurnFailed(fact.code);
+      try { event.sender.send("pet:error", { id: requestId, code: fact.code, meta: fact.meta, message: fact.message }); } catch { /* 窗口销毁忽略 */ }
+    }
+    return null;
+  }
   finally { chatPauseWalk(false, chatLease); conversation.finish(task.id); drainAskBuffer("regen-complete"); } // regen 也是单写者 owner：先释放 captured chat lease，再释放单写者
 });
 /** 原生窗口外观同步（v2.5.28）：把用户主题映射到 nativeTheme.themeSource——
@@ -2017,8 +2084,15 @@ function startAgentApi() {
       }
       try {
         const r = await enq.done;
+        // P0-B2：agent /chat 本就是 post-success 写 history；补齐剩余两件事——
+        // ① vector 入库从 chat() 的 provider 前移到成功之后（§11/§12，legacy 口径）；
+        // ② cognition 真相按实际 turn observation 记账（§8：配置存在≠healthy）。
+        aliveStatus.noteTurnSucceeded();
         // F-03 竞态护栏：任务在途期间发生过 clear-history → 结果不写回（HTTP 响应照常返回调用方）
         if (history.generation() === genAtAsk) {
+          if ((config.getConfig().features || {}).vectorMemory) {
+            try { vectorMemory.add(text); } catch { /* 入库失败忽略 */ }
+          }
           history.append({ ts: Date.now(), mode: "chat", role: "user", content: text });
           history.append({ ts: Date.now(), mode: "chat", role: "assistant", content: r.text });
         } else {
@@ -2034,6 +2108,9 @@ function startAgentApi() {
         // detail/provider body 经 toPayload 丢弃，绝不外发给 Agent 调用方。
         const fact = errorFacts.toPayload(e);
         send(500, { ok: false, error: fact.message, code: fact.code, meta: fact.meta });
+        // P0-B2：agent 轮同样只有真实 observation 才推进 cognition 真相层（失败≠成功、取消单列）。
+        if (fact.code === "CANCELLED" || (e && e.name === "AbortError")) aliveStatus.noteTurnCancelled("agent task cancelled");
+        else aliveStatus.noteTurnFailed(fact.code);
       } finally {
         agentApiAbort = null;
       }
@@ -2724,6 +2801,7 @@ async function handleAskInner(sender, { id, text, askGen }) {
   let cognition = null;
   let formalSuppressions = [];
   const wmEnabled = ((config.getConfig().whitemoonRuntime || {}).enabled) === true;
+  if (!wmEnabled) aliveStatus.noteFormalDisabled(); // 开关关闭 ⇒ DISABLED（诚实记账，不是故障也不是健康；§30 source=config-disabled）
   if (wmEnabled && mode === "chat") {
     let projRes = null;
     try {
@@ -2732,6 +2810,9 @@ async function handleAskInner(sender, { id, text, askGen }) {
       projRes = { state: "unknown", error: String((e && e.message) || e) };
     }
     if (!projRes || projRes.state !== "ok" || !projRes.projection || !projRes.projection.character) {
+      // P0-B2 §29：FORMAL CHARACTER 层按实际投影读取结果记账（UNAVAILABLE / PACKAGE_MISMATCH）。
+      // 注意不写 COGNITION 层——Host 失败 ≠ 模型失败（§6 禁止互相冒充）；也不动 BODY 层。
+      aliveStatus.noteProjection((projRes && projRes.state) || "unknown", String((projRes && projRes.error) || ""));
       logTts("cognition", "formal projection read failed: " + ((projRes && projRes.state) || "unknown"));
       sender.send("pet:error", {
         id, code: "FORMAL_PROJECTION_UNAVAILABLE",
@@ -2741,6 +2822,7 @@ async function handleAskInner(sender, { id, text, askGen }) {
       conversation.finish(task.id);
       return;
     }
+    aliveStatus.noteProjection("ok"); // 本轮实际读到 canonical 投影 ⇒ FORMAL=OK（source=projection-response）
     cognition = projRes.projection.character;
     // §23：这些 legacy cognition 类别当前无 instance 归属 ⇒ formal mode 抑制
     // （classification+precedence+isolation；不删除底层数据，§19）。
@@ -2753,23 +2835,39 @@ async function handleAskInner(sender, { id, text, askGen }) {
     ];
   }
   const formalInstanceId = cognition ? cognition.instanceId : null;
-  history.append(Object.assign({ ts: Date.now(), mode, role: "user", content: clean },
-    formalInstanceId ? { whitemoonInstance: formalInstanceId } : {}));
-  // 长期记忆（v2.5）：规则式提取事实（称谓/喜好/生日/健康/近期安排），仅本机存储
+  /* === P0-B2 FAILURE-SAFE COGNITION TURN（§11–§14/§19） ===
+   * provider 真实成功之前，本轮零成功语义持久化 mutation。
+   * user 行 / auto facts / bond 成功增量 / vector 入库全部登记进本轮
+   * COGNITION TURN COMMIT BOUNDARY，等真实成功回复到达后连同 assistant 行
+   * 一起、在「ownership 栅栏 + 清史代次栅栏」双双通过时恰好提交一次。
+   * 失败 / 取消 / 迟到结果 ⇒ 边界零执行——该 user 行不进入正常持久 history，
+   * 后续轮次也就不会把它当成功 turn 消费（§13：诚实失败不落正常历史，
+   * 不为此扩 history schema）。UI 当前会话中用户文本仍即时显示（renderer 本地）。
+   * 唯一例外（§15）：用户显式「记住…」指令是独立的 user-initiated 持久化动作，
+   * 不是 provider turn 成功侧效应 ⇒ 保持即时落库，不受本边界调度。 */
+  let full = "";
+  const turnCommit = createTurnCommitBoundary({
+    isCurrent,                                                          // §18/§20：复用现有 conversation ownership，不新建第二套
+    generationValid: () => history.generation() === genAtStart,         // F-03 清史栅栏：清前对话内容不得复活
+    log: (line) => logTts("turn-commit", line)
+  });
+  turnCommit.stage("history-user", () => history.append(Object.assign({ ts: Date.now(), mode, role: "user", content: clean },
+    formalInstanceId ? { whitemoonInstance: formalInstanceId } : {})));
   if (config.getConfig().features && config.getConfig().features.longTermMemory) {
-    // Phase 7-F1：显式完成确认 → PLAN 生命周期转换。**必须先于 extractFacts**：
-    // completion 针对的是「用户发言前已存在」的计划；若顺序反过来，同一条消息里
-    // 新出现的安排表述会先覆盖 type:"event" 单槽位，transition 将作用在错对象上。
-    // 本模块是纯函数：只判定并给出待写入 history 事实的描述，mutation 仍走 memory 既有 API。
-    try {
-      const completion = resolvePlanCompletion({ facts: memory.getFactsList(), userText: clean });
-      if (completion) {
-        memory.deleteFact(completion.matchedPlan.id);   // PLAN 退场：不再注入「计划」分组
-        memory.addFacts([completion.history]);          // HISTORY 进场：history:<planFact.id>
-      }
-    } catch { /* 生命周期转换失败不影响对话 */ }
-    try { memory.addFacts(memory.extractFacts(clean)); } catch { /* 记忆失败不影响对话 */ }
-    // 显式记忆指令（RP 深化）："记住/帮我记一下 xxx" → 必记，不受规则提取宁缺毋滥影响
+    // 规则式提取事实 + Phase 7-F1 计划生命周期转换：本轮自动派生 side effects ⇒ 成功后提交。
+    // 「completion 必须先于 extractFacts」的既有顺序约束在 effect 体内原样保留。
+    turnCommit.stage("facts", () => {
+      try {
+        const completion = resolvePlanCompletion({ facts: memory.getFactsList(), userText: clean });
+        if (completion) {
+          memory.deleteFact(completion.matchedPlan.id);   // PLAN 退场：不再注入「计划」分组
+          memory.addFacts([completion.history]);          // HISTORY 进场：history:<planFact.id>
+        }
+      } catch { /* 生命周期转换失败不影响对话 */ }
+      try { memory.addFacts(memory.extractFacts(clean)); } catch { /* 记忆失败不影响对话 */ }
+    });
+    // 显式记忆指令（RP 深化）："记住/帮我记一下 xxx" → 必记——独立用户发起的持久化动作（§15），
+    // provider 本轮失败/取消也不回滚；不受规则提取宁缺毋滥影响，也不受 commit 边界调度。
     const mm = String(clean || "").match(/^(?:请你?|帮我?|麻烦)?(?:记住|记一下|记牢|记着)[：:，,。！!\s]*(.{2,120})$/);
     if (mm) {
       try {
@@ -2779,23 +2877,31 @@ async function handleAskInner(sender, { id, text, askGen }) {
       } catch { /* 忽略 */ }
     }
   }
-  // 羁绊（v2.5.13）：聊天 +1 经验；升级时 toast + 跨关系阶段解锁专属台词（B-1）
-  try {
-    const stageBefore = bond.getStage().key;
-    const b = bond.addExp(1);
-    if (b.leveledUp) {
-      sendToRenderer("pet:toast", i18n.t(currentUiLang(), "notice.bondLevelUp", { level: b.level }));
-      const st = bond.getStage();
-      if (st.key !== stageBefore && lines.STAGE_LINES[st.key] && lines.STAGE_LINES[st.key].length) {
-        sendProactive(lines.pickTpl(lines.STAGE_LINES[st.key], chatVars()), lines.LINE_MOODS["stage" + st.key] || "温柔"); // 羁绊阶段→音色分档（v2.5.26）
+  // 羁绊（v2.5.13）：聊天 turn 的 +1 exp 属「bond success increment」（§12）⇒ 成功后提交；
+  // pat/拖拽等本地互动走各自路径，不受本边界影响（Minimum Alive：本地行为仍在）。
+  turnCommit.stage("bond", () => {
+    try {
+      const stageBefore = bond.getStage().key;
+      const b = bond.addExp(1);
+      if (b.leveledUp) {
+        sendToRenderer("pet:toast", i18n.t(currentUiLang(), "notice.bondLevelUp", { level: b.level }));
+        const st = bond.getStage();
+        if (st.key !== stageBefore && lines.STAGE_LINES[st.key] && lines.STAGE_LINES[st.key].length) {
+          sendProactive(lines.pickTpl(lines.STAGE_LINES[st.key], chatVars()), lines.LINE_MOODS["stage" + st.key] || "温柔"); // 羁绊阶段→音色分档（v2.5.26）
+        }
       }
-    }
-  } catch { /* 羁绊失败不影响对话 */ }
+    } catch { /* 羁绊失败不影响对话 */ }
+  });
+  // Vector 入库（仅 legacy mode；formal mode 向量不检索也不写入——P0-B1 §23 保持）：
+  // P0-B2 从 chat() 的 provider 前同步段移出，成为成功 turn 侧效应，由本边界恰好提交一次。
+  if (!cognition && (config.getConfig().features || {}).vectorMemory) {
+    turnCommit.stage("vector", () => { try { vectorMemory.add(clean); } catch { /* 入库失败忽略 */ } });
+  }
 
   if (isCurrent()) sender.send("pet:thinking", { id, mode });
   let emotion = "";
   try {
-    let full = "";
+    aliveStatus.noteTurnStarted(); // 本轮确实进入 provider/zcode 调用（WORKING；§8 配置存在不触发）
     if (mode === "zcode") {
       // Agent 任务状态（借鉴 dsh-dafeiyu 反幻觉原则）：只报真实信息（任务文本+计时），不编造阶段百分比；
       // 受设置页「任务状态展示」开关控制（agentApi.statusEnabled）
@@ -2841,12 +2947,13 @@ async function handleAskInner(sender, { id, text, askGen }) {
         text: clean,
         state: petStateNote(), // v2.3 此刻状态注：时段/位置，驱动情绪与台词一致
         signal: task.signal,
-        genGate: () => history.generation() === genAtStart, // F-03：清史后迟到的管线不得把清前文本写回向量库
-        // === P0-B1 ===：canonical 投影进入 assembly boundary（§14/§16）；UI 入口
-        // 已先写当前 user 行进 history ⇒ currentInHistory，组装层去重（§20/T11）；
+        // === P0-B1 ===：canonical 投影进入 assembly boundary（§14/§16）；
+        // === P0-B2 §13 ===：UI 入口不再于 provider 前写当前 user 行 ⇒ 组装层无
+        // 尾随同文行可去重（显式 false；当前 turn 恰好一次由 commit boundary 在结构上保证，
+        // P0-B1 §20 的 assembly 去重路径保留供其他 caller 兼容）；
         // diagnostics 落 Body 日志（§16 可审计 + 实机验收证据面）。
         cognition: cognition || undefined,
-        currentInHistory: true,
+        currentInHistory: false,
         legacyFlags: _legacyFlags,
         suppressions: formalSuppressions,
         assemblySink: (diag) => { try { logTts("cognition-assembly", JSON.stringify(diag)); } catch { /* 诊断旁路 */ } },
@@ -2857,19 +2964,32 @@ async function handleAskInner(sender, { id, text, askGen }) {
       if (emotion) lastReplyEmotion = emotion; // 情绪衔接（B2）
     }
     const isChat = mode === "chat";
-    if (history.generation() === genAtStart) {
-      history.append(Object.assign({ ts: Date.now(), mode, role: "assistant", content: full },
-        isChat ? { swipes: [full], swipeIndex: 0 } : {},
-        formalInstanceId ? { whitemoonInstance: formalInstanceId } : {}));
-    } else {
+    // === P0-B2 COGNITION TURN COMMIT BOUNDARY ===
+    // 走到这里 = provider 真实成功（空 2xx/malformed 已在 chat-client 抛诚实失败）。
+    // 登记 assistant 行后统一提交本轮成功语义：user+assistant 成对进入正常持久 history，
+    // bond/facts/vector 各自恰好一次；任何栅栏不过 ⇒ 全部零执行（§12/§19）。
+    turnCommit.stage("history-assistant", () => history.append(Object.assign({ ts: Date.now(), mode, role: "assistant", content: full },
+      isChat ? { swipes: [full], swipeIndex: 0 } : {},
+      formalInstanceId ? { whitemoonInstance: formalInstanceId } : {})));
+    const settlement = turnCommit.commit();
+    if (settlement.reason === "cancelled") {
+      // provider 在 cancel 之后才 resolve：迟到结果被 ownership 栅栏整体拦截——
+      // 不写 history、不加 bond、不写 facts/vector、不发 pet:done（§19 真实 late-result race）。
+      aliveStatus.noteTurnCancelled("provider resolved after cancel; late result discarded");
+      return;
+    }
+    // 真实成功 observation：本轮 provider 确实答了——stale-generation 情形回复仍然发生，
+    // 只是持久化行属于已被清除的对话，按 F-03 不落盘（气泡照常展示）。
+    aliveStatus.noteTurnSucceeded();
+    if (settlement.reason === "stale-generation") {
       logTts("history", "清除历史竞态: 在途回复不写回（代次已变更）"); // F-03：气泡照常展示，但不落盘
     }
     if (isCurrent()) sender.send("pet:done", Object.assign({ id, mode, full, emotion },
       isChat ? { swipes: [full], swipeIndex: 0 } : {}));
 
-    // 长期记忆摘要：每 20 轮对话自动生成一次
+    // 长期记忆摘要：成功 turn 的派生 side effect——仅在持久化真正提交且本轮为 chat 时调度
     const _fc = config.getConfig();
-    if (_fc.features && _fc.features.longTermMemory) {
+    if (settlement.committed && isChat && _fc.features && _fc.features.longTermMemory) {
       const turns = history.count("chat"); // P1-5：内存计数替代 recent("chat",999) 全量读盘
       if (turns > 0 && turns % 20 === 0) {
         const recent = history.recent("chat", 20);
@@ -2884,13 +3004,22 @@ async function handleAskInner(sender, { id, text, askGen }) {
       }
     }
   } catch (err) {
-    if (err.name !== "AbortError" && isCurrent()) {
+    // === P0-B2 诚实失败路径（§12/§16/§25）===
+    // provider/zcode 失败 ⇒ 边界整轮放弃：user 行、assistant、bond、facts、vector
+    // 一条都不写（基线在 provider 前已写 user/bond/facts/vector，本轮修复）。
+    turnCommit.discard(err && err.name === "AbortError" ? "cancelled" : "provider-error");
+    if (err && err.name !== "AbortError" && isCurrent()) {
       // Phase 5-C：pet:error 只出 {id, code, meta, message}——保留 id 与旧 message 字段，
       // detail/provider body 在 toPayload 处被丢弃，永不进入 renderer。
       // AbortError 守卫保持原样（主动停止不发 pet:error）。
       const fact = errorFacts.toPayload(err);
+      aliveStatus.noteTurnFailed(fact.code); // 实际失败 observation ⇒ COGNITION=UNAVAILABLE（BODY/FORMAL 不受影响）
       sender.send("pet:error", { id, code: fact.code, meta: fact.meta, message: fact.message });
+    } else if (err && err.name === "AbortError") {
+      // 用户主动取消：与基线一致不发 pet:error（stop 路径已复位 UI），状态记 CANCELLED。
+      aliveStatus.noteTurnCancelled("user stop aborted provider request");
     }
+    // isCurrent()=false 的迟到错误（cancel 之后才抛）：不发 pet:error、不改写状态（§19 fence）。
   } finally {
     conversation.finish(task.id); // 2026-10-02 修复：finish 必须用 start 自分配的服务端 task.id。旧代码传渲染层 payload.id——两个独立 UUID 永不相等，finish 守卫永不命中，busy 从本会话第一条消息起永久泄漏（实机第二句起 buffer 自激 + pause 风暴的根因；regenerate 路径一直是正确写法）
   }

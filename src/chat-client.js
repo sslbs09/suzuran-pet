@@ -140,14 +140,16 @@ function validateApiBase(base, allowPrivate) {
 
 /** 解析 SSE 流，逐段回调 content 增量；返回完整文本。
  *  OpenAI 兼容 error 帧（data: {"error": ...}）会向上抛出（v2.5.24 优化建议 P1）；
- *  流空闲 30s 超时与 signal 取消检查（v2.5.27）。 */
-async function readSSE(resp, onChunk, extractor, signal) {
+ *  流空闲 30s 超时与 signal 取消检查（v2.5.27）。
+ *  P0-B2 §17：本函数只负责"读到了什么"；"空 2xx 是不是成功"由调用方在流结束后
+ *  判定（没有有效 assistant content ⇒ PROVIDER_EMPTY_RESPONSE，不落成功 turn）。
+ *  idleMs 可注入（默认仍 30000；loopback 测试用极小值走真实空闲超时分类）。 */
+async function readSSE(resp, onChunk, extractor, signal, idleMs = 30000) {
   if (!resp.body) throw new ErrorWithCode(ERROR_CODES.INTERNAL, { message: "API 未返回可读取的流" });
   const reader = resp.body.getReader();
   const decoder = new TextDecoder("utf-8");
   let buf = "";
   let full = "";
-  const idleMs = 30000;
   while (true) {
     if (signal?.aborted) throw new ErrorWithCode(ERROR_CODES.CANCELLED, { message: "请求已取消" });
     // 空闲计时器必须在每次 read 后清理：否则长流每次读取都留下一个 30s 悬挂定时器
@@ -232,7 +234,21 @@ async function chatOpenAI(cfg, messages, opts) {
     const { code, meta } = codeForHttpStatus(resp.status);
     throw new ErrorWithCode(code, { meta, message: `API ${resp.status}`, detail: String(errBody).slice(0, 300) });
   }
-  return readSSE(resp, opts.onChunk, (j) => j?.choices?.[0]?.delta?.content, opts.signal);
+  // P0-B2 §17：HTTP 2xx 但流结束无有效 assistant 内容（含纯 malformed 体）⇒ 强制失败。
+  // 空文本不得成为 assistant history、不得触发成功 turn 侧效应。
+  const full = await readSSE(resp, opts.onChunk, (j) => j?.choices?.[0]?.delta?.content, opts.signal, opts.sseIdleMs);
+  return assertAssistantContent(full);
+}
+
+/** §16/§17 诚实失败判定：没有任何有效 assistant 文本的「成功」响应一律按失败抛出。
+ *  不得写空 assistant、不得写默认 assistant、不得拿旧 response 冒充成功。 */
+function assertAssistantContent(full) {
+  if (!String(full || "").trim()) {
+    throw new ErrorWithCode(ERROR_CODES.PROVIDER_EMPTY_RESPONSE, {
+      message: "Provider returned a 2xx response without valid assistant content (empty response)"
+    });
+  }
+  return full;
 }
 
 async function chatAnthropic(cfg, system, history, opts) {
@@ -264,12 +280,14 @@ async function chatAnthropic(cfg, system, history, opts) {
     const { code, meta } = codeForHttpStatus(resp.status);
     throw new ErrorWithCode(code, { meta, message: `API ${resp.status}`, detail: String(errBody).slice(0, 300) });
   }
-  return readSSE(resp, opts.onChunk, (j) => {
+  // P0-B2 §17：同 OpenAI 路径——Anthropic 流结束无有效文本（或全部 malformed 行）⇒ 诚实失败。
+  const fullAnth = await readSSE(resp, opts.onChunk, (j) => {
     if (j?.type === "content_block_delta" && j.delta?.type === "text_delta") {
       return j.delta.text;
     }
     return "";
-  }, opts.signal);
+  }, opts.signal, opts.sseIdleMs);
+  return assertAssistantContent(fullAnth);
 }
 
 /**
@@ -282,10 +300,11 @@ async function chatAnthropic(cfg, system, history, opts) {
  *   - state: string 可选「此刻状态」注（时段/位置/心情，越贴近用户消息权重越高，驱动情绪与台词一致）
  *   - onChunk: (delta:string)=>void
  *   - signal: AbortSignal
- *   - genGate: 可选 () => boolean（F-03 实机验收修复）：调用方（main.js 聊天管线）传入
- *     "消息受理时的清史代次仍然有效" 判定；向量入库发生在 chat() 同步段，管线若在
- *     clear-history 之后才执行到此处（防抖重排/锁释放延迟），不加闸会把已清除对话
- *     的用户文本写回向量库并经 search 复活。缺省时行为不变（无 gate 的调用方照旧入库）。
+ *   - genGate: 兼容保留参数。P0-B2 §11/§12：vector 入库已从 provider 前移到调用方
+ *     turn-commit 边界（仅成功 turn 提交），chat() 不再做任何持久化 mutation，
+ *     因此本参数在此不再被使用；F-03 清史代次栅栏由调用方在提交边界执行。
+ *   - sseIdleMs: 可选，SSE 单次 read 空闲上限（默认 30000）。loopback 测试注入极小值
+ *     走真实 TIMEOUT 分类；生产调用不传，行为与历史一致。
  *   - cognition: 可选 P0-B1 formal mode canonical Character 投影
  *     （{instanceId, packageId, displayName, projectionSemanticsVersion, state, relationship}）；
  *     携带时走 §18 冻结排版，且向量记忆不检索、不入库（§23：无 instance 归属）。
@@ -295,8 +314,9 @@ async function chatAnthropic(cfg, system, history, opts) {
  *   - assemblySink: 可选 (diagnostics)=>void（§16 检查钩子；失败不影响对话）。
  * @returns {Promise<{text:string, emotion:string}>} 完整回复（已去掉情绪标注）+ 模型选择的情绪词
  */
-async function chat({ persona, history = [], text, state = "", onChunk = () => {}, signal, genGate,
-  cognition = null, currentInHistory = false, legacyFlags = null, suppressions = [], assemblySink = null }) {
+async function chat({ persona, history = [], text, state = "", onChunk = () => {}, signal, genGate: _genGate = null,
+  cognition = null, currentInHistory = false, legacyFlags = null, suppressions = [], assemblySink = null,
+  sseIdleMs = undefined }) {
   const cfg = config.getConfig();
   // v2.5.22 修复（P1-6）：maxHistoryTurns 是"轮数"（recent() 返回 2N 条 user+assistant），
   // 这里按条数 slice 会把上下文砍半——改为 2N 与 recent 语义一致。
@@ -305,7 +325,10 @@ async function chat({ persona, history = [], text, state = "", onChunk = () => {
   // 世界书（v2.6，§14 追加 102）：按本条用户消息命中关键词才激活情境块，省 token 且更贴切
   const wInfos = activeWorldInfos(text);
   // 向量记忆（§14 追加 102）：语义检索历史片段回引，受 features.vectorMemory 控制。
-  // P0-B1 §23：formal mode（携带 canonical 投影）时向量库无 instance 归属 ⇒ 不检索、不入库。
+  // P0-B1 §23：formal mode（携带 canonical 投影）时向量库无 instance 归属 ⇒ 不检索。
+  // P0-B2 §11/§12：入库（add）已从 provider 之前移除——vector 条目属于「成功 turn
+  // 侧效应」，由调用方 COGNITION TURN COMMIT BOUNDARY 在真实成功后恰好执行一次。
+  // chat() 在本模块中只保留只读 search，不触任何持久化 mutation。
   let vectorBlock = "";
   const vecOn = !!(config.getConfig().features || {}).vectorMemory && !cognition;
   if (vecOn) {
@@ -316,9 +339,6 @@ async function chat({ persona, history = [], text, state = "", onChunk = () => {
         vectorBlock = "【回忆片段】这些是博士之前提过的相关内容，自然回引（若有契合点）：\n" + block;
       }
     } catch { /* 向量记忆故障不影响对话 */ }
-    try {
-      if (typeof genGate !== "function" || genGate()) vectorMemory.add(text); // F-03：清史后代次失效 ⇒ 不得把清前文本写回向量库
-    } catch { /* 入库失败忽略 */ }
   }
 
   const built = buildChatRequest({
@@ -348,11 +368,19 @@ async function chat({ persona, history = [], text, state = "", onChunk = () => {
   if (cfg.chat.apiType === "anthropic") {
     const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
     const conv = messages.filter((m) => m.role !== "system");
-    full = await chatAnthropic(cfg, system, conv, { onChunk, signal });
+    full = await chatAnthropic(cfg, system, conv, { onChunk, signal, sseIdleMs });
   } else {
-    full = await chatOpenAI(cfg, messages, { onChunk, signal });
+    full = await chatOpenAI(cfg, messages, { onChunk, signal, sseIdleMs });
   }
-  return parseEmotion(full);
+  const parsed = parseEmotion(full);
+  // §16/§23 空回复不是有效回答：剥离格式标注后若只剩空白 ⇒ 诚实失败。
+  // 不得写空 assistant、不得把「只回了格式标记」呈现成模型正常回答。
+  if (!parsed.text.trim()) {
+    throw new ErrorWithCode(ERROR_CODES.PROVIDER_EMPTY_RESPONSE, {
+      message: "Model returned no valid body text (only format markers)"
+    });
+  }
+  return parsed;
 }
 
 /**

@@ -79,7 +79,7 @@ test("dynamically constructed / reserved keys were NOT over-cleaned", () => {
 
 test("deletion preserved catalog invariants", () => {
   const zh = Object.keys(i18n.DICT.zh), en = Object.keys(i18n.DICT.en), ja = Object.keys(i18n.DICT.ja);
-  assert.equal(zh.length, 983); // 959（5-F3 清理后）+ 6（5-G3 pet 运行时 title）+ 17（11-E.1 记录观察窗口/托盘）+ 1（P0-B1 err.formalProjection）
+  assert.equal(zh.length, 989); // 983（P0-B1 后）+ 6（P0-B2：err.emptyResponse + alive.* 五个最小存活降级文案键）
   assert.equal(en.length, zh.length, "en key count matches zh");
   assert.equal(ja.length, zh.length, "ja key count matches zh");
   assert.deepEqual(zh.filter((k) => !en.includes(k)), [], "zh/en key sets identical");

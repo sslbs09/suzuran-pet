@@ -66,12 +66,14 @@ function extractResultText(raw) {
 
 /**
  * 执行一次 ZCode 任务
+ * P0-B2 §23：取消 / 失败 / 无有效输出一律以 REJECT 结束——「（已停止）」「（无输出，
+ * 退出码 X）」不得 resolve 成回答文本落进 assistant history 冒充 cognition 成功。
  * @param {Object} opts
  *   - prompt: string 用户任务文本
  *   - persona: string
  *   - onChunk: (rawLine:string)=>void（原始 stdout 分片）
  *   - signal: AbortSignal
- * @returns {Promise<string>} 提取后的最终文本
+ * @returns {Promise<string>} 提取后的最终文本（仅在真实产出时 resolve）
  */
 async function runZcodeTask({ prompt, persona, onChunk = () => {}, signal }) {
   const cfg = config.getConfig();
@@ -95,10 +97,12 @@ async function runZcodeTask({ prompt, persona, onChunk = () => {}, signal }) {
     });
 
     let raw = "";
-    let aborted = false;
+    let aborted = false;        // 任一 abort（用户停止 / 超限截断）
+    let userAborted = false;    // 仅用户经 AbortSignal 主动停止（P0-B2 §19：取消不得提交成功语义）
 
     const onAbort = () => {
       aborted = true;
+      userAborted = true;
       try { child.kill(); } catch { /* 已退出 */ }
     };
     if (signal) {
@@ -120,15 +124,28 @@ async function runZcodeTask({ prompt, persona, onChunk = () => {}, signal }) {
     child.on("error", (err) => reject(err));
     child.on("close", (code) => {
       if (signal) signal.removeEventListener("abort", onAbort);
+      // P0-B2 §23：用户取消 ⇒ reject（AbortError 形态，与 provider 取消路径同语义）。
+      // 「（已停止）」是 CLI 结束状态，不是回答；resolve 它 = 把取消当成功写进 history。
+      if (userAborted) {
+        const e = new Error("已停止");
+        e.name = "AbortError";
+        reject(e);
+        return;
+      }
       if (aborted && raw.length > MAX_OUTPUT) {
-        resolve(raw + "\n…（输出过长，已截断）");
+        resolve(raw + "\n…（输出过长，已截断）"); // 真实产出存在，仅展示长度受限
         return;
       }
-      if (aborted) {
-        resolve(raw || "（已停止）");
+      // P0-B2 §23：非零退出且无有效输出不得包装成回答文本（旧实现把退出状态当回答）。
+      const extracted = extractResultText(raw);
+      if (!extracted.trim()) {
+        const err = new Error(`ZCode 任务无有效输出（退出码 ${code}）`);
+        err.code = "PROVIDER_EMPTY_RESPONSE";
+        err.exitCode = code;
+        reject(err);
         return;
       }
-      resolve(extractResultText(raw) || `（无输出，退出码 ${code}）`);
+      resolve(extracted);
     });
   });
 }

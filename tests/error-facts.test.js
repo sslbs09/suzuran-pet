@@ -18,14 +18,17 @@ const APPROVED_CODES = [
   "SSRF_BLOCKED", "BAD_URL", "HTTP_ERROR", "CANCELLED", "BUSY", "INTERNAL",
   // P0-B1 §27 R8：formal mode canonical 投影读取失败的明确失败码（第 12 码，
   // 经负责人任务书授权的产品认知集成词汇扩展；GSV 隔离规则不受影响）
-  "FORMAL_PROJECTION_UNAVAILABLE"
+  "FORMAL_PROJECTION_UNAVAILABLE",
+  // P0-B2 §16/§17：HTTP 2xx 但无有效 assistant 内容（空响应/malformed 流/流结束无文本）
+  // ——强制诚实失败码（第 13 码，任务书明确禁止把空 2xx 算 COGNITION SUCCESS）
+  "PROVIDER_EMPTY_RESPONSE"
 ];
 /** Phase 5-G1：GSV 引擎专属小写码不属于通用错误码词表 */
 const GSV_ONLY_CODES = ["timeout", "synth", "disabled", "nopath"];
 
 /* ---------- 词表锁定 ---------- */
 
-test("error-facts exposes exactly the 12 approved codes and no others", () => {
+test("error-facts exposes exactly the 13 approved codes and no others", () => {
   assert.deepEqual(Object.keys(facts.ERROR_CODES).sort(), [...APPROVED_CODES].sort());
   assert.ok(Object.isFrozen(facts.ERROR_CODES));
   for (const code of ["RATE_LIMIT", "PROVIDER_UNAVAILABLE", "INVALID_RESPONSE", "EMPTY"]) {
@@ -48,7 +51,7 @@ test("code vocabulary stays in lockstep with the Phase 5-A error-presenter", () 
   // ERROR_PRESENTATIONS 的键就是 code，值是 err.* 文案键
   const presenterCodes = new Set(Object.keys(presenter.ERROR_PRESENTATIONS));
   assert.deepEqual([...presenterCodes].sort(), [...APPROVED_CODES].sort(),
-    "error-facts 与 error-presenter 必须共用同一份 12 码词表");
+    "error-facts 与 error-presenter 必须共用同一份 13 码词表");
   // GSV 小写码改由独立命名空间承载，且与通用词表零交集
   const gsvCodes = new Set(Object.keys(presenter.GSV_PRESENTATIONS));
   assert.deepEqual([...gsvCodes].sort(), [...GSV_ONLY_CODES].sort());

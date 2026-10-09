@@ -177,7 +177,12 @@ async function bootE2e({ formal = true, charN = 1 }) {
       "./src/history": history,
       "./src/memory": require("../src/memory"),
       "./src/bond": require("../src/bond"),
-      "./src/error-facts": require("../src/error-facts")
+      "./src/error-facts": require("../src/error-facts"),
+      // P0-B2：main.js 顶层 require 的新纯模块——真实注入（makeStub 会让
+      // { createTurnCommitBoundary } 解构出 fn 返回 null，staging 链崩溃）。
+      "./src/turn-commit": require("../src/turn-commit"),
+      "./src/alive-status": require("../src/alive-status"),
+      "./src/vector-memory": require("../src/vector-memory")
     }
   });
   return { provider: INFRA.provider, host: INFRA.host, charRef: INFRA.charRef, main, diags };

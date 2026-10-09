@@ -61,6 +61,10 @@ function makeHarness(options = {}) {
     log: [],
     speakCalls: [],
     speakResult: options.speakResult !== false,
+    // P0-B2：agent 区段新增的两个 main.js 模块作用域依赖——harness 契约要求
+    // region 可独立 eval；同时把 truth 记账/向量提交变成可断言面。
+    vectorAdds: [],
+    aliveNotes: [],
   };
 
   const config = {
@@ -132,6 +136,13 @@ function makeHarness(options = {}) {
     chatClient,
     maybeWorkflowComment: () => { state.wakeCalls++; },
     errorFacts: ERROR_FACTS,
+    // P0-B2 truth model + vector commit are module-scope deps of the agent region.
+    vectorMemory: { add: (t) => state.vectorAdds.push(String(t)) },
+    aliveStatus: {
+      noteTurnSucceeded: () => state.aliveNotes.push("succeeded"),
+      noteTurnFailed: (code) => state.aliveNotes.push("failed:" + code),
+      noteTurnCancelled: () => state.aliveNotes.push("cancelled")
+    },
     // M2：通用动作协议的纯模块 + 运行期幂等窗口（每个 harness 实例一个全新
     // store，测试彼此隔离；生产 main.js 用同名模块作用域单例）。纯模块无 I/O，
     // 与生产 require 的是同一份代码。
@@ -350,7 +361,7 @@ test("generation exception keeps 500/error compatibility, emits code/meta, and r
     meta: { status: 502 },
     detail: "full provider detail SECRET_PROVIDER_BODY",
   });
-  await withHarness({ chatError: err }, async (_h, port) => {
+  await withHarness({ chatError: err }, async (h, port) => {
     const r = await request(port, { method: "POST", pathname: "/chat", headers: { "Content-Type": "application/json" }, body: { text: "hello" } });
     assert.equal(r.status, 500);
     assert.equal(r.json.ok, false);
@@ -359,6 +370,10 @@ test("generation exception keeps 500/error compatibility, emits code/meta, and r
     assert.equal(r.json.error, "HTTP 502");
     assert.equal(Object.prototype.hasOwnProperty.call(r.json, "detail"), false);
     assert.equal(r.text.includes("SECRET_PROVIDER_BODY"), false);
+    // P0-B2 §11/§12: a failed agent turn persists nothing and marks cognition UNAVAILABLE
+    assert.equal(h.state.historyAppends.length, 0, "failed agent turn writes no history");
+    assert.equal(h.state.vectorAdds.length, 0, "failed agent turn never commits vector");
+    assert.deepEqual(h.state.aliveNotes, ["failed:HTTP_ERROR"], "failure is recorded as an observed failure, not success");
   });
 });
 
@@ -370,6 +385,8 @@ test("successful chat keeps response shape and wakes workflow observer exactly o
     assert.equal(h.state.calls, 1);
     assert.equal(h.state.wakeCalls, 1);
     assert.equal(h.state.historyAppends.length, 2);
+    // P0-B2: a real successful agent turn is an observed-success on the cognition truth layer
+    assert.deepEqual(h.state.aliveNotes, ["succeeded"], "success recorded as observed-success");
   });
 });
 

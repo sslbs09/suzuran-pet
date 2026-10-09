@@ -17,6 +17,10 @@
     <div id="swipe-bar" class="swipe-bar hidden"><button id="swipe-prev" title="上一版">‹</button><span id="swipe-pos"></span><button id="swipe-next" title="下一版">›</button><button id="swipe-regen" title="重新生成">↻</button></div>
   </div>
 
+  <!-- P0-B2 Minimum Alive 降级指示（任务 §9/§29：正常态不出现，degraded 时指明哪一层不可用；
+       文案区分「正式 Character Runtime 不可用」与「认知服务不可用」，概念不混用） -->
+  <div id="alive-badge" class="alive-badge hidden" role="status" aria-live="polite"></div>
+
   <!-- 桌宠形象（GIF 表情） -->
   <div id="pet" class="pet">
     <img id="sprite" src="sprites/user/idle1.gif" alt="苏苏洛" draggable="false" />

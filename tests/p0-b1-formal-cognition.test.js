@@ -100,7 +100,12 @@ function makeHarness({ host, captures = [], failWith = null }) {
       "./src/history": history,
       "./src/memory": require("../src/memory"),
       "./src/bond": bond,
-      "./src/error-facts": require("../src/error-facts")
+      "./src/error-facts": require("../src/error-facts"),
+      // P0-B2：main.js 顶层 require 的新纯模块——真实注入（makeStub 会让
+      // { createTurnCommitBoundary } 解构出 fn 返回 null，staging 链崩溃）。
+      "./src/turn-commit": require("../src/turn-commit"),
+      "./src/alive-status": require("../src/alive-status"),
+      "./src/vector-memory": require("../src/vector-memory")
     }
   });
   // 替换 harness 自带 config stub（同一对象注入 main 的 require 边界）
@@ -140,7 +145,11 @@ test("T1–T3: formal mode provider input carries canonical identity/state/relat
   assert.equal(opts.cognition.instanceId, "sussurro-A");
   assert.deepEqual(opts.cognition.state, A_CHARACTER(1).state);
   assert.deepEqual(opts.cognition.relationship, A_CHARACTER(1).relationship);
-  assert.equal(opts.currentInHistory, true, "UI entry pre-writes the user row (§20)");
+  // P0-B2 §11–§13 有意反转 P0-B1 §20 基线：UI 入口不再于 provider 前预写 user 行
+  // （pre-write 正是 P0-B2 要修的 failure-mutates-data 边界）。当前 user 行只在
+  // provider 成功后经 turn-commit 与 assistant 成对落盘；组装层去重路径不再触发，
+  // T11「恰好一次」由结构保证（见 p0-b2 提交语义测试）。
+  assert.equal(opts.currentInHistory, false, "P0-B2: no pre-provider user row ⇒ nothing to dedupe");
   assert.equal(host.requests.length, 1);
   assert.equal(host.requests[0].method, "GET");
   const done = s.messages.find((m) => m.name === "pet:done");
@@ -200,7 +209,9 @@ test("T6: enabled=false keeps the existing Body chat path compatible (no cogniti
   assert.equal(captures[0].cognition, undefined, "legacy path supplies no canonical projection");
   assert.ok(String(captures[0].persona).includes("我是苏苏洛"), "legacy persona intact");
   assert.equal(host.requests.length, 0, "no Host traffic while disabled");
-  assert.equal(captures[0].currentInHistory, true, "dedupe flag applies on the legacy UI path too (§20 fix scope)");
+  // P0-B2 §11–§14：legacy UI 入口同样改走 turn-commit 边界（provider 成功后 user+assistant
+  // 成对落盘，且本轮自动派生 side effects 只在真实成功时提交）⇒ 不再预写、currentInHistory=false。
+  assert.equal(captures[0].currentInHistory, false, "P0-B2: legacy UI path also defers the user row to the commit boundary");
   await host.close();
 });
 
