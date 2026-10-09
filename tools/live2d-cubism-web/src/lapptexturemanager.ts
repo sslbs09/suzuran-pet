@@ -13,6 +13,7 @@ import { LAppGlManager } from './lappglmanager';
  */
 export class LAppTextureManager {
   private _released = false;
+  private _pending = new Set<() => void>();
   /**
    * コンストラクタ
    */
@@ -24,11 +25,9 @@ export class LAppTextureManager {
    * 解放する。
    */
   public release(): void {
+    if (this._released) return;
     this._released = true;
-    for (let i = 0; i < this._textures.length; i++) {
-      this._glManager.getGl().deleteTexture(this._textures[i].id);
-    }
-    this._textures = null;
+    this.releaseTextures();
   }
 
   /**
@@ -44,108 +43,76 @@ export class LAppTextureManager {
     callback: (textureInfo: TextureInfo) => void,
     isCurrent: () => boolean = () => true
   ): void {
-    // search loaded texture already
-    for (let i = 0; i < this._textures.length; i++) {
-      if (
-        this._textures[i].fileName == fileName &&
-        this._textures[i].usePremultply == usePremultiply
-      ) {
-        // 2回目以降はキャッシュが使用される(待ち時間なし)
-        // WebKitでは同じImageのonloadを再度呼ぶには再インスタンスが必要
-        // 詳細：https://stackoverflow.com/a/5024181
-        this._textures[i].img = new Image();
-        this._textures[i].img.addEventListener(
-          'load',
-          (): void => { if(!this._released && isCurrent()) callback(this._textures[i]); },
-          {
-            passive: true
-          }
-        );
-        this._textures[i].img.src = fileName;
-        return;
-      }
+    if (this._released || !isCurrent()) return;
+    const cached = this._textures.find(texture =>
+      texture.fileName === fileName && texture.usePremultply === usePremultiply);
+    if (cached) {
+      queueMicrotask(() => {
+        if (!this._released && isCurrent() && this._textures.includes(cached)) callback(cached);
+      });
+      return;
     }
 
-    // データのオンロードをトリガーにする
+    // The product document and its restricted pet-user protocol have different
+    // origins. Read permitted bytes, then decode a document-owned Blob image;
+    // direct protocol Image.src can taint the source of WebGL texImage2D.
+    const controller = new AbortController();
     const img = new Image();
-    img.addEventListener(
-      'load',
-      (): void => {
-        if(this._released || !isCurrent()) return;
-        // テクスチャオブジェクトの作成
-        const tex: WebGLTexture = this._glManager.getGl().createTexture();
-
-        // テクスチャを選択
-        this._glManager
-          .getGl()
-          .bindTexture(this._glManager.getGl().TEXTURE_2D, tex);
-
-        // テクスチャにピクセルを書き込む
-        this._glManager
-          .getGl()
-          .texParameteri(
-            this._glManager.getGl().TEXTURE_2D,
-            this._glManager.getGl().TEXTURE_MIN_FILTER,
-            this._glManager.getGl().LINEAR_MIPMAP_LINEAR
-          );
-        this._glManager
-          .getGl()
-          .texParameteri(
-            this._glManager.getGl().TEXTURE_2D,
-            this._glManager.getGl().TEXTURE_MAG_FILTER,
-            this._glManager.getGl().LINEAR
-          );
-
-        // Premult処理を行わせる
-        if (usePremultiply) {
-          this._glManager
-            .getGl()
-            .pixelStorei(
-              this._glManager.getGl().UNPACK_PREMULTIPLY_ALPHA_WEBGL,
-              1
-            );
-        }
-
-        // テクスチャにピクセルを書き込む
-        this._glManager
-          .getGl()
-          .texImage2D(
-            this._glManager.getGl().TEXTURE_2D,
-            0,
-            this._glManager.getGl().RGBA,
-            this._glManager.getGl().RGBA,
-            this._glManager.getGl().UNSIGNED_BYTE,
-            img
-          );
-
-        // ミップマップを生成
-        this._glManager
-          .getGl()
-          .generateMipmap(this._glManager.getGl().TEXTURE_2D);
-
-        // テクスチャをバインド
-        this._glManager
-          .getGl()
-          .bindTexture(this._glManager.getGl().TEXTURE_2D, null);
-
-        const textureInfo: TextureInfo = new TextureInfo();
-        if (textureInfo != null) {
-          textureInfo.fileName = fileName;
-          textureInfo.width = img.width;
-          textureInfo.height = img.height;
-          textureInfo.id = tex;
-          textureInfo.img = img;
-          textureInfo.usePremultply = usePremultiply;
-          if (this._textures != null) {
-            this._textures.push(textureInfo);
-          }
-        }
-
-        callback(textureInfo);
-      },
-      { passive: true }
-    );
-    img.src = fileName;
+    let objectURL: string | null = null;
+    let cancelled = false;
+    const current = () => !cancelled && !this._released && isCurrent();
+    const notifyFailure = (reason: string) => {
+      if (current()) window.dispatchEvent(new CustomEvent('cubism-asset-error', { detail: { reason } }));
+    };
+    const cleanup = () => {
+      img.removeEventListener('load', onLoad);
+      img.removeEventListener('error', onError);
+      if (objectURL) { URL.revokeObjectURL(objectURL); objectURL = null; }
+      this._pending.delete(cancel);
+    };
+    const cancel = () => { cancelled = true; controller.abort(); cleanup(); };
+    const onError = () => { notifyFailure('texture-image-decode-failed'); cleanup(); };
+    const onLoad = () => {
+      if (!current()) { cleanup(); return; }
+      const gl = this._glManager.getGl();
+      let tex: WebGLTexture | null = null;
+      try {
+        tex = gl.createTexture();
+        if (!tex) throw new Error('texture allocation failed');
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, usePremultiply ? 1 : 0);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+        gl.generateMipmap(gl.TEXTURE_2D);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        const info = new TextureInfo();
+        Object.assign(info, { fileName, width: img.width, height: img.height, id: tex, img, usePremultply: usePremultiply });
+        this._textures.push(info);
+        callback(info);
+      } catch {
+        this._textures = this._textures.filter(texture => texture.id !== tex);
+        if (tex) gl.deleteTexture(tex);
+        notifyFailure('texture-upload-failed');
+      } finally { cleanup(); }
+    };
+    img.addEventListener('load', onLoad, { passive: true });
+    img.addEventListener('error', onError, { passive: true });
+    this._pending.add(cancel);
+    void (async () => {
+      try {
+        const response = await fetch(fileName, { signal: controller.signal });
+        if (!current()) { cleanup(); return; }
+        if (!response.ok) throw new Error('texture response unavailable');
+        const bytes = await response.blob();
+        if (!current()) { cleanup(); return; }
+        objectURL = URL.createObjectURL(bytes);
+        img.src = objectURL;
+      } catch {
+        notifyFailure('texture-bytes-load-failed');
+        cleanup();
+      }
+    })();
   }
 
   /**
@@ -154,6 +121,7 @@ export class LAppTextureManager {
    * 配列に存在する画像全てを解放する。
    */
   public releaseTextures(): void {
+    for (const cancel of [...this._pending]) cancel();
     for (let i = 0; i < this._textures.length; i++) {
       this._glManager.getGl().deleteTexture(this._textures[i].id);
       this._textures[i] = null;
