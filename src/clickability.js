@@ -65,6 +65,10 @@ function createNativeIgnoreController({ setIntervalFn, clearIntervalFn, pollInte
  *  env 注入活环境读取器：{ petEl?, activeRenderMode?, busy?, walkState?, playback? }。 */
 function petUiHit(el, e, env = {}) {
   if (!el) return false;
+  const live2dCanvas = el.closest && el.closest("#live2d-canvas");
+  if (live2dCanvas && env.live2dInteractiveAt && e) {
+    return env.live2dInteractiveAt(e.clientX, e.clientY) === true;
+  }
   // 精确命中：角色/气泡/输入栏/信息版/渲染画布 这些真正的可交互实体
   if (el.closest("#pet") || el.closest("#bubble") || el.closest("#input-bar") ||
       el.closest("#rig-canvas") || el.closest("#live2d-canvas") || el.closest("#info-panel")) return true;

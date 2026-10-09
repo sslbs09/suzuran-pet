@@ -236,6 +236,18 @@ function loadLive2dScript(src) {
 }
 let live2dStackPromise = null;
 let live2dProductSelection = null;
+function setLive2dRendererStatus(text = "") {
+  let label = document.getElementById("live2d-renderer-status");
+  if (!text) { if (label) { label.textContent = ""; label.classList.add("hidden"); } return; }
+  if (!label) {
+    label = document.createElement("output");
+    label.id = "live2d-renderer-status";
+    label.style.cssText = "position:fixed;top:4px;left:4px;z-index:50;background:#5c1414;color:#fff;font:12px sans-serif;padding:4px 7px;border-radius:3px;pointer-events:none";
+    document.body.appendChild(label);
+  }
+  label.textContent = text;
+  label.classList.remove("hidden");
+}
 function ensureLive2dStack() {
   if (window.Live2DRuntime) return Promise.resolve("already"); // 已就绪（含测试替身）：不重复注入
   if (live2dStackPromise) return live2dStackPromise;
@@ -253,6 +265,7 @@ function ensureLive2dStack() {
       window.__LIVE2D_RUNTIME_CONFIG__ = { shaderURL: selection.shaderURL };
       return "cubism-web";
     }
+    live2dProductSelection = null;
     const coreOk = await loadLive2dScript("live2dcubismcore.min.js")
       .then(() => true)
       .catch(() => { return null; });
@@ -261,7 +274,7 @@ function ensureLive2dStack() {
     await loadLive2dScript("live2d-runtime.js");
     return "full";
   })();
-  live2dStackPromise.catch(() => { live2dStackPromise = null; }); // 插件/注入失败允许下次切换重试
+  live2dStackPromise = live2dStackPromise.catch(() => { live2dStackPromise = null; return null; }); // 插件/注入失败允许下次切换重试
   return live2dStackPromise;
 }
 
@@ -271,8 +284,9 @@ async function initLive2d(context) {
   if (!canvas) return { status: "failed", error: new Error("Live2D canvas 缺失") };
   const stack = await ensureLive2dStack();
   if (!isCurrentRenderRequest(context, "live2d")) return { status: "superseded" }; // 跨 await 复查 generation：旧代请求不得接管新 renderer
-  if (!stack || !window.Live2DRuntime) return { status: "failed", error: new Error("Live2D runtime 未加载") };
+  if (!stack || !window.Live2DRuntime) { setLive2dRendererStatus("LIVE2D RENDERER DEGRADED"); return { status: "failed", error: new Error("Live2D runtime 未加载") }; }
   if (!window.Live2DCubismCore) {
+    setLive2dRendererStatus("LIVE2D RENDERER DEGRADED");
     window.petAPI.playback && window.petAPI.playback("[live2d] Live2D Core 缺失，初始化失败");
     return { status: "failed", error: new Error("Live2D Core 缺失") };
   }
@@ -283,6 +297,7 @@ async function initLive2d(context) {
     skins = [{ id: "builtin/Haru", name: "Haru（Cubism Web R5）", url: live2dProductSelection.modelURL }];
   }
   if (!skins || !skins.length) {
+    setLive2dRendererStatus("LIVE2D RENDERER DEGRADED");
     window.petAPI.playback && window.petAPI.playback("[live2d] 未找到模型（内置缺失且 userData/assets/live2d/ 为空）");
     return { status: "failed", error: new Error("未找到 Live2D 模型") };
   }
@@ -296,9 +311,11 @@ async function initLive2d(context) {
     }
     applyLive2dScale(live2dScaleFactor);
     live2dActive = true;
+    setLive2dRendererStatus("");
     window.petAPI.playback && window.petAPI.playback("[live2d] 模型就绪: " + pick.name);
     return { status: "ready", resource: requestedId || "" };
   } catch (e) {
+    setLive2dRendererStatus("LIVE2D RENDERER DEGRADED");
     window.petAPI.playback && window.petAPI.playback("[live2d] 加载失败: " + (e && e.message || e));
     destroyLive2d(context.token);
     return { status: isCurrentRenderRequest(context, "live2d") ? "failed" : "superseded", error: e };
@@ -2149,6 +2166,7 @@ async function switchRenderMode(nextMode, options = {}) {
       if (renderSwitchStatus === "failed" && mode !== "gif" && isCurrentRenderRequest(context, mode)) {
         const fallback = await switchRenderMode("gif", { mainSeq: context.mainSeq });
         if (fallback.status === "ready" || fallback.status === "noop") {
+          if (mode === "live2d") setLive2dRendererStatus("RENDERER FALLBACK");
           return {
             ...fallback,
             requestedMode: mode,
@@ -4521,6 +4539,7 @@ const clickability = window.PetClickability.createClickabilityCore({
   isPetUI: (el, e) => window.PetClickability.petUiHit(el, e, {
     petEl: () => petEl,
     activeRenderMode: () => activeRenderMode,
+    live2dInteractiveAt: (x, y) => activeRenderMode === "live2d" && live2dActive && !!window.Live2DRuntime && window.Live2DRuntime.interactiveAt(x, y),
     busy: () => busy,
     walkState: () => walkState,
     playback: (msg) => { try { window.petAPI.playback(msg); } catch { /* 忽略 */ } },

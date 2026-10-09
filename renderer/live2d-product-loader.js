@@ -8,6 +8,10 @@
     if (!cubism || cubism.provisioned !== true) return { kind: 'legacy' };
     const required = ['coreURL', 'runtimeURL', 'shaderURL', 'modelURL'];
     if (required.some((key) => typeof cubism[key] !== 'string' || !cubism[key])) return { kind: 'legacy' };
+    if (!cubism.coreURL.startsWith('pet-user://live2d-runtime/') ||
+        !cubism.runtimeURL.startsWith('pet-user://live2d-runtime/') ||
+        !cubism.shaderURL.startsWith('pet-user://live2d-runtime/') ||
+        !cubism.modelURL.startsWith('pet-user://live2d/')) return { kind: 'legacy' };
     return {
       kind: 'cubism-web',
       coreURL: cubism.coreURL,
@@ -38,13 +42,19 @@
 
   function validateSemanticCommand(command) {
     if (!command || typeof command !== 'object' || Array.isArray(command)) return false;
-    const keys = Object.keys(command);
-    if (keys.some((key) => /cubism|param|model|shader|resource|filename|file/i.test(key))) return false;
     if (typeof command.type !== 'string') return false;
-    if (command.type === 'mouth') return Number.isFinite(Number(command.value)) && Number(command.value) >= 0 && Number(command.value) <= 1;
-    if (command.type === 'look') return Number.isFinite(Number(command.x)) && Number.isFinite(Number(command.y));
-    if (command.type === 'expression' || command.type === 'motion') return typeof command.name === 'string' && command.name.length > 0 && command.name.length < 80;
-    return command.type === 'neutral' || command.type === 'stop';
+    const schemas = {
+      mouth: ['type', 'value'], look: ['type', 'x', 'y'],
+      expression: ['type', 'name'], motion: ['type', 'name'],
+      neutral: ['type'], stop: ['type']
+    };
+    const allowed = schemas[command.type];
+    if (!allowed || Object.keys(command).some((key) => !allowed.includes(key))) return false;
+    if (command.type === 'mouth') return typeof command.value === 'number' && Number.isFinite(command.value) && command.value >= 0 && command.value <= 1;
+    if (command.type === 'look') return typeof command.x === 'number' && typeof command.y === 'number' && Number.isFinite(command.x) && Number.isFinite(command.y) && Math.abs(command.x) <= 1 && Math.abs(command.y) <= 1;
+    if (command.type === 'expression') return ['neutral', 'happy', 'reaction'].includes(command.name);
+    if (command.type === 'motion') return ['idle', 'greet', 'pat'].includes(command.name);
+    return true;
   }
 
   async function loadStack(selection, loadScript) {
