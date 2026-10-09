@@ -217,10 +217,46 @@ function destroyRig() {
   document.body.classList.remove("rig-mode");
 }
 
+/* ---------- Live2D 栈按需加载（3C 收口，3A 基线证据 #1） ----------
+ * live2dcubismcore.min.js 因 Live2D 许可不可随仓库捆绑（仓库只有插件与 runtime），
+ * 原 index.html 无条件 defer 链让 pixi-live2d.min.js 在每次文档加载求值时抛
+ * "Could not find Cubism 4 runtime"——Spine/GIF 模式纯噪声。现改为：切到 Live2D
+ * 模式才加载；先探测 core，core 缺失即终止链（绝不加载会抛错的插件），
+ * 走 initLive2d 既有「Core 缺失 → failed」降级语义。CSP script-src 'self'
+ * 允许同源动态 script；测试 harness 预注入 Live2DRuntime 时短路复用。 */
+function loadLive2dScript(src) {
+  return new Promise((resolve, reject) => {
+    const el = document.createElement("script");
+    el.src = src;
+    el.onload = () => resolve(true);
+    el.onerror = () => reject(new Error("Live2D 脚本加载失败: " + src));
+    document.head.appendChild(el);
+  });
+}
+let live2dStackPromise = null;
+function ensureLive2dStack() {
+  if (window.Live2DRuntime) return Promise.resolve("already"); // 已就绪（含测试替身）：不重复注入
+  if (live2dStackPromise) return live2dStackPromise;
+  live2dStackPromise = loadLive2dScript("live2dcubismcore.min.js")
+    .then(() => true)
+    .catch(() => { return null; }) // core 缺失（404/许可未放置）→ 链终止
+    .then((coreOk) => {
+      if (!coreOk) return null;
+      return loadLive2dScript("pixi-live2d.min.js")
+        .then(() => loadLive2dScript("live2d-runtime.js"))
+        .then(() => "full");
+    });
+  live2dStackPromise.catch(() => { live2dStackPromise = null; }); // 插件/注入失败允许下次切换重试
+  return live2dStackPromise;
+}
+
 async function initLive2d(context) {
   const requestedId = context && context.resourceId;
   const canvas = document.getElementById("live2d-canvas");
-  if (!canvas || !window.Live2DRuntime) return { status: "failed", error: new Error("Live2D runtime 未加载") };
+  if (!canvas) return { status: "failed", error: new Error("Live2D canvas 缺失") };
+  const stack = await ensureLive2dStack();
+  if (!isCurrentRenderRequest(context, "live2d")) return { status: "superseded" }; // 跨 await 复查 generation：旧代请求不得接管新 renderer
+  if (!stack || !window.Live2DRuntime) return { status: "failed", error: new Error("Live2D runtime 未加载") };
   if (!window.Live2DCubismCore) {
     window.petAPI.playback && window.petAPI.playback("[live2d] Live2D Core 缺失，初始化失败");
     return { status: "failed", error: new Error("Live2D Core 缺失") };
@@ -1400,8 +1436,10 @@ function spineAnimForMood(mood) {
     if ((mood === "think") && seatedNow && cls.sit && cls.sit[0]) return cls.sit[0];
     if (cls.idle && cls.idle[0]) return cls.idle[0];
   }
-  // 常见映射（明日方舟基建模型只有 Relax/Move/Interact，情绪统一回退 Relax）
-  const map = {
+  // 常见映射（明日方舟基建模型只有 Relax/Move/Interact，情绪统一回退 Relax）。
+  // 3C 收口：映射表提取到双端模块 SpineArbitration.MOOD_ANIM_MAP（单一事实源，
+  // spineMoodCapability 与播放路径共用同一张表）；模块缺席时内联兜底同表。
+  const map = (window.SpineArbitration && window.SpineArbitration.MOOD_ANIM_MAP) || {
     idle: ["Relax", "Idle", "idle", "animation", "stand"],
     happy: ["happy", "Happy", "Relax"],
     think: ["think", "Think", "Sit", "Relax"],
@@ -2438,12 +2476,33 @@ function playSpineInteract() {
     }
     return;
   }
-  const next = spinePhaseAnim();
+  // 3C 收口（3A 实机异常 #2）：站立静止（walk 引擎非 active）时 spinePhaseAnim()=null
+  // 曾直接 return，合法 pat 丢失 Interact。恢复目标经 SpineArbitration 决策：
+  // 有相位用相位（locomotion 归属不变），无相位回落 idle 映射——与 reconcileSpineAnimation
+  // 的 `spinePhaseAnim() || spineAnimForMood("idle")` 同一规则。模块缺席时同式内联兜底。
+  const arb = window.SpineArbitration;
+  const next = arb ? arb.decideInteractRecovery({ phaseAnim: spinePhaseAnim(), idleAnim: spineAnimForMood("idle") })
+    : (spinePhaseAnim() || spineAnimForMood("idle"));
   if (!next) return;
   spineObj.state.clearTrack(0);
   setSpineAnim(inter, false, "poke");
   addSpineAnim(next, true, "poke-resume");
   scheduleFitSpine({});
+}
+
+/**
+ * 某 semantic mood 对当前皮肤动画集的真实能力级别（3C 收口，3A 证据 #3）：
+ * "exact"=专属动画（mood 同名或映射表首位）；"fallback"=借用映射表降级候选
+ * （如内置皮肤 happy→Relax）；"unsupported"=无命中（将走第一个可用动画兜底）。
+ * 分级委托双端纯模块 SpineArbitration.classifyMoodCapability（与 spineAnimForMood
+ * 共享 MOOD_ANIM_MAP 单一事实源）。fallback 不得被当作精确表达成功——mood 播放
+ * 日志 reason 携带级别（[anim] mood:happy:fallback），供实机验收与后续 contract 输入。
+ */
+function spineMoodCapability(mood) {
+  if (!spineObj) return "unsupported";
+  const arb = window.SpineArbitration;
+  if (arb) return arb.classifyMoodCapability({ mood, hasAnim: (n) => spineHas(n), map: arb.MOOD_ANIM_MAP });
+  return "unsupported"; // 模块缺席=能力不可证（诚实降级，不猜测）
 }
 
 /** 在 Spine 模式下播放对应情绪的动画 */
@@ -2490,7 +2549,7 @@ function setSpineMood(mood) {
     // 非生命周期（引擎停止/坐/窗顶/睡）完全旧语义（active=false 时 Default 合法）；
     // mood 字段/dataset/bubble/TTS 均已先行提交，暂停结束后 walk-phase/paused-idle 分支照常恢复正确相位。
     if (isLocomotionLifecycle() && isStaticFallbackAnim(animName)) return;
-    setSpineAnim(animName, true, "mood:" + mood);
+    setSpineAnim(animName, true, "mood:" + mood + ":" + spineMoodCapability(mood));
     moodAnimUntil = Date.now() + 6500; // 情绪动画展示窗口：期间相位对账不抢，过期由对账兜底回收
     scheduleFitSpine({});
   }
