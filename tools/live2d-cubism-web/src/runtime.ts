@@ -2,6 +2,7 @@ import { CubismShaderManager_WebGL } from '@framework/rendering/cubismshader_web
 import { LAppDelegate } from './lappdelegate';
 import { LAppPal } from './lapppal';
 import { createOwnerLifecycle } from './runtime-owner.mjs';
+import { createAlphaSampler } from './runtime-alpha.mjs';
 
 type RuntimeCommand = { type: string; value?: number; x?: number; y?: number; name?: string };
 type RuntimeOptions = { shaderURL?: string; readyTimeoutMs?: number };
@@ -10,14 +11,13 @@ type RuntimeOwner = {
   frameReady: boolean; disposed: boolean; generation: number; frameCount: number; frameTime: number;
   onFrame: (event: Event) => void; onAssetError: (event: Event) => void;
   cancelReady?: () => void;
-  pendingAlpha: { x: number; y: number; rect: Rect } | null;
-  alphaCache: { x: number; y: number; rect: Rect; frame: number; alpha: boolean } | null;
 };
 
 type Rect = { left: number; top: number; right: number; bottom: number; width: number; height: number };
 
 let activeOwner: RuntimeOwner | null = null;
 const ownerLifecycle = createOwnerLifecycle();
+const alphaSampler = createAlphaSampler();
 let scale = 1;
 let lastMood = 'idle';
 let lastCommand: RuntimeCommand | null = null;
@@ -34,10 +34,6 @@ function canvasRect(canvas: HTMLCanvasElement): Rect | null {
   const height = Number(raw.height || canvas.clientHeight || canvas.height);
   if (!(width > 0 && height > 0)) return null;
   return { left: raw.left, top: raw.top, right: raw.left + width, bottom: raw.top + height, width, height };
-}
-
-function sameRect(a: Rect, b: Rect): boolean {
-  return a.left === b.left && a.top === b.top && a.right === b.right && a.bottom === b.bottom && a.width === b.width && a.height === b.height;
 }
 
 function modelParts(modelURL: string): { dir: string; file: string } {
@@ -63,21 +59,20 @@ function rendererReady(owner: RuntimeOwner): boolean {
 }
 
 function samplePendingAlpha(owner: RuntimeOwner): void {
-  const pending = owner.pendingAlpha;
-  if (!pending || !isCurrent(owner) || !rendererReady(owner)) return;
+  if (!isCurrent(owner) || !rendererReady(owner)) return;
   const sub = owner.delegate.getSubdelegate(0);
   const canvas = sub?.getCanvas();
   const gl = sub?.getGl();
   if (!canvas || !gl) return;
   const rect = canvasRect(canvas);
-  if (!rect || !sameRect(rect, pending.rect)) { owner.alphaCache = null; return; }
-  const px = Math.max(0, Math.min(canvas.width - 1, Math.floor((pending.x - rect.left) * canvas.width / rect.width)));
-  const py = Math.max(0, Math.min(canvas.height - 1, Math.floor((rect.bottom - pending.y) * canvas.height / rect.height)));
-  const pixel = new Uint8Array(4);
-  try {
+  if (!rect) return;
+  alphaSampler.sample(owner, owner.frameCount, rect, (x, y, sampleRect) => {
+    const px = Math.max(0, Math.min(canvas.width - 1, Math.floor((x - sampleRect.left) * canvas.width / sampleRect.width)));
+    const py = Math.max(0, Math.min(canvas.height - 1, Math.floor((sampleRect.bottom - y) * canvas.height / sampleRect.height)));
+    const pixel = new Uint8Array(4);
     gl.readPixels(px, py, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
-    owner.alphaCache = { x: pending.x, y: pending.y, rect, frame: owner.frameCount, alpha: pixel[3] >= 16 };
-  } catch { owner.alphaCache = null; }
+    return pixel[3] >= 16;
+  });
 }
 
 function waitForReady(owner: RuntimeOwner, timeoutMs: number): Promise<boolean> {
@@ -113,6 +108,7 @@ function waitForReady(owner: RuntimeOwner, timeoutMs: number): Promise<boolean> 
 function releaseOwner(owner: RuntimeOwner): void {
   if (owner.disposed) return;
   ownerLifecycle.retire(owner);
+  alphaSampler.reset(owner);
   owner.cancelReady?.();
   window.removeEventListener('cubism-frame-rendered', owner.onFrame);
   window.removeEventListener('cubism-asset-error', owner.onAssetError);
@@ -134,18 +130,9 @@ function alphaAt(owner: RuntimeOwner, clientX: number, clientY: number): boolean
   if (!canvas) return false;
   const rect = canvasRect(canvas);
   if (!rect || clientX < rect.left || clientY < rect.top || clientX >= rect.right || clientY >= rect.bottom) {
-    owner.pendingAlpha = null; owner.alphaCache = null; return false;
+    return alphaSampler.submit(owner, clientX, clientY, null);
   }
-  if (!owner.pendingAlpha || owner.pendingAlpha.x !== clientX || owner.pendingAlpha.y !== clientY || !sameRect(owner.pendingAlpha.rect, rect)) {
-    owner.pendingAlpha = { x: clientX, y: clientY, rect };
-    owner.alphaCache = null;
-    return false;
-  }
-  const cache = owner.alphaCache;
-  if (!cache || cache.frame !== owner.frameCount || cache.x !== clientX || cache.y !== clientY || !sameRect(cache.rect, rect)) return false;
-  owner.pendingAlpha = null;
-  owner.alphaCache = null;
-  return cache.alpha;
+  return alphaSampler.submit(owner, clientX, clientY, rect);
 }
 
 const Live2DRuntime = {
@@ -158,7 +145,7 @@ const Live2DRuntime = {
     const owner: RuntimeOwner = {
       ...identity, token, delegate: LAppDelegate.getInstance(), modelURL, shaderURL,
       frameReady: false, generation: identity.generation, frameCount: 0, frameTime: 0,
-      onFrame: () => {}, onAssetError: () => {}, pendingAlpha: null, alphaCache: null
+      onFrame: () => {}, onAssetError: () => {}
     };
     activeOwner = owner;
     lastCommand = null;

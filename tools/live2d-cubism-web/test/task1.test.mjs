@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import loader from '../../../renderer/live2d-product-loader.js';
 import { createOwnerLifecycle } from '../src/runtime-owner.mjs';
+import { createAlphaSampler } from '../src/runtime-alpha.mjs';
 import { provisionProductWeb } from '../provision-product-web.mjs';
 
 const { chooseStack, validateSemanticCommand } = loader;
@@ -36,6 +37,22 @@ test('runtime owner lifecycle uses opaque object identity and stale rejection', 
   assert.equal(lifecycle.accepts(newOwner, newToken), true);
   lifecycle.retire(newOwner);
   assert.equal(lifecycle.accepts(newOwner, newToken), false);
+});
+
+test('post-frame alpha cache remains stable for repeated static-point consumers', () => {
+  const sampler = createAlphaSampler();
+  const owner = {};
+  const rect = { left: 10, top: 20, right: 110, bottom: 120, width: 100, height: 100 };
+  assert.equal(sampler.submit(owner, 40, 50, rect), false);
+  let reads = 0;
+  sampler.sample(owner, 1, rect, () => { reads += 1; return true; });
+  assert.equal(sampler.submit(owner, 40, 50, rect), true);
+  assert.equal(sampler.submit(owner, 40, 50, rect), true);
+  assert.equal(reads, 1);
+  sampler.sample(owner, 2, rect, () => { reads += 1; return true; });
+  assert.equal(sampler.submit(owner, 40, 50, rect), true);
+  assert.equal(reads, 2);
+  assert.equal(sampler.submit(owner, 41, 50, rect), false);
 });
 
 test('built IIFE exposes bounded runtime API and no-owner destroy is safe', async () => {
