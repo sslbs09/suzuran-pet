@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
+import { stripTypeScriptTypes } from 'node:module';
 import loader from '../../../renderer/live2d-product-loader.js';
 import { createOwnerLifecycle } from '../src/runtime-owner.mjs';
 import { createAlphaSampler } from '../src/runtime-alpha.mjs';
@@ -37,6 +38,46 @@ test('runtime owner lifecycle uses opaque object identity and stale rejection', 
   assert.equal(lifecycle.accepts(newOwner, newToken), true);
   lifecycle.retire(newOwner);
   assert.equal(lifecycle.accepts(newOwner, newToken), false);
+});
+
+test('actual runtime init and teardown retain the registered owner object', async () => {
+  // Exercise the real entry's state logic with deterministic draw dependencies.
+  // This unit check does not claim to verify Cubism rendering or native input.
+  const entryURL = new URL('../src/runtime.ts', import.meta.url);
+  const source = stripTypeScriptTypes((await fs.readFile(entryURL, 'utf8'))
+    .replace(/^import .*;\r?\n/gm, '')
+    .replace('export default Live2DRuntime;', 'globalThis.testRuntime = Live2DRuntime;'));
+  const canvas = { width: 300, height: 460, clientWidth: 300, clientHeight: 460,
+    getBoundingClientRect: () => ({ left: 0, top: 0, right: 300, bottom: 460, width: 300, height: 460 }) };
+  let releases = 0;
+  const host = new EventTarget();
+  Object.assign(host, { setTimeout, clearTimeout });
+  const model = { isRendererReady: () => true, getLeaseEvidence: () => ({ disposed: false }) };
+  const gl = { drawingBufferWidth: 300, drawingBufferHeight: 460 };
+  const manager = { getModel: () => model, stop() {}, getObservedParameters: () => ({ mouthOpenY: 0 }) };
+  const sub = { getCanvas: () => canvas, getGl: () => gl, getLive2DManager: () => manager };
+  const dependencies = {
+    window: host, console, Date, Math, Uint8Array, globalThis: null,
+    createOwnerLifecycle, createAlphaSampler, Live2dProductLoader: loader,
+    CubismShaderManager_WebGL: { getInstance: () => ({ getShader: () => ({ _isShaderLoaded: true }) }) },
+    LAppPal: { getDeltaTime: () => 1 / 60 },
+    LAppDelegate: { getInstance: () => ({ initialize: () => true, getSubdelegate: () => sub,
+      run: () => queueMicrotask(() => host.dispatchEvent(new Event('cubism-frame-rendered'))),
+      dispose: () => { releases += 1; } }) }
+  };
+  dependencies.globalThis = dependencies;
+  vm.runInNewContext(source, dependencies);
+  const runtime = dependencies.testRuntime;
+  const oldToken = {}, newToken = {};
+  assert.equal(await runtime.init(canvas, 'pet-user://live2d/Haru/Haru.model3.json', oldToken, { readyTimeoutMs: 40 }), true);
+  assert.equal(runtime.snapshot().frameReady, true);
+  assert.equal(await runtime.init(canvas, 'pet-user://live2d/Haru/Haru.model3.json', newToken, { readyTimeoutMs: 40 }), true);
+  assert.equal(releases, 1);
+  assert.equal(runtime.destroy(oldToken), false);
+  assert.equal(runtime.snapshot().active, true);
+  assert.equal(runtime.destroy(), true);
+  assert.equal(runtime.snapshot().active, false);
+  assert.equal(releases, 2);
 });
 
 test('post-frame alpha cache remains stable for repeated static-point consumers', () => {

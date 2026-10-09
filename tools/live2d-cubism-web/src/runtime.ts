@@ -142,11 +142,11 @@ const Live2DRuntime = {
     const shaderURL = options.shaderURL || (globalThis as any).__LIVE2D_RUNTIME_CONFIG__?.shaderURL || 'pet-user://live2d-runtime/Framework/Shaders/WebGL/';
     if (activeOwner) releaseOwner(activeOwner);
     const identity = ownerLifecycle.begin(token);
-    const owner: RuntimeOwner = {
-      ...identity, token, delegate: LAppDelegate.getInstance(), modelURL, shaderURL,
+    const owner: RuntimeOwner = Object.assign(identity, {
+      token, delegate: LAppDelegate.getInstance(), modelURL, shaderURL,
       frameReady: false, generation: identity.generation, frameCount: 0, frameTime: 0,
       onFrame: () => {}, onAssetError: () => {}
-    };
+    });
     activeOwner = owner;
     lastCommand = null;
     requestedMouthOpen = 0;
@@ -157,7 +157,7 @@ const Live2DRuntime = {
       }
       owner.delegate.run();
       const ready = await waitForReady(owner, options.readyTimeoutMs ?? 10000);
-    if (!ready || !isCurrent(owner)) { releaseOwner(owner); return false; }
+      if (!ready || !isCurrent(owner)) { releaseOwner(owner); return false; }
       return true;
     } catch {
       releaseOwner(owner);
