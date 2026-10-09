@@ -235,18 +235,32 @@ function loadLive2dScript(src) {
   });
 }
 let live2dStackPromise = null;
+let live2dProductSelection = null;
 function ensureLive2dStack() {
   if (window.Live2DRuntime) return Promise.resolve("already"); // 已就绪（含测试替身）：不重复注入
   if (live2dStackPromise) return live2dStackPromise;
-  live2dStackPromise = loadLive2dScript("live2dcubismcore.min.js")
-    .then(() => true)
-    .catch(() => { return null; }) // core 缺失（404/许可未放置）→ 链终止
-    .then((coreOk) => {
-      if (!coreOk) return null;
-      return loadLive2dScript("pixi-live2d.min.js")
-        .then(() => loadLive2dScript("live2d-runtime.js"))
-        .then(() => "full");
-    });
+  live2dStackPromise = (async () => {
+    let capability = null;
+    try { capability = await window.petAPI.live2dCapability(); } catch { /* capability is optional for legacy fallback */ }
+    if (!window.Live2dProductLoader) {
+      try { await loadLive2dScript("live2d-product-loader.js"); } catch { /* legacy path remains available */ }
+    }
+    const selection = window.Live2dProductLoader && window.Live2dProductLoader.chooseStack
+      ? window.Live2dProductLoader.chooseStack(capability) : { kind: "legacy" };
+    if (selection.kind === "cubism-web") {
+      await window.Live2dProductLoader.loadStack(selection, loadLive2dScript);
+      live2dProductSelection = selection;
+      window.__LIVE2D_RUNTIME_CONFIG__ = { shaderURL: selection.shaderURL };
+      return "cubism-web";
+    }
+    const coreOk = await loadLive2dScript("live2dcubismcore.min.js")
+      .then(() => true)
+      .catch(() => { return null; });
+    if (!coreOk) return null;
+    await loadLive2dScript("pixi-live2d.min.js");
+    await loadLive2dScript("live2d-runtime.js");
+    return "full";
+  })();
   live2dStackPromise.catch(() => { live2dStackPromise = null; }); // 插件/注入失败允许下次切换重试
   return live2dStackPromise;
 }
@@ -265,6 +279,9 @@ async function initLive2d(context) {
   let skins = [];
   try { skins = await window.petAPI.live2dList(); } catch { /* 忽略 */ }
   if (!isCurrentRenderRequest(context, "live2d")) return { status: "superseded" };
+  if (live2dProductSelection && live2dProductSelection.kind === "cubism-web") {
+    skins = [{ id: "builtin/Haru", name: "Haru（Cubism Web R5）", url: live2dProductSelection.modelURL }];
+  }
   if (!skins || !skins.length) {
     window.petAPI.playback && window.petAPI.playback("[live2d] 未找到模型（内置缺失且 userData/assets/live2d/ 为空）");
     return { status: "failed", error: new Error("未找到 Live2D 模型") };
@@ -4419,8 +4436,21 @@ window.addEventListener("pointermove", (e) => {
 });
 window.addEventListener("pointerup", (e) => {
   if (dragState && e.pointerId === dragState.pointerId) {
+    const live2dTap = activeRenderMode === "live2d" && live2dActive && !dragState.moved && window.Live2DRuntime
+      ? { x: e.clientX, y: e.clientY } : null;
     clickability.setLastMouse(e.clientX, e.clientY);
     finishDrag("pointerup");
+    // Body owns candidate/threshold/lease/finish.  Only after finish may the
+    // product renderer receive a bounded hit and semantic pat signal.
+    if (live2dTap) {
+      try {
+        const area = window.Live2DRuntime.hit(live2dTap.x, live2dTap.y);
+        if (area) {
+          window.Live2DRuntime.poke();
+          window.petAPI.pat && window.petAPI.pat();
+        }
+      } catch { /* renderer teardown/reload wins over a late tap */ }
+    }
   }
 });
 window.addEventListener("pointercancel", (e) => {

@@ -154,7 +154,7 @@ function registerUserAssetProtocol() {
       if (file !== USER_ASSET_DIR && !file.startsWith(USER_ASSET_DIR + path.sep)) return new Response("forbidden", { status: 403 });
       if (!fs.existsSync(file) || !fs.statSync(file).isFile()) return new Response("not found", { status: 404 });
       const ext = path.extname(file).toLowerCase();
-      const type = { ".png": "image/png", ".gif": "image/gif", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".otf": "font/otf", ".json": "application/json", ".atlas": "text/plain", ".skel": "application/octet-stream" }[ext] || "application/octet-stream";
+      const type = { ".png": "image/png", ".gif": "image/gif", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".otf": "font/otf", ".json": "application/json", ".js": "text/javascript", ".atlas": "text/plain", ".skel": "application/octet-stream" }[ext] || "application/octet-stream";
       return new Response(fs.readFileSync(file), { headers: { "content-type": type } });
     } catch { return new Response("bad request", { status: 400 }); }
   });
@@ -1234,10 +1234,25 @@ ipcMain.handle("pet:live2d-list", () => {
   return out;
 });
 // Live2D Core 与内置模型属于可选发行资源；缺失时返回空列表，设置页应明确提示而不是进入空白模式。
-ipcMain.handle("pet:live2d-capability", () => ({
-  core: fs.existsSync(path.join(config.APP_DIR, "renderer", "live2dcubismcore.min.js")),
-  builtinModels: fs.existsSync(path.join(config.APP_DIR, "renderer", "live2d", "models"))
-}));
+ipcMain.handle("pet:live2d-capability", () => {
+  const userAssets = path.join(config.STORAGE.userDir, "assets");
+  const productRoot = path.join(userAssets, "live2d-runtime");
+  const productModel = path.join(userAssets, "live2d", "Haru", "Haru.model3.json");
+  const productShader = path.join(productRoot, "Framework", "Shaders", "WebGL", "vertshadersrc.vert");
+  const productCore = path.join(productRoot, "live2dcubismcore.js");
+  const productBundle = path.join(productRoot, "live2d-runtime.js");
+  return {
+    core: fs.existsSync(path.join(config.APP_DIR, "renderer", "live2dcubismcore.min.js")),
+    builtinModels: fs.existsSync(path.join(config.APP_DIR, "renderer", "live2d", "models")),
+    cubismWeb: {
+      provisioned: [productCore, productBundle, productShader, productModel].every((file) => fs.existsSync(file)),
+      coreURL: "pet-user://live2d-runtime/live2dcubismcore.js",
+      runtimeURL: "pet-user://live2d-runtime/live2d-runtime.js",
+      shaderURL: "pet-user://live2d-runtime/Framework/Shaders/WebGL/",
+      modelURL: "pet-user://live2d/Haru/Haru.model3.json"
+    }
+  };
+});
 let rendererReloadAt = 0;
 ipcMain.on("pet:set-live2d-scale", (_e, v) => { // Live2D 角色大小（实时生效）
   const s = Math.max(0.3, Math.min(1.5, Number(v) || 1));
