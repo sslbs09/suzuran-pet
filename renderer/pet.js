@@ -303,11 +303,23 @@ async function initLive2d(context) {
   }
   const pick = (requestedId && skins.find((s) => s.id === requestedId)) || skins.find((s) => s.id.startsWith("builtin/")) || skins[0];
   try {
+    // Keep a real positive layout while the renderer loads. display:none gives
+    // WebGL a zero-sized drawing buffer and cannot prove a real first frame.
+    canvas.classList.remove("hidden");
+    canvas.style.display = "";
+    canvas.style.visibility = "hidden";
+    canvas.style.pointerEvents = "none";
+    window.petAPI.setSize && window.petAPI.setSize(Math.round(300 * live2dScaleFactor), Math.round(460 * live2dScaleFactor), "render-mode");
     bindCtxLost(canvas, "live2d", context.token);
     const ok = await window.Live2DRuntime.init(canvas, pick.url, context.token);
-    if (!ok || !isCurrentRenderRequest(context, "live2d")) {
+    if (!isCurrentRenderRequest(context, "live2d")) {
       destroyLive2d(context.token);
       return { status: "superseded" };
+    }
+    if (!ok) {
+      setLive2dRendererStatus("LIVE2D RENDERER DEGRADED");
+      destroyLive2d(context.token);
+      return { status: "failed", error: new Error("Live2D renderer readiness failed") };
     }
     applyLive2dScale(live2dScaleFactor);
     live2dActive = true;
@@ -324,7 +336,13 @@ async function initLive2d(context) {
 
 function destroyLive2d(ownerToken) {
   let destroyed = true;
-  try { if (window.Live2DRuntime) destroyed = window.Live2DRuntime.destroy(ownerToken) !== false; } catch { /* 忽略 */ }
+  try {
+    if (window.Live2DRuntime) {
+      destroyed = arguments.length === 0
+        ? window.Live2DRuntime.destroy() !== false
+        : window.Live2DRuntime.destroy(ownerToken) !== false;
+    }
+  } catch { /* 忽略 */ }
   const canvas = document.getElementById("live2d-canvas");
   if (ownerToken && !destroyed) return;
   live2dActive = false;
@@ -4318,7 +4336,7 @@ function renderDragClickable() {
   } catch { /* 页面销毁时 IPC 可能已不可用 */ }
 }
 
-function finishDrag(reason = "cancel") {
+function finishDrag(reason = "cancel", tapPoint = null) {
   const state = dragState;
   if (!state || !state.active) return false;
   // State Core Interaction：先结算 candidate 生命周期（wasDrag/interactionId），再摘全局状态
@@ -4356,7 +4374,17 @@ function finishDrag(reason = "cancel") {
     if (!patSeq || now - patSeq.at > 2000) patSeq = { at: now, count: 0, barOpenedByFirst: false };
     patSeq.count += 1;
     patSeq.at = now;
-    if (patSeq.count >= 2) {
+    const live2dTap = activeRenderMode === "live2d" && live2dActive && tapPoint && window.Live2DRuntime;
+    if (live2dTap) {
+      try {
+        const area = window.Live2DRuntime.hit(tapPoint.x, tapPoint.y);
+        if (area) {
+          window.Live2DRuntime.poke();
+          window.petAPI.pat && window.petAPI.pat();
+          showPatFeedback();
+        }
+      } catch { /* renderer teardown/reload wins over a late tap */ }
+    } else if (patSeq.count >= 2) {
       // 摸头：把第 1 击误开的聊天栏关回去，保持"摸头不开栏"的直觉
       if (patSeq.barOpenedByFirst) {
         if (!inputBar.classList.contains("hidden")) toggleInputBar();
@@ -4457,18 +4485,8 @@ window.addEventListener("pointerup", (e) => {
     const live2dTap = activeRenderMode === "live2d" && live2dActive && !dragState.moved && window.Live2DRuntime
       ? { x: e.clientX, y: e.clientY } : null;
     clickability.setLastMouse(e.clientX, e.clientY);
-    finishDrag("pointerup");
-    // Body owns candidate/threshold/lease/finish.  Only after finish may the
-    // product renderer receive a bounded hit and semantic pat signal.
-    if (live2dTap) {
-      try {
-        const area = window.Live2DRuntime.hit(live2dTap.x, live2dTap.y);
-        if (area) {
-          window.Live2DRuntime.poke();
-          window.petAPI.pat && window.petAPI.pat();
-        }
-      } catch { /* renderer teardown/reload wins over a late tap */ }
-    }
+    if (live2dTap) finishDrag("pointerup", live2dTap);
+    else finishDrag("pointerup");
   }
 });
 window.addEventListener("pointercancel", (e) => {

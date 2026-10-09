@@ -1,0 +1,8 @@
+{
+  "name": "whitemoon-live2d-product-runtime-source",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build-product.mjs --sdk-root <absolute-sdk-root> --work-dir <absolute-work-dir> --tool-root <absolute-tool-root>"
+  }
+}
