@@ -860,6 +860,21 @@ const observationIngress = whitemoonIngress.createObservationIngress({
   log: (line) => logTts("whitemoon", line)
 });
 
+/* ---------- P0-B1 FORMAL COGNITION：canonical Character Projection 只读通道 ---------- */
+// 架构纪律（任务 §11）：Body 读取 canonical Identity/State/Relationship 的唯一
+// 通道是 Host 的窄只读 surface；不直读 Core JSON/store、不复制 Core 持久化逻辑。
+// 每轮聊天现取一次、不缓存：continuity 来自 Host→Core 持久真相，不来自本地缓存
+// （§22：不能从 Body local cache 伪造 continuity）。禁用时零流量。
+const whitemoonProjection = require("./src/whitemoon-projection");
+const formalProjection = whitemoonProjection && typeof whitemoonProjection.createProjectionClient === "function"
+  ? whitemoonProjection.createProjectionClient({
+      getEndpoint: () => {
+        const wm = (config.getConfig() || {}).whitemoonRuntime || {};
+        return { enabled: wm.enabled === true, baseUrl: String(wm.baseUrl || ""), token: String(wm.ingressToken || "") };
+      }
+    })
+  : null;
+
 function openObservation() {
   if (observationWin && !observationWin.isDestroyed()) { observationWin.focus(); return; }
   observationWin = new BrowserWindow({
@@ -2382,9 +2397,14 @@ function chatVars() {
   const cfg = config.getConfig();
   return { name: (cfg.pet && cfg.pet.name) || "苏苏洛", user: (cfg.chat && cfg.chat.userName) || "博士" };
 }
-function buildChatPersona() {
+function buildChatPersona(formalMode) {
   const base = personaCache || config.getPersonaText();
   const cfg = config.getConfig();
+  // P0-B1 formal mode：只供旧版「呈现人设」基础文本（OWNER-MATRIX §2：
+  // LEGACY PRESENTATION PERSONA / COMPATIBILITY STYLE，低于 canonical 且不覆盖之）。
+  // bond/facts/summary/心情基调等 legacy 派生记忆没有 instance 归属 ⇒ 不进 formal
+  // cognition（§23 抑制；抑制清单经 assembly diagnostics 记录）。
+  if (formalMode) return base;
   if (!(cfg.features && cfg.features.longTermMemory)) return base;
   const parts = [];
   const mem = memory.getText();
@@ -2697,7 +2717,44 @@ async function handleAskInner(sender, { id, text, askGen }) {
   }
   const isCurrent = () => task.isCurrent();
   const genAtStart = history.generation(); // F-03 竞态护栏：清除历史后，本次在途回复不得写回
-  history.append({ ts: Date.now(), mode, role: "user", content: clean });
+  /* === P0-B1 formal cognition：本轮唯一一次 canonical 投影读取（§14/§22） === */
+  // enabled=true 时聊天必须实际消费 canonical Character 输入；读取失败则明确失败：
+  // 本轮不预写 history/记忆/bond、不调 provider，也绝不静默降级成"看起来 formal 成功"
+  // （§27 R8：不得 fake formal success）。enabled=false 时本节零流量、零行为差（§13/T6）。
+  let cognition = null;
+  let formalSuppressions = [];
+  const wmEnabled = ((config.getConfig().whitemoonRuntime || {}).enabled) === true;
+  if (wmEnabled && mode === "chat") {
+    let projRes = null;
+    try {
+      projRes = formalProjection ? await formalProjection.fetchProjection() : { state: "unavailable", error: "projection client not constructed" };
+    } catch (e) {
+      projRes = { state: "unknown", error: String((e && e.message) || e) };
+    }
+    if (!projRes || projRes.state !== "ok" || !projRes.projection || !projRes.projection.character) {
+      logTts("cognition", "formal projection read failed: " + ((projRes && projRes.state) || "unknown"));
+      sender.send("pet:error", {
+        id, code: "FORMAL_PROJECTION_UNAVAILABLE",
+        meta: { projectionState: (projRes && projRes.state) || "unknown" },
+        message: "正式 Character Runtime 当前不可用，本轮消息未发送"
+      });
+      conversation.finish(task.id);
+      return;
+    }
+    cognition = projRes.projection.character;
+    // §23：这些 legacy cognition 类别当前无 instance 归属 ⇒ formal mode 抑制
+    // （classification+precedence+isolation；不删除底层数据，§19）。
+    formalSuppressions = [
+      { category: "LEGACY_BOND", reason: "INSTANCE_PROVENANCE_UNKNOWN" },
+      { category: "LEGACY_FACT", reason: "INSTANCE_PROVENANCE_UNKNOWN" },
+      { category: "LEGACY_SUMMARY", reason: "INSTANCE_PROVENANCE_UNKNOWN" },
+      { category: "LEGACY_VECTOR_RECALL", reason: "INSTANCE_PROVENANCE_UNKNOWN" },
+      { category: "EXPLICIT_USER_PREFERENCE", reason: "INSTANCE_PROVENANCE_UNKNOWN" }
+    ];
+  }
+  const formalInstanceId = cognition ? cognition.instanceId : null;
+  history.append(Object.assign({ ts: Date.now(), mode, role: "user", content: clean },
+    formalInstanceId ? { whitemoonInstance: formalInstanceId } : {}));
   // 长期记忆（v2.5）：规则式提取事实（称谓/喜好/生日/健康/近期安排），仅本机存储
   if (config.getConfig().features && config.getConfig().features.longTermMemory) {
     // Phase 7-F1：显式完成确认 → PLAN 生命周期转换。**必须先于 extractFacts**：
@@ -2761,14 +2818,38 @@ async function handleAskInner(sender, { id, text, askGen }) {
         }
       }
     } else {
-      const persona = buildChatPersona();
+      const persona = buildChatPersona(!!cognition);
+      const _cfg = config.getConfig();
+      const _maxTurns = (_cfg.chat && _cfg.chat.maxHistoryTurns) || 20;
+      const _recent = history.recent("chat", _maxTurns);
+      // P0-B1 §23 跨实例隔离（不伪造隔离）：formal 请求只取带当前 instance 标签的
+      // 会话行；未标签旧行 provenance 未知 ⇒ 排除。legacy 路径不过滤（T6 兼容）。
+      const _historyRows = cognition
+        ? _recent.filter((r) => r.whitemoonInstance === cognition.instanceId)
+        : _recent;
+      const _legacyFlags = cognition ? {} : {
+        facts: !!(_cfg.features && _cfg.features.longTermMemory),
+        summary: !!(_cfg.features && _cfg.features.longTermMemory),
+        bond: !!(_cfg.features && _cfg.features.longTermMemory && _cfg.rpMode !== false),
+        manualFacts: !!(_cfg.features && _cfg.features.longTermMemory) && (() => {
+          try { return memory.getFactsList().some((f) => f && f.type === "manual"); } catch { return false; }
+        })()
+      };
       const r = await chatClient.chat({
         persona,
-        history: history.recent("chat", config.getConfig().chat.maxHistoryTurns || 20),
+        history: _historyRows,
         text: clean,
         state: petStateNote(), // v2.3 此刻状态注：时段/位置，驱动情绪与台词一致
         signal: task.signal,
         genGate: () => history.generation() === genAtStart, // F-03：清史后迟到的管线不得把清前文本写回向量库
+        // === P0-B1 ===：canonical 投影进入 assembly boundary（§14/§16）；UI 入口
+        // 已先写当前 user 行进 history ⇒ currentInHistory，组装层去重（§20/T11）；
+        // diagnostics 落 Body 日志（§16 可审计 + 实机验收证据面）。
+        cognition: cognition || undefined,
+        currentInHistory: true,
+        legacyFlags: _legacyFlags,
+        suppressions: formalSuppressions,
+        assemblySink: (diag) => { try { logTts("cognition-assembly", JSON.stringify(diag)); } catch { /* 诊断旁路 */ } },
         onChunk: (d) => { if (isCurrent()) sender.send("pet:chunk", { id, mode, text: d }); }
       });
       full = r.text;
@@ -2778,7 +2859,8 @@ async function handleAskInner(sender, { id, text, askGen }) {
     const isChat = mode === "chat";
     if (history.generation() === genAtStart) {
       history.append(Object.assign({ ts: Date.now(), mode, role: "assistant", content: full },
-        isChat ? { swipes: [full], swipeIndex: 0 } : {}));
+        isChat ? { swipes: [full], swipeIndex: 0 } : {},
+        formalInstanceId ? { whitemoonInstance: formalInstanceId } : {}));
     } else {
       logTts("history", "清除历史竞态: 在途回复不写回（代次已变更）"); // F-03：气泡照常展示，但不落盘
     }

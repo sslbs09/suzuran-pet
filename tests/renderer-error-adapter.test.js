@@ -188,6 +188,6 @@ test("the adapter never introduces catalog keys and holds no copy of its own", (
   assert.doesNotMatch(src, /err\.[a-zA-Z]+\s*[:=]/, "adapter defines no code→key mapping of its own");
   const keys = new Set(Object.keys(i18n.DICT.zh).filter((k) => k.startsWith("err.")));
   const before = Object.keys(presenter.ERROR_PRESENTATIONS).length + Object.keys(presenter.GSV_PRESENTATIONS).length;
-  assert.equal(before, 15, "presenter vocabulary unchanged by 5-G2");
-  assert.ok(keys.size >= 15, "catalog still carries every err.* key");
+  assert.equal(before, 16, "presenter vocabulary: 12 general (incl. P0-B1 FORMAL_PROJECTION_UNAVAILABLE) + 4 GSV");
+  assert.ok(keys.size >= 16, "catalog still carries every err.* key");
 });

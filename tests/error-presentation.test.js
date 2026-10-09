@@ -23,7 +23,8 @@ const CODE_KEYS = {
   HTTP_ERROR: "err.http",
   CANCELLED: "err.cancelled",
   BUSY: "err.busy",
-  INTERNAL: "err.internal"
+  INTERNAL: "err.internal",
+  FORMAL_PROJECTION_UNAVAILABLE: "err.formalProjection"
 };
 
 /* 5-G1：GSV 引擎专属码，独立命名空间，不参与通用词表 */

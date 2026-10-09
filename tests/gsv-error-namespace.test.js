@@ -32,15 +32,16 @@ const GSV_KEYS = { timeout: "err.gsvTimeout", synth: "err.gsvSynthFail", disable
 test("1) the general vocabulary still maps the uppercase codes exactly as before", () => {
   assert.deepEqual(presenter.toPresentation({ code: "TIMEOUT" }), { key: "err.timeout", params: {} });
   assert.equal(presenter.ERROR_PRESENTATIONS.TIMEOUT, "err.timeout");
-  // 11 个通用码逐个复核，确保隔离没有误伤
+  // 12 个通用码逐个复核，确保隔离没有误伤（P0-B1 追加第 12 码 FORMAL_PROJECTION_UNAVAILABLE）
   const expected = {
     AUTH_INVALID: "err.authInvalid", NO_API_KEY: "err.noApiKey", QUOTA_EXCEEDED: "err.quotaExceeded",
     TIMEOUT: "err.timeout", NETWORK_ERROR: "err.networkError", SSRF_BLOCKED: "err.ssrfBlocked",
     BAD_URL: "err.badUrl", HTTP_ERROR: "err.http", CANCELLED: "err.cancelled",
-    BUSY: "err.busy", INTERNAL: "err.internal"
+    BUSY: "err.busy", INTERNAL: "err.internal",
+    FORMAL_PROJECTION_UNAVAILABLE: "err.formalProjection"
   };
-  assert.deepEqual(presenter.ERROR_PRESENTATIONS, expected, "general table must be byte-identical to Phase 5-A");
-  assert.equal(Object.keys(presenter.ERROR_PRESENTATIONS).length, 11);
+  assert.deepEqual(presenter.ERROR_PRESENTATIONS, expected, "general table must match Phase 5-A + P0-B1 12th code");
+  assert.equal(Object.keys(presenter.ERROR_PRESENTATIONS).length, 12);
 });
 
 /* ---- 2. GSV timeout 仍显示原有文案 ---- */
@@ -131,7 +132,7 @@ test("restartGsv IPC contract is untouched: main still returns lowercase GSV cod
 
 test("every code either namespace emits is renderable, and vice versa", () => {
   const all = [...Object.keys(presenter.ERROR_PRESENTATIONS), ...Object.keys(presenter.GSV_PRESENTATIONS)];
-  assert.equal(new Set(all).size, 15, "11 general + 4 GSV, no overlap");
+  assert.equal(new Set(all).size, 16, "12 general (incl. P0-B1 FORMAL_PROJECTION_UNAVAILABLE) + 4 GSV, no overlap");
   for (const key of [...Object.values(presenter.ERROR_PRESENTATIONS), ...Object.values(presenter.GSV_PRESENTATIONS)]) {
     for (const lang of ["zh", "en", "ja"]) {
       assert.ok(String(i18n.DICT[lang][key] || "").trim(), `${lang}:${key} missing from catalog`);

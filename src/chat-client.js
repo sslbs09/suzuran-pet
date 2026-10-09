@@ -10,6 +10,8 @@
 const config = require("./config");
 const { activeWorldInfos } = require("./world-info"); // 世界书：按用户消息关键词激活情境块（§14 追加 102）
 const vectorMemory = require("./vector-memory"); // 向量记忆：语义片段回引（§14 追加 102）
+// P0-B1：请求组装收敛到单一可检查边界（任务 §16）；本模块只做 provider 序列化与 SSE。
+const { buildChatRequest } = require("./request-assembly");
 const { safeFetch, isLoopbackHost, originOf, sameOrigin } = require("./safe-url");
 // Phase 5-C：错误来源主动产出结构化事实（code/meta/message/detail），不再靠下游解析文案
 const { ErrorWithCode, ERROR_CODES, codeForHttpStatus, toPayload } = require("./error-facts");
@@ -271,7 +273,8 @@ async function chatAnthropic(cfg, system, history, opts) {
 }
 
 /**
- * 发送一轮聊天
+ * 发送一轮聊天（P0-B1 起：消息组装委托 request-assembly 边界，本函数只做
+ * 配置读取、向量记忆 I/O（legacy）与 provider 序列化/流式。）
  * @param {Object} opts
  *   - persona: string
  *   - history: Array<{role:'user'|'assistant', content:string}>
@@ -283,40 +286,63 @@ async function chatAnthropic(cfg, system, history, opts) {
  *     "消息受理时的清史代次仍然有效" 判定；向量入库发生在 chat() 同步段，管线若在
  *     clear-history 之后才执行到此处（防抖重排/锁释放延迟），不加闸会把已清除对话
  *     的用户文本写回向量库并经 search 复活。缺省时行为不变（无 gate 的调用方照旧入库）。
+ *   - cognition: 可选 P0-B1 formal mode canonical Character 投影
+ *     （{instanceId, packageId, displayName, projectionSemanticsVersion, state, relationship}）；
+ *     携带时走 §18 冻结排版，且向量记忆不检索、不入库（§23：无 instance 归属）。
+ *   - currentInHistory: 可选 true = 调用方已把当前文本先写入 history（UI 入口，§20）；
+ *     组装层去除尾部同文重复 user 行，保证当前 turn 恰好出现一次。
+ *   - legacyFlags / suppressions: 可选 diagnostics 供给（§16/§17 可审计性）。
+ *   - assemblySink: 可选 (diagnostics)=>void（§16 检查钩子；失败不影响对话）。
  * @returns {Promise<{text:string, emotion:string}>} 完整回复（已去掉情绪标注）+ 模型选择的情绪词
  */
-async function chat({ persona, history = [], text, state = "", onChunk = () => {}, signal, genGate }) {
+async function chat({ persona, history = [], text, state = "", onChunk = () => {}, signal, genGate,
+  cognition = null, currentInHistory = false, legacyFlags = null, suppressions = [], assemblySink = null }) {
   const cfg = config.getConfig();
-  const messages = [
-    { role: "system", content: buildSystemMessage(persona) },
-    { role: "system", content: buildFormatInstruction() }, // 强格式指令单独一条，确保情绪标注
-  ];
-  if (state) messages.push({ role: "system", content: "【此刻状态】" + state + "\n（顺着这个状态自然回应即可）" });
+  // v2.5.22 修复（P1-6）：maxHistoryTurns 是"轮数"（recent() 返回 2N 条 user+assistant），
+  // 这里按条数 slice 会把上下文砍半——改为 2N 与 recent 语义一致。
+  const maxHistory = ((cfg.chat && cfg.chat.maxHistoryTurns) || 20) * 2;
+  const sliced = history.slice(-maxHistory);
   // 世界书（v2.6，§14 追加 102）：按本条用户消息命中关键词才激活情境块，省 token 且更贴切
   const wInfos = activeWorldInfos(text);
-  if (wInfos.length) {
-    messages.push({ role: "system", content: "【当前情境】\n" + wInfos.join("\n\n") + "\n（顺着情境自然地回应，不要复述本条）" });
-  }
-  // 向量记忆（§14 追加 102）：语义检索历史片段回引（"上次她说感冒了"级细节，受 features.vectorMemory 控制）
-  const vecOn = !!(config.getConfig().features || {}).vectorMemory;
+  // 向量记忆（§14 追加 102）：语义检索历史片段回引，受 features.vectorMemory 控制。
+  // P0-B1 §23：formal mode（携带 canonical 投影）时向量库无 instance 归属 ⇒ 不检索、不入库。
+  let vectorBlock = "";
+  const vecOn = !!(config.getConfig().features || {}).vectorMemory && !cognition;
   if (vecOn) {
     try {
       const segs = vectorMemory.search(text, 3);
       if (segs.length) {
         const block = segs.map((s) => "- " + s.text).join("\n");
-        messages.push({ role: "system", content: "【回忆片段】这些是博士之前提过的相关内容，自然回引（若有契合点）：\n" + block });
+        vectorBlock = "【回忆片段】这些是博士之前提过的相关内容，自然回引（若有契合点）：\n" + block;
       }
     } catch { /* 向量记忆故障不影响对话 */ }
     try {
       if (typeof genGate !== "function" || genGate()) vectorMemory.add(text); // F-03：清史后代次失效 ⇒ 不得把清前文本写回向量库
     } catch { /* 入库失败忽略 */ }
   }
-  // v2.5.22 修复（P1-6）：maxHistoryTurns 是"轮数"（recent() 返回 2N 条 user+assistant），
-  // 这里按条数 slice 会把上下文砍半——改为 2N 与 recent 语义一致。
-  for (const h of history.slice(-(cfg.chat.maxHistoryTurns * 2))) {
-    messages.push({ role: h.role, content: h.content });
+
+  const built = buildChatRequest({
+    personaText: persona ? config.fillTokens(persona) : "",
+    rulesText: config.fillTokens(buildPetRules()),
+    formatText: buildFormatInstruction(),
+    stateNote: state,
+    worldBlock: wInfos.join("\n\n"),
+    vectorBlock,
+    cognition: cognition || null,
+    history: sliced,
+    text,
+    currentInHistory: !!currentInHistory,
+    legacyFlags: legacyFlags || {},
+    suppressions: suppressions || [],
+    provider: {
+      model: cfg.chat.model, apiType: cfg.chat.apiType,
+      temperature: cfg.chat.temperature, maxTokens: cfg.chat.maxTokens, stream: true
+    }
+  });
+  if (typeof assemblySink === "function") {
+    try { assemblySink(built.diagnostics); } catch { /* 诊断旁路不影响对话 */ }
   }
-  messages.push({ role: "user", content: text });
+  const messages = built.messages;
 
   let full;
   if (cfg.chat.apiType === "anthropic") {

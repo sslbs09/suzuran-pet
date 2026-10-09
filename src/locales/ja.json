@@ -964,6 +964,7 @@
   "page.addchar.pickHint": ".atlas / .skel/.json / .png を含むフォルダを選択…",
   "page.addchar.imported": "✅「{name}」をインポートして切り替えました（{id}）",
   "err.unknown": "リクエストを完了できませんでした。時間をおいて再試行してください。",
+  "err.formalProjection": "正式 Character Runtime は現在利用できません（正味のキャラクター投影の読み込みに失敗）。このメッセージは送信されませんでした。WhiteMoon Runtime Host の接続を確認してください。",
   "tray.observationLabel": "📝 観察を記録…",
   "page.observation.title": "観察を記録",
   "page.observation.h1": "📝 観察を記録",

@@ -19,7 +19,7 @@ const taskQueue = require(require("node:path").join(root, "src/task-queue.js"));
 const chatClient = require(require("node:path").join(root, "src/chat-client.js"));
 
 const APPROVED = ["NO_API_KEY", "AUTH_INVALID", "QUOTA_EXCEEDED", "TIMEOUT", "NETWORK_ERROR",
-  "SSRF_BLOCKED", "BAD_URL", "HTTP_ERROR", "CANCELLED", "BUSY", "INTERNAL"];
+  "SSRF_BLOCKED", "BAD_URL", "HTTP_ERROR", "CANCELLED", "BUSY", "INTERNAL", "FORMAL_PROJECTION_UNAVAILABLE"];
 
 /** 抓取被抛出的错误事实（含 code/meta/detail）。 */
 async function caught(fn) {
@@ -233,7 +233,7 @@ test("readSSE: normal stream still concatenates content", async () => {
 
 /* ---------------- conversation-service 兼容 ---------------- */
 
-test("conversation-service: ERROR_CODES is now the shared 11-code vocabulary", () => {
+test("conversation-service: ERROR_CODES is now the shared 12-code vocabulary", () => {
   assert.deepEqual(Object.keys(conversation.ERROR_CODES).sort(), [...APPROVED].sort());
   assert.equal(conversation.ERROR_CODES.EMPTY, undefined, "EMPTY is not an approved code");
   // 5-G1：GSV 小写码已移出通用词表

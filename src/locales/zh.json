@@ -964,6 +964,7 @@
   "page.addchar.pickHint": "请选择包含 .atlas / .skel/.json / .png 的文件夹…",
   "page.addchar.imported": "✅ 已导入「{name}」并切换（{id}）",
   "err.unknown": "暂时无法完成请求。请稍后重试。",
+  "err.formalProjection": "正式 Character Runtime 当前不可用（读取正式角色投影失败），本轮消息没有发送。请检查 WhiteMoon Runtime Host 连接。",
   "tray.observationLabel": "📝 记录观察…",
   "page.observation.title": "记录观察",
   "page.observation.h1": "📝 记录观察",

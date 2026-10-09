@@ -35,7 +35,9 @@ const ERROR_CODES = Object.freeze({
   HTTP_ERROR: "HTTP_ERROR",
   CANCELLED: "CANCELLED",
   BUSY: "BUSY",
-  INTERNAL: "INTERNAL"
+  INTERNAL: "INTERNAL",
+  // P0-B1 §27 R8: formal mode 下 canonical 投影读取失败——明确失败，绝不伪装成功。
+  FORMAL_PROJECTION_UNAVAILABLE: "FORMAL_PROJECTION_UNAVAILABLE"
 });
 
 /** meta 白名单：只允许 status，且必须与 presenter 的校验规则一致（整数 100..599）。 */

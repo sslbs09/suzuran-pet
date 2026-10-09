@@ -31,7 +31,8 @@
     HTTP_ERROR: "err.http",
     CANCELLED: "err.cancelled",
     BUSY: "err.busy",
-    INTERNAL: "err.internal"
+    INTERNAL: "err.internal",
+    FORMAL_PROJECTION_UNAVAILABLE: "err.formalProjection"
   });
 
   /* GSV 专用命名空间：仅 pet:restart-gsv 一条链使用，不属于通用错误码词表。

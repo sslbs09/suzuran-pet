@@ -964,6 +964,7 @@
   "page.addchar.pickHint": "Choose a folder containing .atlas / .skel/.json / .png…",
   "page.addchar.imported": "✅ Imported “{name}” and switched ({id})",
   "err.unknown": "The request could not be completed. Please try again later.",
+  "err.formalProjection": "Formal Character Runtime is unavailable (the canonical character projection could not be read); this message was not sent. Check the WhiteMoon Runtime Host connection.",
   "tray.observationLabel": "📝 Record an observation…",
   "page.observation.title": "Record Observation",
   "page.observation.h1": "📝 Record Observation",

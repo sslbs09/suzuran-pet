@@ -203,7 +203,7 @@ function loadMain(options = {}) {
   const source = fs.readFileSync(MAIN, "utf8") + `\n;globalThis.__m1 = {\n  get() { return { win, walk, ipcMain, v2StateCore, v2Authority, v2Commit, v2Drag, v2Locomotion, RUNTIME_V2_LOCOMOTION_ENABLED, renderModeSeq, groundGapDocFloor }; },\n  setWindow(value) { win = value; },\n  setTray(value) { tray = value; },\n  probe(name) { return typeof globalThis[name] === "function" ? globalThis[name] : undefined; },\n  call(name, ...args) { return typeof globalThis[name] === "function" ? globalThis[name](...args) : undefined; },\n  createWindow, startWalkingEngine, stopWalkingEngine, walkOnPhaseEnd, chatPauseWalk, setBodyPosture, setBodyAirborne, startFlight, walkBroadcast, walkTick, chatOwnership\n};`;
   const cleanEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("SUSSURRO_RUNTIME_V2_")));
   Object.assign(cleanEnv, options.env || {});
-  const context = { console: { log: noOp, error: noOp, warn: noOp }, require: requireStub, process: { ...process, env: cleanEnv, resourcesPath: ROOT, on: noOp }, __dirname: ROOT, __filename: MAIN, setTimeout: fakeSetTimeout, clearTimeout: fakeClear, setInterval: fakeSetInterval, clearInterval: fakeClear, Date: TestDate, URL, URLSearchParams, Buffer, Response };
+  const context = { console: { log: noOp, error: noOp, warn: noOp }, require: requireStub, process: { ...process, env: cleanEnv, resourcesPath: ROOT, on: noOp, send: undefined }, __dirname: ROOT, __filename: MAIN, setTimeout: fakeSetTimeout, clearTimeout: fakeClear, setInterval: fakeSetInterval, clearInterval: fakeClear, Date: TestDate, URL, URLSearchParams, Buffer, Response };
   context.globalThis = context;
   vm.createContext(context);
   const savedRuntimeEnv = {};
