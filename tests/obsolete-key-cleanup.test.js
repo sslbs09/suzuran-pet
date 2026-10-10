@@ -79,7 +79,10 @@ test("dynamically constructed / reserved keys were NOT over-cleaned", () => {
 
 test("deletion preserved catalog invariants", () => {
   const zh = Object.keys(i18n.DICT.zh), en = Object.keys(i18n.DICT.en), ja = Object.keys(i18n.DICT.ja);
-  assert.equal(zh.length, 1017); // 989（P0-B2 后）+ 28（P1-U1 正式记忆查看/纠正/撤回文案）
+  // settings redesign（P2 起）catalog 进入「只增不减」阶段（新 UI 键先行、旧键 P6 才清理），
+  // 因此不再钉死精确数量；下限 = P1-U1 冻结基线 1017，防意外 mass-deletion。
+  // 键集合一致与占位符一致仍是硬不变量（见下）。
+  assert.ok(zh.length >= 1017, "catalog 不得低于冻结基线 1017（got " + zh.length + "）");
   assert.equal(en.length, zh.length, "en key count matches zh");
   assert.equal(ja.length, zh.length, "ja key count matches zh");
   assert.deepEqual(zh.filter((k) => !en.includes(k)), [], "zh/en key sets identical");

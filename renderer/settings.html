@@ -41,15 +41,7 @@
     </nav>
   </aside>
   <div class="set-main">
-  <!-- 未保存改动提示条（v2.5.18）：替代原右下角悬浮保存按钮——那个按钮只保存"通用设置"，
-       用户改完 API Key 点它会误以为全保存了（作用域陷阱）。现在：任何改动出现提示条，
-       「保存全部」按 API → 人设 → 语音 → 其他的顺序依次保存，作用域不再模糊 -->
-  <div id="set-dirty" class="set-dirty" hidden>
-    <span data-i18n="set.dirtyTip">⚠ 有未保存的改动</span>
-    <button class="primary" id="set-save-all" type="button" data-i18n="set.dirtySaveAll">保存全部</button>
-    <button id="set-discard" type="button" data-i18n="set.dirtyDiscard">放弃改动</button>
-    <span id="set-dirty-result" class="result"></span>
-  </div>
+  <!-- P2：全局「保存全部/放弃改动」提示条已退役——改为各事务组独立 [保存]/[放弃]（见各分区 actions） -->
 
   <!-- 首跑引导清单（v2.5.26）：实时完成状态，帮新手 3 步上手 -->
   <section id="sec-onboard">
@@ -281,6 +273,11 @@
         <span data-i18n="set.userName">桌宠对你的称呼</span>
         <input id="user-name" type="text" placeholder="主人" />
       </label>
+      <div class="col tx-actions">
+        <button id="btn-identity-save" type="button" data-i18n="set.txSave">保存</button>
+        <button id="btn-identity-discard" type="button" data-i18n="set.txDiscard">放弃</button>
+        <span id="identity-result" class="result"></span>
+      </div>
     </div>
     <div class="row">
       <label class="col">
@@ -309,6 +306,7 @@
     <div class="row actions">
       <button id="btn-test" type="button" class="primary" data-i18n="set.testConn">🔌 测试连接</button>
       <button id="btn-save-api" type="button" class="primary" data-i18n="set.saveApi">💾 保存 API 设置</button>
+      <button id="btn-ai-discard" type="button" data-i18n="set.txDiscard">放弃</button>
       <span id="test-result" class="result"></span>
     </div>
     <p class="hint" data-i18n="set.ollamaHint">Ollama 本地模型无需 Key（地址填 <code>http://localhost:11434/v1</code>）；其他服务商按各自的 OpenAI 兼容地址填写。</p>
@@ -378,6 +376,11 @@
           <input id="genie-script" type="text" placeholder="已随包自带（engines/genie）" data-i18n-placeholder="set.serverScriptPh" />
         </label>
       </div>
+      <div class="row actions">
+        <button id="btn-engine-save" type="button" data-i18n="set.txSave">保存</button>
+        <button id="btn-engine-discard" type="button" data-i18n="set.txDiscard">放弃</button>
+        <span id="engine-tx-result" class="result"></span>
+      </div>
       <div class="row">
         <label class="col grow">
           <span data-i18n="set.refAudio">参考音频（克隆音色，可留空用默认）</span>
@@ -387,6 +390,11 @@
           <span data-i18n="set.refText">参考音频原文</span>
           <input id="genie-ref-text" type="text" placeholder="参考音频对应的文字" data-i18n-placeholder="set.refTextPh" />
         </label>
+      </div>
+      <div class="row actions">
+        <button id="btn-ref-save" type="button" data-i18n="set.txSave">保存</button>
+        <button id="btn-ref-discard" type="button" data-i18n="set.txDiscard">放弃</button>
+        <span id="ref-tx-result" class="result"></span>
       </div>
       <div class="row">
         <label class="col">
@@ -402,7 +410,6 @@
       </div>
     </div>
     <div class="row actions">
-      <button id="btn-save-voice" type="button" class="primary" data-i18n="set.saveVoice">💾 保存语音设置</button>
       <button id="btn-open-studio" type="button" data-i18n="set.openStudio">🎙️ 音色克隆与训练</button>
       <button id="btn-open-guide" type="button" data-i18n="set.openGuide">📖 语音部署与训练指南</button>
       <span id="voice-result" class="result"></span>
@@ -533,7 +540,6 @@
       </label>
     </div>
     <div class="row actions">
-      <button id="btn-save-other" type="button" class="primary" data-i18n="set.save">💾 保存</button>
       <button id="btn-open-terms" type="button" data-i18n="set.openTerms">📄 使用条款与隐私政策</button>
       <button id="btn-open-config" type="button" data-i18n="set.openConfigFile">📄 打开 config.json</button>
       <button id="btn-clear-history" type="button" class="danger" data-i18n="set.clearHistory">🗑 清除聊天记录</button>
@@ -572,6 +578,11 @@
         <input id="agent-max-body" type="number" min="1" max="1024" value="64" />
       </label>
       <div class="actions"><button id="btn-agent-token" type="button" data-i18n="set.agentTokenGen">生成/重新生成 Token</button></div>
+    </div>
+    <div class="row actions">
+      <button id="btn-agent-save" type="button" data-i18n="set.txSave">保存</button>
+      <button id="btn-agent-discard" type="button" data-i18n="set.txDiscard">放弃</button>
+      <span id="agent-tx-result" class="result"></span>
     </div>
     <p class="hint" data-i18n="set.agentSecHint">安全提示：端口、开关、Token 与请求体上限在保存后需要重启桌宠生效。启用 Token 后，本机脚本须在每个请求中发送 <code>Authorization: Bearer &lt;Token&gt;</code>。</p>
     <div class="row">
@@ -633,6 +644,11 @@
         <span data-i18n="set.weatherKey">天气源 API Key（open-meteo 留空）</span>
         <input id="weather-key" type="password" autocomplete="off" placeholder="留空" data-i18n-placeholder="set.weatherKeyPh" />
       </label>
+      <div class="col tx-actions">
+        <button id="btn-weather-save" type="button" data-i18n="set.txSave">保存</button>
+        <button id="btn-weather-discard" type="button" data-i18n="set.txDiscard">放弃</button>
+        <span id="weather-tx-result" class="result"></span>
+      </div>
       <span id="weather-now" class="result" style="align-self:center;"></span>
     </div>
     <div class="row">
@@ -733,6 +749,7 @@
   <script src="error-present.js"></script>
   <script src="theme.js"></script>
   <script src="theme-init.js"></script>
+  <script src="settings-save-plan.js"></script>
   <script src="settings.js"></script>
   <script src="memory-control.js"></script>
 </body>

@@ -110,7 +110,8 @@ async function createGsvRestartHandler(lang, outcome) {
   vm.runInContext(extractFunction(settingsSource, "function setResult(el, text, ok)"), sandbox, { filename: "renderer/settings.js" });
   // 5-G2：restartGsv 的 GSV 分流已收口进共享适配器 presentRestartGsv
   const start = settingsSource.indexOf('$("btn-restart-gsv").addEventListener');
-  const end = settingsSource.indexOf('$("btn-save-voice")', start);
+  // P2：btn-save-voice 已随保存模型重构移除，切片终点改用其后首个稳定区段锚点（固定台词音频池）
+  const end = settingsSource.indexOf("/* ---------- 固定台词音频池", start);
   assert.ok(start !== -1 && end > start, "production restartGsv click handler found");
   sandbox.$("btn-restart-gsv").addEventListener = (event, cb) => { callbacks[event] = cb; };
   vm.runInContext(settingsSource.slice(start, end), sandbox, { filename: "renderer/settings.js" });

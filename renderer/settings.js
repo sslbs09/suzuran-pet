@@ -24,8 +24,115 @@ const PRESETS = {
 
 let S = {}; // 当前配置快照
 let _agentClients = []; // Agent 接入方快照（locale 重放数据源）
-let personaDirty = false; // 人设输入框是否有未保存改动（v2.5.18 未保存条用）
 let _loadedChatUserName = ""; // TD-9：改名检测基线（语音/翻译缓存键含称呼）
+const SSP = window.SettingsSavePlan; // P2 产品语义保存模型（纯数据模块，见 settings-save-plan.js）
+
+/* ---------- P2 产品语义保存模型：事务组状态机（模块作用域；接线见文末 IIFE） ----------
+ * Rule A：独立设置即时生效（既有专用通道 + RULE_A_PATCH 单键 saveSettings），无放弃语义。
+ * Rule B：7 个事务组各自维护 snapshot/dirty，组级 [保存]/[放弃]。
+ * 已退役：整区保存/全局放弃提示条与按控件类型即时判定（改由本节事务组与 Rule A 取代）。 */
+const TX_UI = {
+  "tx-ai-provider": { save: "btn-save-api", discard: "btn-ai-discard", result: "test-result" },
+  "tx-identity": { save: "btn-identity-save", discard: "btn-identity-discard", result: "identity-result" },
+  "tx-persona": { save: "btn-save-persona", discard: "btn-persona-discard", result: "persona-result" },
+  "tx-agent": { save: "btn-agent-save", discard: "btn-agent-discard", result: "agent-tx-result" },
+  "tx-weather": { save: "btn-weather-save", discard: "btn-weather-discard", result: "weather-tx-result" },
+  "tx-engine-deploy": { save: "btn-engine-save", discard: "btn-engine-discard", result: "engine-tx-result" },
+  "tx-ref-audio": { save: "btn-ref-save", discard: "btn-ref-discard", result: "ref-tx-result" }
+};
+const txState = {}; // txId → { values:[成员快照], dirty:bool }
+
+function txFieldValues(txId) {
+  return SSP.TRANSACTIONS[txId].ids.map((id) => {
+    const el = $(id);
+    return el ? (el.type === "checkbox" ? el.checked : el.value) : "";
+  });
+}
+function snapshotTx(txId) {
+  txState[txId] = { values: txFieldValues(txId), dirty: false };
+  refreshTxUI(txId);
+}
+function initSaveModelSnapshots() {
+  for (const txId of SSP.TX_IDS) snapshotTx(txId); // 快照来源 = 已加载到 UI 的持久化值（非 HTML default）
+}
+function refreshTxUI(txId) {
+  const st = txState[txId];
+  const ui = TX_UI[txId];
+  if (!st || !ui) return;
+  const saveBtn = $(ui.save), discardBtn = $(ui.discard);
+  if (saveBtn) saveBtn.disabled = !st.dirty;
+  if (discardBtn) discardBtn.disabled = !st.dirty;
+}
+function markTxDirty(txId) {
+  const st = txState[txId];
+  if (!st) return;
+  if (!st.dirty) { st.dirty = true; refreshTxUI(txId); }
+}
+function clearTxDirty(txId) {
+  const st = txState[txId];
+  if (!st) return;
+  st.values = txFieldValues(txId);
+  st.dirty = false;
+  refreshTxUI(txId);
+}
+function discardTx(txId) { // 不 reload、不影响其它事务；从本组快照回填，不发保存 IPC
+  const st = txState[txId];
+  if (!st || !st.dirty) return;
+  SSP.TRANSACTIONS[txId].ids.forEach((id, i) => {
+    const el = $(id);
+    if (!el) return;
+    if (el.type === "checkbox") el.checked = !!st.values[i]; else el.value = st.values[i];
+  });
+  // 本 P2 事务字段均不驱动条件显隐（条件 owner 见 P4），无需额外重绘
+  st.dirty = false;
+  refreshTxUI(txId);
+}
+async function submitTx(txId) {
+  const tx = SSP.TRANSACTIONS[txId];
+  if (!tx) return;
+  const ui = TX_UI[txId];
+  const res = ui && ui.result ? $(ui.result) : null;
+  const get = (id) => { const el = $(id); return el ? (el.type === "checkbox" ? el.checked : el.value) : ""; };
+  try {
+    if (txId === "tx-identity") {
+      const patch = tx.build(get);
+      // TD-9：称呼变更影响翻译/语音缓存键，改前确认（原 AI 分区保存语义，现属 tx-identity）
+      const newName = patch.chat.userName;
+      if (newName !== (_loadedChatUserName || "主人") && !confirm(L("set.renameCacheWarn"))) {
+        $("user-name").value = _loadedChatUserName || "主人"; // 取消则还原输入框
+        return;
+      }
+      const r = await window.petAPI.saveSettings(patch);
+      if (r === true) { _loadedChatUserName = newName; clearTxDirty(txId); if (res) setResult(res, L("set.saved"), true); }
+      else if (res) setResult(res, L("set.saveFailed") + presentResultError(r), false);
+      return;
+    }
+    if (tx.channel === "save-persona") {
+      const ok = await window.petAPI.savePersona($("persona").value);
+      if (ok) { clearTxDirty(txId); if (res) setResult(res, L("set.personaSaved"), true); }
+      else if (res) setResult(res, L("set.personaSaveFail"), false);
+      return;
+    }
+    if (tx.channel === "set-weather") {
+      // IMPLEMENTATION CONSTRAINT：weather.* 不走 save-settings 白名单；显式携带持久化 enabled
+      const persisted = await window.petAPI.getWeatherCfg();
+      const next = await window.petAPI.setWeather(tx.build(get, persisted && persisted.enabled));
+      if (next && typeof next === "object") { clearTxDirty(txId); if (res) setResult(res, L("set.saved"), true); }
+      return;
+    }
+    const r = await window.petAPI.saveSettings(tx.build(get));
+    if (r === true) {
+      clearTxDirty(txId);
+      if (res) setResult(res, L("set.saved"), true);
+      // 语音 profile 变化 → 固定台词音频池视图刷新（原整区保存的收尾行为，按组继承）
+      if (txId === "tx-engine-deploy" || txId === "tx-ref-audio") fetchAndRenderFixedLinePool();
+    } else if (res) {
+      setResult(res, L("set.saveFailed") + presentResultError(r), false); // 保持 dirty，输入不丢
+    }
+  } catch (e) {
+    if (res) setResult(res, L("set.saveFailed") + presentResultError(e), false);
+  }
+}
 
 function setResult(el, text, ok) {
   el.textContent = text || "";
@@ -456,6 +563,7 @@ async function fetchAndRenderOnboard(S) {
 
   renderKeyStatuses();
   maybeShowCredNotice();
+  initSaveModelSnapshots(); // P2：字段填充完成后取事务组初始快照（snapshot 来自已加载的持久化值，非 HTML default）
 })();
 
 // 渲染模式联动：先选模式，仅显示该模式支持的选项（data-rm="gif|spine|rig" 标记，支持空格分隔多模式）
@@ -553,36 +661,17 @@ $("model-pick").addEventListener("change", () => {
   }
 });
 
-$("btn-save-api").addEventListener("click", async () => { await doSaveApi(); });
-
-/* 提取为具名函数（v2.5.18）：顶部「保存全部」需要按顺序复用各分区保存逻辑 */
-async function doSaveApi() {
-  const patch = readChat();
-  // TD-9（轻量版）：改名提示——翻译/语音缓存键含展开后的称呼，改名会触发相关句子重新生成
-  const newName = patch.chat.userName;
-  if (newName !== (_loadedChatUserName || "主人") && !confirm(L("set.renameCacheWarn"))) {
-    $("user-name").value = _loadedChatUserName || "主人"; // 取消则还原输入框
-    return;
-  }
-  const r = await window.petAPI.saveSettings(patch);
-  if (r === true) { _loadedChatUserName = newName; setResult($("test-result"), L("set.apiSaved"), true); }
-  else { setResult($("test-result"), L("set.saveFailed") + presentResultError(r), false); }
-}
+$("btn-save-api").addEventListener("click", () => submitTx("tx-ai-provider")); // P2：AI 连接 = tx-ai-provider（身份字段已拆 tx-identity；采样改 Rule A）
 
 /* ---------- 人设 ---------- */
-$("btn-save-persona").addEventListener("click", async () => { await doSavePersona(); });
-
-async function doSavePersona() {
-  const ok = await window.petAPI.savePersona($("persona").value);
-  personaDirty = false;
-  setResult($("persona-result"), ok ? L("set.personaSaved") : L("set.personaSaveFail"), ok);
-}
+$("btn-save-persona").addEventListener("click", () => submitTx("tx-persona")); // P2：tx-persona（save-persona 通道不变）
 
 $("btn-reset-persona").addEventListener("click", async () => {
   if (!confirm(L("set.confirmReset"))) return;
   const r = await window.petAPI.resetPersona();
   if (r.ok) {
     $("persona").value = r.persona;
+    snapshotTx("tx-persona"); // 恢复默认 = 已提交动作，直接成为事务快照
     setResult($("persona-result"), L("set.personaReset"), true);
   } else {
     setResult($("persona-result"), "❌ " + presentResultError(r), false);
@@ -633,29 +722,7 @@ $("btn-restart-gsv").addEventListener("click", async () => {
   setResult(out, window.ErrorPresent.presentRestartGsv(r, L("set.gsvOk")), !!(r && r.ok));
 });
 
-$("btn-save-voice").addEventListener("click", async () => { await doSaveVoice(); });
-
-async function doSaveVoice() {
-  const enabled = $("tts-enabled").value === "true";
-  const plan = $("tts-plan").value;
-  const patch = {
-    greetingOnStart: $("greeting-on-start").checked,
-    tts: { enabled, rate: parseFloat($("tts-rate").value) || 0.9, systemVoiceFallback: $("sys-voice-fallback").value || "tts" },
-    ttsGenie: {
-      enabled: plan === "genie",
-      python: $("genie-python").value.trim(),
-      serverScript: $("genie-script").value.trim(),
-      refAudio: $("genie-ref-audio").value.trim(),
-      refText: $("genie-ref-text").value.trim(),
-      speakJa: $("genie-speak-ja").checked
-    },
-    ttsCloud: { enabled: plan === "edge" },
-    ttsCosy: { enabled: plan === "cosy" }
-  };
-  const r = await window.petAPI.saveSettings(patch);
-  setResult($("voice-result"), r === true ? L("set.voiceSaved") : L("set.voiceSaveFail"), r === true);
-  if (r === true) await fetchAndRenderFixedLinePool();
-}
+/* ---------- 语音（P2：无整区保存——开关/语速/方案/日语模式 = Rule A 即时；部署路径/参考音频 = 事务组） ---------- */
 
 /* ---------- 固定台词音频池 ---------- */
 let fixedLineStatus = null;
@@ -951,7 +1018,7 @@ $("stand-sink").addEventListener("change", async () => {
   $("stand-sink").value = String(r.standSink);
   $("stand-sink-val").textContent = r.standSink + " px";
 });
-// 天气（v2.5.26）：开关+城市+当前天气
+// 天气（v2.5.26）：enabled = Rule A 单键即时；城市/源/Key = tx-weather 组级保存
 (async () => {
   try {
     const wc = await window.petAPI.getWeatherCfg();
@@ -961,13 +1028,11 @@ $("stand-sink").addEventListener("change", async () => {
     $("weather-key").value = wc.key || "";
     const now = await window.petAPI.getWeather();
     if (now) $("weather-now").textContent = `${now.desc} ${now.temp}°C · 湿${now.humidity}% · 风${now.wind}km/h`;
+    snapshotTx("tx-weather"); // 字段异步填充完成后再取快照（否则放弃会把未加载值当 persisted）
   } catch { /* 忽略 */ }
 })();
-const _saveWeather = () => window.petAPI.setWeather({ enabled: $("weather-on").checked, city: $("weather-city").value.trim(), provider: $("weather-provider").value, key: $("weather-key").value.trim() });
-$("weather-on").addEventListener("change", _saveWeather);
-$("weather-city").addEventListener("change", _saveWeather);
-$("weather-provider").addEventListener("change", _saveWeather);
-$("weather-key").addEventListener("change", _saveWeather);
+// enabled 单键即时：绝不携带表单字段（city/provider/key 的未保存修改不被顺带提交）
+$("weather-on").addEventListener("change", () => { window.petAPI.setWeather({ enabled: $("weather-on").checked }); });
 
 /* ---------- 聊天外观（字体/字号/气泡宽度，松手即生效） ---------- */
 function fillChatFontOptions(customFonts) { // 已导入的本地字体追加到下拉末尾
@@ -1014,69 +1079,8 @@ $("btn-import-font").addEventListener("click", async () => {
 });
 
 /* ---------- 其他 ---------- */
-$("btn-save-other").addEventListener("click", async () => { await doSaveOther(); });
-
-async function doSaveOther() {
-  const r = await window.petAPI.saveSettings({
-    uiLang: $("ui-lang").value,
-    hotkey: $("hotkey").value.trim() || "Alt+Shift+S",
-    startHidden: $("start-hidden").value === "true",
-    netProxy: $("net-proxy").value.trim(), // O8：应用内网络代理（更新/天气）
-    pet: { name: $("pet-name").value },
-    features: {
-      clipboardWatch: $("feat-clipboard").checked,
-      systemMonitor: $("feat-sysmon").checked,
-      focusMode: $("focus-mode").checked,
-      longTermMemory: $("feat-memory").checked,
-      emotionalVoice: $("feat-emotional").checked,
-      desktopIcons: $("feat-desktop-icons").checked
-    },
-    autoLaunch: $("auto-launch").checked, // 开机自启（系统级，主进程单独处理）
-    agentApi: {
-      enabled: $("agent-enabled").value === "true",
-      port: parseInt($("agent-port").value, 10) || 8765,
-      invokeWord: $("agent-word").value.trim(),
-      bearerToken: $("agent-token").value.trim(),
-      maxBodyBytes: Math.max(1024, Math.min(1024 * 1024, (parseInt($("agent-max-body").value, 10) || 64) * 1024)),
-      statusEnabled: $("agent-status-enabled").checked
-    },
-    renderMode: $("render-mode").value,
-    walking: $("walking-opt").checked,
-    rigScale: Number($("rig-scale").value) || 1.0, // 2.5D 角色大小
-    rigMouseFollow: $("rig-mouse").checked !== false, // 2.5D 头部/眼睛跟随鼠标
-    mouseTrackGlobal: $("rig-mouse-global").checked, // 全局鼠标跟踪（需显式许可）
-    catToy: $("cat-toy").checked, // 逗猫棒（需显式许可）
-    fileGuard: $("file-guard").checked, // 蜜标监控
-    proactiveChat: $("proactive-chat").checked, // 主动搭话（v2.3 单独开关）
-    personify: $("personify").checked, // 人格化（v2.3 单独开关）
-    rpMode: $("rp-mode").checked // 角色扮演模式（关=助手模式优先服从指令）
-  });
-  // 渲染模式联动：选「2.5D」需有皮肤；选 gif/spine 则关闭 2.5D
-  const rm = $("render-mode").value;
-  if (rm === "rig") {
-    const skins = await window.petAPI.rigSkins();
-    if (!skins || !skins.length) { setResult($("other-result"), L("notice.importRigSkinFirst"), false); return; }
-    await window.petAPI.rigSet(S.rigSkinId || skins[0].id);
-    $("rig-switch").checked = true;
-  } else if (S.rigSkinId) {
-    await window.petAPI.rigSet("");
-    $("rig-switch").checked = false;
-  }
-  // 2.5D 角色开关（v2.2）：勾选状态变化才处理
-  const wantRig = $("rig-switch").checked;
-  const hadRig = !!S.rigSkinId;
-  if (wantRig !== hadRig) {
-    if (wantRig) {
-      const skins = await window.petAPI.rigSkins();
-      if (skins && skins.length) await window.petAPI.rigSet(skins[0].id);
-      else { $("rig-switch").checked = false; setResult($("other-result"), L("set.rmNoPsdImport"), false); return; }
-    } else {
-      await window.petAPI.rigSet("");
-    }
-  }
-  setResult($("other-result"), r === true ? L("set.saved") : L("set.saveFailed"), r === true);
-}
-
+/* ---------- Agent 接入管理（接入名单：显示授权了谁、在线状态、可主动断开） ----------
+ * P2：Agent 配置 = tx-agent（组级保存；承载 bearerToken → secrets 提取语义）。 */
 $("btn-agent-token").addEventListener("click", async () => {
   const token = await window.petAPI.generateAgentToken();
   $("agent-token").value = token || "";
@@ -1515,58 +1519,60 @@ function syncNavVisibility() {
     });
   }
 
-  // 未保存改动跟踪：只盯"需要显式保存"的控件；即时生效类（INSTANT_IDS）与情绪分档（tone-*）不触发
-  const INSTANT_IDS = new Set(["render-mode", "theme-select", "ui-lang", "rig-scale", "rig-mouse",
-    "rig-mouse-global", "cat-toy", "walk-global", "soft-render", "file-guard", "proactive-chat",
-    "personify", "rp-mode", "ws-watch", "ws-watch-dirs", "seat-sink", "sit-max", "walk-max",
-    "chat-font", "chat-font-size", "bubble-width", "live2d-scale", "mem-add-input",
-    "agent-client-name", "cred-source", "cred-slot"]);
-  let dirtyOn = false;
-  const bar = $("set-dirty");
-  function markDirty() { if (!dirtyOn && bar) { dirtyOn = true; bar.hidden = false; } }
-  function hideBarSoon() {
-    setTimeout(() => {
-      if (!dirtyOn && bar) {
-        bar.hidden = true;
-        const res = $("set-dirty-result");
-        if (res) setResult(res, "");
-      }
-    }, 2000);
+  /* ---------- P2 接线（事务机制函数在模块作用域，见文件头部） ---------- */
+
+  // Rule B：事务成员 → 所属组脏态（每组独立，互不传染）
+  for (const txId of SSP.TX_IDS) {
+    for (const id of SSP.TRANSACTIONS[txId].ids) {
+      const el = $(id);
+      if (!el) continue;
+      const onEdit = () => markTxDirty(txId);
+      el.addEventListener("input", onEdit);
+      el.addEventListener("change", onEdit);
+    }
   }
-  const setMain = document.querySelector(".set-main");
-  if (setMain) {
-    const onEdit = (e) => {
-      const t = e.target;
-      if (!t || !t.id || INSTANT_IDS.has(t.id) || String(t.id).startsWith("tone-")) return;
-      if (t.id === "persona") personaDirty = true;
-      markDirty();
-    };
-    setMain.addEventListener("input", onEdit, true);
-    setMain.addEventListener("change", onEdit, true);
+  for (const txId of SSP.TX_IDS) {
+    const ui = TX_UI[txId];
+    if (!ui) continue;
+    const saveBtn = $(ui.save), discardBtn = $(ui.discard);
+    if (saveBtn) saveBtn.addEventListener("click", () => submitTx(txId));
+    if (discardBtn) discardBtn.addEventListener("click", () => discardTx(txId));
   }
 
-  const btnAll = $("set-save-all");
-  if (btnAll) btnAll.addEventListener("click", async () => {
-    const res = $("set-dirty-result");
-    if (res) setResult(res, "");
-    try { await doSaveApi(); } catch { /* 失败提示见「聊天 API」分区 result */ }
-    if (personaDirty) { try { await doSavePersona(); } catch { /* 见「人设」分区 */ } }
-    try { await doSaveVoice(); } catch { /* 见「语音」分区 */ }
-    try { await doSaveOther(); } catch { /* 见「系统与高级」分区 */ }
-    const otherErr = $("other-result") && $("other-result").classList.contains("err");
-    if (otherErr) { if (res) setResult(res, L("set.dirtyPartial"), false); return; } // 保持提示条可见
-    dirtyOn = false;
-    if (res) setResult(res, L("set.allSaved"), true);
-    hideBarSoon();
-  });
-  const btnDiscard = $("set-discard");
-  if (btnDiscard) btnDiscard.addEventListener("click", () => {
-    if (!confirm(L("set.confirmDiscardAll"))) return;
-    location.reload();
+  // Rule A：save-settings 单键 patch（改变即提交，无放弃；unknown id 返回 null 不静默保存）
+  for (const id of Object.keys(SSP.RULE_A_PATCH)) {
+    const el = $(id);
+    if (!el) continue;
+    el.addEventListener("change", async () => {
+      const patch = SSP.ruleAPatchOf(id, el.type === "checkbox" ? el.checked : el.value);
+      if (!patch) return;
+      try { await window.petAPI.saveSettings(patch); } catch { /* 即时项失败不阻塞 UI（P4 归位状态呈现） */ }
+      if (id === "tts-plan") fetchAndRenderFixedLinePool(); // 方案切换 → 语音 profile 变化 → 音频池视图刷新
+    });
+  }
+
+  // Rule A：既有专用通道接线（P2 前未按冻结规则接线的五项；main 侧 handler 全部现成）
+  const walkingEl = $("walking-opt");
+  if (walkingEl) walkingEl.addEventListener("change", () => { window.petAPI.setWalking(walkingEl.checked); });
+  const featureToggles = [["feat-clipboard", "clipboardWatch"], ["feat-sysmon", "systemMonitor"], ["focus-mode", "focusMode"]];
+  for (const [id, name] of featureToggles) {
+    const el = $(id);
+    if (!el) continue;
+    el.addEventListener("change", () => { window.petAPI.toggleFeature(name, el.checked); });
+  }
+  const ttsEnabledEl = $("tts-enabled");
+  if (ttsEnabledEl) ttsEnabledEl.addEventListener("change", () => { window.petAPI.setTts(ttsEnabledEl.value === "true"); });
+  const ttsRateEl = $("tts-rate");
+  if (ttsRateEl) ttsRateEl.addEventListener("change", () => { window.petAPI.setRate(parseFloat(ttsRateEl.value)); });
+  const speakJaEl = $("genie-speak-ja");
+  if (speakJaEl) speakJaEl.addEventListener("change", () => {
+    window.petAPI.setSpeakJa(speakJaEl.checked)
+      .then(() => fetchAndRenderFixedLinePool())
+      .catch(() => { /* 引擎侧失败不阻塞 UI */ });
   });
 
-  // 供外部调用：生成 Agent Token 后 .value 是程序赋值不触发 input 事件，需手动标记
-  window.__setMarkDirty = markDirty;
+  // 供外部调用（Agent Token 生成）：程序赋值不触发 input 事件，需手动标记所属事务
+  window.__setMarkDirty = () => markTxDirty("tx-agent");
 })();
 
 /* ---------- Phase 4-B1：locale 变化的动态重绘（单一订阅，零业务副作用） ----------

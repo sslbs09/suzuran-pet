@@ -3201,6 +3201,16 @@ ipcMain.handle("pet:save-settings", (_e, patch) => {
       sendToRenderer("pet:tts-changed", !!after.tts.enabled);
       applyTtsEngine(!!after.tts.enabled);
     }
+    // V1（settings redesign P2）：中文语音方案布尔即时化后，运行中的本地引擎生命周期需要跟随——
+    // 复用既有 applyTtsEngine（按新方案拉起 Genie / 日语模式清场）；切离本地克隆时停掉残留 Genie。
+    // 不动 GSV / 引擎优先级 / speakJa / 缓存语义。
+    const ttsEnginePlanChanged = ["ttsGenie", "ttsCloud", "ttsCosy"].some((k) =>
+      safePatch[k] && typeof safePatch[k] === "object" && Object.prototype.hasOwnProperty.call(safePatch[k], "enabled")
+      && !!safePatch[k].enabled !== !!(before[k] || {}).enabled);
+    if (ttsEnginePlanChanged) {
+      if ((after.tts || {}).enabled) applyTtsEngine(!!after.tts.enabled);
+      if (!((after.ttsGenie || {}).enabled)) tts.shutdownGenieServer();
+    }
     if (renderModeChanged) {
       dispatchRenderModeIntent(requestedRenderMode);
     } else if (!!after.walking !== !!before.walking) {
