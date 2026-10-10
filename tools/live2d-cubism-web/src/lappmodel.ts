@@ -651,7 +651,13 @@ export class LAppModel extends CubismUserModel {
       gazeY: value(CubismDefaultParameterId.ParamEyeBallY),
       mouthOpenY: value('ParamMouthOpenY'),
       breath: value(CubismDefaultParameterId.ParamBreath),
-      lipSyncRms: this.getLipSyncRms()
+      lipSyncRms: this.getLipSyncRms(),
+      // Read the current SDK producer; command receipt and idle pose changes
+      // cannot establish that an expression or requested motion is running.
+      expressionActive: this._expressionManager.getCubismMotionQueueEntries()
+        .some(entry => entry && entry.isAvailable() && !entry.isFinished()),
+      loadedExpressionCount: this._expressions.size,
+      motionPriority: this._motionManager.getCurrentPriority()
     };
   }
 

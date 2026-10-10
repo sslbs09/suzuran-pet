@@ -54,24 +54,34 @@ function rendererReady(owner: RuntimeOwner): boolean {
     const rect = canvas ? canvasRect(canvas) : null;
     const bufferWidth = Number(gl?.drawingBufferWidth || canvas?.width || 0);
     const bufferHeight = Number(gl?.drawingBufferHeight || canvas?.height || 0);
-    return Boolean(model?.isRendererReady() && shader?._isShaderLoaded === true && canvas && rect && bufferWidth > 0 && bufferHeight > 0);
+    return Boolean(model?.isRendererReady() && shader?._isShaderLoaded === true && canvas && rect && gl && !gl.isContextLost() && bufferWidth > 0 && bufferHeight > 0);
   } catch { return false; }
 }
 
-function samplePendingAlpha(owner: RuntimeOwner): void {
-  if (!isCurrent(owner) || !rendererReady(owner)) return;
+function sampleFrameAlpha(owner: RuntimeOwner): boolean {
+  if (!isCurrent(owner) || !rendererReady(owner)) { alphaSampler.reset(owner); return false; }
   const sub = owner.delegate.getSubdelegate(0);
   const canvas = sub?.getCanvas();
   const gl = sub?.getGl();
-  if (!canvas || !gl) return;
+  if (!canvas || !gl) { alphaSampler.reset(owner); return false; }
   const rect = canvasRect(canvas);
-  if (!rect) return;
-  alphaSampler.sample(owner, owner.frameCount, rect, (x, y, sampleRect) => {
-    const px = Math.max(0, Math.min(canvas.width - 1, Math.floor((x - sampleRect.left) * canvas.width / sampleRect.width)));
-    const py = Math.max(0, Math.min(canvas.height - 1, Math.floor((sampleRect.bottom - y) * canvas.height / sampleRect.height)));
-    const pixel = new Uint8Array(4);
-    gl.readPixels(px, py, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
-    return pixel[3] >= 16;
+  if (!rect) { alphaSampler.reset(owner); return false; }
+  const width = gl.drawingBufferWidth, height = gl.drawingBufferHeight;
+  return alphaSampler.sample(owner, owner.frameCount, rect, width, height, pixels => {
+    // Cubism uses offscreen targets. Read the display target and restore the
+    // previous binding; WebGL2 has an independent READ_FRAMEBUFFER binding.
+    const gl2 = gl as WebGL2RenderingContext;
+    const target = typeof gl2.READ_FRAMEBUFFER === 'number' ? gl2.READ_FRAMEBUFFER : gl.FRAMEBUFFER;
+    const bindingKey = target === gl2.READ_FRAMEBUFFER ? gl2.READ_FRAMEBUFFER_BINDING : gl.FRAMEBUFFER_BINDING;
+    const previous = gl.getParameter(bindingKey);
+    const display = sub.getFrameBuffer();
+    if (previous !== display) gl.bindFramebuffer(target, display);
+    try {
+      gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      return !gl.isContextLost() && gl.getError() === gl.NO_ERROR;
+    } finally {
+      if (previous !== display) gl.bindFramebuffer(target, previous);
+    }
   });
 }
 
@@ -85,17 +95,16 @@ function waitForReady(owner: RuntimeOwner, timeoutMs: number): Promise<boolean> 
       window.removeEventListener('cubism-asset-error', owner.onAssetError);
       window.clearTimeout(timer);
       owner.cancelReady = undefined;
-      resolve(ok && isCurrent(owner) && rendererReady(owner));
+      resolve(ok && isCurrent(owner) && rendererReady(owner) && owner.frameReady);
     };
     owner.onFrame = (event) => {
       if (!isCurrent(owner)) return finish(false);
       if (rendererReady(owner)) {
-        owner.frameReady = true;
         owner.frameCount += 1;
         owner.frameTime = Number((event as CustomEvent).detail?.at || Date.now());
-        samplePendingAlpha(owner);
-        finish(true);
-      }
+        owner.frameReady = sampleFrameAlpha(owner);
+        if (owner.frameReady) finish(true);
+      } else { owner.frameReady = false; alphaSampler.reset(owner); }
     };
     owner.onAssetError = () => finish(false);
     owner.cancelReady = () => finish(false);
@@ -127,12 +136,10 @@ function alphaAt(owner: RuntimeOwner, clientX: number, clientY: number): boolean
   if (!isCurrent(owner) || !owner.frameReady || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return false;
   const sub = owner.delegate.getSubdelegate(0);
   const canvas = sub?.getCanvas();
-  if (!canvas) return false;
+  const gl = sub?.getGl();
+  if (!canvas || !gl || gl.isContextLost()) { alphaSampler.reset(owner); owner.frameReady = false; return false; }
   const rect = canvasRect(canvas);
-  if (!rect || clientX < rect.left || clientY < rect.top || clientX >= rect.right || clientY >= rect.bottom) {
-    return alphaSampler.submit(owner, clientX, clientY, null);
-  }
-  return alphaSampler.submit(owner, clientX, clientY, rect);
+  return alphaSampler.at(owner, clientX, clientY, rect, gl.drawingBufferWidth, gl.drawingBufferHeight);
 }
 
 const Live2DRuntime = {
@@ -204,7 +211,7 @@ const Live2DRuntime = {
       mood: lastMood, requestedMouthOpen, requestedCommand: lastCommand, renderer: 'cubism-web-r5',
       frameReady: Boolean(owner?.frameReady), frameCount: owner?.frameCount || 0, frameTime: owner?.frameTime || LAppPal.getDeltaTime(),
       ownerGeneration: owner?.generation || 0, modelLease: owner ? manager(owner)?.getModel()?.getLeaseEvidence() ?? null : null,
-      observedParams
+      observedParams, alphaCache: alphaSampler.snapshot(owner)
     };
   }
 };

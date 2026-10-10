@@ -40,7 +40,7 @@ test('runtime owner lifecycle uses opaque object identity and stale rejection', 
   assert.equal(lifecycle.accepts(newOwner, newToken), false);
 });
 
-test('actual runtime init and teardown retain the registered owner object', async () => {
+for (const webgl2 of [false, true]) test(`actual runtime retains owner and restores ${webgl2 ? 'independent READ' : 'FRAMEBUFFER'} binding`, async () => {
   // Exercise the real entry's state logic with deterministic draw dependencies.
   // This unit check does not claim to verify Cubism rendering or native input.
   const entryURL = new URL('../src/runtime.ts', import.meta.url);
@@ -53,9 +53,25 @@ test('actual runtime init and teardown retain the registered owner object', asyn
   const host = new EventTarget();
   Object.assign(host, { setTimeout, clearTimeout });
   const model = { isRendererReady: () => true, getLeaseEvidence: () => ({ disposed: false }) };
-  const gl = { drawingBufferWidth: 300, drawingBufferHeight: 460 };
+  let binding = { offscreen: true }, readFailure = false, contextLost = false, reads = 0;
+  const originalBinding = binding;
+  const drawBinding = { independentDraw: true };
+  const gl = { drawingBufferWidth: 300, drawingBufferHeight: 460,
+    FRAMEBUFFER: 0x8d40, FRAMEBUFFER_BINDING: 0x8ca6, RGBA: 0x1908, UNSIGNED_BYTE: 0x1401, NO_ERROR: 0,
+    ...(webgl2 ? { READ_FRAMEBUFFER: 0x8ca8, READ_FRAMEBUFFER_BINDING: 0x8caa } : {}),
+    isContextLost: () => contextLost,
+    getParameter: key => webgl2 && key === 0x8ca6 ? drawBinding : binding,
+    bindFramebuffer: (target, value) => { assert.equal(target, webgl2 ? 0x8ca8 : 0x8d40); binding = value; }, getError: () => 0,
+    readPixels: (_x, _y, width, height, _format, _type, pixels) => {
+      assert.equal(binding, null);
+      assert.equal(pixels.length, width * height * 4);
+      reads++;
+      if (readFailure) throw new Error('failed read');
+      pixels.fill(255);
+    }
+  };
   const manager = { getModel: () => model, stop() {}, getObservedParameters: () => ({ mouthOpenY: 0 }) };
-  const sub = { getCanvas: () => canvas, getGl: () => gl, getLive2DManager: () => manager };
+  const sub = { getCanvas: () => canvas, getGl: () => gl, getFrameBuffer: () => null, getLive2DManager: () => manager };
   const dependencies = {
     window: host, console, Date, Math, Uint8Array, globalThis: null,
     createOwnerLifecycle, createAlphaSampler, Live2dProductLoader: loader,
@@ -71,6 +87,26 @@ test('actual runtime init and teardown retain the registered owner object', asyn
   const oldToken = {}, newToken = {};
   assert.equal(await runtime.init(canvas, 'pet-user://live2d/Haru/Haru.model3.json', oldToken, { readyTimeoutMs: 40 }), true);
   assert.equal(runtime.snapshot().frameReady, true);
+  assert.equal(runtime.snapshot().alphaCache.ready, true);
+  assert.equal(binding, originalBinding);
+  if (webgl2) assert.equal(gl.getParameter(gl.FRAMEBUFFER_BINDING), drawBinding);
+  assert.equal(reads, 1);
+  assert.equal(runtime.interactiveAt(100, 100), true);
+  assert.equal(runtime.interactiveAt(101, 101), true);
+  assert.equal(reads, 1);
+  readFailure = true;
+  host.dispatchEvent(new Event('cubism-frame-rendered'));
+  assert.equal(runtime.snapshot().frameReady, false);
+  assert.equal(runtime.interactiveAt(100, 100), false);
+  assert.equal(binding, originalBinding);
+  if (webgl2) assert.equal(gl.getParameter(gl.FRAMEBUFFER_BINDING), drawBinding);
+  readFailure = false;
+  host.dispatchEvent(new Event('cubism-frame-rendered'));
+  assert.equal(runtime.snapshot().frameReady, true);
+  contextLost = true;
+  assert.equal(runtime.interactiveAt(100, 100), false);
+  assert.equal(runtime.snapshot().alphaCache.ready, false);
+  contextLost = false;
   assert.equal(await runtime.init(canvas, 'pet-user://live2d/Haru/Haru.model3.json', newToken, { readyTimeoutMs: 40 }), true);
   assert.equal(releases, 1);
   assert.equal(runtime.destroy(oldToken), false);
@@ -80,24 +116,9 @@ test('actual runtime init and teardown retain the registered owner object', asyn
   assert.equal(releases, 2);
 });
 
-test('post-frame alpha cache remains stable for repeated static-point consumers', () => {
-  const sampler = createAlphaSampler();
-  const owner = {};
-  const rect = { left: 10, top: 20, right: 110, bottom: 120, width: 100, height: 100 };
-  assert.equal(sampler.submit(owner, 40, 50, rect), false);
-  let reads = 0;
-  sampler.sample(owner, 1, rect, () => { reads += 1; return true; });
-  assert.equal(sampler.submit(owner, 40, 50, rect), true);
-  assert.equal(sampler.submit(owner, 40, 50, rect), true);
-  assert.equal(reads, 1);
-  sampler.sample(owner, 2, rect, () => { reads += 1; return true; });
-  assert.equal(sampler.submit(owner, 40, 50, rect), true);
-  assert.equal(reads, 2);
-  assert.equal(sampler.submit(owner, 41, 50, rect), false);
-});
-
 test('built IIFE exposes bounded runtime API and no-owner destroy is safe', async () => {
-  const bundle = await fs.readFile(path.resolve(process.env.TASK1_BUNDLE || 'E:/WhiteMoon/work/live2d-sussurro-2026/phase1-runtime-decision/product-build-task1-r4/dist/live2d-runtime/live2d-runtime.js'), 'utf8');
+  assert.ok(process.env.TASK1_BUNDLE, 'TASK1_BUNDLE must select the bundle from the current explicit build');
+  const bundle = await fs.readFile(path.resolve(process.env.TASK1_BUNDLE), 'utf8');
   const sandbox = { console, performance: { now: () => 0 }, setTimeout, clearTimeout, Uint8Array, Date, Math };
   sandbox.window = sandbox;
   sandbox.globalThis = sandbox;

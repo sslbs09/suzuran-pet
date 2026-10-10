@@ -23,5 +23,29 @@ explicit work directory. Provisioning is separate and non-overwriting:
 node tools/live2d-cubism-web/provision-product-web.mjs --sdk-root <sdk> --runtime-dir <runtime-dir> --model-dir <Haru-dir> --profile-dir <new-profile>
 ```
 
-The actual application UI/Host validation is owned by Task 2 and remains
-`NOT RUN` for this Task 1 source package.
+Provision into the application's actual test user directory (for the direct
+launcher this is `<outer-profile>/body-userdata`), so assets resolve beneath
+`<test-user-directory>/assets`. A sibling outer-profile asset directory is not
+the application's asset root.
+
+The display alpha cache is filled after each completed draw, before READY.
+Pointer queries read the cached image at any client coordinate. Its reusable
+RGBA buffer is bound to the renderer owner, CSS rectangle, and actual drawing
+buffer dimensions; failed reads and context loss invalidate the contour.
+Alpha admission and Cubism logical hits remain separate. The original native
+clickability controller and drag owner are unchanged.
+
+Build r8 and its native Windows input were exercised in the isolated product
+Body. The closure report under the explicit E: work directory records the
+runtime, Chibi/P0 wall, performance measurements, exact bundle hash and limits.
+This remains a locally provisioned TEST/SAMPLE mode, with no vendor model or
+Core payload committed and no production Sussurro assets supplied.
+
+For targeted checks, set `TASK1_BUNDLE` to the exact bundle produced by the
+explicit build above, then run the three tests; an obsolete cached bundle is
+never selected implicitly:
+
+```powershell
+$env:TASK1_BUNDLE = '<absolute-path-to-current-live2d-runtime.js>'
+node --test tools/live2d-cubism-web/test/task1.test.mjs tools/live2d-cubism-web/test/texture-origin.test.mjs tools/live2d-cubism-web/test/alpha-frame.test.mjs
+```
