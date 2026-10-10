@@ -147,21 +147,20 @@ test("G6: EXTERNAL_DRAG active → applySeatPosition 被 deny（denyLegacy 现�
 });
 
 /* ---------- G7/G8: scale 处理 ---------- */
+// P1 user pet scale removal：setScale（"scale-change" 的唯一生产触发者）已随用户写路径移除，
+// 本组用例保留 MotionAuthority 的释放语义契约本身（reason 释放 → LEGACY 可写、旧 token 失效）。
 
 test("G7: scale during V2 → 先 interrupt 释放 episode，再 resize（无 competing position writer）", () => {
   const authority = runtimeV2.createMotionAuthority();
   const ep = authority.acquire("ep-s");
-  // setScale 语义：interrupt→release→LEGACY；此后 legacy reposition/clamp 允许（唯一写者）
+  // 释放语义：interrupt→release→LEGACY；此后 legacy reposition/clamp 允许（唯一写者）
   authority.release("scale-change");
   assert.equal(authority.owner(), "legacy");
   assert.equal(authority.positionAdmit("legacy").ok, true);
   assert.equal(authority.positionAdmit("v2-locomotion", ep).ok, false, "旧 V2 token 释放后彻底失效");
-  assert.match(mainSource, /v2Locomotion\.interrupt\("scale-change"\)[\s\S]{0,120}v2Drag\.end\("scale-change"\)/, "setScale 先释放 V2 再释放 EXTERNAL");
 });
 
 test("G8: scale during Drag → 不允许 external 与 scale 同时写 position", () => {
-  // setScale 在 resize 前 v2Drag.end() → 释放 EXTERNAL；drag landing 与 scale 写不同时存在
-  assert.match(mainSource, /v2Drag && v2Drag\.active\(\)\) v2Drag\.end\("scale-change"\)/, "scale 前释放拖拽会话");
   const authority = runtimeV2.createMotionAuthority();
   const acq = authority.externalAcquire("drag");
   authority.externalRelease("scale-change");
@@ -224,7 +223,7 @@ test("G12: gate OFF（v2Authority null）→ guard/clamp/writer 全放行，base
 
 test("最终 inventory 合同：主窗口 x/y native 写仅出现在 commit 点 / 带 admission 的 legacy writer", () => {
   const winPosWrites = (mainSource.match(/win\.setPosition\(/g) || []).length;
-  // 逐个受控：sitOnTaskbar/clamp/outOfScreen(2)/walkSetPosition/commit×2/reposition/seat-exit/sleeping/pet:move(OFF)/setScale
+  // 逐个受控：sitOnTaskbar/clamp/outOfScreen(2)/walkSetPosition/commit×2/reposition/seat-exit/sleeping/pet:move(OFF)（setScale 已随 P1 user-scale removal 移除）
   assert.ok(winPosWrites >= 1, "存在 native 写点");
   // 关键异步/裸写旁路必须挂 admission：
   for (const fn of ["outOfScreenGuard", "clampPetToWorkArea"]) {

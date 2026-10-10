@@ -88,5 +88,12 @@ const V = (n) => "dummy-val-" + n;
   assertEq("null patch secrets 空", JSON.stringify(r.secrets), "{}");
 }
 
+// 11) P1 user pet scale removal：window 顶层已出白名单——用户不得再经 patch 写 window.scale
+{
+  const r = SP.filterSettingsPatch({ window: { scale: 2 } });
+  assertEq("window 顶层被拒（P1 scale 移除）", r.unknown, ["window"]);
+  assertEq("window 不落入 config patch", Object.prototype.hasOwnProperty.call(r.patch, "window"), false);
+}
+
 console.log(failed ? `\n${failed} 项失败` : "\nsettings-patch 全部通过 ✅");
 process.exit(failed ? 1 : 0);

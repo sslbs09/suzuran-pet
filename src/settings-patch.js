@@ -9,7 +9,7 @@
 /** 设置页实际可改的键。ttsGenie/ttsGsv 的 python/serverScript 是设置页语音部署区的
  *  合法配置（用户主动填的引擎路径，保留）；secrets 走 DPAPI 不落 config，放行安全。 */
 const ALLOWED_TOP = new Set([
-  "pet", "chat", "window", "features", "agentApi", "uiLang", "hotkey", "startHidden",
+  "pet", "chat", "features", "agentApi", "uiLang", "hotkey", "startHidden",
   "renderMode", "walking", "walkSeatSink", "walkTiming", "rigScale", "rigMouseFollow",
   "mouseTrackGlobal", "catToy", "fileGuard", "proactiveChat", "personify", "rpMode",
   "dimMode", "greetingOnStart", "security", "spineSkinId", "tts", "ttsCloud", "ttsCosy",

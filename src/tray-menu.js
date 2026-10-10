@@ -17,7 +17,7 @@ function buildTrayItems(deps) {
     isWindowVisible, toggleWindow, setMode, setTts, setRate, setSpeakJa, setWalking,
     detectSpineModels, skinParseDir, SPINE_CN, SKIN_CHAR_NAMES, SKIN_PERSON_NAMES, setSpineSkin, skinIconOf,
     sendToRenderer, setPetLayer, openPsdWindow, rigSkinList, setRigSkin,
-    setDimMode, sitOnTaskbar, setScale, clampScale, setWalkSpeed, setCatToy,
+    setDimMode, sitOnTaskbar, setWalkSpeed, setCatToy,
     setFileGuard,
     diagClick, openDocs, openSchedule, openSettings, openMoodManager, openVoiceStudio, openTtsGuide, openQuickstart, openHelp, openAddChar, checkUpdate,
     openObservation, whitemoonEnabled = false, // Phase 11-E.1：记录观察（WhiteMoon 连接开启时才显示）
@@ -38,7 +38,6 @@ function buildTrayItems(deps) {
     : i18n.t(lang, "tray.modeAuto");
   const ttsOn = !!(cfg.tts || {}).enabled;
   const rate = (cfg.tts || {}).rate || 0.9;
-  const scale = clampScale((cfg.window || {}).scale);
   const speakJa = !!((cfg.ttsGenie || {}).speakJa);
   const walkingOn = !!cfg.walking && cfg.renderMode === "spine";
   const isSpine = cfg.renderMode === "spine";
@@ -117,14 +116,6 @@ function buildTrayItems(deps) {
     appearanceItems.push({ label: i18n.t(lang, "tray.psdTool"), click: () => openPsdWindow() });
   }
   appearanceItems.push(
-    { type: "separator" },
-    { label: i18n.t(lang, "tray.sizeMenu"),
-      submenu: [
-        { label: i18n.t(lang, "tray.sizeSmall"), type: "radio", checked: scale <= 0.8, click: () => setScale(0.75) },
-        { label: i18n.t(lang, "tray.sizeStandard"), type: "radio", checked: scale > 0.8 && scale < 1.2, click: () => setScale(1.0) },
-        { label: i18n.t(lang, "tray.sizeLarge"), type: "radio", checked: scale >= 1.2 && scale < 1.6, click: () => setScale(1.25) },
-        { label: i18n.t(lang, "tray.sizeXLarge"), type: "radio", checked: scale >= 1.6, click: () => setScale(1.5) }
-      ] },
     { label: i18n.t(lang, "tray.layerLabel"),
       submenu: [
         { label: i18n.t(lang, "tray.layerTop"), type: "radio", checked: (cfg.layer || "top") !== "desktop", click: () => setPetLayer("top") },

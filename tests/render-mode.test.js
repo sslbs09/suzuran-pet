@@ -28,15 +28,8 @@ function setSizeHandlerBlock(source = mainSource) {
   return sourceBlock(source, 'ipcMain.on("pet:set-size"', 'ipcMain.handle("pet:tts-clone"', "pet:set-size");
 }
 
-function setScaleFunctionBlock(source = mainSource) {
-  return sourceBlock(source, "function setScale(scale)", "function setWalkSpeed", "setScale");
-}
-
-function setScaleExecutableBlock(source = mainSource) {
-  const block = setScaleFunctionBlock(source);
-  const handler = block.indexOf('ipcMain.handle("pet:set-scale"');
-  return handler >= 0 ? block.slice(0, handler) : block;
-}
+// P1 user pet scale removal：setScale 函数与其专属 wiring/harness/mutation 契约随用户写路径一并退役
+// （见 tests/scale-migration.test.js 的 CALLER-CLOSURE 断言）。渲染模式切换自身的 geometry 契约不受影响。
 
 function assertSetSizeWiring(source = mainSource) {
   const block = setSizeHandlerBlock(source);
@@ -50,86 +43,6 @@ function assertSetSizeWiring(source = mainSource) {
   assert.match(callback, /}, 150\);/, "pet:set-size 保留 150ms callback");
   assert.match(callback, /repositionAfterWindowSizeChange\(renderModeCommit, wasGrounded\)/, "pet:set-size callback 使用 pre-resize grounded 结果");
   assert.doesNotMatch(callback, /captureResizeAnchor\(\)|wasGroundAnchored\(/, "pet:set-size callback 不重新推断 grounded");
-}
-
-function assertSetScaleWiring(source = mainSource) {
-  const block = setScaleFunctionBlock(source);
-  assert.match(block, /const resizeRevision = windowSizeRevision\.next\(\);/, "setScale 保存 resize revision");
-  assert.match(block, /const wasGrounded = captureResizeAnchor\(\);/, "setScale 保存 grounded 结果");
-  const capture = block.indexOf("const wasGrounded = captureResizeAnchor();");
-  const setSize = block.indexOf("win.setSize(ws, hs)");
-  assert.ok(capture >= 0 && capture < setSize, "setScale 在 win.setSize 前 capture");
-  const enableResizable = block.indexOf("if (!win.isResizable()) win.setResizable(true);");
-  assert.equal((block.match(/win\.setResizable\(true\)/g) || []).length, 1, "setScale 只开启一次 resizable");
-  assert.ok(enableResizable >= 0 && enableResizable < setSize, "setScale 在 win.setSize 前临时开启 resizable");
-  const callbackStart = block.indexOf("setTimeout(() =>");
-  const callback = block.slice(callbackStart);
-  assert.match(callback, /const revisionCurrent = windowSizeRevision\.isCurrent\(resizeRevision\);/, "setScale callback 保存 revision 判断");
-  assert.match(callback, /if \(revisionCurrent\) \{/, "setScale callback 仅 current 时定位");
-  assert.match(callback, /finally \{/, "setScale callback 用 finally 保证 resizable 恢复");
-  assert.match(callback, /repositionAfterWindowSizeChange\(false, wasGrounded\)/, "setScale callback 使用保存的 grounded 结果");
-  assert.equal((callback.match(/win\.setResizable\(false\)/g) || []).length, 1, "setScale callback 最终恢复 resizable=false");
-  assert.ok(callback.indexOf("win.setResizable(false)") > callback.indexOf("repositionAfterWindowSizeChange(false, wasGrounded)"), "setScale 先完成稳定定位再恢复 resizable");
-  assert.doesNotMatch(callback, /if \(!windowSizeRevision\.isCurrent\(resizeRevision\)\) return;/, "setScale stale callback 不能跳过 resizable 恢复");
-  assert.match(block, /const ws = Math\.round\(\(cfg\.window\.width \|\| 260\) \* s\);/, "setScale 使用 base width 计算目标宽度");
-  assert.match(block, /const hs = Math\.round\(\(cfg\.window\.height \|\| 200\) \* s\);/, "setScale 使用 base height 计算目标高度");
-  assert.match(block, /win\.setSize\(ws, hs\);/, "setScale 使用当前 scale 目标尺寸执行 native resize");
-  const notify = block.indexOf('sendToRenderer("pet:scale-changed", s);');
-  assert.ok(notify > setSize, "native resize 请求后才通知 renderer scale-changed");
-}
-
-// setScale 的最小动态夹具：直接执行 production function block，验证 native resize 顺序与 stale callback 行为。
-function createScaleHarness({ width = 260, height = 200, x = 400, y = 300, resizable = false, grounded = false } = {}) {
-  const calls = [];
-  const callbacks = [];
-  const wa = { x: 0, y: 0, width: 1536, height: 800 };
-  let bounds = { x, y, width, height };
-  let resizableState = !!resizable;
-  const fakeWin = {
-    isDestroyed: () => false,
-    isResizable: () => resizableState,
-    setResizable: (value) => { resizableState = !!value; calls.push({ type: "setResizable", value: resizableState }); },
-    setSize: (nextWidth, nextHeight) => {
-      calls.push({ type: "setSize", width: nextWidth, height: nextHeight, resizable: resizableState });
-      if (resizableState) { bounds.width = nextWidth; bounds.height = nextHeight; }
-    },
-    getBounds: () => ({ ...bounds }),
-    getPosition: () => [bounds.x, bounds.y],
-    setPosition: (nextX, nextY) => { bounds.x = nextX; bounds.y = nextY; calls.push({ type: "setPosition", x: nextX, y: nextY }); }
-  };
-  const config = {
-    saveConfig: () => {},
-    getConfig: () => ({ window: { width: 260, height: 200 } })
-  };
-  const revision = RM.createResizeRevision();
-  const fn = new Function(
-    "clampScale", "config", "win", "windowSizeRevision", "captureResizeAnchor", "walkGeo", "screen",
-    "walkMinX", "repositionAfterWindowSizeChange", "clampPetToWorkArea", "applySeatPosition", "refreshTrayMenu",
-    "sendToRenderer", "setTimeout", `${setScaleExecutableBlock()}; return setScale;`
-  )(
-    (value) => Math.max(0.6, Math.min(2.0, Number(value) || 1.0)),
-    config,
-    fakeWin,
-    revision,
-    () => grounded,
-    { workAreaOf: () => wa },
-    {},
-    () => 0,
-    (_renderModeCommit, wasGrounded) => calls.push({ type: "reposition", wasGrounded, bounds: { ...bounds } }),
-    (reason) => calls.push({ type: "clamp", reason }),
-    () => calls.push({ type: "seat" }),
-    () => calls.push({ type: "tray" }),
-    (_channel, value) => calls.push({ type: "notify", value }),
-    (callback, delay) => { callbacks.push({ callback, delay }); return callbacks.length; }
-  );
-  return {
-    calls,
-    callbacks,
-    get bounds() { return { ...bounds }; },
-    get resizable() { return resizableState; },
-    setScale: fn,
-    runCallback(index = 0) { callbacks[index].callback(); }
-  };
 }
 
 function createSitOnTaskbarHarness({ gap, bounds, workArea } = {}) {
@@ -656,7 +569,6 @@ const groundGapBlock = mainSource.slice(groundGapBlockStart, groundGapBlockEnd);
 assert.match(groundGapBlock, /walk\.seated\) applySeatPosition\(\)/, "Spine late groundGap 仍按最新 gap 重锚当前坐姿");
 assert.match(groundGapBlock, /report\.target === "gif"/, "GIF late groundGap 走独立分支");
 assertSetSizeWiring();
-assertSetScaleWiring();
 assertSitOnTaskbarWiring();
 assertOutOfScreenGuardWiring();
 
@@ -1007,33 +919,6 @@ const sitNegativeDisplay = createSitOnTaskbarHarness({
 sitNegativeDisplay.run();
 assertEq("sitOnTaskbar 负坐标显示器 canonical 坐标仍为整数", sitNegativeDisplay.calls[0], { type: "commitLegacyPosition", x: -300, y: 863 });
 
-const scaleSequence = createScaleHarness({ width: 260, height: 200, resizable: false });
-scaleSequence.setScale(1.25);
-assertEq("setScale 260×200 → 325×250", { width: scaleSequence.bounds.width, height: scaleSequence.bounds.height }, { width: 325, height: 250 });
-const firstSetSizeIndex = scaleSequence.calls.findIndex((call) => call.type === "setSize");
-const firstEnableIndex = scaleSequence.calls.findIndex((call) => call.type === "setResizable" && call.value === true);
-const firstNotifyIndex = scaleSequence.calls.findIndex((call) => call.type === "notify");
-assert.ok(firstEnableIndex >= 0 && firstEnableIndex < firstSetSizeIndex, "setScale shrink/resize 前开启 resizable");
-assert.ok(firstNotifyIndex > firstSetSizeIndex, "setScale native resize 后才通知 renderer");
-scaleSequence.runCallback();
-assertEq("setScale callback 最终恢复 false", scaleSequence.resizable, false);
-scaleSequence.setScale(0.75);
-assertEq("setScale 325×250 → 195×150", { width: scaleSequence.bounds.width, height: scaleSequence.bounds.height }, { width: 195, height: 150 });
-scaleSequence.runCallback();
-assertEq("setScale shrink 后最终恢复 false", scaleSequence.resizable, false);
-
-const staleScale = createScaleHarness({ width: 260, height: 200, resizable: false });
-staleScale.setScale(1.25);
-staleScale.setScale(0.75);
-const staleBoundsBeforeCallback = staleScale.bounds;
-const staleCallStart = staleScale.calls.length;
-staleScale.runCallback(0);
-assertEq("stale setScale callback 不改后续 bounds", staleScale.bounds, staleBoundsBeforeCallback);
-assertEq("stale setScale callback 不留下 resizable=true", staleScale.resizable, false);
-assert.equal(staleScale.calls.slice(staleCallStart).some((call) => call.type === "clamp" || call.type === "reposition"), false, "stale setScale callback 不执行定位");
-staleScale.runCallback(1);
-assertEq("current setScale callback 最终恢复 false", staleScale.resizable, false);
-
 const dragStart = mainSource.indexOf("function dragSeatUpdate");
 const dragEnd = mainSource.indexOf("/* ---------- 桌面行走 v2", dragStart);
 const dragBlock = mainSource.slice(dragStart, dragEnd);
@@ -1076,22 +961,6 @@ const moveSetSizeCaptureAfterSetSize = (block) => block.replace(
   /  const wasGrounded = captureResizeAnchor\(\);\n([\s\S]*?  win\.setSize\(ws, hs\);\n)/,
   "$1  const wasGrounded = captureResizeAnchor();\n"
 );
-const removeScaleRevision = (block) => block.replace("    const resizeRevision = windowSizeRevision.next();\n", "");
-const removeScaleCapture = (block) => block.replace("    const wasGrounded = captureResizeAnchor();\n", "");
-const removeScaleResizableEnable = (block) => block.replace("    try { if (!win.isResizable()) win.setResizable(true); } catch { /* 忽略 */ }\n", "");
-const moveScaleResizableEnableAfterSetSize = (block) => block
-  .replace("    try { if (!win.isResizable()) win.setResizable(true); } catch { /* 忽略 */ }\n", "")
-  .replace("    win.setSize(ws, hs);\n", "    win.setSize(ws, hs);\n    try { if (!win.isResizable()) win.setResizable(true); } catch { /* 忽略 */ }\n");
-const removeScaleResizableRestore = (block) => block.replace("        try { if (win && !win.isDestroyed()) win.setResizable(false); } catch { /* 忽略 */ }\n", "");
-const moveScaleCaptureAfterSetSize = (block) => block.replace(
-  /    const wasGrounded = captureResizeAnchor\(\);\n([\s\S]*?    win\.setSize\(ws, hs\);\n)/,
-  "$1    const wasGrounded = captureResizeAnchor();\n"
-);
-const removeScaleRevisionGuard = (block) => block.replace("        if (revisionCurrent) {\n", "        if (true) {\n");
-const moveScaleNotificationBeforeSetSize = (block) => block
-  .replace('  sendToRenderer("pet:scale-changed", s);\n', "")
-  .replace("    win.setSize(ws, hs);\n", '    sendToRenderer("pet:scale-changed", s);\n    win.setSize(ws, hs);\n');
-const replaceScaleTargetWithOldSize = (block) => block.replace("    win.setSize(ws, hs);\n", "    win.setSize(325, 250);\n");
 const removeSitPositionNormalization = (block) => block.replace(
   "  const targetY = renderModeMod.groundAlign(b, wa, groundGap).y || 0;\n",
   "  const targetY = calculatedY;\n"
@@ -1101,15 +970,6 @@ const removeDragPositionNormalization = (block) => block.split("v2DragCommitLand
 
 expectMutationToFail("MUT-A", (source) => mutateBlock(source, 'ipcMain.on("pet:set-size"', 'ipcMain.handle("pet:tts-clone"', moveSetSizeCaptureAfterSetSize), assertSetSizeWiring);
 expectMutationToFail("MUT-B", (source) => mutateBlock(source, 'ipcMain.on("pet:set-size"', 'ipcMain.handle("pet:tts-clone"', removeSetSizeCapture), assertSetSizeWiring);
-expectMutationToFail("MUT-C", (source) => mutateBlock(source, "function setScale(scale)", "function setWalkSpeed", removeScaleRevision), assertSetScaleWiring);
-expectMutationToFail("MUT-D", (source) => mutateBlock(source, "function setScale(scale)", "function setWalkSpeed", removeScaleCapture), assertSetScaleWiring);
-expectMutationToFail("MUT-E", (source) => mutateBlock(source, "function setScale(scale)", "function setWalkSpeed", moveScaleCaptureAfterSetSize), assertSetScaleWiring);
-expectMutationToFail("MUT-F", (source) => mutateBlock(source, "function setScale(scale)", "function setWalkSpeed", removeScaleRevisionGuard), assertSetScaleWiring);
-expectMutationToFail("MUT-J", (source) => mutateBlock(source, "function setScale(scale)", "function setWalkSpeed", removeScaleResizableEnable), assertSetScaleWiring);
-expectMutationToFail("MUT-K", (source) => mutateBlock(source, "function setScale(scale)", "function setWalkSpeed", moveScaleResizableEnableAfterSetSize), assertSetScaleWiring);
-expectMutationToFail("MUT-L", (source) => mutateBlock(source, "function setScale(scale)", "function setWalkSpeed", removeScaleResizableRestore), assertSetScaleWiring);
-expectMutationToFail("MUT-M", (source) => mutateBlock(source, "function setScale(scale)", "function setWalkSpeed", moveScaleNotificationBeforeSetSize), assertSetScaleWiring);
-expectMutationToFail("MUT-N", (source) => mutateBlock(source, "function setScale(scale)", "function setWalkSpeed", replaceScaleTargetWithOldSize), assertSetScaleWiring);
 expectMutationToFail("MUT-G", (source) => mutateBlock(source, "function sitOnTaskbar", 'ipcMain.handle("pet:sit-taskbar"', (block) => block.replace("const targetY = renderModeMod.groundAlign(b, wa, groundGap).y || 0;", "const targetY = wa.y + wa.height + walk.groundGap - b.height;")), assertSitOnTaskbarWiring);
 expectMutationToFail("MUT-H", (source) => mutateBlock(source, "function outOfScreenGuard", "function walkTick", (block) => block.replace(") + groundGap;", ") + (walk.groundGap || 0);")), assertOutOfScreenGuardWiring);
 expectMutationToFail("MUT-O", (source) => mutateBlock(source, "function sitOnTaskbar", 'ipcMain.handle("pet:sit-taskbar"', removeSitPositionNormalization), assertSitOnTaskbarWiring);

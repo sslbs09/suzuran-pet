@@ -686,7 +686,7 @@ function refreshTrayMenu() {
     isWindowVisible, toggleWindow, setMode, setTts, setRate, setSpeakJa, setWalking,
     detectSpineModels, skinParseDir, SPINE_CN, SKIN_CHAR_NAMES, SKIN_PERSON_NAMES, setSpineSkin, skinIconOf,
     sendToRenderer, setPetLayer, openPsdWindow, rigSkinList, setRigSkin,
-    setDimMode, sitOnTaskbar, setScale, clampScale, setWalkSpeed, setCatToy,
+    setDimMode, sitOnTaskbar, setWalkSpeed, setCatToy,
     setFileGuard,
     openSchedule, openSettings, openMoodManager, openVoiceStudio, openTtsGuide, openQuickstart, openHelp, openAddChar,
     openDocs, diagClick, checkUpdate: trayCheckUpdate,
@@ -1702,52 +1702,6 @@ ipcMain.handle("pet:refuse-terms", () => {
 ipcMain.handle("pet:open-terms", () => openTerms());
 ipcMain.handle("pet:open-quickstart", () => { openQuickstart(); return true; });
 
-/* ---------- 桌宠大小缩放 ---------- */
-function setScale(scale) {
-  const s = clampScale(scale);
-  const prevScaleForV2 = (config.getConfig().window || {}).scale;
-  config.saveConfig({ window: { scale: s } });
-  // V2：scale 换代 + 让位（resize/reposition 属 V1 处理路径；下一 stable-sit 按新几何再开 episode）
-  if (typeof v2Geo !== "undefined" && v2Geo && prevScaleForV2 !== s) v2Geo.scaleGeneration += 1;
-  if (typeof v2Locomotion !== "undefined" && v2Locomotion) v2Locomotion.interrupt("scale-change"); // 显式操作：先释放 V2 episode
-  if (typeof v2Drag !== "undefined" && v2Drag && v2Drag.active()) v2Drag.end("scale-change");       // 再释放 EXTERNAL_DRAG，scale 不与拖拽同时写 position
-  // Shadow 只读观察：requested scale 换代（gate OFF 零动作；typeof 守卫兼容测试沙箱代码块抽取）
-  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsScaleChanged(s);
-  if (typeof v2StateCore !== "undefined" && v2StateCore) v2StateCore.posture.invalidateSupport("scale"); // posture 语义保持；support 证据诚实过期
-  if (win && !win.isDestroyed()) {
-    const resizeRevision = windowSizeRevision.next();
-    const wasGrounded = captureResizeAnchor();
-    const cfg = config.getConfig();
-    const ws = Math.round((cfg.window.width || 260) * s);
-    const hs = Math.round((cfg.window.height || 200) * s);
-    // resizable:false 时 Electron 可能忽略缩小；沿用 pet:set-size 的安全 resize 流程。
-    try { if (!win.isResizable()) win.setResizable(true); } catch { /* 忽略 */ }
-    win.setSize(ws, hs);
-    try {
-      const wa = walkGeo.workAreaOf(screen, win.getBounds());
-      const [x, y] = win.getPosition();
-      commitLegacyPosition(Math.min(Math.max(x, walkMinX(wa)), wa.x + wa.width - ws),
-        Math.min(Math.max(y, wa.y), wa.y + wa.height - hs + 80), "scale-clamp");
-    } catch { /* 忽略 */ }
-    repositionAfterWindowSizeChange(false, wasGrounded);
-    setTimeout(() => {
-      const revisionCurrent = windowSizeRevision.isCurrent(resizeRevision);
-      try {
-        if (revisionCurrent) {
-          clampPetToWorkArea("缩放");
-          repositionAfterWindowSizeChange(false, wasGrounded);
-        }
-      } finally {
-        // stale callback 也必须收回自己打开的 resizable 状态，不能因 stale 直接跳过恢复。
-        try { if (win && !win.isDestroyed()) win.setResizable(false); } catch { /* 忽略 */ }
-      }
-    }, 120);
-    applySeatPosition(); // 尺寸档位变了，若正处于坐姿立即按新档位重新落座
-  }
-  refreshTrayMenu();
-  sendToRenderer("pet:scale-changed", s);
-}
-ipcMain.handle("pet:set-scale", (_e, scale) => { setScale(scale); return true; });
 function setWalkSpeed(mul) { // 散步速度档位（借鉴 Ark-Pets 可调移速）
   const v = Math.max(0.4, Math.min(3, Number(mul) || 1));
   config.saveConfig({ walkSpeedMul: v });

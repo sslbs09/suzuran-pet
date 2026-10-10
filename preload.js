@@ -55,7 +55,6 @@ contextBridge.exposeInMainWorld("petAPI", {
   setUiLang: (lang) => ipcRenderer.invoke("pet:set-ui-lang", lang),
   getI18n: () => ipcRenderer.invoke("pet:get-i18n"),
   onUiLangChanged: (cb) => ipcRenderer.on("pet:ui-lang-changed", (_e, lang) => cb(lang)),
-  setScale: (scale) => ipcRenderer.invoke("pet:set-scale", scale),
   getSeatSink: () => ipcRenderer.invoke("pet:get-seat-sink"),
   getWeather: () => ipcRenderer.invoke("pet:get-weather"),
   getWeatherCfg: () => ipcRenderer.invoke("pet:get-weather-cfg"),

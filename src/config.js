@@ -176,6 +176,8 @@ const CONFIG_SHAPE_BACKUP_PATH = CONFIG_PATH + ".shape-recovery.bak";
 let configWriteBlocked = false;
 let shapeRecoveryPending = false;
 let shapeRecoveryBackupMade = false;
+let scaleNormalizePending = false;   // P1 user-scale removal：load 发现非 canonical scale，待写回 1.0
+let scaleNormalizeWriting = false;   // 写回进行中（抑制 saveConfig 内部重读触发的再调度）
 
 function warnConfig(message) {
   try { console.warn(message); } catch { /* 诊断失败不影响配置读取 */ }
@@ -199,6 +201,7 @@ function applyReadState(read) {
   configWriteBlocked = read.status === "parse-error" || read.status === "read-error";
   shapeRecoveryPending = false;
   shapeRecoveryBackupMade = false;
+  scaleNormalizePending = false;
   if (read.status === "parse-error") {
     warnConfig("config parse error: using defaults; file preserved");
   } else if (read.status === "read-error") {
@@ -216,12 +219,29 @@ function reportShapeRecovery(normalized) {
   }
 }
 
+/** P1 user pet scale removal：无论存量为何值（0.5/0.6/0.75/1.25/1.5/1.8/2.0/missing/invalid/非对象
+ *  window），加载后一律收敛到 canonical user pet scale = 1.0。只动 window.scale，不触碰
+ *  window 其它字段（x/y/width/height）；幂等；返回是否发生变更。 */
+function normalizeUserScale(cfg) {
+  if (!cfg || typeof cfg !== "object") return false;
+  const w = cfg.window;
+  if (!w || typeof w !== "object" || Array.isArray(w)) {
+    cfg.window = { scale: 1.0 };
+    return true;
+  }
+  if (typeof w.scale === "number" && w.scale === 1) return false;
+  w.scale = 1.0;
+  return true;
+}
+
 function normalizeLoadedConfig(read) {
   const normalized = normalizeConfigShape(DEFAULTS, read.value);
   if (read.status === "ok") {
     reportShapeRecovery(normalized);
     shapeRecoveryPending = normalized.topLevelInvalid || normalized.recoveredPaths.length > 0;
   }
+  // user pet scale 收敛：旧值（含非法/缺失/非对象 window）统一 canonical 1.0，读方零改动
+  if (normalizeUserScale(normalized.value)) scaleNormalizePending = true;
   return normalized;
 }
 
@@ -269,6 +289,20 @@ function getConfig(force = false) {
   cfg._keySource = cfg.chat.apiKey ? (secrets.status("chatApiKey").saved ? "安全本地存储" : "config.json") : "未配置（请在设置中填写或显式导入 API Key）";
   cfg._configPath = CONFIG_PATH;
   cache = cfg;
+  // P1 user-scale removal：老配置收敛 canonical 1.0 后延迟写回（避免在 load 栈内递归 saveConfig）
+  if (scaleNormalizePending && !configWriteBlocked && !scaleNormalizeWriting) {
+    scaleNormalizeWriting = true;
+    setTimeout(() => {
+      try {
+        saveConfig({ window: { scale: 1.0 } });
+      } catch (e) {
+        warnConfig("scale normalize writeback failed: " + (e && e.message));
+      } finally {
+        scaleNormalizeWriting = false;
+        scaleNormalizePending = false;
+      }
+    }, 0);
+  }
   return cfg;
 }
 
@@ -440,7 +474,7 @@ module.exports = {
   CONFIG_SHAPE_BACKUP_PATH,
   getConfig, saveConfig, getPersonaText, savePersonaText, resetPersona,
   initializeSecretStorage, secretStatus, replaceSecrets, buildSettingsView,
-  fillTokens, detectZcodeCli
+  fillTokens, detectZcodeCli, normalizeUserScale
 };
 
 // CLI 冒烟测试：node src/config.js --test

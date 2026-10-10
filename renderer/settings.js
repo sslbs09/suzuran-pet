@@ -219,7 +219,6 @@ async function fetchAndRenderOnboard(S) {
   $("ui-lang").value = S.uiLang; // main buildSettingsView 已 canonical（substrate v1：renderer 不再自带 locale 兜底）
   $("hotkey").value = S.hotkey || "Alt+Shift+S";
   $("start-hidden").value = String(!!S.startHidden);
-  $("pet-scale").value = String(S.scale || 1);
   try {
     const ss = await window.petAPI.getSeatSink();
     $("seat-sink").value = String(ss.value);
@@ -1018,13 +1017,11 @@ $("btn-import-font").addEventListener("click", async () => {
 $("btn-save-other").addEventListener("click", async () => { await doSaveOther(); });
 
 async function doSaveOther() {
-  const scale = parseFloat($("pet-scale").value) || 1;
   const r = await window.petAPI.saveSettings({
     uiLang: $("ui-lang").value,
     hotkey: $("hotkey").value.trim() || "Alt+Shift+S",
     startHidden: $("start-hidden").value === "true",
     netProxy: $("net-proxy").value.trim(), // O8：应用内网络代理（更新/天气）
-    window: { scale },
     pet: { name: $("pet-name").value },
     features: {
       clipboardWatch: $("feat-clipboard").checked,
@@ -1065,8 +1062,6 @@ async function doSaveOther() {
     await window.petAPI.rigSet("");
     $("rig-switch").checked = false;
   }
-  // 立即应用桌宠大小（不等重启）
-  if (r === true) await window.petAPI.setScale(scale);
   // 2.5D 角色开关（v2.2）：勾选状态变化才处理
   const wantRig = $("rig-switch").checked;
   const hadRig = !!S.rigSkinId;
