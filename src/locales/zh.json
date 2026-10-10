@@ -1015,5 +1015,7 @@
   "page.observation.unavailable": "未记录，Runtime Host 未运行。原文已保留，可直接重试。",
   "page.observation.unknown": "结果未知，可能已记录。原文已保留，重试会复用同一提交标识。",
   "page.observation.failed": "未记录：{reason}",
-  "page.observation.disabled": "未启用 WhiteMoon 连接（在设置中开启后再试）。"
+  "page.observation.disabled": "未启用 WhiteMoon 连接（在设置中开启后再试）。",
+  "set.txSave": "保存",
+  "set.txDiscard": "放弃"
 }

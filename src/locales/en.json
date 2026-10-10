@@ -1015,5 +1015,7 @@
   "page.observation.unavailable": "Not recorded - the Runtime Host is not running. Your text is kept; you can retry directly.",
   "page.observation.unknown": "Outcome unknown - it may have been recorded. Your text is kept; a retry reuses the same submission id.",
   "page.observation.failed": "Not recorded: {reason}",
-  "page.observation.disabled": "WhiteMoon connection is disabled (enable it in Settings first)."
+  "page.observation.disabled": "WhiteMoon connection is disabled (enable it in Settings first).",
+  "set.txSave": "Save",
+  "set.txDiscard": "Discard"
 }

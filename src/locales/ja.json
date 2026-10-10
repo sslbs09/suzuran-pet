@@ -1015,5 +1015,7 @@
   "page.observation.unavailable": "未記録 - Runtime Host が起動していません。入力は保持され、そのまま再試行できます。",
   "page.observation.unknown": "結果は不明です - 記録されているかもしれません。入力は保持され、再試行は同じ提出 ID を使います。",
   "page.observation.failed": "未記録：{reason}",
-  "page.observation.disabled": "WhiteMoon 接続が無効です（設定で有効にしてください）。"
+  "page.observation.disabled": "WhiteMoon 接続が無効です（設定で有効にしてください）。",
+  "set.txSave": "保存",
+  "set.txDiscard": "破棄"
 }
