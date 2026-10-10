@@ -90,7 +90,30 @@ function createProjectionClient({ getEndpoint, fetchImpl, timeoutMs = DEFAULT_TI
     return out;
   }
 
-  return { fetchProjection };
+  async function memoryRequest(route, control) {
+    const endpoint = getEndpoint();
+    if (!endpoint || !endpoint.enabled) {
+      return { ok: false, status: "FORMAL_DISABLED" };
+    }
+    if (!/^https?:\/\//i.test(String(endpoint.baseUrl || ""))) return { ok: false, status: "MEMORY_UNAVAILABLE" };
+    try {
+      const res = await doFetch(String(endpoint.baseUrl).replace(/\/+$/, "") + route, {
+        method: control === undefined ? "GET" : "POST",
+        headers: { ...(endpoint.token ? { Authorization: `Bearer ${endpoint.token}` } : {}),
+          ...(control === undefined ? {} : { "Content-Type": "application/json" }) },
+        ...(control === undefined ? {} : { body: JSON.stringify(control) }),
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+      const payload = await res.json();
+      if (!res.ok || !payload || payload.ok !== true) return { ok: false, status: payload && payload.status || "MEMORY_UNAVAILABLE" };
+      return payload;
+    } catch {
+      // No retry: a POST timeout may have committed. Inspect to learn truth.
+      return { ok: false, status: "MEMORY_RESULT_UNKNOWN" };
+    }
+  }
+  return { fetchProjection, inspectMemory: () => memoryRequest("/memory-inspect"),
+    controlMemory: (control) => memoryRequest("/memory-control", control) };
 }
 
 module.exports = { createProjectionClient, classifyHttpResult, DEFAULT_TIMEOUT_MS, PROJECTION_PATH };

@@ -1277,9 +1277,6 @@ ipcMain.handle("pet:regenerate", async (event, requestId, identity) => { // Swip
   if (!cfg.chat.apiKey) return null;
   const rows = history.recent("chat", (cfg.chat.maxHistoryTurns || 20) + 1);
   if (!rows.length || rows[rows.length - 1].role !== "assistant") return null;
-  const hist = rows.slice(0, -1); // 上下文去掉旧回复
-  const text = (() => { for (let i = hist.length - 1; i >= 0; i--) if (hist[i].role === "user") return hist[i].content; return ""; })();
-  if (!text) return null;
   // TD-4：重生成也走单写者——此前游离在任务管理之外，可与正在进行的聊天并发（历史写入竞态）
   const task = conversation.start({ kind: "regenerate", meta: { sender: event.sender, requestId } });
   if (!task.ok) { logTts("chat", "regenerate 跳过: " + task.code); return null; }
@@ -1287,10 +1284,32 @@ ipcMain.handle("pet:regenerate", async (event, requestId, identity) => { // Swip
   if (!chatLease || chatLease.ok === false) { conversation.finish(task.id); return null; }
   sendToRenderer("pet:thinking", { id: requestId, mode: "chat" });
   const genAtRegen = history.generation(); // F-03：清史后迟到的重生成管线不得写回向量库
-  aliveStatus.noteTurnStarted(); // P0-B2：regenerate 同样进入真实 provider 调用，状态诚实记 WORKING
   try {
+    let cognition = null;
+    if (((cfg.whitemoonRuntime || {}).enabled) === true) {
+      const projection = formalProjection ? await formalProjection.fetchProjection() : null;
+      // The existing task owns the Host await too. Reload, stop, and clear-history
+      // must fence this request before it can enter the provider.
+      if (!task.isCurrent() || !isCurrentBodyMutation(event, identity) || history.generation() !== genAtRegen) return null;
+      if (!projection || projection.state !== "ok" || !projection.projection?.character) {
+        sendToRenderer("pet:error", { id: requestId, code: "FORMAL_PROJECTION_UNAVAILABLE", message: "正式记忆当前不可用，未重新生成回复" });
+        return null;
+      }
+      cognition = projection.projection.character;
+    }
+    const eligible = (row) => !cognition || (row.whitemoonInstance === cognition.instanceId &&
+      (row.whitemoonMemoryRevision || 0) >= (cognition.currentMemory ? cognition.currentMemory.revision : 0));
+    // A reply from before correction (or another Instance) cannot be regenerated
+    // as current truth. Old history remains available in the history viewer.
+    if (!eligible(rows[rows.length - 1])) return null;
+    const hist = rows.slice(0, -1).filter(eligible); // 上下文去掉旧回复
+    const text = (() => { for (let i = hist.length - 1; i >= 0; i--) if (hist[i].role === "user") return hist[i].content; return ""; })();
+    if (!text) return null;
+    aliveStatus.noteTurnStarted(); // P0-B2：只有即将进入 provider 时才记 WORKING
     const r = await chatClient.chat({
-      persona: personaCache || config.getPersonaText(), history: hist, text,
+      persona: cognition ? buildChatPersona(true) : personaCache || config.getPersonaText(), history: hist, text,
+      cognition: cognition || undefined,
+      currentInHistory: !!cognition,
       state: petStateNote(),
       signal: task.signal,
       onChunk: (d) => { if (task.isCurrent()) sendToRenderer("pet:chunk", { id: requestId, mode: "chat", text: d }); }
@@ -2867,7 +2886,7 @@ async function handleAskInner(sender, { id, text, askGen }) {
     log: (line) => logTts("turn-commit", line)
   });
   turnCommit.stage("history-user", () => history.append(Object.assign({ ts: Date.now(), mode, role: "user", content: clean },
-    formalInstanceId ? { whitemoonInstance: formalInstanceId } : {})));
+    formalInstanceId ? { whitemoonInstance: formalInstanceId, whitemoonMemoryRevision: cognition.currentMemory ? cognition.currentMemory.revision : 0 } : {})));
   if (config.getConfig().features && config.getConfig().features.longTermMemory) {
     // 规则式提取事实 + Phase 7-F1 计划生命周期转换：本轮自动派生 side effects ⇒ 成功后提交。
     // 「completion 必须先于 extractFacts」的既有顺序约束在 effect 体内原样保留。
@@ -2985,7 +3004,7 @@ async function handleAskInner(sender, { id, text, askGen }) {
     // bond/facts/vector 各自恰好一次；任何栅栏不过 ⇒ 全部零执行（§12/§19）。
     turnCommit.stage("history-assistant", () => history.append(Object.assign({ ts: Date.now(), mode, role: "assistant", content: full },
       isChat ? { swipes: [full], swipeIndex: 0 } : {},
-      formalInstanceId ? { whitemoonInstance: formalInstanceId } : {})));
+      formalInstanceId ? { whitemoonInstance: formalInstanceId, whitemoonMemoryRevision: cognition.currentMemory ? cognition.currentMemory.revision : 0 } : {})));
     const settlement = turnCommit.commit();
     if (settlement.reason === "cancelled") {
       // provider 在 cancel 之后才 resolve：迟到结果被 ownership 栅栏整体拦截——
@@ -3621,6 +3640,17 @@ ipcMain.on("pet:pat", () => {
 const { PROACTIVE_DEFAULTS } = features;
 function proactiveMin() { return (config.getConfig().features && config.getConfig().features.proactiveMin) || PROACTIVE_DEFAULTS.intervalMin; }
 // 记忆管理（v2.5.2）：设置页查看/删除/清空
+ipcMain.handle("pet:inspect-formal-memory", async (event) => {
+  if (!isCurrentSettingsMutation(event)) return { ok: false, status: "MEMORY_ACCESS_DENIED" };
+  if (!formalProjection || typeof formalProjection.inspectMemory !== "function") return { ok: false, status: "MEMORY_UNAVAILABLE" };
+  return formalProjection.inspectMemory();
+});
+ipcMain.handle("pet:control-formal-memory", async (event, control) => {
+  if (!isCurrentSettingsMutation(event) || !isConsentAccepted(config.getConfig())) return { ok: false, status: "MEMORY_ACCESS_DENIED" };
+  if (!formalProjection || typeof formalProjection.controlMemory !== "function") return { ok: false, status: "MEMORY_UNAVAILABLE" };
+  return formalProjection.controlMemory(control);
+});
+
 ipcMain.handle("pet:get-memory", () => {
   try {
     const facts = memory.getFactsList();

@@ -178,8 +178,21 @@
   </section>
 
   <!-- ============ 0.6 记忆管理（v2.5，加密存储） ============ -->
-  <section id="sec-memory" data-rm="gif spine rig">
+  <section id="sec-memory">
     <h2 data-i18n="set.memoryTitle">🧠 记忆管理（v2.5）</h2>
+    <div id="formal-memory-section">
+      <h3 data-i18n="set.formalMemTitle">当前角色的正式长期内容</h3>
+      <p class="hint" data-i18n="set.formalMemHint">纠正与撤回保留原历史，只改变哪些内容当前有效。纠正后的新聊天会从新的有效内容开始；旧会话仍保留在历史中。</p>
+      <button id="formal-memory-refresh" type="button" data-i18n="set.formalMemView">查看 / 刷新</button>
+      <p id="formal-memory-status" class="hint" role="status" aria-live="polite"></p>
+      <h4 data-i18n="set.formalMemHistory">A. 经历与用户纠正 · Formal Core Experience</h4>
+      <div id="formal-memory-history" style="max-height:360px;overflow:auto;"></div>
+      <h4 data-i18n="set.formalMemDerived">B. 派生角色状态与关系 · 只读</h4>
+      <div id="formal-memory-state"></div>
+    </div>
+    <h3 data-i18n="set.formalMemLegacyTitle">C. LEGACY / COMPATIBILITY · 旧版个人记忆</h3>
+    <p id="legacy-memory-role" class="hint"></p>
+    <div id="legacy-memory-editor" hidden>
     <div class="row">
       <div class="col full">
         <span data-i18n="set.memoryDesc">她记得的事（称谓/喜好/生日/健康/近期安排，本地加密存储，不联网上传）。可在聊天中自然更新，或在此逐条删除 / 清空。</span>
@@ -200,6 +213,7 @@
     </div>
     <div class="row">
       <label class="col"><input id="feat-memory" type="checkbox" checked /><span data-i18n="set.featMemory">🧠 长期记忆（自动记住重要对话内容）</span></label>
+    </div>
     </div>
   </section>
 
@@ -733,5 +747,6 @@
   <script src="theme.js"></script>
   <script src="theme-init.js"></script>
   <script src="settings.js"></script>
+  <script src="memory-control.js"></script>
 </body>
 </html>

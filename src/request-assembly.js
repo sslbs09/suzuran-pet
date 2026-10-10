@@ -77,6 +77,13 @@ function buildCanonicalBlock(cog) {
   lines.push("");
   lines.push("◆ CANONICAL_RELATIONSHIP（正式关系投影 · 非旧版 bond 分值）");
   lines.push(hasEntries(cog.relationship) ? stableJson(cog.relationship) : "（当前无正式关系条目）");
+  if (cog.currentMemory) {
+    lines.push("");
+    lines.push("◆ CANONICAL_CURRENT_MEMORY（当前有效经历 / 用户纠正）");
+    lines.push("仅以下记录当前有效。用户纠正是当前的用户声明，不代表旧事件发生过；它覆盖被纠正的内容。没有列出的旧记录不得当成当前事实。");
+    for (const entry of cog.currentMemory.entries || []) lines.push(entry.id + " · " + entry.type + "：" + entry.summary);
+    if (!(cog.currentMemory.entries || []).length) lines.push("（当前无有效经历内容）");
+  }
   return lines.join("\n");
 }
 
@@ -142,7 +149,11 @@ function buildChatRequest(opts) {
   if (worldBlock) messages.push({ role: "system", content: "【当前情境】\n" + worldBlock + "\n（顺着情境自然地回应，不要复述本条）" });
   if (vectorBlock) messages.push({ role: "system", content: vectorBlock });
 
-  const hist = dedupeCurrent(history, text, currentInHistory);
+  const revision = formal && cognition.currentMemory ? cognition.currentMemory.revision : 0;
+  const eligibleHistory = revision > 0
+    ? history.filter((row) => (row.whitemoonMemoryRevision || 0) >= revision)
+    : history;
+  const hist = dedupeCurrent(eligibleHistory, text, currentInHistory);
   for (const h of hist) messages.push({ role: h.role, content: h.content });
   messages.push({ role: "user", content: text });
 
