@@ -78,3 +78,56 @@ test("设置页：深色截图存档（沿用旧存档习惯）", async ({ page 
   await page.waitForTimeout(600);
   await page.screenshot({ path: "tests/__visual-out__/settings-dark.png", fullPage: true });
 });
+
+test("设置页：搜索跨页过滤（命中页保留、未命中页隐藏、清空恢复）", async ({ page }) => {
+  await page.goto(settingsUrl);
+  await page.locator('a[href="#page-voice"]').click(); // 激活页先切走，验证搜索可跨页命中
+  await page.locator("#set-search").fill("天气");
+  await expect(page.locator("#page-general")).toBeVisible();
+  await expect(page.locator("#sec-weather")).toBeVisible();
+  await expect(page.locator("#page-voice")).toBeHidden();
+  await page.locator("#set-search").fill("");
+  await expect(page.locator("#page-voice")).toBeVisible(); // 清空 → 回到激活页
+});
+
+test("设置页：全部 DOM id 唯一（stable id 协议护栏）", async ({ page }) => {
+  await page.goto(settingsUrl);
+  const dups = await page.evaluate(() => {
+    const ids = [...document.querySelectorAll("[id]")].map((e) => e.id);
+    return ids.filter((id, i) => ids.indexOf(id) !== i);
+  });
+  expect(dups).toEqual([]);
+});
+
+test("设置页：四页归属抽查（外观/对话/声音/隐私）", async ({ page }) => {
+  await page.goto(settingsUrl);
+  // 外观：渲染模式 + 皮肤 + 气泡字体（桌面图标感知不在本页——已归高级>实验性）
+  await page.locator('a[href="#page-appearance"]').click();
+  const appearance = page.locator("#page-appearance");
+  await expect(appearance.locator("#render-mode")).toBeVisible();
+  await expect(appearance.locator("#rig-skins-list")).toBeAttached();
+  await expect(appearance.locator("#live2d-skins-list")).toBeAttached();
+  await expect(appearance.locator("#bubble-width")).toBeVisible();
+  await expect(page.locator("#page-appearance #feat-desktop-icons")).toHaveCount(0);
+  // 对话：AI 事务 + 身份 + 人设 + 记忆（Formal/LEGACY 结构在场）
+  await page.locator('a[href="#page-chat"]').click();
+  const chat = page.locator("#page-chat");
+  await expect(chat.locator("#btn-save-api")).toBeVisible(); // tx-ai-provider 保存锚点
+  await expect(chat.locator("#btn-ai-discard")).toBeAttached(); // tx-ai-provider 放弃锚点
+  await expect(chat.locator("#btn-identity-save")).toBeAttached(); // tx-identity
+  await expect(chat.locator("#persona")).toBeVisible(); // tx-persona
+  await expect(chat.locator("#legacy-memory-editor")).toBeAttached();
+  // 声音：正常层齐全；工程层不在本页（genie-fields 在高级）
+  await page.locator('a[href="#page-voice"]').click();
+  const voice = page.locator("#page-voice");
+  await expect(voice.locator("#tts-enabled")).toBeVisible();
+  await expect(voice.locator("#fixed-lines-preload")).toBeVisible();
+  await expect(voice.locator("#genie-python")).toHaveCount(0);
+  await expect(voice.locator("#btn-fixed-lines-clear")).toHaveCount(0);
+  // 隐私：感知 + 凭据 + 数据（清除聊天记录 + 独立结果位）
+  await page.locator('a[href="#page-privacy"]').click();
+  const privacy = page.locator("#page-privacy");
+  await expect(privacy.locator("#feat-clipboard")).toBeVisible();
+  await expect(privacy.locator("#btn-clear-history")).toBeVisible();
+  await expect(privacy.locator("#privacy-result")).toBeAttached();
+});
