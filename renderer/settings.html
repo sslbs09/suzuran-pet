@@ -3,14 +3,15 @@
 <head>
 <meta charset="UTF-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; media-src 'self' data: blob:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'">
-<title data-i18n="page.settings.title">苏苏洛 · 设置</title>
+<title data-i18n="page.settings.title">WhiteMoon · 设置</title>
 <link rel="stylesheet" href="ui.css" />
 <link rel="stylesheet" href="settings.css" />
 </head>
 <body class="ui-page settings-page">
   <div class="ui-shell">
   <header>
-    <h1 data-i18n="set.title">🦊 苏苏洛 · 设置</h1>
+    <h1 data-i18n="set.title">WhiteMoon · 设置</h1>
+    <div class="sub" id="settings-character" data-i18n="set.characterLine">当前角色：苏苏洛</div>
     <div class="sub" id="key-source">—</div>
   </header>
 
@@ -25,20 +26,13 @@
   <aside class="set-nav" id="set-nav" aria-label="设置分区导航" data-i18n-aria-label="set.navAria">
     <input id="set-search" type="search" data-i18n-placeholder="set.navSearchPlaceholder" placeholder="搜索设置项…" aria-label="搜索设置项" />
     <nav>
-      <a href="#sec-render" data-i18n="set.nav.render">🖼 渲染模式</a>
-      <a href="#sec-experimental" data-i18n="set.nav.experimental">🧪 实验性功能</a>
-      <a href="#sec-personality" data-i18n="set.nav.personality">💬 主动与人格化</a>
-      <a href="#sec-memory" data-i18n="set.nav.memory">🧠 记忆管理</a>
-      <a href="#sec-api" data-i18n="set.nav.api">💬 聊天 API</a>
-      <a href="#sec-persona" data-i18n="set.nav.persona">🎭 人设</a>
-      <a href="#sec-voice" data-i18n="set.nav.voice">🗣 语音</a>
-      <a href="#sec-other" data-i18n="set.nav.other">⚙ 系统与界面</a>
-      <a href="#sec-agent" data-i18n="set.nav.agent">🤝 Agent 接口</a>
-      <a href="#sec-sense" data-i18n="set.nav.sense">👀 感知与监控</a>
-      <a href="#sec-weather" data-i18n="set.nav.weather">🌤 天气</a>
-      <a href="#sec-security" data-i18n="set.nav.security">🔐 密钥与凭据</a>
-      <a href="#sec-logdiag" data-i18n="set.nav.logdiag">📋 日志诊断</a>
-    </nav>
+      <a href="#page-general" data-i18n="set.nav.general">⚙ 通用</a>
+      <a href="#page-appearance" data-i18n="set.nav.appearance">🖼 外观</a>
+      <a href="#page-chat" data-i18n="set.nav.chat">💬 对话</a>
+      <a href="#page-voice" data-i18n="set.nav.voice">🗣 声音</a>
+      <a href="#page-privacy" data-i18n="set.nav.privacy">🔐 隐私与感知</a>
+      <a href="#page-advanced" data-i18n="set.nav.advanced">🧪 高级</a>
+
   </aside>
   <div class="set-main">
   <!-- P2：全局「保存全部/放弃改动」提示条已退役——改为各事务组独立 [保存]/[放弃]（见各分区 actions） -->
@@ -48,6 +42,108 @@
     <h2 data-i18n="set.onboardTitle">🐣 新手三步（完成即可畅聊）</h2>
     <div id="onboard-list" style="display:flex;flex-direction:column;gap:8px;"></div>
   </section>
+
+  <div class="settings-page" id="page-general">
+
+  <section id="sec-general">
+    <h2 data-i18n="set.generalTitle">⚙ 通用</h2>
+    <div class="row">
+      <label class="col">
+        <span data-i18n="set.uiLang">界面语言（聊天内容始终为中文）</span>
+        <select id="ui-lang">
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+          <option value="ja">日本語</option>
+        </select>
+      </label>
+      <label class="col">
+        <span data-i18n="set.themeLabel">🎨 主题颜色</span>
+        <select id="theme-select">
+          <option value="auto" data-i18n="set.themeAuto">自动（按时间：19 点-6 点深色）</option>
+          <option value="system" data-i18n="set.themeSystem">跟随系统（Windows 深色模式）</option>
+          <option value="light" data-i18n="set.themeLight">浅色</option>
+          <option value="dark" data-i18n="set.themeDark">深色</option>
+        </select>
+      </label>
+      <label class="col">
+        <span data-i18n="set.hotkey">全局热键（隐藏/显示）</span>
+        <input id="hotkey" type="text" placeholder="Alt+Shift+S" />
+      </label>
+      <label class="col">
+        <span data-i18n="set.startHidden">启动即隐藏到托盘</span>
+        <select id="start-hidden">
+          <option value="false" data-i18n="set.no">否</option>
+          <option value="true" data-i18n="set.yes">是</option>
+        </select>
+      </label>
+      <label class="col"><input id="auto-launch" type="checkbox" /><span data-i18n="set.autoLaunch">🖥️ 开机自启（随系统启动，配合「启动隐藏」可静默进托盘）</span></label>
+      <label class="col">
+        <span data-i18n="set.scheduleRow">日程与提醒</span>
+        <button id="btn-open-schedule" type="button" data-i18n="set.openSchedule">📅 打开日程安排</button>
+      </label>
+    </div>
+  </section>
+
+  <section id="sec-weather">
+    <h2 data-i18n="set.weatherTitle">🌤 天气（免费·无需密钥·半小时自动刷新）</h2>
+    <div class="row">
+      <label class="col switch-row">
+        <span data-i18n="set.weatherOn">开启天气（她会偶尔播报天气、信息版显示）</span>
+        <label class="switch"><input type="checkbox" id="weather-on" /><span class="slider"></span></label>
+      </label>
+      <div id="weather-options"><label class="col">
+        <span data-i18n="set.weatherCity">城市（内置：北京/上海/广州/深圳/成都/杭州等；或直接填 纬度,经度）</span>
+        <input id="weather-city" type="text" placeholder="上海" />
+      </label>
+      <label class="col">
+        <span data-i18n="set.weatherProvider">天气源（open-meteo 免 key；openweathermap 需 key；开发者可注册自定义源）</span>
+        <select id="weather-provider">
+          <option value="open-meteo" data-i18n="set.wpvOpenMeteo">Open-Meteo（免 key·推荐）</option>
+          <option value="openweathermap" data-i18n="set.wpvOpenWeatherMap">OpenWeatherMap（需 key）</option>
+        </select>
+      </label>
+      <label class="col">
+        <span data-i18n="set.weatherKey">天气源 API Key（open-meteo 留空）</span>
+        <input id="weather-key" type="password" autocomplete="off" placeholder="留空" data-i18n-placeholder="set.weatherKeyPh" />
+      </label></div>
+      <div class="col tx-actions">
+        <button id="btn-weather-save" type="button" data-i18n="set.txSave">保存</button>
+        <button id="btn-weather-discard" type="button" data-i18n="set.txDiscard">放弃</button>
+        <span id="weather-tx-result" class="result"></span>
+      </div>
+      <span id="weather-now" class="result" style="align-self:center;"></span>
+    </div>
+    <div class="row">
+      <label class="col grow">
+        <span data-i18n="set.netProxy">网络代理（应用内更新/天气走此代理；留空=跟随系统。例：http=127.0.0.1:7897）</span>
+        <input id="net-proxy" type="text" autocomplete="off" placeholder="留空 = 跟随系统代理" data-i18n-placeholder="set.netProxyPh" />
+      </label>
+    </div>
+    <div class="row">
+      <label class="col full update-col">
+        <span data-i18n="set.updateRow">软件更新</span>
+        <div class="update-row">
+          <span id="update-version" class="ver-inline"></span>
+          <button id="btn-check-update" type="button" data-i18n="set.checkUpdate">检查更新</button>
+          <span class="mini-hint" data-i18n="set.updateAutoCheckHint">每 24 小时自动静默检查一次新版本</span>
+        </div>
+        <div id="update-result" class="result"></div>
+        <div class="fixed-lines-progress"><span id="update-progress-bar"></span></div>
+      </label>
+    </div>
+  </section>
+
+  <section id="sec-about">
+    <h2 data-i18n="set.aboutTitle">ℹ️ 关于</h2>
+    <div class="row actions">
+      <button id="btn-open-terms" type="button" data-i18n="set.openTerms">📄 使用条款与隐私政策</button>
+    </div>
+    <p class="foot" id="version">苏苏洛桌宠 · 2.5 正式版</p>
+  </section>
+
+  </div>
+
+  <div class="settings-page" id="page-appearance" hidden>
 
   <section id="sec-render">
     <h2 data-i18n="set.renderTitle">🖼 渲染模式（先选择模式，对应选项才会出现）</h2>
@@ -61,15 +157,7 @@
           <option value="live2d" data-i18n="set.rmLive2d">Live2D 角色（实验，内置示例模型）</option>
         </select>
       </label>
-      <label class="col">
-        <span data-i18n="set.themeLabel">🎨 主题颜色</span>
-        <select id="theme-select">
-          <option value="auto" data-i18n="set.themeAuto">自动（按时间：19 点-6 点深色）</option>
-          <option value="system" data-i18n="set.themeSystem">跟随系统（Windows 深色模式）</option>
-          <option value="light" data-i18n="set.themeLight">浅色</option>
-          <option value="dark" data-i18n="set.themeDark">深色</option>
-        </select>
-      </label>
+
       <label class="col">
         <span data-i18n="set.modeHintLabel">模式说明</span>
         <p class="hint" id="rm-hint" style="margin:0;">下方各区块按所选渲染模式显示：Spine 显示行走/模型选项，2.5D 显示角色/跟随选项，GIF 为经典表情。</p>
@@ -108,108 +196,48 @@
         <input id="walking-opt" type="checkbox" />
         <span data-i18n="set.walkingOpt">🚶 桌面行走（沿屏幕走动、走走停停；拖拽时自动暂停；仅 Spine 模式生效）</span>
       </label>
-      <label class="col" data-rm="spine">
-        <span data-i18n="set.sitMax">单次坐下最久（秒）</span>
-        <input id="sit-max" type="range" min="15" max="180" step="5" />
-        <span id="sit-max-val" style="font-weight:600;">30 s</span>
-      </label>
-      <label class="col" data-rm="spine">
-        <span data-i18n="set.walkMax">单次散步最久（秒）</span>
-        <input id="walk-max" type="range" min="8" max="120" step="1" />
-        <span id="walk-max-val" style="font-weight:600;">20 s</span>
-      </label>
-      <label class="col" data-rm="spine">
-        <span data-i18n="set.perchPct">跳上窗顶概率（%；0=不跳）</span>
-        <input id="perch-pct" type="range" min="0" max="30" step="1" />
-        <span id="perch-pct-val" style="font-weight:600;">8 %</span>
-      </label>
-      <label class="col" data-rm="spine"><input id="feat-desktop-icons" type="checkbox" /><span data-i18n="set.featDesktopIcons">🧩 桌面图标感知（实验性）：只读桌面图标的位置坐标（仅本机·不联网上传），让她能走到桌面图标上站/坐；仅「桌面层级」显示模式下生效</span></label>
+
+
     </div>
     <p class="hint" data-rm="spine" data-i18n="set.spineHint">💡 懒人换模型：把任意 Spine 模型的 .atlas + .skel（或 .json）+ .png 放入用户数据目录的 assets/spine/user/ 文件夹，重启即自动替换，无需任何配置</p>
   </section>
 
-  <section id="sec-experimental" data-rm="rig spine">
-    <h2 data-i18n="set.expTitle">🧪 实验性功能（需单独许可）</h2>
+  <section id="sec-bubbles">
+    <h2 data-i18n="set.bubblesTitle">💬 气泡与字体</h2>
     <div class="row">
-      <div class="col switch-row" data-rm="rig">
-        <span data-i18n="set.expMouseTrack">🖱️ 全局鼠标跟踪：开了她就会一直看着你的鼠标（只在本机算，不上传）。想感受"被盯着看"就开，默认关。</span>
-        <label class="switch"><input type="checkbox" id="rig-mouse-global" /><span class="slider"></span></label>
-      </div>
-      <div class="col switch-row" data-rm="spine">
-        <span data-i18n="set.expCatToy">🐈 逗猫棒：小玩具一个——开了她就会追着你的鼠标跑（只在本机算，不上传）。默认关，想逗就开。</span>
-        <label class="switch"><input type="checkbox" id="cat-toy" /><span class="slider"></span></label>
-      </div>
-      <div class="col switch-row" data-rm="spine">
-        <span data-i18n="set.expWalkGlobal">🌍 桌面全域行走（实验）：开了她就能走到另一块屏幕上去逛（多显示器玩家的快乐）。默认关，先观察一两天再放心用。</span>
-        <label class="switch"><input type="checkbox" id="walk-global" /><span class="slider"></span></label>
-      </div>
-      <div class="col switch-row">
-        <span data-i18n="set.expSoftRender">🖥 软件渲染（没独显/显卡驱动抽风时开）：改用 CPU 画画，慢一点但更稳。重启应用后生效。</span>
-        <label class="switch"><input type="checkbox" id="soft-render" /><span class="slider"></span></label>
-      </div>
+      <label class="col">
+        <span data-i18n="set.bubbleWidth">聊天气泡宽度</span>
+        <input id="bubble-width" type="range" min="0" max="600" step="20" />
+        <span id="bubble-width-val" style="font-weight:600;">自适应</span>
+      </label>
+      <label class="col">
+        <span data-i18n="set.chatFontSize">聊天字体大小</span>
+        <input id="chat-font-size" type="range" min="10" max="22" step="1" />
+        <span id="chat-font-size-val" style="font-weight:600;">11 px</span>
+      </label>
+      <label class="col">
+        <span data-i18n="set.chatFont">聊天字体</span>
+        <select id="chat-font">
+          <option value="" data-i18n="set.fontDefault">默认（微软雅黑）</option>
+          <option value="宋体">宋体</option>
+          <option value="黑体">黑体</option>
+          <option value="楷体">楷体</option>
+          <option value="仿宋">仿宋</option>
+          <option value="等线">等线</option>
+        </select>
+      </label>
+      <label class="col">
+        <span data-i18n="set.importFont">导入本地字体（ttf/otf/woff）</span>
+        <button id="btn-import-font" type="button">📂 <span data-i18n="set.importFontBtn">选择字体文件并应用</span></button>
+      </label>
+      <span id="appearance-result" class="result"></span>
     </div>
   </section>
 
-  <!-- ============ 0.5 主动与人格化（v2.3，单独开关） ============ -->
-  <section id="sec-personality" data-rm="gif spine rig">
-    <h2 data-i18n="set.personalityTitle">💬 主动与人格化（v2.3）</h2>
-    <div class="row">
-      <div class="col switch-row">
-        <span data-i18n="set.proactiveLabel">🗣️ 主动搭话：一会儿不理它，它会自己来找你说话（还会记得你的生日/安排来搭话）。默认开。</span>
-        <label class="switch"><input type="checkbox" id="proactive-chat" /><span class="slider"></span></label>
-      </div>
-      <div class="col switch-row">
-        <span data-i18n="set.personifyLabel">💗 人格化：被扔、睡醒、坐上窗台、被你逮住时，它会像活人一样碎碎念。默认开（摸头互动不受影响）。</span>
-        <label class="switch"><input type="checkbox" id="personify" /><span class="slider"></span></label>
-      </div>
-      <div class="col switch-row">
-        <span data-i18n="set.rpLabel">🎭 角色扮演模式（RP）：开=她以恋人/角色扮演的口吻聊天（有人味但偶尔会"皮"，不太听话）；关=助手模式，优先服从你的指令、回复直接简洁，少用亲密称呼和撒娇。默认开。</span>
-        <label class="switch"><input type="checkbox" id="rp-mode" /><span class="slider"></span></label>
-      </div>
-    </div>
-  </section>
+  </div>
 
-  <!-- ============ 0.6 记忆管理（v2.5，加密存储） ============ -->
-  <section id="sec-memory">
-    <h2 data-i18n="set.memoryTitle">🧠 记忆管理（v2.5）</h2>
-    <div id="formal-memory-section">
-      <h3 data-i18n="set.formalMemTitle">当前角色的正式长期内容</h3>
-      <p class="hint" data-i18n="set.formalMemHint">纠正与撤回保留原历史，只改变哪些内容当前有效。纠正后的新聊天会从新的有效内容开始；旧会话仍保留在历史中。</p>
-      <button id="formal-memory-refresh" type="button" data-i18n="set.formalMemView">查看 / 刷新</button>
-      <p id="formal-memory-status" class="hint" role="status" aria-live="polite"></p>
-      <h4 data-i18n="set.formalMemHistory">A. 经历与用户纠正 · Formal Core Experience</h4>
-      <div id="formal-memory-history" style="max-height:360px;overflow:auto;"></div>
-      <h4 data-i18n="set.formalMemDerived">B. 派生角色状态与关系 · 只读</h4>
-      <div id="formal-memory-state"></div>
-    </div>
-    <h3 data-i18n="set.formalMemLegacyTitle">C. LEGACY / COMPATIBILITY · 旧版个人记忆</h3>
-    <p id="legacy-memory-role" class="hint"></p>
-    <div id="legacy-memory-editor" hidden>
-    <div class="row">
-      <div class="col full">
-        <span data-i18n="set.memoryDesc">她记得的事（称谓/喜好/生日/健康/近期安排，本地加密存储，不联网上传）。可在聊天中自然更新，或在此逐条删除 / 清空。</span>
-        <p class="hint" id="mem-stats" style="margin:6px 0 4px;">加载中…</p>
-        <div id="bond-wrap" style="margin:6px 0 10px;">
-          <div id="bond-bar-label" style="font-size:12px;color:var(--ui-muted);margin-bottom:4px;"></div>
-          <div style="height:8px;border-radius:4px;background:var(--ui-line);overflow:hidden;">
-            <div id="bond-bar" style="height:100%;width:0%;border-radius:4px;background:linear-gradient(90deg,var(--ui-accent),var(--ui-accent-strong));transition:width .4s var(--ui-ease);"></div>
-          </div>
-        </div>
-        <div id="mem-list" style="max-height:180px;overflow:auto;border:1px solid var(--ui-line);border-radius:6px;padding:6px 10px;background:var(--ui-surface);"></div>
-        <button id="mem-clear" type="button" style="margin-top:8px;" data-i18n="set.memClear">🗑️ 清空全部记忆</button>
-        <div style="display:flex;gap:6px;margin-top:8px;">
-          <input id="mem-add-input" type="text" placeholder="手动添加一条记忆，如：我喜欢喝咖啡（最多 120 字）" data-i18n-placeholder="set.memAddPh" style="flex:1;padding:5px 8px;border:1px solid var(--ui-line);border-radius:6px;background:var(--ui-surface);color:inherit;" />
-          <button id="mem-add-btn" type="button" data-i18n="set.memAdd">➕ 添加</button>
-        </div>
-      </div>
-    </div>
-    <div class="row">
-      <label class="col"><input id="feat-memory" type="checkbox" checked /><span data-i18n="set.featMemory">🧠 长期记忆（自动记住重要对话内容）</span></label>
-    </div>
-    </div>
-  </section>
+  <div class="settings-page" id="page-chat" hidden>
 
-  <!-- ============ 1. 聊天 API ============ -->
   <section id="sec-api">
     <h2 data-i18n="set.api">聊天 API（最关键的一步）</h2>
     <div class="row">
@@ -312,7 +340,24 @@
     <p class="hint" data-i18n="set.ollamaHint">Ollama 本地模型无需 Key（地址填 <code>http://localhost:11434/v1</code>）；其他服务商按各自的 OpenAI 兼容地址填写。</p>
   </section>
 
-  <!-- ============ 2. 人设 ============ -->
+  <section id="sec-personality">
+    <h2 data-i18n="set.personalityTitle">💬 主动与人格化（v2.3）</h2>
+    <div class="row">
+      <div class="col switch-row">
+        <span data-i18n="set.proactiveLabel">🗣️ 主动搭话：一会儿不理它，它会自己来找你说话（还会记得你的生日/安排来搭话）。默认开。</span>
+        <label class="switch"><input type="checkbox" id="proactive-chat" /><span class="slider"></span></label>
+      </div>
+      <div class="col switch-row">
+        <span data-i18n="set.personifyLabel">💗 人格化：被扔、睡醒、坐上窗台、被你逮住时，它会像活人一样碎碎念。默认开（摸头互动不受影响）。</span>
+        <label class="switch"><input type="checkbox" id="personify" /><span class="slider"></span></label>
+      </div>
+      <div class="col switch-row">
+        <span data-i18n="set.rpLabel">🎭 角色扮演模式（RP）：开=她以恋人/角色扮演的口吻聊天（有人味但偶尔会"皮"，不太听话）；关=助手模式，优先服从你的指令、回复直接简洁，少用亲密称呼和撒娇。默认开。</span>
+        <label class="switch"><input type="checkbox" id="rp-mode" /><span class="slider"></span></label>
+      </div>
+    </div>
+  </section>
+
   <section id="sec-persona">
     <h2 data-i18n="set.persona">人设（角色设定）</h2>
     <p class="hint" data-i18n="set.personaHint">编辑下方内容即可自定义角色。占位符 <code>{{userName}}</code> 会自动替换成上面填的称呼，<code>{{petName}}</code> 替换成桌宠名字。保存后立即生效。</p>
@@ -324,7 +369,49 @@
     </div>
   </section>
 
-  <!-- ============ 3. 语音 ============ -->
+  <section id="sec-memory">
+    <h2 data-i18n="set.memoryTitle">🧠 记忆管理（v2.5）</h2>
+    <div id="formal-memory-section">
+      <h3 data-i18n="set.formalMemTitle">当前角色的正式长期内容</h3>
+      <p class="hint" data-i18n="set.formalMemHint">纠正与撤回保留原历史，只改变哪些内容当前有效。纠正后的新聊天会从新的有效内容开始；旧会话仍保留在历史中。</p>
+      <button id="formal-memory-refresh" type="button" data-i18n="set.formalMemView">查看 / 刷新</button>
+      <p id="formal-memory-status" class="hint" role="status" aria-live="polite"></p>
+      <h4 data-i18n="set.formalMemHistory">A. 经历与用户纠正 · Formal Core Experience</h4>
+      <div id="formal-memory-history" style="max-height:360px;overflow:auto;"></div>
+      <h4 data-i18n="set.formalMemDerived">B. 派生角色状态与关系 · 只读</h4>
+      <div id="formal-memory-state"></div>
+    </div>
+    <h3 data-i18n="set.formalMemLegacyTitle">C. LEGACY / COMPATIBILITY · 旧版个人记忆</h3>
+    <p id="legacy-memory-role" class="hint"></p>
+    <div id="legacy-memory-editor" hidden>
+    <div class="row">
+      <div class="col full">
+        <span data-i18n="set.memoryDesc">她记得的事（称谓/喜好/生日/健康/近期安排，本地加密存储，不联网上传）。可在聊天中自然更新，或在此逐条删除 / 清空。</span>
+        <p class="hint" id="mem-stats" style="margin:6px 0 4px;">加载中…</p>
+        <div id="bond-wrap" style="margin:6px 0 10px;">
+          <div id="bond-bar-label" style="font-size:12px;color:var(--ui-muted);margin-bottom:4px;"></div>
+          <div style="height:8px;border-radius:4px;background:var(--ui-line);overflow:hidden;">
+            <div id="bond-bar" style="height:100%;width:0%;border-radius:4px;background:linear-gradient(90deg,var(--ui-accent),var(--ui-accent-strong));transition:width .4s var(--ui-ease);"></div>
+          </div>
+        </div>
+        <div id="mem-list" style="max-height:180px;overflow:auto;border:1px solid var(--ui-line);border-radius:6px;padding:6px 10px;background:var(--ui-surface);"></div>
+        <button id="mem-clear" type="button" style="margin-top:8px;" data-i18n="set.memClear">🗑️ 清空全部记忆</button>
+        <div style="display:flex;gap:6px;margin-top:8px;">
+          <input id="mem-add-input" type="text" placeholder="手动添加一条记忆，如：我喜欢喝咖啡（最多 120 字）" data-i18n-placeholder="set.memAddPh" style="flex:1;padding:5px 8px;border:1px solid var(--ui-line);border-radius:6px;background:var(--ui-surface);color:inherit;" />
+          <button id="mem-add-btn" type="button" data-i18n="set.memAdd">➕ 添加</button>
+        </div>
+      </div>
+    </div>
+    <div class="row">
+      <label class="col"><input id="feat-memory" type="checkbox" checked /><span data-i18n="set.featMemory">🧠 长期记忆（自动记住重要对话内容）</span></label>
+    </div>
+    </div>
+  </section>
+
+  </div>
+
+  <div class="settings-page" id="page-voice" hidden>
+
   <section id="sec-voice">
     <h2 data-i18n="set.voice">语音（想让它开口说话就看这里）</h2>
     <div class="row">
@@ -364,54 +451,16 @@
         <input id="greeting-on-start" type="checkbox" />
         <span data-i18n="set.greetingOnStart">🗣 启动时自动问候（气泡 + 语音）</span>
       </label>
-    </div>
-    <div id="genie-fields">
-      <div class="row">
-        <label class="col grow">
-          <span data-i18n="set.pythonPath">Python 路径（pythonw.exe）</span>
-          <input id="genie-python" type="text" placeholder="已随包自带（engines/genie），一般无需填写" data-i18n-placeholder="set.pythonPathPh" />
-        </label>
-        <label class="col grow">
-          <span data-i18n="set.serverScript">服务器脚本 genie_tts_server.py</span>
-          <input id="genie-script" type="text" placeholder="已随包自带（engines/genie）" data-i18n-placeholder="set.serverScriptPh" />
-        </label>
-      </div>
-      <div class="row actions">
-        <button id="btn-engine-save" type="button" data-i18n="set.txSave">保存</button>
-        <button id="btn-engine-discard" type="button" data-i18n="set.txDiscard">放弃</button>
-        <span id="engine-tx-result" class="result"></span>
-      </div>
-      <div class="row">
-        <label class="col grow">
-          <span data-i18n="set.refAudio">参考音频（克隆音色，可留空用默认）</span>
-          <input id="genie-ref-audio" type="text" placeholder="已随包自带（engines/genie/ref）" data-i18n-placeholder="set.refAudioPh" />
-        </label>
-        <label class="col grow">
-          <span data-i18n="set.refText">参考音频原文</span>
-          <input id="genie-ref-text" type="text" placeholder="参考音频对应的文字" data-i18n-placeholder="set.refTextPh" />
-        </label>
-      </div>
-      <div class="row actions">
-        <button id="btn-ref-save" type="button" data-i18n="set.txSave">保存</button>
-        <button id="btn-ref-discard" type="button" data-i18n="set.txDiscard">放弃</button>
-        <span id="ref-tx-result" class="result"></span>
-      </div>
-      <div class="row">
+    </div><div class="row">
         <label class="col">
           <input id="genie-speak-ja" type="checkbox" />
           <span data-i18n="set.speakJa">🗣 日语语音模式：界面文字保持中文，说话先翻译成日语（配合本地日语微调音色）</span>
         </label>
       </div>
-      <div class="row actions">
-        <button id="btn-restart-gsv" type="button" data-i18n="set.restartJa">🔄 重启日语语音服务</button>
-        <button id="btn-clear-trcache" type="button" data-i18n="set.clearTrCache">🗑 清空翻译缓存</button>
-        <span id="ja-prewarm-progress" class="result"></span>
-        <span id="gsv-result" class="result"></span>
-      </div>
-    </div>
+
     <div class="row actions">
-      <button id="btn-open-studio" type="button" data-i18n="set.openStudio">🎙️ 音色克隆与训练</button>
-      <button id="btn-open-guide" type="button" data-i18n="set.openGuide">📖 语音部署与训练指南</button>
+
+
       <span id="voice-result" class="result"></span>
     </div>
     <h3 class="subhead"><span data-i18n="set.audTitle">🎭 情绪音色试听</span><small data-i18n="set.audHint">（日语 GSV 链路，含实时播放参数模拟；需已启用日语语音模式与 GSV）</small></h3>
@@ -441,50 +490,114 @@
         <label class="switch"><input type="checkbox" id="tts-fixed-only" /><span class="slider"></span></label>
       </div>
     </div>
-    <div id="fixed-lines-preload" class="fixed-lines-preload" aria-live="polite">
-      <div class="fixed-lines-head">
-        <div>
-          <b data-i18n="set.fixedPoolTitle">🔊 固定台词音频池</b>
-          <div id="fixed-lines-profile" class="hint">读取当前语音方案…</div>
-        </div>
-        <span id="fixed-lines-state" class="voice-pool-badge">未检查</span>
+    </section>
+
+  </div>
+
+  <div class="settings-page" id="page-privacy" hidden>
+
+  <section id="sec-sense">
+    <h2 data-i18n="set.senseTitle">👀 感知与监控</h2>
+    <div class="row">
+      <div class="col switch-row">
+        <span data-i18n="set.wsWatch">🧐 感知工作区活动：她会在你改代码时小声嘀咕（只读监听文件变化，不上传）</span>
+        <label class="switch"><input type="checkbox" id="ws-watch" /><span class="slider"></span></label>
       </div>
-      <div id="fixed-lines-summary" class="fixed-lines-summary">已加载 0 / 0 · 失败 0 · 缓存 0 B</div>
-      <div class="fixed-lines-progress"><span id="fixed-lines-progress-bar"></span></div>
-      <div class="fixed-lines-pools" id="fixed-lines-pools">
-        <span class="fixed-lines-pools-title" data-i18n="set.fixedPoolsTitle">预加载范围：</span>
-        <span id="fixed-lines-pools-box" class="fixed-lines-pools-box"></span>
-        <button id="btn-fixed-lines-pools-all" type="button" class="mini" data-i18n="set.fixedPoolsAll">全选</button>
-        <button id="btn-fixed-lines-pools-common" type="button" class="mini" data-i18n="set.fixedPoolsCommon">常用</button>
-      </div>
-      <p class="hint" data-i18n="set.fixedPoolHint">只生成当前语音方案，缓存长期有效（空间超限自动按最久未用清理）；云端语音可能产生 API 费用。系统语音无需预加载。</p>
-      <div class="actions">
-        <button id="btn-fixed-lines-start" type="button" class="primary" data-i18n="set.fixedBtnStart">▶ 开始/继续预加载</button>
-        <button id="btn-fixed-lines-retry" type="button" data-i18n="set.fixedBtnRetry">↻ 重试失败</button>
-        <button id="btn-fixed-lines-cancel" type="button" data-i18n="set.fixedBtnCancel">暂停</button>
-        <button id="btn-fixed-lines-clear" type="button" class="danger" data-i18n="set.fixedBtnClear">清空当前缓存</button>
-        <button id="btn-fixed-lines-clear-old" type="button" data-i18n="set.fixedBtnClearOld">清理旧版本缓存</button>
-        <button id="btn-fixed-lines-toggle" type="button">显示未加载/失败</button>
-        <span id="fixed-lines-result" class="result"></span>
-      </div>
-      <div id="fixed-lines-list" class="fixed-lines-list" hidden></div>
+      <label class="col grow">
+        <span style="font-size:11px;" data-i18n="set.wsWatchDirsLabel">监听目录（分号/逗号分隔；留空 = 默认 ZCode 工作区）</span>
+        <input id="ws-watch-dirs" type="text" placeholder="E:\SuzuranPetGit; C:\Users\你\.zcode\workspace\default" style="font-size:12px;" />
+      </label>
+    </div>
+    <div class="row">
+      <label class="col"><input id="feat-clipboard" type="checkbox" /><span data-i18n="set.featClipboard">📋 剪贴板感知（读取复制内容并反应）</span></label>
+      <label class="col"><input id="feat-sysmon" type="checkbox" /><span data-i18n="set.featSysmon">📊 系统监控播报（CPU/内存异常时提醒）</span></label>
+      <label class="col"><input id="focus-mode" type="checkbox" /><span data-i18n="set.focusMode">🎯 专注/离开模式（检测到你离开/长时间无操作时安静不打扰，回来打招呼）</span></label>
+      <label class="col"><input id="file-guard" type="checkbox" /><span data-i18n="set.fileGuard">🛡️ 蜜标监控：检测其他程序访问我的敏感配置区域（配置/密钥/历史文件），发现即提醒（普通权限下无法显示具体进程名）</span></label>
     </div>
   </section>
 
-  <!-- ============ 4. 系统与高级（原「④ 其他」，v2.5.18 改名明义） ============ -->
-  <!-- v2.5.26 重排：原「系统与高级（杂七杂八）」拆为 系统界面 / Agent 接口 / 感知监控 三区，
-       模式专属控件归位渲染模式区，记忆/情绪开关归位各自分区 -->
-  <section id="sec-other">
-    <h2 data-i18n="set.other">⚙ 系统与界面</h2>
+  <section id="sec-security">
+    <h2 data-i18n="set.securityTitle">🔐 密钥与凭据安全</h2>
     <div class="row">
-      <label class="col">
-        <span data-i18n="set.uiLang">界面语言（聊天内容始终为中文）</span>
-        <select id="ui-lang">
-          <option value="zh">中文</option>
-          <option value="en">English</option>
-          <option value="ja">日本語</option>
+      <label class="col grow">
+        <span data-i18n="set.chatKeyStatus">聊天 API Key 状态</span>
+        <div id="status-chat-key" class="cred-status">—</div>
+      </label>
+      <label class="col grow">
+        <span data-i18n="set.cosyKeyStatus">CosyVoice Key 状态</span>
+        <div id="status-cosy-key" class="cred-status">—</div>
+      </label>
+      <label class="col grow">
+        <span data-i18n="set.agentTokenStatus">Agent Token 状态</span>
+        <div id="status-agent-token" class="cred-status">—</div>
+      </label>
+    </div>
+    <div class="row actions">
+      <button id="btn-clear-chat-key" type="button" class="danger" data-i18n="set.clearChatKey">清除聊天 Key</button>
+      <button id="btn-clear-cosy-key" type="button" class="danger" data-i18n="set.clearCosyKey">清除 Cosy Key</button>
+      <button id="btn-clear-agent-token" type="button" class="danger" title="清除并重启后，Agent API 恢复为空 token 兼容模式（本机脚本无需认证）" data-i18n-title="set.clearAgentTokenTitle" data-i18n="set.clearAgentToken">清除 Agent Token</button>
+      <span id="clear-result" class="result"></span>
+    </div>
+    <p class="hint" data-i18n="set.securityHint">清除只删除本应用加密存储中的密钥，不会改动任何外部应用的文件。Agent Token 清除并重启后回到「空 token 兼容模式」（仅监听 127.0.0.1 的旧脚本仍可调用）。</p>
+
+    <h2 style="margin-top:16px;" data-i18n="set.importCredTitle">从本机其他应用显式导入凭据</h2>
+    <p class="hint" data-i18n="set.importCredHint">确认说明：导入会把指定<b>本地来源</b>中的凭据复制到受 Windows DPAPI 保护的本应用存储，仅在对应服务调用时使用。原值不会被显示、修改或上传，来源文件保持不变。</p>
+    <div class="row">
+      <label class="col grow">
+        <span data-i18n="set.credSourceLabel">可导入凭据（扫描结果只显示指纹，不显示完整密钥）</span>
+        <select id="cred-source">
+          <option value="" data-i18n="set.credSourceEmpty">（请先点击下方「扫描」）</option>
         </select>
       </label>
+      <label class="col">
+        <span data-i18n="set.credSlotLabel">导入用途</span>
+        <select id="cred-slot">
+          <option value="chat" data-i18n="set.credSlotChat">聊天 API Key</option>
+          <option value="ttsCosy" data-i18n="set.credSlotCosy">CosyVoice Key</option>
+        </select>
+      </label>
+    </div>
+    <div class="row actions">
+      <button id="btn-scan-creds" type="button" data-i18n="set.credScan">🔍 扫描本机可导入凭据</button>
+      <button id="btn-import-cred" type="button" class="primary" disabled data-i18n="set.credImport">⬇ 导入所选凭据</button>
+      <span id="import-result" class="result"></span>
+    </div>
+      <div class="row actions">
+      <button id="btn-clear-history" type="button" class="danger" data-i18n="set.clearHistory">🗑 清除聊天记录</button>
+      <span id="privacy-result" class="result"></span>
+    </div>
+  </section>
+
+  </div>
+
+  <div class="settings-page" id="page-advanced" hidden>
+
+  <section id="sec-experimental" data-rm="rig spine">
+    <h2 data-i18n="set.expTitle">🧪 实验性功能（需单独许可）</h2>
+    <div class="row">
+      <div class="col switch-row" data-rm="rig">
+        <span data-i18n="set.expMouseTrack">🖱️ 全局鼠标跟踪：开了她就会一直看着你的鼠标（只在本机算，不上传）。想感受"被盯着看"就开，默认关。</span>
+        <label class="switch"><input type="checkbox" id="rig-mouse-global" /><span class="slider"></span></label>
+      </div>
+      <div class="col switch-row" data-rm="spine">
+        <span data-i18n="set.expCatToy">🐈 逗猫棒：小玩具一个——开了她就会追着你的鼠标跑（只在本机算，不上传）。默认关，想逗就开。</span>
+        <label class="switch"><input type="checkbox" id="cat-toy" /><span class="slider"></span></label>
+      </div>
+      <div class="col switch-row" data-rm="spine">
+        <span data-i18n="set.expWalkGlobal">🌍 桌面全域行走（实验）：开了她就能走到另一块屏幕上去逛（多显示器玩家的快乐）。默认关，先观察一两天再放心用。</span>
+        <label class="switch"><input type="checkbox" id="walk-global" /><span class="slider"></span></label>
+      </div>
+      <div class="col switch-row">
+        <span data-i18n="set.expSoftRender">🖥 软件渲染（没独显/显卡驱动抽风时开）：改用 CPU 画画，慢一点但更稳。重启应用后生效。</span>
+        <label class="switch"><input type="checkbox" id="soft-render" /><span class="slider"></span></label>
+      </div>
+    </div>
+      <label class="col" data-rm="spine"><input id="feat-desktop-icons" type="checkbox" /><span data-i18n="set.featDesktopIcons">🧩 桌面图标感知（实验性）：只读桌面图标的位置坐标（仅本机·不联网上传），让她能走到桌面图标上站/坐；仅「桌面层级」显示模式下生效</span></label>
+  </section>
+
+  <section id="sec-calibration" data-rm="spine">
+    <h2 data-i18n="set.section.calibration">🚶 行走校准（Spine 模式）</h2>
+    <div class="row">
       <label class="col">
         <span data-i18n="set.seatSink">坐姿下沉量（坐姿时腿垂进任务栏多少）</span>
         <input id="seat-sink" type="range" min="0" max="80" step="2" />
@@ -495,58 +608,22 @@
         <input id="stand-sink" type="range" min="-30" max="30" step="2" />
         <span id="stand-sink-val" style="font-weight:600;">0 px</span>
       </label>
-      <label class="col">
-        <span data-i18n="set.hotkey">全局热键（隐藏/显示）</span>
-        <input id="hotkey" type="text" placeholder="Alt+Shift+S" />
+      <label class="col" data-rm="spine">
+        <span data-i18n="set.sitMax">单次坐下最久（秒）</span>
+        <input id="sit-max" type="range" min="15" max="180" step="5" />
+        <span id="sit-max-val" style="font-weight:600;">30 s</span>
       </label>
-      <label class="col">
-        <span data-i18n="set.startHidden">启动即隐藏到托盘</span>
-        <select id="start-hidden">
-          <option value="false" data-i18n="set.no">否</option>
-          <option value="true" data-i18n="set.yes">是</option>
-        </select>
+      <label class="col" data-rm="spine">
+        <span data-i18n="set.walkMax">单次散步最久（秒）</span>
+        <input id="walk-max" type="range" min="8" max="120" step="1" />
+        <span id="walk-max-val" style="font-weight:600;">20 s</span>
       </label>
-      <label class="col"><input id="auto-launch" type="checkbox" /><span data-i18n="set.autoLaunch">🖥️ 开机自启（随系统启动，配合「启动隐藏」可静默进托盘）</span></label>
-    </div>
-    <div class="row">
-      <label class="col">
-        <span data-i18n="set.bubbleWidth">聊天气泡宽度</span>
-        <input id="bubble-width" type="range" min="0" max="600" step="20" />
-        <span id="bubble-width-val" style="font-weight:600;">自适应</span>
-      </label>
-      <label class="col">
-        <span data-i18n="set.chatFontSize">聊天字体大小</span>
-        <input id="chat-font-size" type="range" min="10" max="22" step="1" />
-        <span id="chat-font-size-val" style="font-weight:600;">11 px</span>
-      </label>
-      <label class="col">
-        <span data-i18n="set.chatFont">聊天字体</span>
-        <select id="chat-font">
-          <option value="" data-i18n="set.fontDefault">默认（微软雅黑）</option>
-          <option value="宋体">宋体</option>
-          <option value="黑体">黑体</option>
-          <option value="楷体">楷体</option>
-          <option value="仿宋">仿宋</option>
-          <option value="等线">等线</option>
-        </select>
-      </label>
-      <label class="col">
-        <span data-i18n="set.importFont">导入本地字体（ttf/otf/woff）</span>
-        <button id="btn-import-font" type="button">📂 <span data-i18n="set.importFontBtn">选择字体文件并应用</span></button>
-      </label>
-      <label class="col">
-        <span data-i18n="set.scheduleRow">日程与提醒</span>
-        <button id="btn-open-schedule" type="button" data-i18n="set.openSchedule">📅 打开日程安排</button>
+      <label class="col" data-rm="spine">
+        <span data-i18n="set.perchPct">跳上窗顶概率（%；0=不跳）</span>
+        <input id="perch-pct" type="range" min="0" max="30" step="1" />
+        <span id="perch-pct-val" style="font-weight:600;">8 %</span>
       </label>
     </div>
-    <div class="row actions">
-      <button id="btn-open-terms" type="button" data-i18n="set.openTerms">📄 使用条款与隐私政策</button>
-      <button id="btn-open-config" type="button" data-i18n="set.openConfigFile">📄 打开 config.json</button>
-      <button id="btn-clear-history" type="button" class="danger" data-i18n="set.clearHistory">🗑 清除聊天记录</button>
-      <span id="other-result" class="result"></span>
-    </div>
-    <p class="hint" data-i18n="set.taskHint">任务模式（/zcode 前缀操控电脑）默认关闭：想开启请打开 config.json，把 <code>zcodeEnabled</code> 改为 <code>true</code> 并配置 <code>zcodeCli</code> 路径（需自行安装 ZCode）。</p>
-    <p class="foot" id="version">苏苏洛桌宠 · 2.5 正式版</p>
   </section>
 
   <section id="sec-agent">
@@ -602,124 +679,100 @@
     <p class="hint" data-i18n="set.agentHint">其他 agent / 脚本可调用：<code>POST http://127.0.0.1:8765/chat</code>，请求体 <code>{"text":"苏苏洛 帮我…"}</code>；<code>GET /health</code> 查状态。仅监听本机，不对局域网开放。</p>
   </section>
 
-  <section id="sec-sense">
-    <h2 data-i18n="set.senseTitle">👀 感知与监控</h2>
+  <section id="sec-voice-engine">
+    <h2 data-i18n="set.section.voiceEngine">🔊 语音引擎与部署</h2>
+    <div id="genie-fields">
     <div class="row">
-      <div class="col switch-row">
-        <span data-i18n="set.wsWatch">🧐 感知工作区活动：她会在你改代码时小声嘀咕（只读监听文件变化，不上传）</span>
-        <label class="switch"><input type="checkbox" id="ws-watch" /><span class="slider"></span></label>
+        <label class="col grow">
+          <span data-i18n="set.pythonPath">Python 路径（pythonw.exe）</span>
+          <input id="genie-python" type="text" placeholder="已随包自带（engines/genie），一般无需填写" data-i18n-placeholder="set.pythonPathPh" />
+        </label>
+        <label class="col grow">
+          <span data-i18n="set.serverScript">服务器脚本 genie_tts_server.py</span>
+          <input id="genie-script" type="text" placeholder="已随包自带（engines/genie）" data-i18n-placeholder="set.serverScriptPh" />
+        </label>
       </div>
-      <label class="col grow">
-        <span style="font-size:11px;" data-i18n="set.wsWatchDirsLabel">监听目录（分号/逗号分隔；留空 = 默认 ZCode 工作区）</span>
-        <input id="ws-watch-dirs" type="text" placeholder="E:\SuzuranPetGit; C:\Users\你\.zcode\workspace\default" style="font-size:12px;" />
-      </label>
-    </div>
+      <div class="row actions">
+        <button id="btn-engine-save" type="button" data-i18n="set.txSave">保存</button>
+        <button id="btn-engine-discard" type="button" data-i18n="set.txDiscard">放弃</button>
+        <span id="engine-tx-result" class="result"></span>
+      </div>
     <div class="row">
-      <label class="col"><input id="feat-clipboard" type="checkbox" /><span data-i18n="set.featClipboard">📋 剪贴板感知（读取复制内容并反应）</span></label>
-      <label class="col"><input id="feat-sysmon" type="checkbox" /><span data-i18n="set.featSysmon">📊 系统监控播报（CPU/内存异常时提醒）</span></label>
-      <label class="col"><input id="focus-mode" type="checkbox" /><span data-i18n="set.focusMode">🎯 专注/离开模式（检测到你离开/长时间无操作时安静不打扰，回来打招呼）</span></label>
-      <label class="col"><input id="file-guard" type="checkbox" /><span data-i18n="set.fileGuard">🛡️ 蜜标监控：检测其他程序访问我的敏感配置区域（配置/密钥/历史文件），发现即提醒（普通权限下无法显示具体进程名）</span></label>
+        <label class="col grow">
+          <span data-i18n="set.refAudio">参考音频（克隆音色，可留空用默认）</span>
+          <input id="genie-ref-audio" type="text" placeholder="已随包自带（engines/genie/ref）" data-i18n-placeholder="set.refAudioPh" />
+        </label>
+        <label class="col grow">
+          <span data-i18n="set.refText">参考音频原文</span>
+          <input id="genie-ref-text" type="text" placeholder="参考音频对应的文字" data-i18n-placeholder="set.refTextPh" />
+        </label>
+      </div>
+      <div class="row actions">
+        <button id="btn-ref-save" type="button" data-i18n="set.txSave">保存</button>
+        <button id="btn-ref-discard" type="button" data-i18n="set.txDiscard">放弃</button>
+        <span id="ref-tx-result" class="result"></span>
+      </div>
+    <div class="row actions">
+        <button id="btn-restart-gsv" type="button" data-i18n="set.restartJa">🔄 重启日语语音服务</button>
+        <button id="btn-clear-trcache" type="button" data-i18n="set.clearTrCache">🗑 清空翻译缓存</button>
+        <span id="ja-prewarm-progress" class="result"></span>
+        <span id="gsv-result" class="result"></span>
+      </div>
     </div>
   </section>
-  <!-- ============ 4.5 天气（v2.5.26，Open-Meteo 免 key 免费） ============ -->
-  <section id="sec-weather">
-    <h2 data-i18n="set.weatherTitle">🌤 天气（免费·无需密钥·半小时自动刷新）</h2>
-    <div class="row">
-      <label class="col switch-row">
-        <span data-i18n="set.weatherOn">开启天气（她会偶尔播报天气、信息版显示）</span>
-        <label class="switch"><input type="checkbox" id="weather-on" /><span class="slider"></span></label>
-      </label>
-      <label class="col">
-        <span data-i18n="set.weatherCity">城市（内置：北京/上海/广州/深圳/成都/杭州等；或直接填 纬度,经度）</span>
-        <input id="weather-city" type="text" placeholder="上海" />
-      </label>
-      <label class="col">
-        <span data-i18n="set.weatherProvider">天气源（open-meteo 免 key；openweathermap 需 key；开发者可注册自定义源）</span>
-        <select id="weather-provider">
-          <option value="open-meteo" data-i18n="set.wpvOpenMeteo">Open-Meteo（免 key·推荐）</option>
-          <option value="openweathermap" data-i18n="set.wpvOpenWeatherMap">OpenWeatherMap（需 key）</option>
-        </select>
-      </label>
-      <label class="col">
-        <span data-i18n="set.weatherKey">天气源 API Key（open-meteo 留空）</span>
-        <input id="weather-key" type="password" autocomplete="off" placeholder="留空" data-i18n-placeholder="set.weatherKeyPh" />
-      </label>
-      <div class="col tx-actions">
-        <button id="btn-weather-save" type="button" data-i18n="set.txSave">保存</button>
-        <button id="btn-weather-discard" type="button" data-i18n="set.txDiscard">放弃</button>
-        <span id="weather-tx-result" class="result"></span>
-      </div>
-      <span id="weather-now" class="result" style="align-self:center;"></span>
-    </div>
-    <div class="row">
-      <label class="col grow">
-        <span data-i18n="set.netProxy">网络代理（应用内更新/天气走此代理；留空=跟随系统。例：http=127.0.0.1:7897）</span>
-        <input id="net-proxy" type="text" autocomplete="off" placeholder="留空 = 跟随系统代理" data-i18n-placeholder="set.netProxyPh" />
-      </label>
-    </div>
-    <div class="row">
-      <label class="col full update-col">
-        <span data-i18n="set.updateRow">软件更新</span>
-        <div class="update-row">
-          <span id="update-version" class="ver-inline"></span>
-          <button id="btn-check-update" type="button" data-i18n="set.checkUpdate">检查更新</button>
-          <span class="mini-hint" data-i18n="set.updateAutoCheckHint">每 24 小时自动静默检查一次新版本</span>
+
+  <section id="sec-voice-cache">
+    <h2 data-i18n="set.section.voiceCache">💾 固定台词音频池</h2>
+    <div id="fixed-lines-preload" class="fixed-lines-preload" aria-live="polite">
+      <div class="fixed-lines-head">
+        <div>
+          <b data-i18n="set.fixedPoolTitle">🔊 固定台词音频池</b>
+          <div id="fixed-lines-profile" class="hint">读取当前语音方案…</div>
         </div>
-        <div id="update-result" class="result"></div>
-        <div class="fixed-lines-progress"><span id="update-progress-bar"></span></div>
-      </label>
-    </div>
-  </section>
-  <!-- ============ 5. 密钥与凭据安全 ============ -->
-  <section id="sec-security">
-    <h2 data-i18n="set.securityTitle">🔐 密钥与凭据安全</h2>
-    <div class="row">
-      <label class="col grow">
-        <span data-i18n="set.chatKeyStatus">聊天 API Key 状态</span>
-        <div id="status-chat-key" class="cred-status">—</div>
-      </label>
-      <label class="col grow">
-        <span data-i18n="set.cosyKeyStatus">CosyVoice Key 状态</span>
-        <div id="status-cosy-key" class="cred-status">—</div>
-      </label>
-      <label class="col grow">
-        <span data-i18n="set.agentTokenStatus">Agent Token 状态</span>
-        <div id="status-agent-token" class="cred-status">—</div>
-      </label>
-    </div>
-    <div class="row actions">
-      <button id="btn-clear-chat-key" type="button" class="danger" data-i18n="set.clearChatKey">清除聊天 Key</button>
-      <button id="btn-clear-cosy-key" type="button" class="danger" data-i18n="set.clearCosyKey">清除 Cosy Key</button>
-      <button id="btn-clear-agent-token" type="button" class="danger" title="清除并重启后，Agent API 恢复为空 token 兼容模式（本机脚本无需认证）" data-i18n-title="set.clearAgentTokenTitle" data-i18n="set.clearAgentToken">清除 Agent Token</button>
-      <span id="clear-result" class="result"></span>
-    </div>
-    <p class="hint" data-i18n="set.securityHint">清除只删除本应用加密存储中的密钥，不会改动任何外部应用的文件。Agent Token 清除并重启后回到「空 token 兼容模式」（仅监听 127.0.0.1 的旧脚本仍可调用）。</p>
-
-    <h2 style="margin-top:16px;" data-i18n="set.importCredTitle">从本机其他应用显式导入凭据</h2>
-    <p class="hint" data-i18n="set.importCredHint">确认说明：导入会把指定<b>本地来源</b>中的凭据复制到受 Windows DPAPI 保护的本应用存储，仅在对应服务调用时使用。原值不会被显示、修改或上传，来源文件保持不变。</p>
-    <div class="row">
-      <label class="col grow">
-        <span data-i18n="set.credSourceLabel">可导入凭据（扫描结果只显示指纹，不显示完整密钥）</span>
-        <select id="cred-source">
-          <option value="" data-i18n="set.credSourceEmpty">（请先点击下方「扫描」）</option>
-        </select>
-      </label>
-      <label class="col">
-        <span data-i18n="set.credSlotLabel">导入用途</span>
-        <select id="cred-slot">
-          <option value="chat" data-i18n="set.credSlotChat">聊天 API Key</option>
-          <option value="ttsCosy" data-i18n="set.credSlotCosy">CosyVoice Key</option>
-        </select>
-      </label>
-    </div>
-    <div class="row actions">
-      <button id="btn-scan-creds" type="button" data-i18n="set.credScan">🔍 扫描本机可导入凭据</button>
-      <button id="btn-import-cred" type="button" class="primary" disabled data-i18n="set.credImport">⬇ 导入所选凭据</button>
-      <span id="import-result" class="result"></span>
+        <span id="fixed-lines-state" class="voice-pool-badge">未检查</span>
+      </div>
+      <div id="fixed-lines-summary" class="fixed-lines-summary">已加载 0 / 0 · 失败 0 · 缓存 0 B</div>
+      <div class="fixed-lines-progress"><span id="fixed-lines-progress-bar"></span></div>
+      <div class="fixed-lines-pools" id="fixed-lines-pools">
+        <span class="fixed-lines-pools-title" data-i18n="set.fixedPoolsTitle">预加载范围：</span>
+        <span id="fixed-lines-pools-box" class="fixed-lines-pools-box"></span>
+        <button id="btn-fixed-lines-pools-all" type="button" class="mini" data-i18n="set.fixedPoolsAll">全选</button>
+        <button id="btn-fixed-lines-pools-common" type="button" class="mini" data-i18n="set.fixedPoolsCommon">常用</button>
+      </div>
+      <p class="hint" data-i18n="set.fixedPoolHint">只生成当前语音方案，缓存长期有效（空间超限自动按最久未用清理）；云端语音可能产生 API 费用。系统语音无需预加载。</p>
+      <div class="actions">
+        <button id="btn-fixed-lines-start" type="button" class="primary" data-i18n="set.fixedBtnStart">▶ 开始/继续预加载</button>
+        <button id="btn-fixed-lines-retry" type="button" data-i18n="set.fixedBtnRetry">↻ 重试失败</button>
+        <button id="btn-fixed-lines-cancel" type="button" data-i18n="set.fixedBtnCancel">暂停</button>
+        <button id="btn-fixed-lines-clear" type="button" class="danger" data-i18n="set.fixedBtnClear">清空当前缓存</button>
+        <button id="btn-fixed-lines-clear-old" type="button" data-i18n="set.fixedBtnClearOld">清理旧版本缓存</button>
+        <button id="btn-fixed-lines-toggle" type="button">显示未加载/失败</button>
+        <span id="fixed-lines-result" class="result"></span>
+      </div>
+      <div id="fixed-lines-list" class="fixed-lines-list" hidden></div>
     </div>
   </section>
 
-  <!-- ============ 日志诊断（v2.5.28）：只读尾部 + 报错高亮 + 一键脱敏导出 ============ -->
+  <section id="sec-creator">
+    <h2 data-i18n="set.section.creator">🎨 创作者工具</h2>
+    <div class="row actions">
+      <button id="btn-open-psd" type="button" data-i18n="set.creatorPSD">🧩 PSD 角色工具</button>
+      <button id="btn-open-studio" type="button" data-i18n="set.openStudio" disabled>🎙️ 音色克隆与训练</button>
+      <button id="btn-open-guide" type="button" data-i18n="set.openGuide" disabled>📖 语音部署与训练指南</button>
+      <span id="creator-result" class="result"></span>
+    </div>
+    <p class="hint" data-i18n="set.creatorUnavailable">音色克隆与训练、语音部署与训练指南正在完善中，暂不可用。</p>
+  </section>
+
+  <section id="sec-developer">
+    <h2 data-i18n="set.section.developer">🛠 开发者</h2>
+    <div class="row actions">
+      <button id="btn-open-config" type="button" data-i18n="set.openConfigFile">📄 打开 config.json</button>
+      <span id="other-result" class="result"></span>
+    </div>
+    <p class="hint" data-i18n="set.taskHint">任务模式（/zcode 前缀操控电脑）默认关闭：想开启请打开 config.json，把 <code>zcodeEnabled</code> 改为 <code>true</code> 并配置 <code>zcodeCli</code> 路径（需自行安装 ZCode）。</p>
+  </section>
+
   <section id="sec-logdiag">
     <h2 data-i18n="set.logdiagTitle">📋 日志诊断</h2>
     <p class="hint" data-i18n="set.logdiagHint">显示运行日志（tts.log）最近内容：红色=错误（需人工查看）、黄色=警告（可自愈）。一键导出会自动脱敏（密钥、URL 参数、路径中的用户名、窗口标题、精确坐标、PID、称呼），可放心发给他人或开发者。</p>
@@ -740,6 +793,9 @@
     <div id="logdiag-result" class="result"></div>
     <pre id="logdiag-pre" class="logdiag-pre" tabindex="0"></pre>
   </section>
+
+  </div>
+
   </div><!-- /.set-main -->
   </div><!-- /.set-layout -->
   </div>
@@ -750,6 +806,7 @@
   <script src="theme.js"></script>
   <script src="theme-init.js"></script>
   <script src="settings-save-plan.js"></script>
+  <script src="settings-navigation.js"></script>
   <script src="settings.js"></script>
   <script src="memory-control.js"></script>
 </body>

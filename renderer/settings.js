@@ -579,7 +579,7 @@ function applyRenderModeUI(mode) {
         : mode === "live2d" ? L("set.rmHintLive2d")
           : L("set.rmHintGif");
   }
-  syncNavVisibility(); // v2.5.18：分区被渲染模式隐藏时，左侧导航项同步隐藏
+  // LEGACY-UI REFLOW：页切换与搜索迁移至 renderer/settings-navigation.js（presentation only）
 }
 
 /* ---------- 预设 ---------- */
@@ -1028,11 +1028,19 @@ $("stand-sink").addEventListener("change", async () => {
     $("weather-key").value = wc.key || "";
     const now = await window.petAPI.getWeather();
     if (now) $("weather-now").textContent = `${now.desc} ${now.temp}°C · 湿${now.humidity}% · 风${now.wind}km/h`;
+    applyWeatherUI(); // 载入后按持久化 enabled 同步条件显隐
     snapshotTx("tx-weather"); // 字段异步填充完成后再取快照（否则放弃会把未加载值当 persisted）
   } catch { /* 忽略 */ }
 })();
 // enabled 单键即时：绝不携带表单字段（city/provider/key 的未保存修改不被顺带提交）
-$("weather-on").addEventListener("change", () => { window.petAPI.setWeather({ enabled: $("weather-on").checked }); });
+$("weather-on").addEventListener("change", () => {
+  applyWeatherUI(); // P4 语义移植：enabled 关 → 城市/源/Key 隐藏（单键即时，不带表单字段）
+  window.petAPI.setWeather({ enabled: $("weather-on").checked });
+});
+function applyWeatherUI() {
+  const options = $("weather-options");
+  if (options) options.hidden = !$("weather-on").checked;
+}
 
 /* ---------- 聊天外观（字体/字号/气泡宽度，松手即生效） ---------- */
 function fillChatFontOptions(customFonts) { // 已导入的本地字体追加到下拉末尾
@@ -1154,10 +1162,12 @@ $("btn-open-terms").addEventListener("click", () => window.petAPI.openTerms());
 
 $("btn-open-config").addEventListener("click", () => window.petAPI.openConfig());
 
+$("btn-open-psd").addEventListener("click", () => window.petAPI.psdOpen()); // P4 台账补记：既有 v2.1 PSD 角色工具窗口
+
 $("btn-clear-history").addEventListener("click", async () => {
   if (!confirm(L("set.confirmClear"))) return;
   const ok = await window.petAPI.clearHistory();
-  setResult($("other-result"), ok ? L("set.saved") : L("set.saveFailed"), ok);
+  setResult($("privacy-result"), ok ? L("set.saved") : L("set.saveFailed"), ok);
 });
 
 /* ---------- ⑤ 密钥与凭据安全 ---------- */
@@ -1475,49 +1485,9 @@ $("btn-clear-agent-token").addEventListener("click", () => clearSecretFlow("agen
    现在：左栏锚点 + scroll-spy 高亮 + 搜索过滤；任何需显式保存的改动触发顶部提示条，
    「保存全部」按 API → 人设 → 语音 → 系统高级 顺序依次走各自既有的保存函数。 */
 
-function syncNavVisibility() {
-  document.querySelectorAll(".set-nav a").forEach((a) => {
-    const sec = document.querySelector(a.getAttribute("href"));
-    a.style.display = (!sec || sec.style.display === "none") ? "none" : "";
-  });
-}
-
 (function setupSettingsNav() {
   const links = [...document.querySelectorAll(".set-nav a")];
   if (!links.length) return;
-
-  // scroll-spy：滚动时高亮当前分区对应的导航项
-  if ("IntersectionObserver" in window) {
-    const byId = new Map(links.map((a) => [a.getAttribute("href").slice(1), a]));
-    const io = new IntersectionObserver((entries) => {
-      entries.forEach((en) => {
-        if (!en.isIntersecting) return;
-        links.forEach((l) => l.classList.remove("active"));
-        const a = byId.get(en.target.id);
-        if (a) a.classList.add("active");
-      });
-    }, { rootMargin: "-8% 0px -75% 0px", threshold: 0 });
-    links.forEach((a) => { const s = document.querySelector(a.getAttribute("href")); if (s) io.observe(s); });
-  }
-  if (links[0]) links[0].classList.add("active");
-
-  // 搜索过滤：按文本内容显示/隐藏分区（优先于渲染模式过滤；清空后恢复渲染模式过滤）
-  const searchInput = $("set-search");
-  if (searchInput) {
-    searchInput.addEventListener("input", () => {
-      const q = searchInput.value.trim().toLowerCase();
-      const sections = document.querySelectorAll(".set-main > section");
-      if (!q) {
-        applyRenderModeUI($("render-mode").value);
-      } else {
-        sections.forEach((s) => {
-          const hit = (s.textContent || "").toLowerCase().includes(q);
-          s.style.display = hit ? "" : "none";
-        });
-      }
-      syncNavVisibility();
-    });
-  }
 
   /* ---------- P2 接线（事务机制函数在模块作用域，见文件头部） ---------- */
 

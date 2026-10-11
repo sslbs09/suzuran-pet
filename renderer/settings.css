@@ -175,3 +175,8 @@ body.theme-dark .settings-page .set-dirty { border-color: #4a4030; background: #
 .settings-page .logdiag-pre .log-error { color: var(--ui-danger); font-weight: 600; }
 .settings-page .logdiag-pre .log-warn { color: var(--ui-warn, #b26a00); }
 .settings-page .logdiag-pre .log-info { color: var(--ui-muted); }
+
+/* LEGACY-UI REFLOW（功能性修正）：天气条件容器不参与旧 .row 网格布局，
+   子元素回到原网格轨道；hidden 语义优先于 contents（enabled 关 → 字段隐藏）。 */
+#weather-options { display: contents; }
+#weather-options[hidden] { display: none; }
