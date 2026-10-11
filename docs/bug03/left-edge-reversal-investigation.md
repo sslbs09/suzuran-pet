@@ -1,8 +1,32 @@
 # BUG-03 RESIDUAL — LEFT-EDGE REVERSAL FLASH
 
-BUG-03 RESIDUAL: **PARTIAL（稳定 Move 已通过；首次起步后立即折返的裁剪反例正在修复）**。
+BUG-03 RESIDUAL: **FIXED（Sol 根因与修复成立；43ms 裁剪反例已在 harness 合同与真实 Electron 双缘 5+5 验收闭合）**。
 
-WALKING HIT-TEST: **PARTIAL（完整原生鼠标矩阵仍在验收）**。
+WALKING HIT-TEST: **FIXED（13/13 原生鼠标矩阵 + stationary 穿越 PASS；见 §14 接管验收记录）**。
+
+> §14（2026-10-11 接管验收，GPT-5.3 Flash）：Sol 中断后由接管方完成剩余验收。
+> - 43ms 裁剪反例：`tests/render-lifecycle-contract.test.js` 的 "first applied Move is body-fitted
+>   before render and a 43ms reversal cannot freeze the transition anchor" PASS（233/233 全绿）。
+> - 真实 Electron 双缘 5+5（`e2e-chibi-edge-visual.cjs`，自然折返）：10/10 turn `pass:true`，
+>   每折返 `maxScreenCoreStep ≤ 1px`（即折返前后 screenCharacterX = window.x + body core 连续）、
+>   `maxCoreStep ≈ 0`（mirror 围绕已应用核心零刚体平移）、**clippedFrames=0**（Sol 记录的反例
+>   143/149 裁剪帧消除）、`maxWindowStep ≤ 1`、`minLeft/RightMargin=1`。
+> - 原生鼠标矩阵（`e2e-chibi-walking-clickability.cjs`）：**13/13 PASS** —— idle body、
+>   walking 左/右 × {body, 画布内透明, outeredge, behindTARGET}、reversal 前后 × {body, 画布内透明}，
+>   全部以真实 SendInput + WindowFromPoint 实际命中窗口 + WS_EX_TRANSPARENT 实际状态 + 主/渲染层
+>   事件流 + interaction-pause acquire + walking body 用例的 episode-close 证据判定；
+>   stationary-cursor 穿越 PASS（左出/右进 alpha 0↔opaque 翻转全程 native route 正确跟随）。
+> - 接管期间仅修验收装置预期（不碰产品代码）：①reversal-transparent 选点按折返方向偏侧
+>   （身体离开后必然保持透明的半区，消除与移动身体的选点竞争）；②stationary 穿越 alpha 阈值
+>   240→128（Move 动画肢体摆动使固定点 alpha 波动，240 不可采样）；③idlebody 需制造
+>   walking on→off 真实边沿才会设置 idle 动画、且 walking=false 时 Sitd/Sit 坐姿是合法 idle 终态。
+> - 环境事实：用户日常实例（PID 15800）与本 E2E 共享桌面，其 alwaysOnTop 透明窗口曾吃掉
+>   穿透点击（reversal-transparent 4/4 INCONCLUSIVE，WindowFromPoint root=用户实例 pet）；
+>   以 WM_CLOSE（=产品语义的隐藏到托盘，进程保留）临时隐藏后 2 用例立即 PASS，验收后经
+>   second-instance→showWindow 恢复显示。数据无触碰。
+> - B-2 已知边界（记录，不属本轮回归）：walking 中身体快速扫过静止光标时，ignoreMouseEvents
+>   恢复链（main 200ms 光标哨兵 → renderer 重判 → IPC apply）可能慢于 ~300ms 的穿越窗口；
+>   身体停留 ≥1 次采样的场景均正确恢复。
 
 前次 CLOSED 结论作废。本报告只裁决本次残余问题，不关闭整个 Chibi Bug Sweep。
 
