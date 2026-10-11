@@ -62,7 +62,7 @@ function createSitOnTaskbarHarness({ gap, bounds, workArea } = {}) {
   const config = { getConfig: () => ({ renderMode: "gif" }) };
   const fn = new Function(
     "win", "walkGeo", "screen", "config", "walk", "gifVisualGroundGap", "renderModeMod", "walkMinX",
-    "showWindow", "skinHasSit", "applySeatPosition", "walkBroadcast", "logTts", "commitLegacyPosition", "setBodyPosture",
+    "charStripInset", "showWindow", "skinHasSit", "applySeatPosition", "walkBroadcast", "logTts", "commitLegacyPosition", "setBodyPosture",
     `${sourceBlock(mainSource, "function sitOnTaskbar", 'ipcMain.handle("pet:sit-taskbar"', "sitOnTaskbar")}; return sitOnTaskbar;`
   )(
     fakeWin,
@@ -73,6 +73,7 @@ function createSitOnTaskbarHarness({ gap, bounds, workArea } = {}) {
     gap,
     RM,
     () => wa.x,
+    (b) => (b ? Math.max(138, Math.round(b.width) - 122) : 138), // charStripInset（BUG-02 宽度感知；fixture 无 compact）
     () => {},
     true,
     () => {},
@@ -1099,7 +1100,7 @@ function createDragSeatFixture({ x = 100, y = 768, seated = true, layer = "alway
   };
   const api = new Function(
     "win", "walk", "config", "screen", "walkGeo", "renderModeMod", "effectiveSeatSink", "desktopIconMode", "desktopIconCache",
-    "walkSetPosition", "walkBroadcast", "applyLayer", "walkSchedulePhase", "clearTimeout", "randInt", "walkMinX", "PET_LOCAL_X", "gifVisualGroundGap", "v2DragCommitLanding", "setBodyPosture", "commitLegacyPosition",
+    "walkSetPosition", "walkBroadcast", "applyLayer", "walkSchedulePhase", "clearTimeout", "randInt", "walkMinX", "PET_LOCAL_X", "gifVisualGroundGap", "v2DragCommitLanding", "setBodyPosture", "commitLegacyPosition", "charStripInset",
     `${/* 本夹具只测 seat 落位几何，不测 transition：注入恒零 seatExit 上下文（applySeatPosition 的 offset 层自然短路） */ ""}
      let seatExit = null; const seatExitOffsetY = () => 0;
      ${sourceBlock(mainSource, "function dragSeatUpdate", "/* ---------- 桌面行走 v2", "dragSeatUpdate")};
@@ -1120,7 +1121,8 @@ function createDragSeatFixture({ x = 100, y = 768, seated = true, layer = "alway
     // Closure 门面：本夹具无 drag session（LEGACY）→ 语义即归一化裸 setPosition（与真 helper LEGACY 分支一致）
     (x, y) => { const px = Math.round(x), py = Math.round(y); bounds.x = px; bounds.y = py; posWrites.push({ x: px, y: py, via: "landing" }); return true; },
     (patch) => Object.assign(walk, patch),
-    (x, y) => { const px = Math.round(x), py = Math.round(y); bounds.x = px; bounds.y = py; posWrites.push({ x: px, y: py, via: "commit" }); return { ok: true }; }
+    (x, y) => { const px = Math.round(x), py = Math.round(y); bounds.x = px; bounds.y = py; posWrites.push({ x: px, y: py, via: "commit" }); return { ok: true }; },
+    (b) => (b ? Math.max(138, Math.round(b.width) - 122) : 138) // charStripInset（BUG-02 宽度感知；fixture 无 compact）
   );
   return { api, walk, bounds, posWrites, broadcasts };
 }

@@ -435,7 +435,7 @@ function sitOnTaskbar() {
   // Native BrowserWindow coordinates must be integral; keep the visual gap precise until this boundary.
   const targetY = renderModeMod.groundAlign(b, wa, groundGap).y || 0;
   commitLegacyPosition(
-    Math.round(Math.min(Math.max(b.x, walkMinX(wa)), wa.x + wa.width - b.width)) || 0,
+    Math.round(Math.min(Math.max(b.x, wa.x - charStripInset(b)), wa.x + wa.width - b.width)) || 0,
     targetY
   , "sit-taskbar");
   showWindow();
@@ -476,7 +476,9 @@ function clampPetToWorkArea(reason = "显示器变化") {
   try {
     const b = win.getBounds();
     const wa = walkGeo.workAreaOf(screen, b);
-    const x = Math.min(Math.max(b.x, walkMinX(wa)), Math.max(walkMinX(wa), wa.x + wa.width - b.width));
+    // 水平钳位下界按条带真实偏移（宽窗右缘锚定 → 窗口左段允许在屏外；BUG-02 宽窗几何统一源）
+    const minX = wa.x - charStripInset(b);
+    const x = Math.min(Math.max(b.x, minX), Math.max(minX, wa.x + wa.width - b.width));
     const maxY = wa.y + wa.height - b.height + 80; // 保留坐姿下沉到任务栏的空间
     const y = Math.min(Math.max(b.y, wa.y), Math.max(wa.y, maxY));
     if (x !== b.x || y !== b.y) {
@@ -3880,7 +3882,7 @@ function dragSeatUpdate(final = false) {
       magnet = "taskbar";
       walk.taskbarHang = false;
       ny = waBottom + groundGap - b.height + effectiveSeatSink();
-      nx = Math.min(Math.max(b.x, walkMinX(wa)), wa.x + wa.width - b.width);
+      nx = Math.min(Math.max(b.x, wa.x - charStripInset(b)), wa.x + wa.width - b.width);
     } else if (freeDragMode && final && feet > waBottom - 40 && feet < waBottom + 20) {
       // 任务栏半挂：保留释放高度，仅有限下探，不强制塞入坐姿下沉量（原 -120/+80 → -40/+20 收窄）
       walk.taskbarHang = true;
@@ -3890,7 +3892,7 @@ function dragSeatUpdate(final = false) {
       // 半挂只允许在可见工作区内，避免透明窗口底部落到屏幕外被裁切。
       const visibleFeetY = Math.min(feet + groundGap, waBottom);
       ny = Math.round(Math.max(wa.y, visibleFeetY - b.height + 22));
-      nx = Math.min(Math.max(b.x, walkMinX(wa)), wa.x + wa.width - b.width);
+      nx = Math.min(Math.max(b.x, wa.x - charStripInset(b)), wa.x + wa.width - b.width);
       v2DragCommitLanding(nx, ny); // Closure：EXTERNAL 持有时半挂经 external admission（唯一 drag writer）
       walkBroadcast();
       applyLayer();
@@ -4222,6 +4224,15 @@ function __seatExitTestHook(op, arg) {
 const WALK_SPEED = 1.2;                        // 每 tick 像素 ≈ 30px/s
 const PET_LOCAL_X = 138;                       // 标准 Spine 260×200 窗口的唯一角色锚点
 
+/** 角色条带在窗口内的左偏移（屏幕 charLeft = win.x + stripInset）。BUG-02 几何统一源。
+ *  条带 CSS 右缘锚定（.pet left: calc(100%-122px)）→ 偏移=宽-122；ui-edge-compact 镜像布局=左锚定 138px。
+ *  标准窗（260）两式同为 138：PET_LOCAL_X 硬编码仅在标准宽成立——气泡加宽窗口下，
+ *  左界/钳位/图标对中若仍用 138 会整体错位（行走左边界扩出屏幕=历史“闪现”同族根因）。 */
+function charStripInset(b) {
+  if (!b || (typeof walk !== "undefined" && walk && walk.uiEdgeCompact)) return PET_LOCAL_X;
+  return Math.max(PET_LOCAL_X, Math.round(b.width) - 122);
+}
+
 /** 清理拖拽暂停；只触碰 dragPaused 及其专属时间状态，保留 chat/zoom 暂停。 */
 function clearDragPause(reason = "drag-cleanup", broadcast = true) {
   if (typeof v2Drag !== "undefined" && v2Drag && v2Drag.active()) v2Drag.end(reason);
@@ -4400,7 +4411,7 @@ const v2Locomotion = RUNTIME_V2_LOCOMOTION_ENABLED ? (() => {
       now: () => Date.now(),
       bounds: () => (win && !win.isDestroyed() ? win.getBounds() : null),
       workArea: () => { try { const b = win && !win.isDestroyed() ? win.getBounds() : null; return b ? walkGeo.workAreaOf(screen, b) : null; } catch { return null; } },
-      clampX: (x, wa, width) => walkGeo.clampWalkX(x, wa, width, false, PET_LOCAL_X), // 与 V1 同式复用纯计算（不复制算法）
+      clampX: (x, wa, width) => walkGeo.clampWalkX(x, wa, width, false, charStripInset({ width })), // 与 V1 同式复用纯计算（宽度感知 inset，BUG-02）
       speed: () => walkSpeed(),
       groundGap: () => walk.groundGap,
       seatSink: () => effectiveSeatSink(),
@@ -4622,7 +4633,7 @@ function walkFlightTick() {
   const dt = WALK_TICK_MS / 1000;
   const b = win.getBounds();
   const wa = walkGeo.workAreaOf(screen, b);
-  const minX = walkMinX(wa);
+  const minX = wa.x - charStripInset(b);
   const maxX = Math.max(minX, wa.x + wa.width - b.width);
   const groundY = walkGeo.groundLine(wa, b.height, walk.groundGap);
 
@@ -4709,10 +4720,10 @@ function safeSetPosition(x, y, source = "position") {
   // v2.5.22d 合并（技术债 #5）：与 walkSetPosition 实现完全相同，收敛为别名
   return walkSetPosition(x, y, source);
 }
-function clampWalkX(x, wa, width) { return walkGeo.clampWalkX(x, wa, width, false, PET_LOCAL_X); }
+function clampWalkX(x, wa, width) { return walkGeo.clampWalkX(x, wa, width, false, charStripInset({ width })); }
 function walkSpan() { return walkGeo.spanOf(() => screen.getAllDisplays(), config.getConfig().walkGlobal); }
-function clampWalkSpan(x, span, width) { return walkGeo.clampWalkSpan(x, span, width, false, PET_LOCAL_X); }
-function walkMinX(wa) { return walkGeo.walkMinX(wa, false, PET_LOCAL_X); }
+function clampWalkSpan(x, span, width) { return walkGeo.clampWalkSpan(x, span, width, false, charStripInset({ width })); }
+function walkMinX(wa) { return walkGeo.walkMinX(wa, false, PET_LOCAL_X); } // 无宽度上下文的保守标准窗语义；有 bounds 的调用点用 wa.x - charStripInset(b)
 function setEdgeLeft(v) {
   v = !!v;
   if (walk.edgeLeft === v) return;
@@ -5249,8 +5260,8 @@ async function walkAttemptIconPerch() {
     if (!cands.length) return false;
     const t = cands[Math.floor(Math.random() * cands.length)];
     walk.perchTopY = Math.round(t.y + walk.groundGap - b.height); // 窗口底=图标顶+脚下空隙 → 角色脚踩图标顶
-    const charCx = (walk.charInset + b.width - 2) / 2; // 角色条带中心对准图标
-    walk.targetX = Math.min(Math.max(Math.round(t.x - charCx), walkMinX(wa)), wa.x + wa.width - b.width);
+    const charCx = charStripInset(b) + 60; // 角色条带中心对准图标（条带宽 120：inset+60；宽窗/compact 两式一致，BUG-02）
+    walk.targetX = Math.min(Math.max(Math.round(t.x - charCx), wa.x - charStripInset(b)), wa.x + wa.width - b.width);
     setBodyPosture({ iconTarget: true, gotoPerch: true, returning: false, seated: false, iconRest: false }, { source: "icon-perch-admit" });
     walk.resting = false;
     walk.sunk = false;
@@ -5340,7 +5351,7 @@ function outOfScreenGuard() {
       if (walk.seated) applySeatPosition();
     }
     // 水平：角色条带左缘越出工作区左缘 → 钳回贴边（与 walkTick 同款死区，越界 ≤8px 不干预）
-    const inset = PET_LOCAL_X;
+    const inset = charStripInset(b);
     const charLeft = b.x + inset;
     if (walkGeo.clampNeeded(wa.x, charLeft).overdue) {
       const fixX = wa.x - inset;
@@ -5375,7 +5386,7 @@ function walkTick() {
         commitLegacyPosition(eb.x, Math.round(groundY), "walk-clamp-y");
         if (walk.seated) applySeatPosition(); // 应坐姿时再校正下沉
       }
-      const inset = PET_LOCAL_X;
+      const inset = charStripInset(eb); // 宽度感知：非标准宽窗口条带偏移=宽-122（BUG-02）
       let charLeft = eb.x + inset;
       // 坐姿自愈（v2.5.26）：坐下后 Y 若漂移（皮肤 Sit 姿态/多屏匹配/瞬态残留），5s 低频拉回任务栏
       if (walk.seated && !walk.sleeping && Date.now() - (walk._seatHealAt || 0) > 5000) {
@@ -5642,9 +5653,14 @@ function startWalkingEngine(opts = {}) {
   if (walk.active) return true;
   if (config.getConfig().renderMode !== "spine") return false; // GIF 模式不可行走
   // 行走前恢复标准窗口尺寸：气泡加宽的大窗口会让 charInset=宽-122 超上限 → 行走左边界扩到屏幕外（“闪现”/出屏）
+  // BUG-02：恢复宽度变化同样补偿 x，角色屏上位置不随窗口恢复跳变（ admission 与 pet:set-size 同规则）。
   try {
     const wc = config.getConfig().window || {};
-    win.setSize(Math.round(wc.width || 260), Math.round(wc.height || 200));
+    const stdW = Math.round(wc.width || 260), stdH = Math.round(wc.height || 200);
+    const before = win.getBounds();
+    const dw = stdW - Math.round(before.width);
+    if (dw !== 0 && win.isVisible() && !walk.dragPaused) commitLegacyPosition(Math.round(before.x - dw), before.y, "resize-x-compensate");
+    win.setSize(stdW, stdH);
   } catch { /* 忽略 */ }
   walk.active = true;
   if (!opts.resume) { // fresh start 初始化组；A27：resume 不触碰任何业务姿态字段
@@ -6323,7 +6339,18 @@ ipcMain.on("pet:set-size", (_e, w, h, source, identity) => {
   const wasGrounded = captureResizeAnchor();
   const ws = Math.max(120, Math.min(1200, Math.round(w || 170)));
   const hs = Math.max(120, Math.min(900, Math.round(h || 260)));
-  // resizable:false 时 setSize 缩小会被忽略（放大接近原值看不出），先临时允许缩放
+  // BUG-02：条带右缘锚定（.pet left: calc(100%-122px)）——setSize 顶左固定会让角色屏上瞬跳 ±ΔW
+  // （气泡开合=ensureWindowWidthFor、行走激活恢复标准窗、放大还原=症状三个触发源）。
+  // 补偿 win.x 使条带屏上位置不变：气泡区向左生长，角色原地不动。
+  // render-mode 重派（布局有意重派）/拖拽持有（用户拥有几何）/隐藏窗口除外；V2/EXTERNAL 持有
+  // 时经 commitLegacyPosition 的 admission 拒绝（owner 逐拍 live 提交接管，不双写）。
+  try {
+    if (!renderModeCommit && win.isVisible() && !walk.dragPaused) {
+      const before = win.getBounds();
+      const dw = ws - Math.round(before.width);
+      if (dw !== 0) commitLegacyPosition(Math.round(before.x - dw), before.y, "resize-x-compensate");
+    }
+  } catch { /* 补偿失败退回顶左固定（原行为） */ }
   try { if (!win.isResizable()) win.setResizable(true); } catch { /* 忽略 */ }
   win.setSize(ws, hs);
   if (typeof v2StateCore !== "undefined" && v2StateCore) v2StateCore.posture.invalidateSupport("resize"); // posture 语义保持；support 证据诚实过期

@@ -28,6 +28,13 @@ function makeAdmission(authority) {
   };
 }
 
+/** 真实 charStripInset 提取（BUG-02 宽度感知几何：钳位/哨兵与 main 同源，不复制算法） */
+function buildCharStripInset(walk = { uiEdgeCompact: false }) {
+  const s = mainSource.indexOf("function charStripInset");
+  const e = mainSource.indexOf("}", mainSource.indexOf("Math.max(PET_LOCAL_X", s)) + 1;
+  return new Function("walk", "PET_LOCAL_X", `${mainSource.slice(s, e)}; return charStripInset;`)(walk, 138);
+}
+
 /** 提取真实 outOfScreenGuard，注入真 authority-backed admission + 捕获 win.setPosition */
 function buildOutOfScreenGuard(authority, bounds, writes) {
   const adm = makeAdmission(authority);
@@ -35,10 +42,11 @@ function buildOutOfScreenGuard(authority, bounds, writes) {
   const walk = { paused: false, flight: false, jump: false, seated: false, _vLog: 0, groundGap: 10 };
   const api = new Function(
     "win", "walk", "walkGeo", "screen", "config", "renderModeMod", "gifVisualGroundGap", "logTts", "applySeatPosition", "PET_LOCAL_X",
-    "v2LegacyPositionBlocked", "v2NoteDeferredClamp",
+    "charStripInset", "v2LegacyPositionBlocked", "v2NoteDeferredClamp",
     block("function outOfScreenGuard()", "\nfunction walkTick") + "; return outOfScreenGuard;"
   )(win, walk, walkGeo, { getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }), getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }) },
     { getConfig: () => ({ renderMode: "spine" }) }, require("../src/render-mode"), 0, () => {}, () => {}, 138,
+    buildCharStripInset(walk),
     adm.v2LegacyPositionBlocked, adm.v2NoteDeferredClamp);
   return { guard: () => api(), writes, adm, walk, bounds };
 }
@@ -50,10 +58,11 @@ function buildClamp(authority, bounds, writes) {
   const walk = { seated: false, perched: false, flight: false, jump: false, dragPaused: false, groundGap: 10 };
   const api = new Function(
     "win", "walk", "walkGeo", "screen", "walkMinX", "walkState", "applySeatPosition", "applyLayer", "logTts",
-    "v2LegacyPositionBlocked", "v2NoteDeferredClamp", "commitLegacyPosition",
+    "charStripInset", "v2LegacyPositionBlocked", "v2NoteDeferredClamp", "commitLegacyPosition",
     block("function clampPetToWorkArea(", "\nlet displayClampTimer") + "; return clampPetToWorkArea;"
   )(win, walk, walkGeo, { getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }), getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }) },
     () => 0, require("../src/walk-state"), () => {}, () => {}, () => {},
+    buildCharStripInset(walk),
     adm.v2LegacyPositionBlocked, adm.v2NoteDeferredClamp,
     (x, y) => { const r = authority.positionAdmit("legacy"); if (!r.ok) return r; win.setPosition(x, y); return { ok: true }; });
   return { clamp: () => api("test"), writes, adm, bounds };
