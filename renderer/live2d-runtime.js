@@ -147,14 +147,31 @@
 
   function setScale(v) { scaleFactor = Number(v) > 0 ? Number(v) : 1.0; fit(); }
 
+  /** BUG-07：点击/悬停命中判定（alpha hit-test 的最小收缩方案）。
+   *  画布满铺窗口（100%×100%，与视口同原点），此前 elementFromPoint 命中画布元素即整窗可交互——
+   *  大透明画布把 hover/pat/drag 全部拦截。产品级 Cubism Web 栈有帧缓存 alpha 精判（runtime-alpha.mjs）；
+   *  legacy pixi-live2d 栈按模型包围盒判定：可交互范围从整窗收缩到模型 rect。
+   *  残余：模型 rect 内的透明边角仍可命中（chibi 模型画布通常略大于角色轮廓）——记录不改，等价产品栈。 */
+  function interactiveAt(x, y) {
+    const owner = activeOwner;
+    if (!owner || !owner.model || !active) return false;
+    try {
+      const b = owner.model.getBounds();
+      if (!b || !Number.isFinite(b.x) || !(b.width > 0) || !(b.height > 0)) return false;
+      const px = Number(x), py = Number(y);
+      return px >= b.x && px <= b.x + b.width && py >= b.y && py <= b.y + b.height;
+    } catch { return false; }
+  }
+
   window.Live2DRuntime = {
     init,
     destroy,
     setMood,
     poke,
     setScale,
+    interactiveAt, // BUG-07：clickability 精确命中入口（petUiHit live2dInteractiveAt 钩子消费）
     get active() { return active; },
     /** 供错误上报/诊断 */
-    version: "v1.2"
+    version: "v1.3"
   };
 })();

@@ -4609,7 +4609,10 @@ const clickability = window.PetClickability.createClickabilityCore({
   isPetUI: (el, e) => window.PetClickability.petUiHit(el, e, {
     petEl: () => petEl,
     activeRenderMode: () => activeRenderMode,
-    live2dInteractiveAt: (x, y) => activeRenderMode === "live2d" && live2dActive && !!window.Live2DRuntime && window.Live2DRuntime.interactiveAt(x, y),
+    live2dInteractiveAt: (x, y) => activeRenderMode === "live2d" && live2dActive && !!window.Live2DRuntime &&
+      (typeof window.Live2DRuntime.interactiveAt === "function"
+        ? window.Live2DRuntime.interactiveAt(x, y) // BUG-07：精确命中（产品栈=alpha 帧缓存；legacy 栈=模型包围盒）
+        : true), // 无 interactiveAt 的替身栈：退回旧整画布语义（不抛错——抛错会冻结 clickability 刷新=BUG-07 根因之一）
     busy: () => busy,
     walkState: () => walkState,
     playback: (msg) => { try { window.petAPI.playback(msg); } catch { /* 忽略 */ } },
