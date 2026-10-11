@@ -1,0 +1,40 @@
+[
+  {
+    "side": "left",
+    "index": 1,
+    "flipTs": 1791734285282,
+    "frames": 149,
+    "maxWindowStep": 1,
+    "admissionProbe": true,
+    "seedDistance": 1,
+    "firstMoveTs": 1791734285239,
+    "flipAfterFirstMoveMs": 43,
+    "edgeTouchFrames": 143,
+    "bubbleVisibleFrames": 0,
+    "clippedFrames": 143,
+    "minLeftMargin": 0,
+    "minRightMargin": 20,
+    "maxLocalStep": 16.263987998970833,
+    "maxScreenStep": 16.263987998970833,
+    "maxCoreStep": 0.23666367132199184,
+    "maxHeadStep": 6.316379538095276,
+    "maxScreenCoreStep": 1.0000000081713836,
+    "maxScreenHeadStep": 6.316379538095276,
+    "worst": {
+      "ts": 1791734285282,
+      "frame": 32,
+      "dt": 8,
+      "local": -16.263987998970833,
+      "window": 0,
+      "screen": -16.263987998970833,
+      "spine": -8.285839206169172,
+      "core": 0,
+      "head": -6.316379538095276,
+      "screenCore": 0,
+      "screenHead": -6.316379538095276
+    },
+    "maxAlignmentMs": 16,
+    "evidence": "E:\\WhiteMoon\\work\\chibi-left-edge-flash-residual-evidence\\bug03-visual-2Yf7D6\\left-1",
+    "pass": false
+  }
+]

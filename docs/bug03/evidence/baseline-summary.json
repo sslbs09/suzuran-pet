@@ -1,0 +1,44 @@
+[
+  {
+    "side": "left",
+    "index": 1,
+    "flipTs": 1791731081533,
+    "frames": 322,
+    "maxWindowStep": 1,
+    "maxLocalStep": 17.90456492557783,
+    "maxScreenStep": 17.90456492557783,
+    "worst": {
+      "ts": 1791731081686,
+      "frame": 407,
+      "dt": 8,
+      "local": 17.90456492557783,
+      "window": 0,
+      "screen": 17.90456492557783,
+      "spine": 18.06769359111786
+    },
+    "maxAlignmentMs": 18,
+    "evidence": "C:\\Users\\xsbil\\AppData\\Local\\Temp\\bug03-visual-hbbhYR\\left-1",
+    "pass": false
+  },
+  {
+    "side": "right",
+    "index": 1,
+    "flipTs": 1791731087477,
+    "frames": 318,
+    "maxWindowStep": 1,
+    "maxLocalStep": 21.90269808242806,
+    "maxScreenStep": 21.90269808242806,
+    "worst": {
+      "ts": 1791731087636,
+      "frame": 392,
+      "dt": 12,
+      "local": -21.90269808242806,
+      "window": 0,
+      "screen": -21.90269808242806,
+      "spine": -22.038594603538513
+    },
+    "maxAlignmentMs": 22,
+    "evidence": "C:\\Users\\xsbil\\AppData\\Local\\Temp\\bug03-visual-hbbhYR\\right-1",
+    "pass": false
+  }
+]

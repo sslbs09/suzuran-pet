@@ -34,7 +34,7 @@ function wait(ms = 10) {
 
 function createPetLifecycleHarness(opts = {}) {
   const handlers = {};
-  const calls = { sizes: [], clickable: [], playback: [], outcomes: [], outcomeVis: [], corrections: [], bodyReadies: [], asks: [], stops: [], regenerates: [], walkingPauses: [], regenerateResult: true, fetches: 0 };
+  const calls = { sizes: [], charInsets: [], clickable: [], playback: [], outcomes: [], outcomeVis: [], corrections: [], bodyReadies: [], asks: [], stops: [], regenerates: [], walkingPauses: [], regenerateResult: true, fetches: 0 };
   const elements = new Map();
   let sampleAlpha = 255; // T11：置 0 可造“永不产生有效轮廓”的异常模型（sample 恒 null → 无 TARGET）
   const nativeSetTimeout = setTimeout;
@@ -339,6 +339,7 @@ function createPetLifecycleHarness(opts = {}) {
     stop: (id) => { calls.stops.push(id); },
     regenerate: (id) => { calls.regenerates.push(id); return calls.regenerateResult; },
     walkingPause: (...args) => { calls.walkingPauses.push(args); }, moveWindow() {}, hideWindow() {}, reloadRenderer() {}, pat() {}, throwPet() {},
+    setCharInset: (inset) => calls.charInsets.push(inset),
     getAppearance: async () => null, getInfo: async () => ({})
   }, {
     get(target, property) {
@@ -3263,6 +3264,148 @@ async function seatRuntimeHarness({ keepScale = false, edgeDiag = false, sleepNa
   return h;
 }
 const seatState = h => h.lifecycle.seatYForTest.state();
+
+test("Spine current-pose alpha hit maps DOM coordinates, ignores transparent pixels and retired owners", async () => {
+  const h = await seatRuntimeHarness({ keepScale: true });
+  h.obj.auditGeometry = { bbox: { x: -20, y: -80, width: 40, height: 80 }, visible: [{ x: -20, y: -80, width: 40, height: 80 }] };
+  h.obj.x = 80; h.obj.y = 120; h.obj.scale.set(1);
+  const query = (x, y) => {
+    h.sandbox.hitX = x; h.sandbox.hitY = y;
+    return vm.runInContext('typeof spineInteractiveAt === "function" && spineInteractiveAt(hitX,hitY)', h.sandbox);
+  };
+  const canvas = h.app.view.getBoundingClientRect();
+  const cx = 80 * canvas.width / h.app.screen.width, cy = 80 * canvas.height / h.app.screen.height;
+  const pose = { x: h.obj.x, y: h.obj.y, sx: h.obj.scale.x };
+  assert.equal(query(cx, cy), true, "opaque body pixel is interactive");
+  assert.equal(query(5 * canvas.width / h.app.screen.width, cy), false, "transparent pixel passes through");
+  assert.equal(query(-1, cy), false, "outside actual canvas passes through");
+  assert.deepEqual({ x: h.obj.x, y: h.obj.y, sx: h.obj.scale.x }, pose, "point sampling cannot modify the visible pose");
+  await h.switch("gif");
+  assert.equal(query(cx, cy), false, "retired Spine owner cannot claim a hit");
+});
+
+test("BUG03: first applied Move is body-fitted before render and a 43ms reversal cannot freeze the transition anchor", async () => {
+  const h = await seatRuntimeHarness({ keepScale: true });
+  h.app.screen.width = 120;
+  const geometry = { bbox: { x: -60, y: -100, width: 126, height: 100 },
+    visible: [{ x: -40, y: -90, width: 40, height: 80 }, { x: 15, y: -40, width: 20, height: 40 }] };
+  const core = { worldX: -20, worldY: -50, data: { name: "F_Chest" } };
+  h.obj.skeleton = { findBone: name => name === "F_Chest" ? core : null };
+  const update = h.obj.update;
+  h.obj.update = dt => { update(dt); h.obj.auditGeometry = geometry; };
+  h.setAnim("Relax");
+  vm.runInContext('walkState = { active:false, resting:false, paused:false, seated:false, perched:false, sleeping:false, face:-1 }', h.sandbox);
+  h.obj.scale.set(-1, 1); h.obj.x = 24; h.obj.y = 150; // previous Relax core=44
+  h.handlers.onWalking({ ...LIVEW, face: -1 });
+  const generation = h.lifecycle.getState().fit.generation;
+  h.frame(16); // actual bundled pose apply, then the existing owner ticker, before render
+  const coreX = () => h.obj.x + h.obj.scale.x * core.worldX;
+  assert.equal(coreX(), 60, "first rendered Move must already use the ordinary body anchor, before the 150ms fit");
+  assert.equal(h.obj.y, 150, "early horizontal placement does not take Y authority");
+  assert.equal(Math.abs(h.obj.scale.x), 1, "early placement does not take scale authority");
+  const before = coreX(), entry = h.obj.state.getCurrent(0), sizes = h.calls.sizes.length;
+  h.clock.advance(27); // same +43ms natural-reversal ordering as the Electron failure
+  h.handlers.onWalking({ ...LIVEW, face: 1 });
+  assert.equal(coreX(), before, "early mirror cannot introduce a 16px rigid body translation");
+  assert.ok(h.lifecycle.getState().fit.generation > generation, "mirror really replaces the pending 150ms ordinary generation");
+  for (const ms of [16, 150, 350, 1000]) {
+    h.frame(ms);
+    assert.equal(coreX(), before, "mirror and later fits retain the already applied anchor");
+    const rt = { width: 360, height: 600 };
+    h.app.renderer.render(h.obj, { renderTexture: rt, transform: { a: 1, d: 1, tx: 120, ty: 200 } });
+    const pixels = h.app.renderer.extract.pixels(rt); let left = rt.width, right = -1;
+    for (let y = 0; y < rt.height; y++) for (let x = 0; x < rt.width; x++) if (pixels[(y * rt.width + x) * 4 + 3] > 32) {
+      left = Math.min(left, x); right = Math.max(right, x);
+    }
+    assert.ok(left >= 120 && right < 240, "actual padded equipment pixels stay inside the original 120px canvas");
+  }
+  assert.equal(h.obj.state.getCurrent(0), entry);
+  assert.equal(h.calls.sizes.length, sizes, "mirror never resizes the native window");
+});
+
+for (const face of [-1, 1]) test("BUG03: body core stays continuous despite asymmetric equipment through Move mirror and delayed fit, face=" + face, async () => {
+  const h = await seatRuntimeHarness({ keepScale: true });
+  const geometry = {
+    bbox: { x: -60, y: -100, width: 126, height: 100 },
+    visible: [{ x: -40, y: -90, width: 40, height: 80 }, { x: 15, y: -40, width: 20, height: 40 }]
+  };
+  const core = { worldX: -20, worldY: -50, data: { name: "F_Chest" } };
+  h.obj.skeleton = { findBone: name => name === "F_Chest" ? core : null };
+  const originalUpdate = h.obj.update;
+  h.obj.update = dt => { originalUpdate(dt); h.obj.auditGeometry = geometry; };
+  h.handlers.onWalking({ ...LIVEW, face: -face });
+  h.frame(); h.clock.advance(5000);
+  h.obj.update(0);
+  h.lifecycle.fitPassForTest();
+  assert.ok(Math.abs(h.obj.x + h.obj.scale.x * core.worldX - h.app.screen.width / 2) <= 0.01,
+    "ordinary Move fit anchors the evidenced body core at canvas center");
+  let pixelLeft = null, pixelRight = null;
+  const center = () => {
+    const rt = { width: h.app.screen.width, height: h.app.screen.height };
+    h.app.renderer.render(h.obj, { renderTexture: rt });
+    const pixels = h.app.renderer.extract.pixels(rt);
+    let sum = 0, count = 0, left = rt.width, right = -1;
+    for (let y = 0; y < rt.height; y++) for (let x = 0; x < rt.width; x++) {
+      const a = pixels[(y * rt.width + x) * 4 + 3];
+      if (y < h.obj.y + h.obj.scale.y * core.worldY) { sum += x * a; count += a; }
+      if (a > 32) { left = Math.min(left, x); right = Math.max(right, x); }
+    }
+    assert.ok(count > 0, "visible pixels are enabled");
+    pixelLeft = left;
+    pixelRight = right;
+    return sum / count;
+  };
+  const before = center(), entry = h.obj.state.getCurrent(0), sizes = h.calls.sizes.length;
+  const scaleBefore = Math.abs(h.obj.scale.x);
+  h.obj.y += 10;
+  const yBefore = h.obj.y;
+  h.handlers.onUiEdgeCompact({ value: face > 0 }); // standard 260px: both CSS anchors equal 138px
+  h.handlers.onWalking({ ...LIVEW, face });
+  assert.ok(Math.abs(center() - before) <= 1, "mirror must preserve visible center before any timer");
+  for (const ms of [150, 350, 500, 800, 1000, 1400]) {
+    h.clock.advance(ms);
+    assert.ok(Math.abs(center() - before) <= 1, "delayed fit must not use a different horizontal anchor");
+    assert.ok(pixelLeft > 0 && pixelRight < h.app.screen.width - 1, "both body and asymmetric equipment remain inside the actual canvas");
+    const actualInset = Math.round(h.elements.get("pet").offsetLeft + pixelLeft * h.elements.get("pet").clientWidth / h.app.screen.width);
+    assert.equal(h.calls.charInsets.at(-1), actualInset, "published visible-left belongs to the actual preserved pose");
+  }
+  assert.equal(h.obj.state.getCurrent(0), entry, "direction turn retains the running animation");
+  assert.equal(h.calls.sizes.length, sizes, "turn does not request native resize");
+  assert.equal(Math.abs(h.obj.scale.x), scaleBefore, "the direction fit retains normal scale authority");
+  assert.notEqual(h.obj.y, yBefore, "direction fit continues normal vertical placement");
+  // A stale Move track can remain during a resting/phase transition. Returning
+  // to Move is not an in-episode reversal and must center the body normally.
+  h.obj.x += 20;
+  vm.runInContext('walkState.resting = true', h.sandbox);
+  h.handlers.onWalking({ ...LIVEW, face: -face });
+  h.clock.advance(5000);
+  assert.ok(Math.abs(h.obj.x + h.obj.scale.x * core.worldX - h.app.screen.width / 2) <= 0.01,
+    "entry from resting does not freeze a stale Move anchor");
+  h.obj.x += 20;
+  const moved = center();
+  h.setAnim("Relax");
+  vm.runInContext('scheduleFitSpine({})', h.sandbox);
+  h.frame(); h.clock.advance(5000);
+  assert.ok(Math.abs(center() - moved) > 1, "a new animation fit releases the direction-only horizontal constraint");
+  h.obj.x += 30;
+  const movedForSize = center();
+  h.app.screen.width += 20;
+  vm.runInContext('scheduleFitSpine({})', h.sandbox);
+  h.clock.advance(5000);
+  assert.ok(Math.abs(center() - movedForSize) > 10, "a new canvas-size fit has no old mirror constraint");
+  const oldOwner = h.obj, oldX = oldOwner.x;
+  await h.switch("gif");
+  await h.switch("spine");
+  h.clock.advance(1200);
+  const nextOwner = h.lifecycle.getState().spineRuntimeOwner.obj;
+  assert.notEqual(nextOwner, oldOwner, "replacement owns a new Spine object");
+  nextOwner.x += 30;
+  const movedForOwner = nextOwner.x;
+  vm.runInContext('scheduleFitSpine({})', h.sandbox);
+  h.clock.advance(5000);
+  assert.notEqual(nextOwner.x, movedForOwner, "new owner fits normally without the old mirror anchor");
+  assert.equal(oldOwner.x, oldX, "old owner timers cannot move the retired object");
+});
 
 for (const [label, source, state, mood, expected, sleepName] of [
   ["Sit→Move", "Sitd", LIVEW, null, true],

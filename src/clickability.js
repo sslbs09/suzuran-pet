@@ -69,6 +69,13 @@ function petUiHit(el, e, env = {}) {
   if (live2dCanvas && env.live2dInteractiveAt && e) {
     return env.live2dInteractiveAt(e.clientX, e.clientY) === true;
   }
+  // Spine canvas/body hit-testing is supplied by the renderer's current-pose
+  // alpha query.  Do this before the generic #pet rule so transparent canvas
+  // pixels do not inherit the whole DOM rectangle's hit area.
+  const spineBody = el.closest && el.closest("#pet");
+  if (spineBody && e && env.activeRenderMode && env.activeRenderMode() === "spine" && env.spineInteractiveAt) {
+    return env.spineInteractiveAt(e.clientX, e.clientY) === true;
+  }
   // 精确命中：角色/气泡/输入栏/信息版/渲染画布 这些真正的可交互实体
   if (el.closest("#pet") || el.closest("#bubble") || el.closest("#input-bar") ||
       el.closest("#rig-canvas") || el.closest("#live2d-canvas") || el.closest("#info-panel")) return true;
@@ -81,17 +88,6 @@ function petUiHit(el, e, env = {}) {
     if (!cp && !cr) {
       try { env.playback("[ui] closest断点 target=" + (el.id || el.tagName) + " pet祖先=无 pet-root祖先=" + (!!cr)); } catch { /* 忽略 */ }
     }
-  }
-  // 行走容差圈（v2.5.1）：只在 Spine 真正走动时启用；静止时不再无条件挡下层应用
-  const walk = env.walkState ? env.walkState() : null;
-  const petEl = env.petEl ? env.petEl() : null;
-  if (e && petEl && env.activeRenderMode && env.activeRenderMode() === "spine" &&
-      !(env.busy && env.busy()) && walk && walk.active && !walk.resting &&
-      !walk.paused && !walk.sleeping && !walk.seated && !walk.perched) {
-    try {
-      const r = petEl.getBoundingClientRect();
-      if (Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2)) < 130) return true;
-    } catch { /* 忽略 */ }
   }
   return false;
 }

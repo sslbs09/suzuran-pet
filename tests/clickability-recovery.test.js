@@ -179,10 +179,10 @@ test("T7-T10 all four render-mode owners remain hittable", () => {
     h.core.refreshClickable(198, 114);
     assert.deepEqual(h.sent, [true], `${label} 实体必须可交互`);
   }
-  // 行走容差圈规则保持：仅 Spine 真正走动时启用
+  // Spine 行走不再扩大透明命中范围；只有当前 pose alpha 命中才可交互
   const walkOn = makeCore({ hitEl: makeEl("DIV", []), activeRenderMode: "spine", walkState: { active: true, resting: false, paused: false, sleeping: false, seated: false, perched: false } });
   walkOn.core.refreshClickable(198, 114);
-  assert.deepEqual(walkOn.sent, [true], "Spine 走动中容差圈命中");
+  assert.deepEqual(walkOn.sent, [false], "Spine 走动外圈保持穿透");
   const walkOff = makeCore({ hitEl: makeEl("DIV", []), activeRenderMode: "spine", walkState: { active: false, resting: false, paused: false, sleeping: false, seated: false, perched: false } });
   walkOff.core.refreshClickable(198, 114);
   assert.deepEqual(walkOff.sent, [false], "Spine 静止：容差圈不再挡下层应用");

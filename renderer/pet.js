@@ -457,6 +457,7 @@ let spineFitGeneration = 0;
 let spineFitStableHits = 0;
 let spineFitOwnerGeneration = 0;
 let spineFitOwner = null;
+let spineFitOptions = {};
 /* A-v2.1 pre-visible bootstrap：冷启动/re-entry/reload 的 Spine 在 fit 收敛（autoScale 确立或
  * 判定无需放大/manual 权威已定）之前保持画布不可见——首次可见即最终尺寸，杜绝 0.205→0.275 跳变。
  * 正常路径由 fit pass 事件驱动释放；bounded fallback（8 pass / 5s）只兜异常模型，防永久隐身。 */
@@ -471,6 +472,7 @@ let spineBootstrapDoneResolve = null;
 let spineBootstrapOwnerReset = null; // A24：owner-boundary 记录 {carry, applied, ownerGen}（staged 初值来源与新 owner neutral applied 的证据链）
 
 function scheduleFitSpine(opts = {}) {
+  spineFitOptions = opts;
   spineFitGeneration += 1;
   spineFitStableHits = 0;
   // spineAutoScaled / spineFitKeepScale 跨动画保持（只在换皮肤 initSpine 时重置）：
@@ -483,7 +485,7 @@ function scheduleFitSpine(opts = {}) {
   spineFitOwnerGeneration = ownerGeneration;
   // 坐姿切换不等待完整混合窗口：先快速贴底，再由后续 fit 做最终校准。
   const timers = opts.seatPhase ? [80, 160, 300, 600, 1200, 2400] : [150, 500, 1000, 1800, 2800, 4200];
-  spineFitTimers = timers.map((ms) => setTimeout(() => fitSpinePose(generation, ownerGeneration, owner), ms));
+  spineFitTimers = timers.map((ms) => setTimeout(() => fitSpinePose(generation, ownerGeneration, owner, opts), ms));
 }
 let spineXoff = 0;  // 可见主体偏在包围盒一侧时的水平居中修正（占包围盒宽度比例，face=-1 时自动镜像）
 let spineManual = false;   // 该皮肤是否手动调过 boostTable（true 则不做像素级自动放大）
@@ -1082,7 +1084,7 @@ function measureSpineFitPlacement(keepScale = spineFitKeepScale) {
   return pose;
 }
 
-function fitSpinePose(generation = spineFitGeneration, ownerGeneration = spineFitOwnerGeneration, owner = spineFitOwner) {
+function fitSpinePose(generation = spineFitGeneration, ownerGeneration = spineFitOwnerGeneration, owner = spineFitOwner, opts = {}) {
   seatExitForensicFitEvent("invoke");
   /* PROBE 3（EDGEDIAG）：仅打印紧跟一次 FACE 翻转（≤1500ms 短窗）的 fit；bbox 用原始 getBounds（不做 position 归零，零诊断副作用） */
   const diagEventAt = Math.max(lastFaceFlipAt, lastSeatExitAt); // face 翻转或 seat-exit 边沿任一（diagnostics-only 扩窗）
@@ -1124,6 +1126,10 @@ function fitSpinePose(generation = spineFitGeneration, ownerGeneration = spineFi
     const baseline = Math.abs(spineBaseScaleX);
     // active 期不临时清零 actual Y；任何 invalid-bounds/throw 都不能绕过 limiter。
     const seatYActive = seatExitYOwnsY();
+    // A direction-only mirror already preserved the visible horizontal anchor.
+    // This one generation still fits scale/Y; an animation, size or owner fit
+    // uses ordinary options and releases the constraint.
+    const preserveMirrorX = !!opts.mirrorEntry && spineObj.state.getCurrent(0) === opts.mirrorEntry;
     const bboxBounds = () => spineFitBoundsAtScale(spineObj.scale.x, spineObj.scale.y);
     // 像素采样：可见轮廓（在给定定位状态下）
     const sample = () => {
@@ -1157,11 +1163,22 @@ function fitSpinePose(generation = spineFitGeneration, ownerGeneration = spineFi
     if (spineFitKeepScale) {
       const placement = measureSpineFitPlacement(true);
       if (!placement) { fitBootstrapCheck(false); emitFitDiag("invalid-bbox"); return; }
+      const walkingCore = spineWalkingCoreBone();
+      if (walkingCore && !preserveMirrorX) placement.x = W / 2 - placement.sx * walkingCore.worldX;
       spineObj.scale.set(placement.sx, placement.sy);
-      spineObj.x = placement.x;
+      if (!preserveMirrorX) spineObj.x = placement.x;
+      if (walkingCore && !preserveMirrorX) {
+        spineFitOptions.bodyCoreEntry = spineObj.state.getCurrent(0);
+        spineFitOptions.bodyCoreRevision = spineTrackRevision;
+      }
       if (!seatYActive) spineObj.y = placement.y;
       const vis = placement.vis;
-      spineFigLeftCss = vis && petEl ? petEl.offsetLeft + vis.x0 * (petEl.clientWidth / Math.max(1, W)) : (petEl ? petEl.offsetLeft : 0);
+      if (preserveMirrorX || walkingCore) {
+        const actual = spineVisiblePixels();
+        if (actual && petEl) spineFigLeftCss = petEl.offsetLeft + actual.left * (petEl.clientWidth / Math.max(1, W));
+      } else {
+        spineFigLeftCss = vis && petEl ? petEl.offsetLeft + vis.x0 * (petEl.clientWidth / Math.max(1, W)) : (petEl ? petEl.offsetLeft : 0);
+      }
       if (seatYActive) seatYMeasureTarget("fit-keepScale", placement);
       let keepDiag = null; // FIT keepScale 稳态 offset 读数：只用本拍已算好的 vis，零新增 sample
       if (EDGE_DIAG && vis) {
@@ -1337,12 +1354,9 @@ function scheduleGeometryReport() {
 /** 行走朝向：face=-1 时镜像翻转（假设模型原始朝右；若实际相反改此处符号即可）
  *  注意：fitSpinePose 可能已按姿势 containment 缩小 scale（mag < spineBaseScaleX），
  *  翻转必须保持等比——以当前 scale.y 的绝对值为基准，只改符号，否则会左右拉伸。 */
-/** EDGEDIAG 主因修复：scale.x 镜像的同帧轻量 recenter。
- *  镜像使骨骼包围盒相对物体原点左右翻转（bbox.x 变、宽不变），fit 首拍（~150ms）前出现
- *  约 2×|bbox 偏心|（实测 17~22px）的视觉跳变。此处只做 normal 分支同款 bbox 水平居中
- *  一步：不重算 k/scale、不动 y/scale、不采样、不发 reportGroundGap、不排 timer、不碰
- *  generation——150/500/1000ms 的 scheduleFitSpine 窗口照旧完成可见主体（vis/spineXoff）
- *  精居中，本函数只消灭第一帧的错位。 */
+/** Existing bbox mirror fallback for poses/skins without the evidenced walking
+ *  body core. It preserves legacy placement, without claiming visible-body
+ *  continuity for arbitrary asymmetric equipment or skeletons. */
 function mirrorRecentreImmediate() {
   try {
     if (!spineApp || !spineObj) return;
@@ -1357,15 +1371,96 @@ function mirrorRecentreImmediate() {
     }
   } catch { /* 立即 recenter 失败无碍：后续 fit 窗口照旧收敛（原行为） */ }
 }
-function spineFaceDir(face) {
+function spineVisiblePixels() {
+  let rt = null;
+  try {
+    const W = Math.ceil(spineApp.screen.width), H = Math.ceil(spineApp.screen.height);
+    rt = PIXI.RenderTexture.create({ width: W, height: H });
+    spineApp.renderer.render(spineObj, { renderTexture: rt, clear: true });
+    const pixels = spineApp.renderer.extract.pixels(rt);
+    let left = W;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const alpha = pixels[(y * W + x) * 4 + 3];
+      if (alpha > 32) left = Math.min(left, x);
+    }
+    return left < W ? { left } : null;
+  } catch { return null; }
+  finally { if (rt) rt.destroy(true); }
+}
+function spineInteractiveAt(clientX, clientY) {
+  let rt = null;
+  try {
+    if (activeRenderMode !== "spine" || spineBootstrapPending || !spineApp || !spineObj ||
+        !spineRuntimeOwner || spineRuntimeOwner.obj !== spineObj || spineObj.destroyed) return false;
+    const view = spineApp.view;
+    if (!view || view.classList.contains("hidden") || view.style.visibility === "hidden" || view.style.display === "none") return false;
+    const rect = view.getBoundingClientRect(), W = spineApp.screen.width, H = spineApp.screen.height;
+    if (!(rect.width > 0 && rect.height > 0) || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return false;
+    const x = Math.floor((clientX - rect.left) * W / rect.width);
+    const y = Math.floor((clientY - rect.top) * H / rect.height);
+    if (x < 0 || y < 0 || x >= W || y >= H) return false;
+    // One current-pose stage pixel, including CSS zoom through the DOM rect.
+    // Project the scene into a 1px target; never mutate position or scale.
+    rt = PIXI.RenderTexture.create({ width: 1, height: 1 });
+    spineApp.renderer.render(spineObj, { renderTexture: rt, clear: true,
+      transform: new PIXI.Matrix(1, 0, 0, 1, -x, -y) });
+    return spineApp.renderer.extract.pixels(rt)[3] > 32;
+  } catch { return false; }
+  finally { if (rt) rt.destroy(true); }
+}
+function spineWalkingCoreBone() {
+  if (!spineFitKeepScale || !walkState.active || walkState.resting || walkState.paused ||
+      walkState.seated || walkState.perched || walkState.sleeping || !spineObj) return null;
+  const entry = spineObj.state.getCurrent(0);
+  if (!entry || !entry.animation || entry.animation.name !== "Move") return null;
+  const bone = spineObj.skeleton && typeof spineObj.skeleton.findBone === "function"
+    ? spineObj.skeleton.findBone("F_Chest") : null;
+  return bone && Number.isFinite(bone.worldX) ? bone : null;
+}
+function fitWalkingCoreBeforeRender() {
+  if (!spineObj || spineObj.destroyed || spineFitOwner !== spineRuntimeOwner ||
+      spineFitOwnerGeneration !== activeRenderGeneration ||
+      (seatEpisode.active && seatEpisode.owner === spineObj && seatTrackActive())) return;
+  const bone = spineWalkingCoreBone(), entry = spineObj.state.getCurrent(0);
+  if (!bone || spineFitOptions.mirrorEntry ||
+      (spineFitOptions.bodyCoreEntry === entry && spineFitOptions.bodyCoreRevision === spineTrackRevision)) return;
+  // The first applied Move pose must receive its ordinary horizontal fit before
+  // render. A boundary can mirror it before the existing 150ms full-fit timer.
+  // Keep this completion fact in that fit's options; never re-anchor every frame.
+  spineObj.x = spineApp.screen.width / 2 - spineObj.scale.x * bone.worldX;
+  spineObj.updateTransform();
+  spineFitOptions.bodyCoreEntry = entry;
+  spineFitOptions.bodyCoreRevision = spineTrackRevision;
+  const actual = spineVisiblePixels();
+  if (actual && petEl) {
+    spineFigLeftCss = petEl.offsetLeft + actual.left * (petEl.clientWidth / Math.max(1, spineApp.screen.width));
+    reportGroundGap();
+  }
+}
+function spineFaceDir(face, wasMoving = false) {
   if (!spineObj) return;
   const sy = Math.abs(spineObj.scale.y);
   const sx = sy * (face === -1 ? -1 : 1);
   if (spineObj.scale.x !== sx) {
     const oldSign = spineObj.scale.x < 0 ? -1 : 1;
+    const entry = spineObj.state.getCurrent(0);
+    const directionOnly = wasMoving && oldSign !== (sx < 0 ? -1 : 1) && Math.abs(spineObj.scale.x) === sy &&
+      spineFitOwner === spineRuntimeOwner && spineFitOwnerGeneration === activeRenderGeneration &&
+      spineFitOptions.bodyCoreEntry === entry && spineFitOptions.bodyCoreRevision === spineTrackRevision;
+    // F_Chest is an evidenced body-core bone in the winter skin. Equipment
+    // biases the whole-sprite centroid; absent this explicit capability, retain
+    // the existing mirror path rather than guessing that root is body center.
+    const coreBone = directionOnly ? spineWalkingCoreBone() : null;
+    const coreCenter = coreBone && Number.isFinite(coreBone.worldX)
+      ? spineObj.x + spineObj.scale.x * coreBone.worldX : null;
     const diagBoundsBefore = EDGE_DIAG ? sdRawBounds() : null;
     spineObj.scale.x = sx;
-    mirrorRecentreImmediate(); // 镜像同帧 bbox 回中（EDGEDIAG TOP 修复；bounds 快照仍记录纯镜像位移供诊断）
+    if (coreCenter !== null) {
+      // Reflect the same applied pose about the actual body core. Direction
+      // commit does not advance animation or resample an already clipped pose.
+      spineObj.x = 2 * coreCenter - spineObj.x;
+      spineObj.updateTransform();
+    } else mirrorRecentreImmediate();
     if (EDGE_DIAG) { // PROBE 2：face 确实翻转（scale.x 符号变）才打；记录翻转后、scheduleFitSpine 前的 spine-local x/y（非窗口坐标）
       lastFaceFlipAt = Date.now();
       try {
@@ -1375,7 +1470,9 @@ function spineFaceDir(face) {
           ts: lastFaceFlipAt, turnId: diagEdgeFaceId(), oldFace: oldSign, newFace: face,
           spineLocalX: Number(spineObj.x.toFixed(2)), spineLocalY: Number(spineObj.y.toFixed(2)),
           x: Number(spineObj.x.toFixed(2)), y: Number(spineObj.y.toFixed(2)), // 兼容别名：spineObj.x/y=容器局部坐标（窗口坐标只在 TURN 行的 windowX/bounds* 出现）
-          immediateRecentre: true, // 本行 spineLocalX 已是"镜像+立即 bbox 回中"后的读数；mirrorShiftX（修复前跳变量）=mirrorBoundsAfter.x−mirrorBoundsBefore.x
+          immediateRecentre: true,
+          horizontalAnchor: coreCenter !== null ? "body:F_Chest" : "bbox",
+          bodyCoreBefore: coreCenter,
           scaleXBefore: Number((sy * oldSign).toFixed(5)), scaleXAfter: Number(spineObj.scale.x.toFixed(5)),
           scaleY: Number(sy.toFixed(5)), spineXoff: Number(spineXoff.toFixed(4)),
           keepScale: !!spineFitKeepScale,
@@ -1385,7 +1482,9 @@ function spineFaceDir(face) {
         }));
       } catch { /* 诊断发射失败忽略 */ }
     }
-    scheduleFitSpine({}); // 翻转后包围盒镜像，主体偏移方向也跟着反，需重新居中
+    scheduleFitSpine(coreCenter !== null ? {
+      mirrorEntry: entry, bodyCoreEntry: entry, bodyCoreRevision: spineTrackRevision
+    } : {});
   }
 }
 
@@ -1764,6 +1863,7 @@ function installSeatLifecycle() {
       const forensicBefore = seatExitForensicBeforeFrame();
       if (SPEECH_DIAG) { diagSpineAdvanceSeq += 1; diagLastSpineAdvanceAt = performance.now(); } // 心跳B：过守卫、真正推进 spineObj.update 之前
       spineObj.update(dt);
+      fitWalkingCoreBeforeRender();
       if (seatExitYOwnsY() && seatTrackActive()) releaseSeatExitY("seat-entry"); // 包括排队动画自动晋升。
       seatContainmentCommit();
       seatExitYTick(dt); // Phase2：Y limiter（update/containment 之后；token 不 active 时纯只读短路）
@@ -1789,6 +1889,7 @@ function clearSpineLifecycleTimers() {
   spineFitGeneration += 1;
   spineFitOwnerGeneration = 0;
   spineFitOwner = null;
+  spineFitOptions = {};
   cancelAnimationFrame(scheduleGeometryReport.raf || 0);
   scheduleGeometryReport.raf = 0;
   clearTimeout(geometryReportTimer);
@@ -2276,6 +2377,8 @@ function applyWalkState(s) {
   }
   if (EDGE_DIAG && s && s.edgeDiagTurnId !== undefined) diagActiveEdge = { turnId: s.edgeDiagTurnId, faceTs: 0, expiresAt: Date.now() + 500 }; // correlation 建立/覆盖（纯赋值；untagged 广播不清——见 diagActiveEdge 注释）
   const wasActive = walkState.active;
+  const wasMoving = walkState.active && !walkState.resting && !walkState.paused &&
+    !walkState.seated && !walkState.perched && !walkState.sleeping;
   const wasSeatedSnap = !!(walkState.seated || walkState.perched);
   const wasSleeping = walkState.sleeping;
   const wasResting = !!(walkState.seated || walkState.perched || walkState.sleeping);
@@ -2315,7 +2418,7 @@ function applyWalkState(s) {
   if (!spineObj || activeRenderMode !== "spine") return;
   if (isSleeping) return;                 // 睡觉中：不被行走动画打断
   if (Date.now() < interactAnimHoldUntil) return; // BUG-05：body-local 互动持有 track0；睡眠/苏醒过渡已在上方处理（authority 更高），paused-idle/seat-phase/walk-phase 不得踩掉 Interact
-  spineFaceDir(walkState.face);
+  spineFaceDir(walkState.face, wasMoving);
   if (Date.now() < animDemoUntil) return; // 演示中，不打断
   if (standBeatPoseIntent) {
     admitStandBeatPoseIntent();
@@ -4609,6 +4712,7 @@ const clickability = window.PetClickability.createClickabilityCore({
   isPetUI: (el, e) => window.PetClickability.petUiHit(el, e, {
     petEl: () => petEl,
     activeRenderMode: () => activeRenderMode,
+    spineInteractiveAt,
     live2dInteractiveAt: (x, y) => activeRenderMode === "live2d" && live2dActive && !!window.Live2DRuntime &&
       (typeof window.Live2DRuntime.interactiveAt === "function"
         ? window.Live2DRuntime.interactiveAt(x, y) // BUG-07：精确命中（产品栈=alpha 帧缓存；legacy 栈=模型包围盒）
