@@ -890,7 +890,7 @@ $("btn-fixed-lines-cancel").addEventListener("click", async () => {
 $("btn-fixed-lines-clear").addEventListener("click", async () => {
   if (!confirm(L("set.fixedClearConfirm"))) return;
   const r = await window.petAPI.clearFixedLineAudioCache();
-  setResult($("fixed-lines-result"), r && r.ok ? L("set.fixedCleared") : presentResultError(r), !!(r && r.ok));
+  setResult($("fixed-lines-maintenance-result"), r && r.ok ? L("set.fixedCleared") : presentResultError(r), !!(r && r.ok));
   await fetchAndRenderFixedLinePool();
 });
 $("btn-fixed-lines-toggle").addEventListener("click", () => {
@@ -908,7 +908,7 @@ $("btn-fixed-lines-pools-common").addEventListener("click", () => {
 $("btn-fixed-lines-clear-old").addEventListener("click", async () => {
   if (!confirm(L("set.fixedClearOldConfirm"))) return;
   const r = await window.petAPI.clearOldFixedLineCaches();
-  setResult($("fixed-lines-result"), r && r.ok ? L("set.fixedClearedOldPre") + r.removed + L("set.fixedClearedOldSuf") : presentResultError(r), !!(r && r.ok));
+  setResult($("fixed-lines-maintenance-result"), r && r.ok ? L("set.fixedClearedOldPre") + r.removed + L("set.fixedClearedOldSuf") : presentResultError(r), !!(r && r.ok));
   await fetchAndRenderFixedLinePool();
 });
 if (window.petAPI.onFixedLineAudioProgress) {

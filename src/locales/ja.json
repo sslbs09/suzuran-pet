@@ -1033,5 +1033,6 @@
   "set.section.developer": "🛠 開発者",
   "set.creatorUnavailable": "音声クローンとトレーニング、デプロイガイドは準備中のため利用できません。",
   "set.creatorPSD": "🧩 PSDキャラクターツール",
-  "set.characterLine": "現在のキャラクター：苏苏洛"
+  "set.characterLine": "現在のキャラクター：苏苏洛",
+  "set.section.voiceMaintenance": "🧹 音声キャッシュ保守"
 }

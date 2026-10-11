@@ -1033,5 +1033,6 @@
   "set.section.developer": "🛠 开发者",
   "set.creatorUnavailable": "音色克隆与训练、语音部署与训练指南正在完善中，暂不可用。",
   "set.creatorPSD": "🧩 PSD 角色工具",
-  "set.characterLine": "当前角色：苏苏洛"
+  "set.characterLine": "当前角色：苏苏洛",
+  "set.section.voiceMaintenance": "🧹 语音缓存维护"
 }

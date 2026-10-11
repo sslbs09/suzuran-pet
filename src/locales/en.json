@@ -1033,5 +1033,6 @@
   "set.section.developer": "🛠 Developer",
   "set.creatorUnavailable": "Voice cloning & training and the deployment guide are not available yet.",
   "set.creatorPSD": "🧩 PSD character tool",
-  "set.characterLine": "Current character: Sussurro"
+  "set.characterLine": "Current character: Sussurro",
+  "set.section.voiceMaintenance": "🧹 Voice cache maintenance"
 }
