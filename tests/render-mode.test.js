@@ -1254,7 +1254,11 @@ assert.doesNotMatch(mainSource, /final && seated && magnet !== "icon" && !freeDr
 /* preload/renderer 契约层（v1 测试盲区：undefined source 被 preload 归一化成 "drag"） */
 function assertPokeInteractWiring(rendererSrc = rendererSource, preloadSrc = preloadSource) {
   assert.match(preloadSrc, /walkingPause: \(b, source, interactionId\) => ipcRenderer\.send\("pet:walking-pause", !!b, source \|\| "drag", interactionId === undefined \? null : interactionId, bodyDocumentIdentity\)/, "preload 契约：source、interactionId 与 body identity 透传（State Core）");
-  assert.match(rendererSrc, /pokeResumeTimer = setTimeout\(\(\) => \{\s*if \(!dragState && activeRenderMode === "spine"\) reconcileSpineAnimation\("interact-end"\);\s*\}, 2600\);/, "poke/单击互动只做 body-local 视觉收尾，不发送匿名 release");
+  // BUG-05（产品优先级冻结：pat/interact > locomotion）：tap/pat acquire "interaction" lease，
+  // 2600ms 后 lease-id 匹配释放——不再是"只做 body-local 视觉收尾"
+  assert.match(rendererSrc, /walkingPause\(true, "interaction", interactLeaseId\)/, "互动必须让 locomotion 让位（interaction lease acquire）");
+  assert.match(rendererSrc, /pokeResumeTimer = setTimeout\(\(\) => \{\s*if \(pendingInteractLeaseId === interactLeaseId\) pendingInteractLeaseId = null;\s*window\.petAPI\.walkingPause\(false, "interaction", interactLeaseId\);[\s\S]{0,160}reconcileSpineAnimation\("interact-end"\);\s*\}, 2600\);/, "互动结束：lease 匹配释放 + 视觉收尾");
+  assert.match(rendererSrc, /releasePendingInteractLease\("drag-admit"\)/, "拖拽 admit 接管注意力：未到期 interact lease 立即释放（防卡暂停）");
   assert.doesNotMatch(rendererSrc, /walkingPause\(false\)[;,)]/, "renderer 不再存在任何无 source 的 walkingPause(false) 调用");
 }
 assertPokeInteractWiring();

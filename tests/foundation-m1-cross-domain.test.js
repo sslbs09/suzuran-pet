@@ -42,8 +42,16 @@ test("cross-domain chat ownership survives accepted mode off/on and matching exi
   const beforeBounds = h.state.win.getBounds();
   h.context.__m1.stopWalkingEngine();
   h.context.__m1.startWalkingEngine({ silent: true });
-  await h.context.__m1.walkOnPhaseEnd();
-  h.context.__m1.walkTick();
+  // 相位行为是随机策略（idle 45%/walk 40%/perch）：idle+已锚定 Y 时本断言天然零位移（flaky）。
+  // 固定随机序列强制 walk 行为，锁定本测试的真实目标=chat exit 后 locomotion 可执行。
+  const origRandom = Math.random;
+  Math.random = (() => { const seq = [0.5, 0.9]; let i = 0; return () => seq[Math.min(i++, seq.length - 1)]; })(); // 0.5→walk 行为, 0.9→dir=1
+  try {
+    await h.context.__m1.walkOnPhaseEnd();
+    h.context.__m1.walkTick();
+  } finally {
+    Math.random = origRandom;
+  }
   assert.ok(h.state.v2Commit.stats.committed > before, "walking remains executable after matching chat exit");
   assert.notDeepEqual(h.state.win.getBounds(), beforeBounds, "post-exit phase must reach a native position change");
 });

@@ -297,11 +297,14 @@ test("LIFE-19: 旧文档纪元事件被 isCurrent 拒绝；代际只前进不回
 test("COMPAT-20/22: gate OFF——State Core 不存在，legacy pause 字段即 canonical（源码合同）", () => {
   assert.match(mainSource, /const v2StateCore = RUNTIME_V2_LOCOMOTION_ENABLED \? \(\(\) => \{/);
   assert.match(mainSource, /\}\)\(\) : null;\n\n\/\* Canonical body pose command\/projection boundary[\s\S]*?function setBodyPosture/, "gate OFF：v2StateCore=null（门位内联三元走 legacy compute）");
-  // CANON 三元 = v2StateCore ? effectivePaused() : 三布尔——gate OFF 分支与 V1 逐字等价
+  // CANON 三元 = v2StateCore ? effectivePaused() : legacy 三布尔——OFF 分支与 V1 等价；
+  // walkTick/walkOnPhaseEnd 两处主门额外并入 walk.interactPaused（BUG-05 interaction gate-OFF 兼容）
   const canonTernary = /\(typeof v2StateCore !== "undefined" && v2StateCore \? v2StateCore\.pause\.effectivePaused\(\) : \(walk\.dragPaused \|\| walk\.chatPaused \|\| walk\.zoomPaused\)\)/g;
-  assert.ok((mainSource.match(canonTernary) || []).length >= 4, "主门位全部经 CANON 三元（>=4 处）");
-  // 主门位全部经 v2EffectivePaused（沙箱安全三元），OFF 分支=legacy 三布尔
-  assert.match(mainSource, /if \(\(typeof v2StateCore !== "undefined" && v2StateCore \? v2StateCore\.pause\.effectivePaused\(\) : \(walk\.dragPaused \|\| walk\.chatPaused \|\| walk\.zoomPaused\)\) \|\| walk\.seated \|\| !win\.isVisible\(\)\) return;/, "walkTick 主门");
+  assert.ok((mainSource.match(canonTernary) || []).length >= 3, "主门位经 CANON 三元（>=3 处 legacy 形态）");
+  const canonTernaryInteract = /\(typeof v2StateCore !== "undefined" && v2StateCore \? v2StateCore\.pause\.effectivePaused\(\) : \(walk\.dragPaused \|\| walk\.chatPaused \|\| walk\.zoomPaused \|\| walk\.interactPaused\)\)/g;
+  assert.ok((mainSource.match(canonTernaryInteract) || []).length >= 2, "walkTick/walkOnPhaseEnd 主门并入 interactPaused（BUG-05 gate OFF 兼容）");
+  // 主门位全部经 v2EffectivePaused（沙箱安全三元），OFF 分支=legacy 三布尔+interactPaused
+  assert.match(mainSource, /if \(\(typeof v2StateCore !== "undefined" && v2StateCore \? v2StateCore\.pause\.effectivePaused\(\) : \(walk\.dragPaused \|\| walk\.chatPaused \|\| walk\.zoomPaused \|\| walk\.interactPaused\)\) \|\| walk\.seated \|\| !win\.isVisible\(\)\) return;/, "walkTick 主门");
 });
 
 test("COMPAT-21: Motion Closure 接线保持——external commit/revoke/deny 全在（源码合同）", () => {
@@ -326,7 +329,7 @@ test("COMPAT-22: 单向写合同——pause projection 只由 syncPauseProjectio
 test("STATE-CORE 源码合同：renderer 分类器接入 drag 流；preload 透传 interactionId", () => {
   assert.match(petSource, /const dragInteraction = window\.StateCoreInteraction/);
   assert.match(petSource, /dragInteraction\.begin\(\{ pointerId: e\.pointerId, x: e\.screenX, y: e\.screenY \}\)/, "pointerdown=candidate 零 IPC");
-  assert.match(petSource, /if \(step\.justAdmitted\) window\.petAPI\.walkingPause\(true, "drag", step\.interactionId\);/, "admission 先发 pause+motion 前置 IPC");
+  assert.match(petSource, /if \(step\.justAdmitted\) \{\s*releasePendingInteractLease\("drag-admit"\);[\s\S]{0,80}walkingPause\(true, "drag", step\.interactionId\);/, "admission 先发 pause+motion 前置 IPC（并释放未到期 interact lease，BUG-05）");
   assert.match(petSource, /const ended = dragInteraction\.end\(\);/);
   assert.match(preloadSource, /walkingPause: \(b, source, interactionId\) => ipcRenderer\.send\("pet:walking-pause", !!b, source \|\| "drag", interactionId === undefined \? null : interactionId, bodyDocumentIdentity\)/);
 });

@@ -4837,7 +4837,7 @@ async function walkOnPhaseEnd() {
   if (typeof v2Locomotion !== "undefined" && v2Locomotion && v2Locomotion.owns()) return; // belt：V2 持有期间旧 V1 phase callback 不得推进同一 episode（正常路径 V1 phaseTimer 已让位）
   if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsPhaseEnd(); // Shadow 只读：相位回调入口控制事实快照（gate OFF 零动作）
   if (walk.catToy) { walkSchedulePhase(randInt(400, 900)); return; } // 逗猫棒：相位机让位，由 walkTick 持续追鼠标
-  if ((typeof v2StateCore !== "undefined" && v2StateCore ? v2StateCore.pause.effectivePaused() : (walk.dragPaused || walk.chatPaused || walk.zoomPaused))) {                // 拖拽中冻结一切相位动作（暂停判定=CANONICAL）
+  if ((typeof v2StateCore !== "undefined" && v2StateCore ? v2StateCore.pause.effectivePaused() : (walk.dragPaused || walk.chatPaused || walk.zoomPaused || walk.interactPaused))) {                // 拖拽中冻结一切相位动作（暂停判定=CANONICAL）
     walkSchedulePhase(randInt(3000, 6000));
     return;
   }
@@ -5499,7 +5499,7 @@ function walkTick() {
     else if (walk.dragPaused) cancelSeatExit("drag");
     else seatExitStep(walk.sleeping ? "sleepTick" : "pauseTick");
   }
-  if ((typeof v2StateCore !== "undefined" && v2StateCore ? v2StateCore.pause.effectivePaused() : (walk.dragPaused || walk.chatPaused || walk.zoomPaused)) || walk.seated || !win.isVisible()) return; // 暂停判定=CANONICAL effectivePaused（walk.paused 为 projection）
+  if ((typeof v2StateCore !== "undefined" && v2StateCore ? v2StateCore.pause.effectivePaused() : (walk.dragPaused || walk.chatPaused || walk.zoomPaused || walk.interactPaused)) || walk.seated || !win.isVisible()) return; // 暂停判定=CANONICAL effectivePaused（walk.paused 为 projection；interactPaused 仅 gate OFF 兼容）
   // 自愈②：相位定时器丢失（不在任何过渡流程却无人排程）→ 自动重启循环，防永久静止
   if (!walk.paused && !walk.sleeping && !walk.phaseTimer &&
       !walk.gotoPerch && !walk.returning && !walk.perched && !walk.iconRest && !walk.seated) {
@@ -5749,7 +5749,28 @@ ipcMain.on("pet:walking-pause", (_e, p, source, interactionId, identity) => { //
   // request must not interrupt or cancel the currently running motion.
   if (p && source !== "zoom" && (interactionId === undefined || interactionId === null || String(interactionId) === "")) return;
   if (p && source === "zoom" && (interactionId === undefined || interactionId === null || String(interactionId) === "")) return;
-  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsTakeover(source === "zoom" ? "zoom" : "drag", !!p);
+  if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsTakeover(source === "zoom" ? "zoom" : source === "interaction" ? "interaction" : "drag", !!p);
+  if (source === "interaction") {
+    // BUG-05：pat/interact > locomotion（产品优先级冻结）。body-local 互动期间 locomotion 让位：
+    // V2 episode 立即释放（resumeLegacy 已排相位回调，恢复仍走 policy）；PauseAuthority 用预留的
+    // "interaction" source（State Core v0.1 首批来源）。不建 EXTERNAL_DRAG 会话、不动窗口几何、
+    // 不取消 seatExit（互动不接管几何）。sleep 不经此路径——sleep 的 veto/wake authority 独立。
+    if (typeof v2StateCore !== "undefined" && v2StateCore) {
+      if (p) {
+        if (typeof v2Locomotion !== "undefined" && v2Locomotion) v2Locomotion.interrupt("interact-pause");
+        v2StateCore.pause.acquire("interaction", { leaseId: interactionId, domain: "renderer", now: Date.now() });
+      } else {
+        v2StateCore.pause.release("interaction", { leaseId: interactionId !== undefined ? interactionId : null });
+      }
+      v2StateCore.syncPauseProjection();
+    } else {
+      walk.interactPaused = !!p; // gate OFF 兼容投影：legacy 字段即 canonical
+      if (p && typeof v2Locomotion !== "undefined" && v2Locomotion) v2Locomotion.interrupt("interact-pause");
+    }
+    walk.paused = (typeof v2StateCore !== "undefined" && v2StateCore ? v2StateCore.pause.effectivePaused() : (walk.dragPaused || walk.chatPaused || walk.zoomPaused || walk.interactPaused));
+    if (walk.active) walkBroadcast();
+    return;
+  }
   if (p && source !== "zoom" && typeof v2Locomotion !== "undefined" && v2Locomotion) v2Locomotion.interrupt("drag-pause"); // 先释放 V2 locomotion token（旧 attempt 作废）
   // State Core：drag admission → ① PauseAuthority acquire（CANONICAL pause）→ ② MotionAuthority EXTERNAL_DRAG（顺序合同）
   if (p && source !== "zoom" && typeof v2StateCore !== "undefined" && v2StateCore) {

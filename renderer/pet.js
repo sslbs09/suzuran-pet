@@ -2314,6 +2314,7 @@ function applyWalkState(s) {
   }
   if (!spineObj || activeRenderMode !== "spine") return;
   if (isSleeping) return;                 // 睡觉中：不被行走动画打断
+  if (Date.now() < interactAnimHoldUntil) return; // BUG-05：body-local 互动持有 track0；睡眠/苏醒过渡已在上方处理（authority 更高），paused-idle/seat-phase/walk-phase 不得踩掉 Interact
   spineFaceDir(walkState.face);
   if (Date.now() < animDemoUntil) return; // 演示中，不打断
   if (standBeatPoseIntent) {
@@ -4296,6 +4297,21 @@ window.petAPI.onTermsAgreed(() => {
 /* ---------- 拖拽（手动，区分点击） ---------- */
 let dragState = null;
 let pokeResumeTimer = null; // 戳一戳后的原地站立计时
+// BUG-05：body-local 互动的 locomotion 让位（pat/interact > locomotion，产品优先级冻结）。
+// tap/pat 时向主进程 acquire "interaction" pause lease（State Core 预留来源），2600ms 后
+// lease-id 匹配释放；hold 窗口内 applyWalkState 不许用 paused-idle/seat-phase/walk-phase 踩 track0。
+let interactPauseSeq = 0;
+let pendingInteractLeaseId = null;   // 未到期 interact lease（拖拽 admit/取消路径必须释放，防卡暂停）
+let interactAnimHoldUntil = 0;       // 互动动画持有窗：applyWalkState 的相位动画切换在此期间跳过
+function releasePendingInteractLease(reason) { // 拖拽 admit/取消接管注意力：未到期 interact lease 立即让位
+  const id = pendingInteractLeaseId;
+  if (!id) return;
+  pendingInteractLeaseId = null;
+  interactAnimHoldUntil = 0;
+  clearTimeout(pokeResumeTimer);
+  try { window.petAPI.walkingPause(false, "interaction", id); } catch { /* IPC 失败无碍：lease 由主进程 watchdog/兜底收口 */ }
+  try { window.petAPI.playback("[ui] interact-lease release reason=" + reason); } catch { /* 忽略 */ }
+}
 let dragReleaseTimer = null;
 let zoomInteractionId = null;
 let zoomInteractionSeq = 0;
@@ -4351,6 +4367,7 @@ function finishDrag(reason = "cancel", tapPoint = null) {
 
   if (reason !== "pointerup") {
     // 异常取消只安全放下当前位置：不 click、不 pat、不 throw、不打开输入栏。
+    releasePendingInteractLease("drag-cancel"); // tap→cancel：未到期 interact lease 不能卡住 locomotion
     if (ended.wasDrag) window.petAPI.walkingPause(false, "drag", ended.interactionId); // 只有真 admit 过的 drag 才需释放（tap 无 lease）
     return true;
   }
@@ -4400,11 +4417,19 @@ function finishDrag(reason = "cancel", tapPoint = null) {
       playSpineInteract(); // 单击互动：还原基建里点一下干员的反应动作
       patSeq.barOpenedByFirst = !inputBar.classList.contains("hidden");
     }
+    // BUG-05：互动期间主进程 locomotion 让位（wake 后摸头同样生效——sleep 的 wake authority 独立，
+    // 不经此路径）。lease 生命周期：2600ms 定时器匹配释放；拖拽 admit/取消时提前释放防卡暂停。
+    const interactLeaseId = "interact-" + (++interactPauseSeq);
+    pendingInteractLeaseId = interactLeaseId;
+    interactAnimHoldUntil = Date.now() + 2600;
+    try { window.petAPI.walkingPause(true, "interaction", interactLeaseId); } catch { /* IPC 失败不阻断本地互动 */ }
     // 戳一戳/摸头时原地站定：等互动动作播完再继续散步
     clearTimeout(pokeResumeTimer);
     pokeResumeTimer = setTimeout(() => {
+      if (pendingInteractLeaseId === interactLeaseId) pendingInteractLeaseId = null;
+      window.petAPI.walkingPause(false, "interaction", interactLeaseId); // lease-id 匹配释放；被更新 lease 替换的旧 timer 被权威拒绝
       if (!dragState && activeRenderMode === "spine") reconcileSpineAnimation("interact-end");
-    }, 2600); // body-local interaction 只收尾视觉，不发送匿名 pause release
+    }, 2600);
   } else if (velocity && speed > THROW_MIN_SPEED) {
     try {
       window.petAPI.throwPet(velocity.vx, velocity.vy, interactionId);
@@ -4473,7 +4498,10 @@ window.addEventListener("pointermove", (e) => {
   // 让 EXTERNAL_DRAG/pause 先就位——同源 IPC 有序——再 moveWindow 提交位移
   const step = dragInteraction.move(e.screenX, e.screenY);
   if (step.crossed) {
-    if (step.justAdmitted) window.petAPI.walkingPause(true, "drag", step.interactionId);
+    if (step.justAdmitted) {
+      releasePendingInteractLease("drag-admit"); // BUG-05：拖拽接管注意力，未到期 interact lease 立即让位
+      window.petAPI.walkingPause(true, "drag", step.interactionId);
+    }
     dragState.moved = true;
     try { window.petAPI.playback("[ui] 判定为拖动 dx=" + Math.round(step.dx) + " dy=" + Math.round(step.dy)); } catch { /* 忽略 */ }
     petEl.classList.add("dragging");
