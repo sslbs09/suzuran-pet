@@ -240,16 +240,37 @@ test("I: renderer replacement（body 代际变化）→ episode 失效，不能�
 
 /* ---------------- K/L：fallback 与不重抽 ---------------- */
 
-test("K: 左缘特殊触边（edgeLeft 区域）→ V2 让位 V1（不为覆盖率硬扩）", () => {
+test("K: 左缘到达 → 与右缘同式 in-episode 折返（mid-motion 不再弃权 V1，BUG-03）", () => {
   const w = makeWorld();
-  // minX = wa.x - inset(138) = -138；把窗口放到左缘附近，向左走会越界
+  // minX = wa.x - inset(138) = -138；把窗口放到左缘附近，向左走越界即折返
   w.st.bounds = Object.assign({}, w.st.bounds, { x: -130 });
-  const res = w.begin({ dir: -1, moveMs: 5000 });
+  const res = w.begin({ dir: -1, moveMs: 1000 });
   assert.equal(res.ok, true);
   let guard = 0;
   while (w.owns() && guard++ < 400) w.advance(40);
-  assert.equal(w.st.resumed[w.st.resumed.length - 1], "left-edge-special-fallback", "左缘到达 → 交回 V1（edgeLeft/翻边属特殊触边）");
-  assert.equal(w.authority.owner(), "legacy");
+  assert.equal(w.st.resumed.length, 0, "左缘折返发生在 episode 内：零 resumeLegacy（不再 left-edge-special-fallback）");
+  assert.ok(!w.st.resumed.includes("left-edge-special-fallback"));
+  assert.ok(w.st.projection.dir === 1, "dir 折返为 +1");
+  assert.equal(w.st.face, 1, "face 同步折返朝向");
+  assert.ok(w.st.bounds.x >= -138, "全程不越左界");
+  assert.ok(w.st.events.some((e) => e.ev === "episode-close" && e.completed && e.reason === "cycle-complete"),
+    "episode 走完完整 cycle（不因触边中断）");
+  assert.equal(w.authority.owner(), "legacy", "ownership 只在 cycle 完成后交回");
+  assert.equal(w.st.sitScheduled, 1);
+});
+
+test("K2: 右缘到达 → 同式 in-episode 折返（与左缘对称，行为不变）", () => {
+  const w = makeWorld();
+  // maxX = wa.x + wa.width - 260 = 1276；把窗口放到右缘，向右走越界即折返
+  w.st.bounds = Object.assign({}, w.st.bounds, { x: 1270 });
+  const res = w.begin({ dir: 1, moveMs: 1000 });
+  assert.equal(res.ok, true);
+  let guard = 0;
+  while (w.owns() && guard++ < 400) w.advance(40);
+  assert.equal(w.st.resumed.length, 0, "右缘折返零 resumeLegacy");
+  assert.ok(w.st.projection.dir === -1, "dir 折返为 -1");
+  assert.ok(w.st.bounds.x <= 1276, "全程不越右界");
+  assert.ok(w.st.events.some((e) => e.ev === "episode-close" && e.completed && e.reason === "cycle-complete"));
 });
 
 test("L: direction/duration 全由 V1 传入；controller 无任何 Math.random（不重抽）", () => {

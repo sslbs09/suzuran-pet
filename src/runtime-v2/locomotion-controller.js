@@ -13,7 +13,8 @@
  * - 不重抽随机数：direction/moveMs 由 V1 传入（§5/L）；
  * - Body readiness observation-only：不等待“动画完成”才允许 Move（§6）；
  * - 所有 position 写入必须经 window-commit（§8）；
- * - 左缘特殊触边（edgeLeft 气泡模式切换区）保守 fallback V1（§3：不为覆盖率强行进入 V2）；
+ * - 左/右缘触边一律 in-episode 折返（与 V1 walkTick 同源 clampX 数学）；edgeLeft 特殊触边
+ *   已随条带换边机制删除，不再构成 mid-motion 弃权 V1 的理由（BUG-03 修复）；
  * - interrupt/close 后 token/episode 立即失效：旧 callback 再入被 commit 与 authority 双重拒绝
  *   （§11/§12 不实现 durable resume，replacement 后旧 episode 永不恢复）。
  */
@@ -170,14 +171,12 @@ function createLocomotionController(config) {
     if (r.collapsed) { interrupt("range-collapsed-fallback"); return; } // 尺寸恢复属 out-of-scope → V1
     const speed = deps.speed();
     let nx = r.x + ep.dir * speed;
-    if (nx <= r.minX) {
-      // 左缘到达：V1 的 edgeLeft 气泡模式/翻边属特殊触边（out-of-scope）→ 交回 V1
-      interrupt("left-edge-special-fallback");
-      return;
-    }
-    if (nx >= r.maxX) {
+    if (nx <= r.minX || nx >= r.maxX) {
+      // 左/右缘到达：与右缘同式 in-episode 折返（BUG-03）。历史 edgeLeft 条带换边
+      // （窗口 ±(宽-124) 平移）已删除，左缘特殊触边不复存在——setEdgeLeft 仅剩无消费
+      // 方的标志位，mid-motion 弃权 V1 反而制造不对称闪现/快速起坐循环。
       ep.dir *= -1;
-      nx = r.maxX;
+      nx = nx <= r.minX ? r.minX : r.maxX;
       hooks.setProjection({ dir: ep.dir });
       faceForDir(); // 折返：立即用新方向同步朝向（V1 同源规则）
     } else {
