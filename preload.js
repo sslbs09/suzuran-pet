@@ -62,6 +62,7 @@ contextBridge.exposeInMainWorld("petAPI", {
   setWeather: (patch) => ipcRenderer.invoke("pet:set-weather", patch),
   setSeatSink: (px) => ipcRenderer.invoke("pet:set-seat-sink", px),
   setCharInset: (px) => ipcRenderer.send("pet:set-char-inset", px, bodyDocumentIdentity),
+  reportChatPanelMetrics: (m) => ipcRenderer.send("pet:chat-panel-metrics", m, bodyDocumentIdentity), // BUG-06：面板真实宽（侧别决策输入）
   onUiEdgeCompact: (cb) => ipcRenderer.on("pet:ui-edge-compact", (_e, v) => cb(v)),
   onSetDim: (cb) => ipcRenderer.on("pet:set-dim", (_e, v) => cb(v)), // 半透明模式开关
   onNameChanged: (cb) => ipcRenderer.on("pet:name-changed", (_e, name) => cb(name)),

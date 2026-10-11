@@ -495,6 +495,7 @@ function clampPetToWorkArea(reason = "显示器变化") {
     } else {
       applyLayer();
     }
+    try { const wb = win.getBounds(); updateChatPanelSideFromBounds(wb, walkGeo.workAreaOf(screen, wb)); } catch { /* 侧别判定故障不影响钳位 */ } // BUG-06：显示器/钳位后重评面板侧别
   } catch (e) {
     logTts("display", reason + "，坐标钳制失败: " + (e && e.message || e));
   }
@@ -579,7 +580,7 @@ function createWindow() {
           getWindow: () => win,
           isWalkActive: () => walk.active,
           walkBroadcast: () => walkBroadcast(),
-          updateUiEdgeCompact: (b, wa) => updateUiEdgeCompactFromBounds(b, wa),
+          updateUiEdgeCompact: (b, wa) => updateChatPanelSideFromBounds(b, wa),
           getWorkArea: (b) => walkGeo.workAreaOf(screen, b)
         });
       }, 3000);
@@ -3855,6 +3856,7 @@ ipcMain.on("pet:move", (_e, dx, dy, interactionId, identity) => {
     const [x, y] = win.getPosition();
        commitLegacyPosition(Math.round(x + dx), Math.round(y + dy), "drag-move", { applyLayer: false });
     dragSeatUpdate(); // 拖拽落点吸附：接近任务栏/桌面图标自动坐下
+    try { const mb = win.getBounds(); updateChatPanelSideFromBounds(mb, walkGeo.workAreaOf(screen, mb)); } catch { /* 忽略 */ } // BUG-06：拖拽靠近屏缘时面板随行换边
     dbgLastMoveTs = Date.now();
   }
 });
@@ -4294,6 +4296,9 @@ function walkBroadcast(options = {}) {
   };
   sendToRenderer("pet:walking", payload);
   if (typeof shadowBridge !== "undefined" && shadowBridge) shadowBridge.obsBroadcast(payload, shadowMeta); // Shadow 只读：broadcast 事实（OFF 零动作）
+  try { // BUG-06：状态转换随行评估面板侧别（V2 相位/sleep/暂停等广播点；变化才 IPC）
+    if (win && !win.isDestroyed()) updateChatPanelSideFromBounds(win.getBounds(), walkGeo.workAreaOf(screen, win.getBounds()));
+  } catch { /* 侧别判定故障不影响行走广播 */ }
 }
 
 function walkSchedulePhase(ms) {
@@ -5070,11 +5075,30 @@ function barrierFloorFor(b, x, wa) {
 function barrierRects() {
   return winBarriers.map((r) => ({ x: r.left, y: r.top, w: r.right - r.left, h: r.bottom - r.top, top: r.top, right: r.right, title: r.title, hwnd: r.hwnd }));
 }
-function updateUiEdgeCompactFromBounds(bounds, workArea) {
-  const next = walkState.uiEdgeCompactFromBounds({ windowX: bounds?.x, workAreaLeft: workArea?.x, compact: !!walk.uiEdgeCompact, margin: 2 });
-  if (next === !!walk.uiEdgeCompact) return;
-  walk.uiEdgeCompact = next;
-  sendToRenderer("pet:ui-edge-compact", { value: next, timestamp: Date.now() });
+/* ---------- BUG-06：chat panel 侧别决策（宽度感知 + 滞回，唯一写点 walk.uiEdgeCompact） ---------- */
+const CHAT_PANEL_DEFAULT_W = 136;   // .input-bar 布局宽（renderer 未上报时的保守 fallback）
+const CHAT_PANEL_HYST = 16;         // 侧别滞回余量（px）：贴阈值行走时侧别/几何不得往复
+const CHAT_PANEL_GAP = 6;           // 面板与条带间隙（.bubble right:128 同族语义）
+const CHAT_PANEL_CHAR_W = 120;      // 角色条带宽（.pet width）
+const chatPanelMetrics = { width: CHAT_PANEL_DEFAULT_W, at: 0 };
+function updateChatPanelSideFromBounds(bounds, workArea) {
+  try {
+    if (!bounds || !workArea) return;
+    const inset = charStripInset(bounds);
+    const charLeft = bounds.x + inset;
+    const charRight = charLeft + CHAT_PANEL_CHAR_W;
+    const pw = Math.max(60, Math.round(chatPanelMetrics.width) || CHAT_PANEL_DEFAULT_W);
+    const cur = !!walk.uiEdgeCompact;
+    // 滞回并入决策输入：已换边态用 pw+Hyst 评估（退出更难），未换边态按真实宽度（进入即时）
+    const dec = walkState.chatPanelSideDecision({
+      charLeft, charRight, workArea,
+      panelWidth: cur ? pw + CHAT_PANEL_HYST : pw, gap: CHAT_PANEL_GAP
+    });
+    const next = dec.side === "right";
+    if (next === cur) return;
+    walk.uiEdgeCompact = next;
+    sendToRenderer("pet:ui-edge-compact", { value: next, side: dec.side, clamped: dec.clamped, timestamp: Date.now() });
+  } catch { /* 侧别判定故障不影响行走 */ }
 }
 function nativeHwndKey(value) {
   try {
@@ -5416,7 +5440,7 @@ function walkTick() {
       }
       // 左缘翻边滞回（v2.5.26 收敛①）：判定抽到 walk-state 纯函数，setEdgeLeft 副作用留主干
       const nowE = Date.now();
-      updateUiEdgeCompactFromBounds(eb, wa);
+      updateChatPanelSideFromBounds(eb, wa); // BUG-06：面板宽度感知侧别（替代纯窗口 x 判定）
       const fDec = walkState.edgeFlipDecision({ edgeLeft: walk.edgeLeft, charLeft, edgeL, now: nowE, lastFlipAt: walk._edgeFlipAt || 0 });
       if (fDec) { walk._edgeFlipAt = fDec.at; setEdgeLeft(fDec.flip); }
     } catch { /* 忽略 */ }
@@ -6056,6 +6080,21 @@ ipcMain.on("pet:set-char-inset", (_e, px, identity) => { // 渲染层上报：�
     walk.charInset = PET_LOCAL_X;
   }
 });
+ipcMain.on("pet:chat-panel-metrics", (_e, metrics, identity) => { // BUG-06：面板真实宽上报（侧别决策输入；4px 死区防抖）
+  if (!isCurrentBodyMutation(_e, identity)) return;
+  const w = Math.round(Number(metrics && metrics.width));
+  if (!Number.isFinite(w) || w <= 0) return;
+  const next = Math.min(1200, w);
+  const changed = Math.abs(next - chatPanelMetrics.width) >= 4;
+  chatPanelMetrics.width = next;
+  chatPanelMetrics.at = Date.now();
+  if (changed && win && !win.isDestroyed()) {
+    try {
+      const b = win.getBounds();
+      updateChatPanelSideFromBounds(b, walkGeo.workAreaOf(screen, b));
+    } catch { /* 忽略 */ }
+  }
+});
 if (RUNTIME_V2_SHADOW_ENABLED) { // strict OFF：gate 关闭时不注册监听（渲染层 shadow 上行无处消费）
   ipcMain.on("pet:shadow-evidence", (_e, ev) => { // Shadow v0.1：渲染层 body 证据上行（信任边界：只收当前 pet renderer）
     try {
@@ -6353,6 +6392,7 @@ ipcMain.on("pet:set-size", (_e, w, h, source, identity) => {
   } catch { /* 补偿失败退回顶左固定（原行为） */ }
   try { if (!win.isResizable()) win.setResizable(true); } catch { /* 忽略 */ }
   win.setSize(ws, hs);
+  try { const sb = win.getBounds(); updateChatPanelSideFromBounds(sb, walkGeo.workAreaOf(screen, sb)); } catch { /* 忽略 */ } // BUG-06：尺寸变化（面板宽/加宽/还原）重评侧别
   if (typeof v2StateCore !== "undefined" && v2StateCore) v2StateCore.posture.invalidateSupport("resize"); // posture 语义保持；support 证据诚实过期
   repositionAfterWindowSizeChange(renderModeCommit, wasGrounded);
   setTimeout(() => {

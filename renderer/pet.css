@@ -182,15 +182,18 @@ body.theme-dark .alive-badge { color: #ffd9d9; background: rgba(96, 34, 34, .82)
 body.ui-edge-compact .pet {
   left: 138px; /* edge 只切附属 UI；角色局部锚点始终固定 */
 }
+/* BUG-06：compact=面板换到角色右侧。宽窗（气泡加宽/右侧布局成立）时面板落在条带右缘之外
+ * （条带 [138,258] → 面板 264+）；标准窗右侧放不下时回退到条带上覆盖位（min() 兜底=旧观感，
+ * 保证可见不裁切）。两侧都放不下即冻结规则的 larger-side+clamp 终态：max-width 兜底 116px。 */
 body.ui-edge-compact .input-bar {
-  left: 138px;
+  left: min(264px, calc(100% - 122px));
   width: 120px;
 }
 body.ui-edge-compact .bubble {
-  left: 140px;
+  left: min(264px, calc(100% - 122px));
   right: auto;
-  width: 116px;
-  max-width: 116px;
+  width: auto;
+  max-width: max(116px, calc(100% - 270px));
 }
 body.ui-edge-compact .bubble::after {
   right: auto;

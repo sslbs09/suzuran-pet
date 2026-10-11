@@ -2761,6 +2761,7 @@ function showBubble() {
   bubbleEl.classList.remove("hidden");
   bubbleEl.classList.remove("error", "task");
   bubbleEl.scrollTop = 0; // 新消息从顶部显示，避免残留滚动位置让可见区落在空白段
+  reportChatPanelMetrics(); // BUG-06：可见性切换改变面板宽（RO 不感知 display 切换）
 }
 function setBubbleMode(mode) {
   bubbleEl.classList.toggle("task", mode === "zcode");
@@ -2768,6 +2769,7 @@ function setBubbleMode(mode) {
 function hideBubble() {
   bubbleEl.classList.add("hidden");
   stopReveal();
+  reportChatPanelMetrics(); // BUG-06：可见性切换改变面板宽
   clickability.refreshFromLastMouse(); // 无效坐标（-1,-1 等）由核心守卫拒绝：尚未观测到光标时不得主动切穿透
 }
 function stopReveal() {
@@ -3300,14 +3302,35 @@ function injectFontFace(file) { // 导入的字体文件位于 renderer/fonts/us
 }
 
 /** 气泡需要更宽窗口时自动加宽（宽度=气泡+角色条带余量，按 zoom 换算成窗口 DIP）
- *  行走中保持标准窗口：大窗口会让主进程 charInset（=窗口宽-122）超上限，行走左边界扩出屏幕导致“闪现” */
+ *  BUG-02/06：主进程条带几何已宽度感知（charStripInset），宽窗行走左界不再扩出屏幕——
+ *  加宽放宽到"未在真实位移中"：静止态（resting/seated/paused/sleeping）允许为气泡布局加宽
+ *  （含 ui-edge-compact 右侧布局的 266 余量），行走位移中仍保持标准窗（尺寸变化不与逐拍位移竞争）。
+ *  行走激活恢复标准窗由 applyWalkState 既有路径承担（x 补偿后角色不再跳）。 */
 function ensureWindowWidthFor(bubbleW) {
   if (activeRenderMode === "rig" && rigRuntime) return; // rig 模式：窗口尺寸由 rigScale 控制，气泡宽度调整不放大窗口/角色
-  if (walkState.active) return;        // 行走中：保持标准窗口（气泡在窗口内自适应/滚动），避免出屏
+  const locomoting = walkState.active && !walkState.resting && !walkState.seated && !walkState.paused && !walkState.sleeping;
+  if (locomoting) return;              // 位移中：保持标准窗口（气泡在窗口内自适应/滚动）
+  const compact = document.body.classList.contains("ui-edge-compact");
   const zoom = parseFloat(document.body.style.zoom) || 1;
-  const need = Math.ceil((bubbleW + 140) * zoom);
+  const need = Math.ceil((bubbleW + (compact ? 266 : 140)) * zoom);
   window.petAPI.setSize(Math.max(winSize.width, need), winSize.height);
 }
+
+/* BUG-06：面板真实宽度上报（主进程侧别决策输入；死区/换边判定在 main）。
+ * 气泡/输入栏任一可见取 max 宽；两者皆隐用布局常数。RO 跟随内容/设置变化，显式点覆盖 display 切换。 */
+function reportChatPanelMetrics() {
+  try {
+    const bubbleW = !bubbleEl.classList.contains("hidden") ? Math.ceil(bubbleEl.getBoundingClientRect().width) : 0;
+    const inputW = !inputBar.classList.contains("hidden") ? Math.ceil(inputBar.getBoundingClientRect().width) : 0;
+    window.petAPI.reportChatPanelMetrics && window.petAPI.reportChatPanelMetrics({ width: Math.max(bubbleW, inputW) || 136 });
+  } catch { /* 测量失败保持上次值 */ }
+}
+if (window.ResizeObserver) {
+  const panelMetricsRo = new ResizeObserver(() => reportChatPanelMetrics());
+  panelMetricsRo.observe(bubbleEl);
+  panelMetricsRo.observe(inputBar);
+}
+if (window.petAPI.reportChatPanelMetrics) setTimeout(reportChatPanelMetrics, 800); // 首帧布局稳定后初报
 
 function applyAppearance(a) {
   appearanceCfg = a || {};
@@ -3793,6 +3816,7 @@ function toggleInputBar() {
   clickability.petSetClickable(true);
   inputBar.classList.toggle("hidden");
   clampBubbleToWindow();
+  reportChatPanelMetrics(); // BUG-06：可见性切换改变面板宽（RO 不感知 display 切换）
   if (!inputBar.classList.contains("hidden")) {
     inputEl.focus();
     setMood("idle");

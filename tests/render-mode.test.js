@@ -1280,7 +1280,7 @@ function assertEdgeDiagWiring(source = mainSource) {
   assert.match(source, /\.\.\.\(edgeDiagTurnPendingId \? \{ edgeDiagTurnId: edgeDiagTurnPendingId \} : \{\}\)/, "walkBroadcast：pending=0（含关闭态）payload 零新增字段");
   assert.match(source, /faceUpdateAllowed: walk\.face !== faceBefore/, "记录真实门控结果（执行后对比），未重新推导 150ms 表达式");
   assert.match(source, /lastFaceFlipAgeMs: walk\._lastFaceFlip \? Date\.now\(\) - walk\._lastFaceFlip : null/, "lastFaceFlipAgeMs 读取真实状态");
-  assert.match(source, /updateUiEdgeCompactFromBounds\(eb, wa\);/, "wa TDZ 原样保留（本轮禁修——修复另案）");
+  assert.match(source, /updateChatPanelSideFromBounds\(eb, wa\);/, "wa TDZ 原样保留；侧别判定升级为面板宽度感知（BUG-06）");
 }
 assertEdgeDiagWiring();
 assert.match(rendererSource, /if \(EDGE_DIAG && s && s\.edgeDiagTurnId !== undefined\) diagActiveEdge = \{ turnId: s\.edgeDiagTurnId, faceTs: 0, expiresAt: Date\.now\(\) \+ 500 \};/, "renderer 消费点：tagged 建立/覆盖、untagged 不清（生存性）——纯赋值不参与决策");

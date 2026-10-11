@@ -41,6 +41,27 @@ function seatReanchorOnResizeDecision({ seated, perched, dragPaused, flight, jum
   return !!seated && !perched && !dragPaused && !flight && !jump;
 }
 
+/** BUG-06：chat panel（气泡/输入栏）侧别决策（纯函数）。
+ *  panel 附着在角色条带旁：屏幕左/右缘必须换边，否则被屏缘裁切（“chat panel 出现在错误一侧”）。
+ *  charLeft/charRight: 角色条带屏幕左右缘；workArea: 窗口所在显示器的 workArea（multi-monitor
+ *  由调用方用 getDisplayMatching 解析）；panelWidth: 面板真实宽度（渲染层上报）。
+ *  规则（冻结）：常规侧（panel 在角色左侧=产品默认布局）放得下 → left；否则右牵挂得下 → right；
+ *  两侧都放不下 → 取空间更大的一侧（调用方按 roomPx clamp 面板宽，compact CSS 即收窄布局）。
+ *  返回 { side, roomPx, clamped }。 */
+function chatPanelSideDecision({ charLeft, charRight, workArea, panelWidth, gap = 6 }) {
+  const wa = workArea && Number.isFinite(workArea.x) ? workArea : { x: 0, width: 0 };
+  const pw = Math.max(0, Number(panelWidth) || 0);
+  const g = Math.max(0, Number(gap) || 0);
+  const left = Number.isFinite(charLeft) ? charLeft : wa.x;
+  const right = Number.isFinite(charRight) ? charRight : left;
+  const leftRoom = left - g - wa.x;
+  const rightRoom = (wa.x + (Number.isFinite(wa.width) ? wa.width : 0)) - (right + g);
+  if (leftRoom >= pw) return { side: "left", roomPx: leftRoom, clamped: false };
+  if (rightRoom >= pw) return { side: "right", roomPx: rightRoom, clamped: false };
+  const side = rightRoom >= leftRoom ? "right" : "left";
+  return { side, roomPx: Math.max(0, side === "right" ? rightRoom : leftRoom), clamped: true };
+}
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { edgeFlipDecision, uiEdgeCompactFromBounds, verticalClampDecision, seatReanchorOnResizeDecision };
+  module.exports = { edgeFlipDecision, uiEdgeCompactFromBounds, verticalClampDecision, seatReanchorOnResizeDecision, chatPanelSideDecision };
 }

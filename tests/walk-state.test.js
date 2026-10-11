@@ -1,6 +1,6 @@
 /** walk-state 纯函数单测（node）——翻边滞回/垂直钳位/坐姿尺寸重锚决策（v2.5.26 收敛①，行为等价校验） */
 "use strict";
-const { edgeFlipDecision, uiEdgeCompactFromBounds, verticalClampDecision, seatReanchorOnResizeDecision } = require("../src/walk-state");
+const { edgeFlipDecision, uiEdgeCompactFromBounds, verticalClampDecision, seatReanchorOnResizeDecision, chatPanelSideDecision } = require("../src/walk-state");
 let failed = 0;
 function assert(name, cond, extra) {
   if (!cond) { failed++; console.log("FAIL", name, extra || ""); }
@@ -32,5 +32,23 @@ assert("拖拽中→不重锚（防拽离手）", seatReanchorOnResizeDecision({
 assert("飞行中→不重锚", seatReanchorOnResizeDecision({ seated: true, perched: false, dragPaused: false, flight: true, jump: false }) === false);
 assert("跳跃中→不重锚", seatReanchorOnResizeDecision({ seated: true, perched: false, dragPaused: false, flight: false, jump: true }) === false);
 assert("跳窗顶（perched）→不重锚", seatReanchorOnResizeDecision({ seated: true, perched: true, dragPaused: false, flight: false, jump: false }) === false);
+
+// BUG-06：chat panel 侧别决策（冻结规则：常规侧放下→left；否则右牵挂得下→right；两侧都紧→更大侧+clamp）
+{
+  const wa = { x: 0, width: 1920 };
+  // 中屏：常规侧（角色左侧）放得下 → left（产品默认布局不变）
+  assert("侧别：中屏常规侧放下→left", chatPanelSideDecision({ charLeft: 800, charRight: 920, workArea: wa, panelWidth: 200 }).side === "left");
+  // 左缘：常规侧放不下、右牵挂得下 → right
+  assert("侧别：左缘换边→right", chatPanelSideDecision({ charLeft: 0, charRight: 120, workArea: wa, panelWidth: 200 }).side === "right");
+  assert("侧别：左缘换边不 clamp", chatPanelSideDecision({ charLeft: 0, charRight: 120, workArea: wa, panelWidth: 200 }).clamped === false);
+  // 右缘：左侧仍放得下 → left（保持默认）
+  assert("侧别：右缘保持 left", chatPanelSideDecision({ charLeft: 1800, charRight: 1920, workArea: wa, panelWidth: 200 }).side === "left");
+  // 面板真实宽度变大后：中屏两侧都放不下 → 更大侧 + clamped
+  const wide = chatPanelSideDecision({ charLeft: 10, charRight: 130, workArea: { x: 0, width: 260 }, panelWidth: 300 });
+  assert("侧别：两侧都紧→更大侧", wide.side === "right" && wide.clamped === true, JSON.stringify(wide));
+  // 非当前显示器 workArea（负 x 多屏）：跟随传入 display，不硬编码单屏
+  const multi = chatPanelSideDecision({ charLeft: -1920, charRight: -1800, workArea: { x: -1920, width: 1920 }, panelWidth: 200 });
+  assert("侧别：多屏负坐标 display 跟随→right", multi.side === "right", JSON.stringify(multi));
+}
 
 process.exit(failed ? 1 : 0);
