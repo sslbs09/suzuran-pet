@@ -12,6 +12,7 @@ const ALLOWED_TOP = new Set([
   "pet", "chat", "features", "agentApi", "uiLang", "hotkey", "startHidden",
   "renderMode", "walking", "walkSeatSink", "walkTiming", "rigScale", "rigMouseFollow",
   "mouseTrackGlobal", "catToy", "fileGuard", "proactiveChat", "personify", "rpMode",
+  "desktopNotifications", "quietMode", // P1-U2 主动触达控制面（桌面通知总闸 / 安静模式）
   "dimMode", "greetingOnStart", "security", "spineSkinId", "tts", "ttsCloud", "ttsCosy",
   "ttsGenie", "ttsGsv", "moods", "emotionalVoice", "emotionVoice", "live2dScale",
   "autoLaunch", "walkGlobal", "walkSpeed", "proactiveMin", "agentClients", "netProxy",

@@ -233,7 +233,7 @@ test("characterization: features.js 不掌握任何投递安全闸门（窗口�
   const mainSrc = fs.readFileSync(path.join(__dirname, "..", "main.js"), "utf8");
   const start = mainSrc.indexOf("function sendProactive(text, emotion, { force = false } = {})");
   assert.ok(start > 0, "main.js 必须保留 sendProactive 作为唯一投递闸门");
-  const body = mainSrc.slice(start, start + 500);
+  const body = mainSrc.slice(start, start + 900); // P1-U2 后头部新增 master gate；窗口随函数头扩展，锁定语义不变
   assert.match(body, /if \(!force && !isWindowVisible\(\)\) return false;/, "窗口不可见闸门");
   assert.match(body, /if \(!force && awaySince\) return false;/, "离开模式闸门");
   assert.match(body, /lineGate\.admit\(t, \{ force \}\)/, "台词冷却/去重闸门");

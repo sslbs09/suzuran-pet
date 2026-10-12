@@ -142,6 +142,8 @@ contextBridge.exposeInMainWorld("petAPI", {
   // v2.3 人格化/主动搭话
   pat: () => ipcRenderer.send("pet:pat"),
   setProactiveChat: (on) => ipcRenderer.send("pet:set-proactive-chat", on),
+  setDesktopNotifications: (on) => ipcRenderer.send("pet:set-desktop-notifications", on), // P1-U2 桌面通知总闸
+  setQuietMode: (on) => ipcRenderer.send("pet:set-quiet-mode", on), // P1-U2 安静模式
   setPersonify: (on) => ipcRenderer.send("pet:set-personify", on),
   setWorkspaceWatch: (on, dirs) => ipcRenderer.send("pet:set-workspace-watch", on, dirs), // 感知工作区活动
   setRpMode: (on) => ipcRenderer.send("pet:set-rp-mode", on),

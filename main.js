@@ -115,6 +115,7 @@ function localizedFailure(error, lang) {
 }
 const { createChatOwnership } = require("./src/chat-ownership"); // 「角色进入聊天交互」的 ownership 单一权威（所有 chat ingress 共享，见下方 chatOwnership）
 const { createLineGate } = require("./src/line-gate");
+const proactivePolicy = require("./src/proactive-policy"); // P1-U2 主动触达控制面 policy（纯函数：主动消息/桌面通知/安静模式/提醒隔离）
 // M2 Foundation：通用 Body 动作协议（protocolVersion 1）——能力真实声明、
 // intentId 级动作幂等、信封纯校验。三者都是无 I/O 纯逻辑（可单测），
 // 角色语义绝不进入这一层；intentId 是 Core 的执行身份，Body 只透传/回显。
@@ -2368,6 +2369,9 @@ ipcMain.handle("pet:set-weather", (_e, patch) => {
 });
 
 function sendProactive(text, emotion, { force = false } = {}) {
+  // P1-U2 主动消息 master gate：非 force 自发触达（闲置搭话/天气播报/回归问候/人格化碎碎念等）
+  // 统一受「主动消息」总闸 + 「安静模式」控制；force=用户发起交互（摸头回应）与到点提醒恒通过。
+  if (!force && !proactivePolicy.canProactiveMessage(config.getConfig())) return false;
   if (!force && !isWindowVisible()) return false;
   if (!force && awaySince) return false; // 专注/离开模式：静默不打扰（v2.5.26）
   let t = String(text || "");
@@ -2405,9 +2409,12 @@ function sendScheduleDue(item) {
   const text = "⏰ 日程提醒：" + item.title + (item.notes ? "\n" + item.notes : "");
   // 日程情绪（动画档）映射到音色分档：surprised→惊讶 / happy→开心 / 其余→温柔（v2.5.26）
   const mood = item.emotion === "surprised" ? "惊讶" : item.emotion === "happy" ? "开心" : "温柔";
+  // P1-U2 硬边界：user-created reminder 到点投递恒执行（force 不经主动消息/安静模式闸）。
+  if (!proactivePolicy.canReminderDeliver(config.getConfig(), item)) return; // 恒 false 不可能；显式调用锁死边界语义（回归测试覆盖）
   sendProactive(text, mood, { force: true });
   sendToRenderer("pet:schedule-due", item);
-  if (!isWindowVisible() && Notification.isSupported()) {
+  // 桌面通知闸（P1-U2）：只关系统通知 surface；提醒数据/气泡/点击联动不受影响。
+  if (!isWindowVisible() && Notification.isSupported() && proactivePolicy.canDesktopNotify(config.getConfig())) {
     const n = new Notification({ title: i18n.t(currentUiLang(), "notification.scheduleReminderTitle", { appName: "苏苏洛桌宠" }), body: item.title + (item.notes ? "\n" + item.notes : "") }); // appName=BRAND 固定；body 为用户日程数据（DATA，不翻译）
     n.on("click", () => { // 通知点击联动（v2.5.26）：置前+显示桌宠
       try { if (win && !win.isDestroyed()) { if (!win.isVisible()) win.show(); win.focus(); win.moveTop(); } } catch { /* 忽略 */ }
@@ -3662,6 +3669,13 @@ ipcMain.on("pet:set-proactive-chat", (_e, on) => {
   config.saveConfig({ proactiveChat: !!on });
   features.setProactiveEnabled(!!on);
   if (on) features.startProactive((msg, mood) => sendProactive(msg, mood || "idle"), proactiveMin(), proactiveStateFn); // mood 由台词池情绪映射给出（v2.5.26）
+});
+// P1-U2 主动触达控制面：桌面通知 / 安静模式（持久化即时生效；reminder 数据与投递不受影响）
+ipcMain.on("pet:set-desktop-notifications", (_e, on) => {
+  config.saveConfig({ desktopNotifications: !!on });
+});
+ipcMain.on("pet:set-quiet-mode", (_e, on) => {
+  config.saveConfig({ quietMode: !!on });
 });
 // 日语预热进度（v2.5.26）：设置页语音区显示「已缓存 x/N 句」
 ipcMain.handle("pet:ja-prewarm-status", () => features.getJaPrewarmProgress());

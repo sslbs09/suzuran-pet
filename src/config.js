@@ -95,7 +95,9 @@ const DEFAULTS = {
   characterRuntimePlanInitiationV0Enabled: false, // Phase 8-D 主动发起因果实验（默认关，隐藏实验项）：未完成 PLAN→外层 ACT 概率提升；EXPERIMENTAL CAUSAL PROBE, NOT PERSONALITY TUNING
   softRender: false,                        // 软件渲染（默认关，重启生效）：无独显/驱动异常环境用 CPU 渲染兜底（WebGL 走 SwiftShader）
   fileGuard: false,                          // 蜜标监控（默认关）：检测其他程序访问桌宠敏感配置区域
-  proactiveChat: true,                       // 主动搭话（默认开，设置页单独开关）：闲置后主动开口
+  proactiveChat: true,                       // 主动消息总闸（默认开=legacy 行为；P1-U2 升级为全部非 force 自发触达的 master gate）
+  desktopNotifications: true,                // 桌面通知（P1-U2，默认开=现状）：系统级通知 surface 总闸；不影响提醒数据与角色气泡
+  quietMode: false,                          // 安静模式（P1-U2，默认关=现状）：抑制非必要主动打扰；用户聊天与到点提醒不受影响
   personify: true,                           // 人格化（默认开，设置页单独开关）：被抛掷/睡醒/坐窗等事件时小声嘀咕
   rpMode: true,                              // 角色扮演模式（默认开=现有 RP 深度；关=助手模式：优先服从指令、回复直接简洁）
   walking: false,                           // 桌面行走开关（仅 spine 模式生效；GIF 模式下强制无效）
@@ -378,7 +380,9 @@ function buildSettingsView() {
     rigMouseFollow: cfg.rigMouseFollow !== false, // 2.5D 头部/眼睛跟随鼠标（v2.2.1 实验性）
     mouseTrackGlobal: !!cfg.mouseTrackGlobal, // 全局鼠标跟踪（v2.2.1 实验性，需显式许可默认关）
     catToy: !!cfg.catToy, // 逗猫棒（需显式许可默认关）
-    proactiveChat: cfg.proactiveChat !== false, // 主动搭话（设置页单独开关）
+    proactiveChat: cfg.proactiveChat !== false, // 主动消息总闸（P1-U2：master gate 全部非 force 自发触达）
+    desktopNotifications: cfg.desktopNotifications !== false, // 桌面通知（P1-U2，默认开=现状）
+    quietMode: cfg.quietMode === true, // 安静模式（P1-U2，默认关=现状）
     personify: cfg.personify !== false, // 人格化（设置页单独开关）
     features: cfg.features || {}, // 功能开关快照（剪贴板/系统监控/工作区感知等）
     rpMode: cfg.rpMode !== false, // 角色扮演模式（设置页单独开关）：关=助手模式优先服从指令

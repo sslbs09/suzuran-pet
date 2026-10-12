@@ -400,9 +400,14 @@ async function fetchAndRenderOnboard(S) {
   // 蜜标监控（默认关）
   $("file-guard").checked = !!S.fileGuard;
   $("file-guard").addEventListener("change", () => window.petAPI.setFileGuard($("file-guard").checked));
-  // 主动搭话 / 人格化（v2.3，单独开关默认开）
+  // 主动消息总闸（P1-U2：master gate 全部非 force 自发触达；控件已迁至「隐私与感知→主动行为」section）
   $("proactive-chat").checked = S.proactiveChat !== false;
   $("proactive-chat").addEventListener("change", () => window.petAPI.setProactiveChat($("proactive-chat").checked));
+  // P1-U2 安静模式 / 桌面通知（即时持久化，同 proactive-chat 保存语义）
+  $("quiet-mode").checked = S.quietMode === true;
+  $("quiet-mode").addEventListener("change", () => window.petAPI.setQuietMode($("quiet-mode").checked));
+  $("desktop-notifications").checked = S.desktopNotifications !== false;
+  $("desktop-notifications").addEventListener("change", () => window.petAPI.setDesktopNotifications($("desktop-notifications").checked));
   $("personify").checked = S.personify !== false;
   $("personify").addEventListener("change", () => window.petAPI.setPersonify($("personify").checked));
   // 角色扮演模式（RP，单独开关默认开）：关=助手模式优先服从指令
