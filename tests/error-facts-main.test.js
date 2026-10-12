@@ -80,7 +80,7 @@ test("every code pet:error can emit is renderable by the Phase 5-A presenter", (
 /* ---------------- Agent /chat ---------------- */
 
 test("Agent /chat error response keeps its legacy error field and adds code/meta", () => {
-  const agentBlock = region('if (e && e.code === "BUSY")', 600);
+  const agentBlock = region('if (e && e.code === "BUSY")', 900); // STAGE B：BUSY 与 500 之间新增 FORMAL 503 分支，窗口随结构扩展，断言语义不变
   assert.match(agentBlock, /\{\s*ok:\s*false,\s*error:\s*fact\.message,\s*code:\s*fact\.code,\s*meta:\s*fact\.meta\s*\}/,
     "Agent 500 body must stay {ok,error} and gain code/meta");
   assert.match(agentBlock, /errorFacts\.toPayload\(/);

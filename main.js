@@ -2054,18 +2054,41 @@ function startAgentApi() {
       if (!text) { send(400, { ok: false, error: "text 不能为空", ...errorFacts.codeForHttpStatus(400) }); return; }
       // 任务按 id 管理：/stop 可同时取消正在执行和排队请求
       const genAtAsk = history.generation(); // F-03 竞态护栏基线
-      const enq = agentTaskQueue.enqueue(({ id, signal }) => {
+      // STAGE B：formal mode 下 External /chat 与 UI chat 共用同一 formal cognition owner
+      // （fetchFormalCognition 单一入口；绑定 Body configured Instance，调用方不可指定/伪造）。
+      let agentCognition = null;
+      const enq = agentTaskQueue.enqueue(async ({ id, signal }) => {
         agentApiAbort = new AbortController();
         signal.addEventListener("abort", () => agentApiAbort.abort(), { once: true });
+        const wmOn = ((config.getConfig().whitemoonRuntime || {}).enabled) === true;
+        let agentSuppressions = [];
+        agentCognition = null;
+        if (wmOn) {
+          const cog = await fetchFormalCognition();
+          if (cog.state !== "ok") {
+            // honest failure：不降级 legacy、不调 provider、不写任何历史（与 UI 侧同语义，HTTP 通道显式失败）。
+            const err = new Error("正式 Character Runtime 当前不可用，本轮消息未发送");
+            err.code = "FORMAL_PROJECTION_UNAVAILABLE";
+            err.projectionState = cog.state;
+            throw err;
+          }
+          agentCognition = cog.cognition;
+          agentSuppressions = cog.suppressions;
+        }
         // 外部 chat 与 UI chat 共用同一条 ownership 执行路径（chatOwnership.run）：
         // 先与 conversation 单写者互斥，再成对持有 chat pause lease。
         // 排队（agentTaskQueue 串行链）期间不触碰 ownership——只有真正开始执行才拿 lease。
+        const _recent = history.recent("chat", cfg.chat.maxHistoryTurns || 10);
         return chatOwnership.run(async () => chatClient.chat({
-          persona: buildChatPersona(),
-          history: history.recent("chat", cfg.chat.maxHistoryTurns || 10),
+          persona: buildChatPersona(!!agentCognition), // formal ⇒ 纯呈现人设（legacy 派生记忆抑制，与 UI 一致）
+          history: agentCognition
+            ? _recent.filter((r) => r.whitemoonInstance === agentCognition.instanceId) // instance 隔离（与 UI 同式）
+            : _recent,
           text,
           state: petStateNote(),
           signal: agentApiAbort.signal,
+          cognition: agentCognition,
+          suppressions: agentSuppressions,
           genGate: () => history.generation() === genAtAsk, // F-03：清史后迟到的 Agent 任务不得写回向量库
           onChunk: () => {},
         }), { source: "agent-api", signal });
@@ -2082,11 +2105,16 @@ function startAgentApi() {
         aliveStatus.noteTurnSucceeded();
         // F-03 竞态护栏：任务在途期间发生过 clear-history → 结果不写回（HTTP 响应照常返回调用方）
         if (history.generation() === genAtAsk) {
-          if ((config.getConfig().features || {}).vectorMemory) {
+          if (!agentCognition && (config.getConfig().features || {}).vectorMemory) {
             try { vectorMemory.add(text); } catch { /* 入库失败忽略 */ }
           }
-          history.append({ ts: Date.now(), mode: "chat", role: "user", content: text });
-          history.append({ ts: Date.now(), mode: "chat", role: "assistant", content: r.text });
+          // formal mode：写回行携带 configured Instance 归属（与 UI turn-commit 同式）——
+          // 否则 formal 下本入口自己的 history 会被 instance 过滤排除，且跨 instance 不可隔离。
+          const agentFormalMeta = agentCognition
+            ? { whitemoonInstance: agentCognition.instanceId, whitemoonMemoryRevision: agentCognition.currentMemory ? agentCognition.currentMemory.revision : 0 }
+            : {};
+          history.append(Object.assign({ ts: Date.now(), mode: "chat", role: "user", content: text }, agentFormalMeta));
+          history.append(Object.assign({ ts: Date.now(), mode: "chat", role: "assistant", content: r.text }, agentFormalMeta));
         } else {
           logTts("history", "清除历史竞态: Agent API 在途结果不写回（代次已变更）");
         }
@@ -2096,6 +2124,12 @@ function startAgentApi() {
         // ownership 互斥拒绝 = 角色正忙（UI chat 或另一条 /chat 在跑）→ 429 而非 500。
         // 与 UI 侧 conversation.isBusy()→buffer 是同一语义的两端：一个排队补发，一个显式拒绝。
         if (e && e.code === "BUSY") { send(429, { ok: false, error: "角色正忙（busy），请稍后重试", code: "BUSY", meta: {} }); return; }
+        // STAGE B：formal 投影读取失败 ⇒ 显式 503（不降级 legacy、不写 COGNITION 真相层——
+        // Host 失败 ≠ 模型失败；noteProjection 记账已在 fetchFormalCognition 内完成）。
+        if (e && e.code === "FORMAL_PROJECTION_UNAVAILABLE") {
+          send(503, { ok: false, error: e.message, code: e.code, meta: { projectionState: e.projectionState || "unknown" } });
+          return;
+        }
         // Phase 5-C：Agent 响应保留既有 error 字段（协议兼容），并补 code/meta；
         // detail/provider body 经 toPayload 丢弃，绝不外发给 Agent 调用方。
         const fact = errorFacts.toPayload(e);
@@ -2702,6 +2736,34 @@ function drainAskBuffer(reason) { // 恰好一次：busy 已清才 take；补发
   const p = askBuffer.take();
   if (p) handleAsk(p.sender, p.payload);
 }
+/* STAGE B（External Agent Formal Cognition Parity）：formal cognition 读取的唯一 owner helper。
+ * UI 正式聊天（handleAskInner）与 External Agent /chat 共用同一读取与失败语义（§3 不复制 builder）：
+ *  - formal enabled ⇒ 本轮唯一一次 canonical 投影读取；失败如实记账（noteProjection + log），
+ *    由调用方按各自通道显式失败（UI pet:error / Agent HTTP 503），绝不静默降级成 legacy 记忆（§27 R8）。
+ *  - formal disabled ⇒ 调用方不进本函数（零流量、legacy 行为逐字不变）。 */
+const FORMAL_LEGACY_SUPPRESSIONS = Object.freeze([
+  { category: "LEGACY_BOND", reason: "INSTANCE_PROVENANCE_UNKNOWN" },
+  { category: "LEGACY_FACT", reason: "INSTANCE_PROVENANCE_UNKNOWN" },
+  { category: "LEGACY_SUMMARY", reason: "INSTANCE_PROVENANCE_UNKNOWN" },
+  { category: "LEGACY_VECTOR_RECALL", reason: "INSTANCE_PROVENANCE_UNKNOWN" },
+  { category: "EXPLICIT_USER_PREFERENCE", reason: "INSTANCE_PROVENANCE_UNKNOWN" }
+]);
+async function fetchFormalCognition() {
+  let projRes = null;
+  try {
+    projRes = formalProjection ? await formalProjection.fetchProjection() : { state: "unavailable", error: "projection client not constructed" };
+  } catch (e) {
+    projRes = { state: "unknown", error: String((e && e.message) || e) };
+  }
+  if (!projRes || projRes.state !== "ok" || !projRes.projection || !projRes.projection.character) {
+    const st = (projRes && projRes.state) || "unknown";
+    aliveStatus.noteProjection(st, String((projRes && projRes.error) || ""));
+    logTts("cognition", "formal projection read failed: " + st);
+    return { state: st, error: String((projRes && projRes.error) || "") };
+  }
+  aliveStatus.noteProjection("ok"); // 本轮实际读到 canonical 投影 ⇒ FORMAL=OK（source=projection-response）
+  return { state: "ok", cognition: projRes.projection.character, suppressions: FORMAL_LEGACY_SUPPRESSIONS.map((s) => ({ ...s })) };
+}
 async function handleAsk(sender, payload) {
   // F-03（实机验收）：受理时刻的清史代次随消息走——防抖缓冲/锁释放导致的迟到重发
   // 据此识别并丢弃，防止被清除对话经延迟管线重新写入 history/向量库/记忆
@@ -2801,36 +2863,20 @@ async function handleAskInner(sender, { id, text, askGen }) {
   const wmEnabled = ((config.getConfig().whitemoonRuntime || {}).enabled) === true;
   if (!wmEnabled) aliveStatus.noteFormalDisabled(); // 开关关闭 ⇒ DISABLED（诚实记账，不是故障也不是健康；§30 source=config-disabled）
   if (wmEnabled && mode === "chat") {
-    let projRes = null;
-    try {
-      projRes = formalProjection ? await formalProjection.fetchProjection() : { state: "unavailable", error: "projection client not constructed" };
-    } catch (e) {
-      projRes = { state: "unknown", error: String((e && e.message) || e) };
-    }
-    if (!projRes || projRes.state !== "ok" || !projRes.projection || !projRes.projection.character) {
-      // P0-B2 §29：FORMAL CHARACTER 层按实际投影读取结果记账（UNAVAILABLE / PACKAGE_MISMATCH）。
-      // 注意不写 COGNITION 层——Host 失败 ≠ 模型失败（§6 禁止互相冒充）；也不动 BODY 层。
-      aliveStatus.noteProjection((projRes && projRes.state) || "unknown", String((projRes && projRes.error) || ""));
-      logTts("cognition", "formal projection read failed: " + ((projRes && projRes.state) || "unknown"));
+    const cog = await fetchFormalCognition(); // STAGE B：唯一 owner helper（读取/记账/失败语义与重构前逐字等价）
+    if (cog.state !== "ok") {
       sender.send("pet:error", {
         id, code: "FORMAL_PROJECTION_UNAVAILABLE",
-        meta: { projectionState: (projRes && projRes.state) || "unknown" },
+        meta: { projectionState: cog.state },
         message: "正式 Character Runtime 当前不可用，本轮消息未发送"
       });
       conversation.finish(task.id);
       return;
     }
-    aliveStatus.noteProjection("ok"); // 本轮实际读到 canonical 投影 ⇒ FORMAL=OK（source=projection-response）
-    cognition = projRes.projection.character;
+    cognition = cog.cognition;
     // §23：这些 legacy cognition 类别当前无 instance 归属 ⇒ formal mode 抑制
     // （classification+precedence+isolation；不删除底层数据，§19）。
-    formalSuppressions = [
-      { category: "LEGACY_BOND", reason: "INSTANCE_PROVENANCE_UNKNOWN" },
-      { category: "LEGACY_FACT", reason: "INSTANCE_PROVENANCE_UNKNOWN" },
-      { category: "LEGACY_SUMMARY", reason: "INSTANCE_PROVENANCE_UNKNOWN" },
-      { category: "LEGACY_VECTOR_RECALL", reason: "INSTANCE_PROVENANCE_UNKNOWN" },
-      { category: "EXPLICIT_USER_PREFERENCE", reason: "INSTANCE_PROVENANCE_UNKNOWN" }
-    ];
+    formalSuppressions = cog.suppressions;
   }
   const formalInstanceId = cognition ? cognition.instanceId : null;
   /* === P0-B2 FAILURE-SAFE COGNITION TURN（§11–§14/§19） ===
