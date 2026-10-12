@@ -38,6 +38,19 @@ export default [
     rules: sharedRules
   },
   {
+    // E2E 驱动双环境（最窄 file-specific override）：文件本体是 Node 侧（驱动
+    // Playwright/Electron），但 page.evaluate / browser-side callback 内合法使用
+    // window/document。仅这两个文件同时开 Node + Browser globals；不给全部
+    // scripts/**/*.js 加浏览器环境，不关 no-undef，不加文件级 disable。
+    files: ["scripts/e2e-whitemoon-actions.js", "scripts/e2e-whitemoon-ui.js"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "script",
+      globals: { ...globals.node, ...globals.browser, ...globals.es2021 }
+    },
+    rules: sharedRules
+  },
+  {
     // 渲染层页面：浏览器环境
     files: ["renderer/*.js"],
     languageOptions: {
