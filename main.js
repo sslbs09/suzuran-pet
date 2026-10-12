@@ -3748,7 +3748,9 @@ function proactiveStateFn() {
 ipcMain.on("pet:set-proactive-chat", (_e, on) => {
   config.saveConfig({ proactiveChat: !!on });
   features.setProactiveEnabled(!!on);
-  if (on) features.startProactive((msg, mood) => sendProactive(msg, mood || "idle"), proactiveMin(), proactiveStateFn); // mood 由台词池情绪映射给出（v2.5.26）
+  // 参数合同与 startup 逐位一致：(sendFn, intervalMin, chance, stateFn)；chance 复用 canonical source。
+  // 此前漏传第 3 参，stateFn 落入 chance 位 → Math.random() > fn 恒为 NaN 比较，eligible tick 全放行
+  if (on) features.startProactive((msg, mood) => sendProactive(msg, mood || "idle"), proactiveMin(), PROACTIVE_DEFAULTS.chance, proactiveStateFn); // mood 由台词池情绪映射给出（v2.5.26）
 });
 // P1-U2 主动触达控制面：桌面通知 / 安静模式（持久化即时生效；reminder 数据与投递不受影响）
 ipcMain.on("pet:set-desktop-notifications", (_e, on) => {
