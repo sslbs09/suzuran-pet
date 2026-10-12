@@ -4903,7 +4903,9 @@ if (!window.__renderLifecycleTestMode) (async function init() {
   setMood("idle");
 
   // 开场白（气泡 + 语音；可在设置里关闭「启动问候」；隐藏启动时静默待命不打扰）
-  if (state.greetingOnStart !== false && state.personaOpening && !state.hiddenAtStart) {
+  // P1-U2 closure：启动问候=非用户请求的主动触达，受主动消息总闸+安静模式控制
+  // （main get-state 的 startupGreetingAllowed 是唯一 policy owner；!== false 兼容旧 payload=现状语义）。
+  if (state.startupGreetingAllowed !== false && state.greetingOnStart !== false && state.personaOpening && !state.hiddenAtStart) {
     showBubble();
     bubbleText.textContent = state.personaOpening;
     speak(state.personaOpening);

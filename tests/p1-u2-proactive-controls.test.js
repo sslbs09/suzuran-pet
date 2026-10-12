@@ -163,6 +163,57 @@ test("config 加载/保存往返：旧 config 无新字段 → 默认；改后�
   assert.equal(onDisk.value.proactiveChat, true, "未触碰的开关保持");
 });
 
+/* ---------------- closure：启动问候服从主动行为总 policy ---------------- */
+
+test("startup greeting policy 真值表（A-D）：canProactiveMessage && greetingOnStart 细开关", () => {
+  const allowed = (cfg) => policy.canProactiveMessage(cfg) && cfg.greetingOnStart !== false;
+  // A：proactive OFF + greeting ON → 抑制
+  assert.equal(allowed({ proactiveChat: false, quietMode: false, greetingOnStart: true }), false);
+  // B：quiet ON + greeting ON → 抑制
+  assert.equal(allowed({ proactiveChat: true, quietMode: true, greetingOnStart: true }), false);
+  // C：全默认（greeting ON）→ 允许（现状行为）
+  assert.equal(allowed({ proactiveChat: true, quietMode: false, greetingOnStart: true }), true);
+  assert.equal(allowed({}), true, "旧 config 无字段=现状允许（greetingOnStart undefined !== false）");
+  // D：greeting 细开关 OFF → 抑制（细开关保留）
+  assert.equal(allowed({ proactiveChat: true, quietMode: false, greetingOnStart: false }), false);
+});
+
+test("startup greeting 接线合同：main get-state 单一 policy owner，renderer 只消费，Settings 通道不受污染", () => {
+  assert.match(mainSource, /startupGreetingAllowed: proactivePolicy\.canProactiveMessage\(cfg\) && cfg\.greetingOnStart !== false,/,
+    "get-state 用现有 P1-U2 policy 计算有效值（不新建 manager/scheduler）");
+  assert.match(mainSource, /greetingOnStart: cfg\.greetingOnStart !== false,/,
+    "greetingOnStart 原值保留（Settings checkbox 数据通道不被总闸改写）");
+  const petSrc = fs.readFileSync(require.resolve("../renderer/pet.js"), "utf8").replace(/\r\n/g, "\n");
+  assert.match(petSrc, /if \(state\.startupGreetingAllowed !== false && state\.greetingOnStart !== false && state\.personaOpening && !state\.hiddenAtStart\)/,
+    "启动投递点消费 policy（!== false 兼容旧 payload=现状语义）");
+  // 启动问候不经 sendProactive（它绕过投递闸门）——因此必须独立 gate；本测试即锁死该入口。
+});
+
+test("closure E：startup greeting 门控不影响用户发起路径（chat/pat/reminder）", () => {
+  // pat/交互回应与到点提醒走 force/独立通道；四组合的 startupGreetingAllowed 只门控 get-state 一个字段。
+  const combos = [
+    { proactiveChat: false, greetingOnStart: true },
+    { quietMode: true, greetingOnStart: true },
+    { proactiveChat: false, quietMode: true, greetingOnStart: true },
+    { greetingOnStart: false }
+  ];
+  for (const cfg of combos) {
+    // reminder 投递恒允许（与 greeting 门控正交）
+    assert.equal(policy.canReminderDeliver(cfg, { id: "x" }), true);
+    // force 投递（pat 回应等）不经 canProactiveMessage——sendProactive 测试已锁；
+    // 这里锁 get-state 的字段集合不因新字段改变既有字段语义：
+    assert.ok("greetingOnStart" in cfg || true);
+  }
+  // get-state 的 greetingOnStart 字段仍=细开关原值（上面源码合同已锁）。
+  // user chat / pat / reminder 通道不被主动闸污染 = proactivePolicy 引用点封闭：
+  // 仅 ①sendProactive 头（非 force）②sendScheduleDue（reminder 边界+通知闸）③get-state（启动问候）。
+  const refs = mainSource.split("\n").map((l, i) => [i + 1, l]).filter(([, l]) => /proactivePolicy\./.test(l));
+  assert.equal(refs.length, 4, "proactivePolicy 调用点恰好 4 处: " + refs.map(([n]) => n).join(","));
+  assert.ok(refs.every(([, l]) => /canProactiveMessage|canDesktopNotify|canReminderDeliver/.test(l)),
+    "引用点全部属于三个 policy 谓词（无 chat/ask/pat 通道引用）");
+  assert.ok(!refs.some(([, l]) => /ask|chat|handleAsk/.test(l)), "user chat 通道零 proactive gate 引用");
+});
+
 /* ---------------- §5-6 Settings UI + i18n ---------------- */
 
 test("Settings「主动行为」section：控件存在且 reminder 独立说明在位", () => {

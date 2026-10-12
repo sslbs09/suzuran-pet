@@ -3048,6 +3048,10 @@ ipcMain.handle("pet:get-state", () => {
   return {
     personaOpening: openingLine(personaCache),
     greetingOnStart: cfg.greetingOnStart !== false,
+    // P1-U2 closure：启动问候属于 unsolicited proactive outreach，必须服从现在的主动行为总 policy
+    // （同一 policy owner，最小 gate；greetingOnStart 保留细开关原值——Settings 数据通道不受污染，
+    // 本字段只门控 pet.js 的启动投递点；旧 payload 缺字段时 renderer 回退现状语义）。
+    startupGreetingAllowed: proactivePolicy.canProactiveMessage(cfg) && cfg.greetingOnStart !== false,
     forcedMode,
     keyReady: !!cfg.chat.apiKey || chatClient.isLocalUrl(cfg.chat.baseUrl), // 本地部署端点免 Key（v2.5.1）
     keySource: cfg._keySource,
