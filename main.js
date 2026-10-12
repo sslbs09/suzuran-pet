@@ -2387,7 +2387,8 @@ function startFocusWatch() {
       // 状态转移抽到 focus-watch 纯函数（v2.5.26 收敛②），副作用留主干
       const t = focusWatch.focusTransition({ idleSec: idle, awaySince, now: Date.now() });
       awaySince = t.awaySince;
-      if (t.greet && isWindowVisible()) {
+      // CUTOVER §7：Formal owner 下只关回归"发话决策"；away/return 状态机照常维护。
+      if (t.greet && isWindowVisible() && !formalAutonomyOwnsCharacterSpeech()) {
         sendProactive("【开心】（看你回来眼睛一亮）回来啦～刚才没打扰你，现在要聊聊吗？", "开心");
       }
     } catch { /* 忽略 */ }
@@ -2407,7 +2408,9 @@ function startWeatherWatch() {
       const changed = !lastWeather || lastWeather.desc !== data.desc || lastWeather.temp !== data.temp;
       lastWeather = data;
       // 天气变化且非离开/专注时，低概率主动播报（4h 内不重复同类）
-      if (changed && !awaySince && isWindowVisible() && Date.now() - _weatherLastSay > 4 * 3600 * 1000 && Math.random() < 0.5) {
+      // CUTOVER §7：Formal owner 下只关天气"关心式发话"；fetch/lastWeather 照常更新
+      // （天气数据仍是状态快照等非 Character 消费方共用的检测数据）。
+      if (changed && !awaySince && isWindowVisible() && Date.now() - _weatherLastSay > 4 * 3600 * 1000 && Math.random() < 0.5 && !formalAutonomyOwnsCharacterSpeech()) {
         const cat = weather.moodCat(data);
         const pool = lines.WEATHER_LINES[cat] || lines.WEATHER_LINES.cloudy;
         if (pool && pool.length) { _weatherLastSay = Date.now(); sendProactive(lines.pickTpl(pool, chatVars()), "温柔"); }
@@ -2431,6 +2434,19 @@ ipcMain.handle("pet:set-weather", (_e, patch) => {
   config.saveConfig({ weather: next });
   return next;
 });
+
+/**
+ * AUTONOMY OWNER（cutover §2 产品规则）：whitemoonRuntime.enabled === true 时，
+ * unsolicited Character 发话决策归 Formal Runtime（Host 供 opportunity、Core
+ * Package 决定、Adapter 映射、Body/P1-U2 保留最终触达控制）。
+ * 这个谓词只回答一件事：当前 profile 是否由 Formal 拥有主动角色发话决策。
+ * 刻意保持窄：不是 autonomy framework，不是第二套用户设置——Formal enabled
+ * 本身就是 owner 切换条件。
+ * 不放进 sendProactive 全局底层：reminder/到点/安全警告/即时交互反馈等仍合法调用它。
+ */
+function formalAutonomyOwnsCharacterSpeech() {
+  return ((config.getConfig() || {}).whitemoonRuntime || {}).enabled === true;
+}
 
 function sendProactive(text, emotion, { force = false } = {}) {
   // P1-U2 主动消息 master gate：非 force 自发触达（闲置搭话/天气播报/回归问候/人格化碎碎念等）
@@ -2576,7 +2592,11 @@ function petStateNote() {
 /** 人格化事件台词（v2.3，设置页 personify 单独开关） ---------- */
 const personifyCooldowns = {}; // event → 上次发言时间
 const appBootTs = Date.now(); // 启动 15s 内不触发「睡醒」等开场台词（避免与开场白重复）
-function maybePersonify(event, { chance = 0.3, cooldownMs = 60000 } = {}) {
+// CUTOVER §7/§8：opts.autonomous=true 标记「不是用户即时动作直接后果」的场景自语
+// （散步落位嘀咕、系统休眠/唤醒台词）。Formal owner 下这些发话停止；
+// 拖拽/抛掷落地/被抓/摸头等即时交互反馈（不标 autonomous）恒保留。
+function maybePersonify(event, { chance = 0.3, cooldownMs = 60000, autonomous = false } = {}) {
+  if (autonomous && formalAutonomyOwnsCharacterSpeech()) return;
   if (config.getConfig().personify === false) return; // 设置页开关
   if (conversation.isBusy()) return; // 对话中不插话（TD-4 单写者）
   if (Date.now() - appBootTs < 15000 && event === "wake") return; // 启动开场白窗口
@@ -2604,6 +2624,10 @@ function emitWorkflowSignal(source) {
   }, 1500);
 }
 function consumeWorkflowSignalNow() {
+  // CUTOVER §7：workspace/Agent workflow 碎语属 unsolicited Character 发话，Formal
+  // owner 下停发。只跳过消费与投递——信号记录（emitWorkflowSignal/recordWorkflowSignal）
+  // 与 fs.watch 检测本身照常运行，信号不因此被标记为已说。
+  if (formalAutonomyOwnsCharacterSpeech()) return false;
   const result = consumeWorkflowSignal(workflowSignal, Date.now(), {
     busy: conversation.isBusy() || agentTaskQueue.isBusy(),
     sleeping: !!walk.sleeping
@@ -2960,7 +2984,8 @@ async function handleAskInner(sender, { id, text, askGen }) {
       if (b.leveledUp) {
         sendToRenderer("pet:toast", i18n.t(currentUiLang(), "notice.bondLevelUp", { level: b.level }));
         const st = bond.getStage();
-        if (st.key !== stageBefore && lines.STAGE_LINES[st.key] && lines.STAGE_LINES[st.key].length) {
+        if (st.key !== stageBefore && lines.STAGE_LINES[st.key] && lines.STAGE_LINES[st.key].length && !formalAutonomyOwnsCharacterSpeech()) {
+          // CUTOVER §7：Formal owner 下 legacy 羁绊阶段插话停发；bond 数据与 toast 照常。
           sendProactive(lines.pickTpl(lines.STAGE_LINES[st.key], chatVars()), lines.LINE_MOODS["stage" + st.key] || "温柔"); // 羁绊阶段→音色分档（v2.5.26）
         }
       }
@@ -3127,7 +3152,8 @@ ipcMain.handle("pet:get-state", () => {
     // P1-U2 closure：启动问候属于 unsolicited proactive outreach，必须服从现在的主动行为总 policy
     // （同一 policy owner，最小 gate；greetingOnStart 保留细开关原值——Settings 数据通道不受污染，
     // 本字段只门控 pet.js 的启动投递点；旧 payload 缺字段时 renderer 回退现状语义）。
-    startupGreetingAllowed: proactivePolicy.canProactiveMessage(cfg) && cfg.greetingOnStart !== false,
+    // CUTOVER §10：Formal enabled → legacy 开场白不再自行发话（复用同一 gate，不加第二套 flag）。
+    startupGreetingAllowed: !formalAutonomyOwnsCharacterSpeech() && proactivePolicy.canProactiveMessage(cfg) && cfg.greetingOnStart !== false,
     forcedMode,
     keyReady: !!cfg.chat.apiKey || chatClient.isLocalUrl(cfg.chat.baseUrl), // 本地部署端点免 Key（v2.5.1）
     keySource: cfg._keySource,
@@ -3746,7 +3772,11 @@ function proactiveStateFn() {
 }
 
 ipcMain.on("pet:set-proactive-chat", (_e, on) => {
+  // P1-U2 投递权限恒持久化（两种 owner 下 sendProactive/canProactiveMessage 都读它）。
   config.saveConfig({ proactiveChat: !!on });
+  // CUTOVER §6：Formal enabled → 本开关只改变 P1-U2 delivery permission，
+  // 绝不复活 legacy 定时器（autonomy owner 不双轨）。
+  if (formalAutonomyOwnsCharacterSpeech()) return;
   features.setProactiveEnabled(!!on);
   // 参数合同与 startup 逐位一致：(sendFn, intervalMin, chance, stateFn)；chance 复用 canonical source。
   // 此前漏传第 3 参，stateFn 落入 chance 位 → Math.random() > fn 恒为 NaN 比较，eligible tick 全放行
@@ -3905,6 +3935,8 @@ ipcMain.handle("pet:toggle-feature", (_e, { name, value }) => {
   if (name === "clipboardWatch") {
     if (value) {
       features.startClipboardWatch((msg) => {
+        // CUTOVER §7：Formal owner 下 clipboard 的关心/邀请式台词停发；剪贴板检测照常运行。
+        if (formalAutonomyOwnsCharacterSpeech()) return;
         sendProactive(msg, "idle");
       }, 3000);
     } else {
@@ -3915,7 +3947,9 @@ ipcMain.handle("pet:toggle-feature", (_e, { name, value }) => {
     if (value) {
       features.startSystemMonitor(
         () => features.getSystemStats(),
-        (msg) => { sendProactive(msg, "think"); },
+        // CUTOVER §7：Formal owner 下系统监控的 casual 角色碎语停发；
+        // stats 读取与定时器照常（get-sysstats / 状态快照仍可用）。
+        (msg) => { if (formalAutonomyOwnsCharacterSpeech()) return; sendProactive(msg, "think"); },
         15
       );
     } else {
@@ -5611,8 +5645,8 @@ function walkTick() {
       walkBroadcast();
       applyLayer();
       walkSchedulePhase(sitPhaseMs());
-      // 人格化：平时散步跳到窗口顶上时偶尔嘀咕
-      maybePersonify("perch", { chance: 0.2, cooldownMs: 150000 });
+      // 人格化：平时散步跳到窗口顶上时偶尔嘀咕（自主场景自语：Formal owner 下停发）
+      maybePersonify("perch", { chance: 0.2, cooldownMs: 150000, autonomous: true });
     } else if (walk.returning) {
       setBodyPosture({ returning: false, gotoPerch: false, iconTarget: false }, { source: "jump-return" }); walk.perchBarrier = null; walk.targetX = null;
       enterRestPose();
@@ -6021,7 +6055,7 @@ function wakeSleepEffects(reason = "wake") {
   }
   walkBroadcast();
   const edge = transitionSleep(wasSleeping, walk.sleeping);
-  if (edge === "wake") maybePersonify("wake", { chance: 0.35, cooldownMs: 60000 });
+  if (edge === "wake") maybePersonify("wake", { chance: 0.35, cooldownMs: 60000, autonomous: true });
 }
 ipcMain.on("pet:set-sleeping", (_e, v, identity) => {
   if (!isCurrentBodyMutation(_e, identity)) return;
@@ -6093,8 +6127,8 @@ ipcMain.on("pet:set-sleeping", (_e, v, identity) => {
   if (!(win && !win.isDestroyed() && config.getConfig().renderMode === "spine")) walkBroadcast();
   // 人格化：入睡/睡醒时偶尔嘀咕——v2.5.27 只在真实状态边沿触发（防止重复 setSleeping 连发 wake 台词）
   const edge = transitionSleep(wasSleeping, walk.sleeping);
-  if (edge === "sleep") maybePersonify("sleep", { chance: 0.25, cooldownMs: 180000 });
-  else if (edge === "wake") maybePersonify("wake", { chance: 0.35, cooldownMs: 60000 });
+  if (edge === "sleep") maybePersonify("sleep", { chance: 0.25, cooldownMs: 180000, autonomous: true });
+  else if (edge === "wake") maybePersonify("wake", { chance: 0.35, cooldownMs: 60000, autonomous: true });
 }); // 睡觉时行走引擎原地待命
 ipcMain.on("pet:set-has-sit", (_e, v, identity) => { // 渲染层皮肤加载后上报：无坐下动画的皮肤不做坐姿下沉
   if (!isCurrentBodyMutation(_e, identity)) return;
@@ -6727,12 +6761,19 @@ function initializeNormalRuntime() {
       logTts("wm-host", "daily bootstrap 失败: " + (e && e.message || e) + "（Formal 诚实失败，不回退 legacy）");
     });
 
-    // 主动搭话（v2.3 增强）：闲置后 35% 概率开口；设置页 proactiveChat 可单独关闭
-    features.setProactiveEnabled(_cfg.proactiveChat !== false);
-    const _proactiveMin = (_cfg.features && _cfg.features.proactiveMin) || PROACTIVE_DEFAULTS.intervalMin;
-    features.startProactive((msg, mood) => {
-      sendProactive(msg, mood || "idle"); // 台词池情绪→音色分档（v2.5.26）；隐藏到托盘时静默待命，不主动搭话
-    }, _proactiveMin, PROACTIVE_DEFAULTS.chance, proactiveStateFn);
+    // 主动搭话（v2.3 增强）：闲置后 35% 概率开口；设置页 proactiveChat 可单独关闭。
+    // CUTOVER §6：Formal enabled → autonomy owner 是 Formal Runtime（Host pulse 供
+    // 机会、Core 决定发话），legacy 定时发起整体不启动；Formal disabled → 原样保留。
+    // 不进 sendProactive 底层：P1-U2 投递闸（proactiveChat/quietMode）仍统一管触达。
+    if (!formalAutonomyOwnsCharacterSpeech()) {
+      features.setProactiveEnabled(_cfg.proactiveChat !== false);
+      const _proactiveMin = (_cfg.features && _cfg.features.proactiveMin) || PROACTIVE_DEFAULTS.intervalMin;
+      features.startProactive((msg, mood) => {
+        sendProactive(msg, mood || "idle"); // 台词池情绪→音色分档（v2.5.26）；隐藏到托盘时静默待命，不主动搭话
+      }, _proactiveMin, PROACTIVE_DEFAULTS.chance, proactiveStateFn);
+    } else {
+      logTts("features", "Formal autonomy owner 生效：legacy 主动搭话定时器不启动");
+    }
 
     // 日语翻译预热（v2.5.20）：speakJa 模式下空闲批量翻译固定台词进磁盘缓存，
     // 翻译 API 挂了也能说出日语（"说不出来"根治）
@@ -6748,6 +6789,8 @@ function initializeNormalRuntime() {
     // 剪贴板感知（默认关，用户在设置里勾选后启用）
     if (_cfg.features && _cfg.features.clipboardWatch) {
       features.startClipboardWatch((msg) => {
+        // CUTOVER §7：Formal owner 下 clipboard 的关心/邀请式台词停发；剪贴板检测照常运行。
+        if (formalAutonomyOwnsCharacterSpeech()) return;
         sendProactive(msg, "idle");
       }, 3000);
       logTts("features", "剪贴板感知已启动");
@@ -6757,7 +6800,9 @@ function initializeNormalRuntime() {
     if (_cfg.features && _cfg.features.systemMonitor) {
       features.startSystemMonitor(
         () => features.getSystemStats(),
-        (msg) => { sendProactive(msg, "think"); },
+        // CUTOVER §7：Formal owner 下系统监控的 casual 角色碎语停发；
+        // stats 读取与定时器照常（get-sysstats / 状态快照仍可用）。
+        (msg) => { if (formalAutonomyOwnsCharacterSpeech()) return; sendProactive(msg, "think"); },
         15
       );
       logTts("features", "系统监控已启动");

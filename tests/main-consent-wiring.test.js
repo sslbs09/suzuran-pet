@@ -26,6 +26,9 @@ function boot(agreed, options = {}) {
     ...gate, createOnceRunner, gotLock: true, quitting: false, win: null, termsWin: null,
     barrierTimer: null, walk: {}, personaCache: "", path, safeStorage: {},
     console: { log() {}, error() {} }, PROACTIVE_DEFAULTS: { intervalMin: 1, chance: 1 },
+    // cutover：本 harness 的 profile 无 whitemoonRuntime ⇒ legacy autonomy owner（谓词恒 false），
+    // startup 应照常启动 proactive；谓词真实语义由 formal-autonomy-cutover.test.js 源码合同钉死。
+    formalAutonomyOwnsCharacterSpeech: () => false,
     app: { isReady: () => true, whenReady: () => ({ then(fn) { ready = fn; } }),
       on(name, fn) { assert.ok(!events[name], "handler registered once"); events[name] = fn; }, quit: stub("quit") },
     ipcMain: { handle(name, fn) { ipc[name] = fn; } },

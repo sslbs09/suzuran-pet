@@ -36,6 +36,15 @@ const DEFAULT_INSTANCE_ID = "sussurro-daily";
 const DEFAULT_PACKAGE_ID = "sussurro";
 const PROVISION_SCHEMA = 1;
 
+/**
+ * FORMAL AUTONOMY DAILY CUTOVER v0.1（任务 §3/§5）：Body 拥有的唯一 Host
+ * 运行时事实 = opportunity 节奏。Formal enabled 即 autonomy owner 切换，
+ * 固定 MVP cadence 20 分钟（旧系统 12min 门槛 × 18% 平均≈17-18min，MVP 无
+ * chat-idle context 故取保守定值）；不是用户设置，不是随机，不派生第二套
+ * flag。pulse 只是一次决定机会——说/不说由 Core Package 决定。
+ */
+const PULSE_CONTRACT = Object.freeze({ enabled: true, intervalMs: 20 * 60 * 1000 });
+
 function readJsonSafe(file) {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; }
 }
@@ -92,9 +101,47 @@ function createWhitemoonHost(deps) {
       packageId,
       host: { port: ports.hostPort },
       // body token / ingress token 都不落这里：spawn 时经 env 传入（Host env 优先级原生支持）。
-      body: { baseUrl: `http://127.0.0.1:${ports.agentPort}`, timeoutMs: 8000 }
+      body: { baseUrl: `http://127.0.0.1:${ports.agentPort}`, timeoutMs: 8000 },
+      // 首次 provisioning 由 Formal enabled 触发（disabled 不走到这里）→ 直接带合同 cadence。
+      opportunityPulse: { ...PULSE_CONTRACT }
     };
     fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2) + "\n", "utf8");
+  }
+
+  /**
+   * 非常窄的 opportunityPulse reconciliation（§5）。规则：
+   *  - 只碰 opportunityPulse 一个键；instanceId/packageId/host/body/dataDir 等
+   *    一律原样保留（读-改-写整个对象，绝不重建 config）。
+   *  - config 不存在时什么都不做：既不凭空创建（首次绑定的义务在 writeHostConfig），
+   *    也不因缺文件而失败。
+   *  - 值已一致则不落盘（幂等、不磨损）。
+   *  - 现有 config 是坏 JSON 时不覆盖——Host 会诚实报错，比静默重写更可审计。
+   * @param {boolean} formalEnabled
+   */
+  function reconcilePulse(formalEnabled) {
+    if (!fs.existsSync(configPath)) return { reconciled: false, reason: "no-config" };
+    const cfg = readJsonSafe(configPath);
+    if (!cfg || typeof cfg !== "object") {
+      log("Host config 无法解析，跳过 opportunityPulse reconciliation（不做静默重写）");
+      return { reconciled: false, reason: "config-unparsable" };
+    }
+    const current = cfg.opportunityPulse;
+    let changed;
+    let next;
+    if (formalEnabled) {
+      // 合同值只看两个约定字段（键序无关，幂等）；写入时归一为合同对象。
+      changed = !current || current.enabled !== PULSE_CONTRACT.enabled ||
+        current.intervalMs !== PULSE_CONTRACT.intervalMs;
+      next = { ...PULSE_CONTRACT };
+    } else {
+      // disabled：唯一必须消失的是 enabled:true；其余原字段保留（minimal touch）。
+      changed = !!(current && current.enabled === true);
+      next = changed ? { ...current, enabled: false } : current;
+    }
+    if (!changed) return { reconciled: false, reason: "already-consistent" };
+    cfg.opportunityPulse = next;
+    fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2) + "\n", "utf8");
+    return { reconciled: true, pulse: next };
   }
 
   /** 一次性 provisioning：目录、token、Host config、persistent Instance。幂等。 */
@@ -170,6 +217,9 @@ function createWhitemoonHost(deps) {
   /** spawn serve 并有界等待 listening 事件。单次尝试；失败不重试（§9/§10）。 */
   async function start() {
     if (((deps.getEnabled && deps.getEnabled()) !== true)) {
+      // §5：Formal 不是 autonomy owner 时，若历史 config 里 pulse 曾开过，关掉它
+      // （legacy autonomy 独占决策权；不创建 config，不碰其他键）。
+      reconcilePulse(false);
       return { started: false, reason: "disabled" };
     }
     if (child) return { started: true, reason: "already-running", pid: child.pid };
@@ -186,6 +236,10 @@ function createWhitemoonHost(deps) {
       log(startFailure + "（不重试；Formal 诚实失败，不回退 legacy）");
       return { started: false, reason: "provision-failed", error: String((e && e.message) || e) };
     }
+    // §5：Formal = autonomy owner → spawn 前把 Host 机会节奏对齐合同
+    // （20min cadence；对既有 config 做窄 reconciliation，首次模板已自带）。
+    const pulseFix = reconcilePulse(true);
+    if (pulseFix.reconciled) log("opportunityPulse 已对齐 Formal autonomy 合同（20 分钟一次决定机会）");
     const serveChild = spawnChild(["serve", "--config", configPath], {
       WHITEMOON_INGRESS_TOKEN: prov.token,
       SUZURRO_AGENT_TOKEN: String(deps.getAgentToken() || "")
@@ -276,4 +330,4 @@ function createWhitemoonHost(deps) {
   };
 }
 
-module.exports = { createWhitemoonHost, DEFAULT_INSTANCE_ID, DEFAULT_PACKAGE_ID, PROVISION_SCHEMA };
+module.exports = { createWhitemoonHost, DEFAULT_INSTANCE_ID, DEFAULT_PACKAGE_ID, PROVISION_SCHEMA, PULSE_CONTRACT };

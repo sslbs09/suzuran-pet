@@ -179,7 +179,9 @@ test("startup greeting policy 真值表（A-D）：canProactiveMessage && greeti
 });
 
 test("startup greeting 接线合同：main get-state 单一 policy owner，renderer 只消费，Settings 通道不受污染", () => {
-  assert.match(mainSource, /startupGreetingAllowed: proactivePolicy\.canProactiveMessage\(cfg\) && cfg\.greetingOnStart !== false,/,
+  // cutover §10：Formal enabled 时 startupGreetingAllowed 恒 false（复用同一 gate），
+  // P1-U2 结构不变——owner 前缀之后仍是 canProactiveMessage && greetingOnStart 细开关。
+  assert.match(mainSource, /startupGreetingAllowed: (?:!formalAutonomyOwnsCharacterSpeech\(\) && )?proactivePolicy\.canProactiveMessage\(cfg\) && cfg\.greetingOnStart !== false,/,
     "get-state 用现有 P1-U2 policy 计算有效值（不新建 manager/scheduler）");
   assert.match(mainSource, /greetingOnStart: cfg\.greetingOnStart !== false,/,
     "greetingOnStart 原值保留（Settings checkbox 数据通道不被总闸改写）");
