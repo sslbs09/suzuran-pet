@@ -900,7 +900,9 @@ const formalProjection = whitemoonProjection && typeof whitemoonProjection.creat
  * Host config.json 与所有日志都不含 secret。失败语义：单次尝试、不重试、无
  * watchdog；Host 不可达时聊天/观察继续走既有 FORMAL_PROJECTION_UNAVAILABLE 诚实失败。 */
 const whitemoonHost = require("./src/whitemoon-host").createWhitemoonHost({
-  runtimeDir: path.join(app.getPath("userData"), "whitemoon-runtime"),
+  // 持久 daily 数据根：storage 用户数据目录 owner（真实运行 = Electron userData；
+  // 自动化重定向时同源解析）。切 branch/卸载 Body 都不触碰这里。
+  runtimeDir: path.join(config.STORAGE.userDir, "whitemoon-runtime"),
   hostCli: process.env.WHITEMOON_HOST_DIR
     ? path.join(process.env.WHITEMOON_HOST_DIR, "src", "main.js")
     : path.resolve(__dirname, "..", "whitemoon-runtime-host", "src", "main.js"),
