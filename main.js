@@ -171,7 +171,7 @@ let voiceWin = null; // 音色克隆与训练窗口
 let moodWin = null; // 表情管理窗口
 let termsWin = null; // 使用条款确认窗口
 let scheduleWin = null; // 日程管理窗口
-let observationWin = null; // 记录观察窗口（Phase 11-E.1 WhiteMoon ingress）
+let observationWin = null; // 「记住这次经历」确认窗口（Phase 11-E.1 WhiteMoon ingress；原「记录观察」入口收紧语义）
 let psdWin = null;      // PSD 角色工具窗口（v2.1）
 let agentApiAbort = null; // 兼容旧状态读取；新 Agent 请求由 agentTaskQueue 按 task id 管理
 let agentLastSeenFlushAt = 0; // Agent lastSeen 落盘节流（P2-3：60s 内最多写一次 config.json）
@@ -860,7 +860,7 @@ attachCrashDiag(scheduleWin, "schedule");
     scheduleWin.on("closed", () => { scheduleWin = null; });
 }
 
-/* ---------- 记录观察（Phase 11-E.1 WhiteMoon 集成 ingress）---------- */
+/* ---------- 记住这次经历（Phase 11-E.1 WhiteMoon 集成 ingress；原「记录观察」）---------- */
 // Body 只产生「不透明集成动作」：渲染层只提交用户笔记文本 → 本进程铸造
 // actionId（首次提交尝试时）→ POST /integration-input。角色侧语义（它是什么
 // 类型、如何投影、进入哪个手账、条目计数）全部不进入本进程，映射在 Adapter
@@ -976,7 +976,7 @@ function openObservation() {
   observationWin.on("closed", () => { observationWin = null; });
 }
 ipcMain.handle("pet:open-observation", () => { openObservation(); return true; });
-// 渲染层只提交笔记文本；actionId/动作封装/传输全部在主进程（E.1 §4）。
+// 渲染层确认勾选（本地拦截）后只提交笔记文本；actionId/动作封装/传输全部在主进程（E.1 §4）。
 ipcMain.handle("pet:observation-submit", (_e, note) => observationIngress.submit(note));
 ipcMain.handle("pet:observation-state", () => observationIngress.pendingAction());
 

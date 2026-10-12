@@ -7,8 +7,9 @@
  *   - 真实 Runtime Host 进程（../whitemoon-runtime-host/src/main.js serve，pulse 开启）
  *   - 真实 whitemoon-core 持久化（临时 dataDir）
  *   - 真实 Adapter（Host 通过 file: 依赖直接 import）
- * 驱动只做两件事：以用户方式操作「记录观察…」窗口（填文本、点记录），
- * 以及用 curl 级 HTTP 断言鉴权与重试语义。全程绝不手工 POST /experience
+ * 驱动只做两件事：以用户方式操作「记住这次经历…」确认窗口（填文本、未勾选时
+ * 验证 gate 拦截、勾选后点「记住这次经历」），以及用 curl 级 HTTP 断言鉴权与重试
+ * 语义。全程绝不手工 POST /experience
  * 或 /opportunity 为主流程供料——角色的开口全部来自自动 pulse。
  *
  * 运行：node scripts/e2e-whitemoon-ui.js   （需要 Electron 二进制与 GUI 会话）
@@ -205,22 +206,22 @@ async function main() {
       return await petWin.evaluate(() => !!(window.petAPI && typeof window.petAPI.openObservation === "function" && typeof window.petAPI.submitObservation === "function"));
     });
 
-    /* ============ 3. T23：用户经真实 UI 提交第一条观察 ============ */
+    /* ============ 3. T23：用户经真实 UI（勾选确认后）提交第一条共同经历 ============ */
     await petWin.evaluate(() => window.petAPI.openObservation());
     let obsWin = null;
-    await waitFor("记录观察窗口打开", async () => {
+    await waitFor("记住这次经历窗口打开", async () => {
       obsWin = app.windows().find((w) => w.url().includes("observation.html")) || null;
       return obsWin !== null;
     });
-    log("observation window open (real UI)");
+    log("shared-experience confirmation window open (real UI)");
 
     const NOTE_1 = "今天窗台上的薄荷冒出了新芽，博士给它拍了照";
     const result1 = await submitViaUi(obsWin, NOTE_1);
-    if (!/已记录/.test(result1)) fail(`UI 第一条未显示已记录，实际: "${result1}"`);
+    if (!/记住/.test(result1)) fail(`UI 第一条未显示「已记住」，实际: "${result1}"`);
     log("note 1 accepted by UI: " + result1);
 
     // Host→Core→Adapter→Body 全自动 pulse 链路：等待真实 Body 被「接受」的 follow-up
-    const st1 = await waitForPulseAccepted(1, "第一条观察的自动追问");
+    const st1 = await waitForPulseAccepted(1, "第一条共同经历的自动追问");
     const acceptedRounds1 = st1.rounds;
     // 同一条目不被重复追问
     await waitForPulseIdle(acceptedRounds1 + 1, "同一 entry 不重复（角色自选 idle）");
@@ -236,14 +237,20 @@ async function main() {
     if (exp1.type !== "shared-event" || exp1.payload.subject !== "observation-booklet" || exp1.payload.action !== "entry-added") {
       fail("Adapter 映射的形状不符合冻结契约");
     }
-    log("Core persisted exactly one shared-event entry with the user's note");
+    // Memory Inspect 可见性：与 Body 设置页同一读取路径（GET /memory-inspect，ingress token）
+    const inspect1 = await httpJson("GET", `${hostUrl}/memory-inspect`, { token: INGRESS_TOKEN });
+    if (inspect1.status !== 200 || !inspect1.body || inspect1.body.ok !== true) {
+      fail(`memory-inspect 读取失败：HTTP ${inspect1.status} ${inspect1.raw.slice(0, 200)}`);
+    }
+    if (!JSON.stringify(inspect1.body).includes(NOTE_1)) fail("Memory Inspect 读取路径未见第一条共同经历");
+    log("Core persisted exactly one shared-event entry with the user's note; memory-inspect shows it");
 
-    /* ============ 4. T24：第二条真实 UI 观察 → 下一次自动追问被接受 ============ */
+    /* ============ 4. T24：第二条真实 UI 共同经历 → 下一次自动追问被接受 ============ */
     const NOTE_2 = "傍晚博士把薄荷移到了书桌左边，说有香味";
     const result2 = await submitViaUi(obsWin, NOTE_2);
-    if (!/已记录/.test(result2)) fail(`UI 第二条未显示已记录，实际: "${result2}"`);
+    if (!/记住/.test(result2)) fail(`UI 第二条未显示「已记住」，实际: "${result2}"`);
     log("note 2 accepted by UI: " + result2);
-    await waitForPulseAccepted(acceptedRounds1 + 2, "第二条观察的自动追问");
+    await waitForPulseAccepted(acceptedRounds1 + 2, "第二条共同经历的自动追问");
     const inst2 = await httpJson("GET", `${hostUrl}/instance`);
     if (inst2.body.experienceCount !== 2) fail(`期望 2 条 Experience，实际 ${inst2.body.experienceCount}`);
     const st2 = await httpJson("GET", `${hostUrl}/status`);
@@ -329,14 +336,26 @@ async function main() {
   process.exitCode = exitCode;
 }
 
-/** 经真实 UI（textarea + 记录按钮）提交一条观察，返回界面结果文案 */
+/** 经真实 UI 提交一条共同经历：未勾选确认必须先被本地拦截，勾选后走原 production path。
+ *  返回界面结果文案。 */
 async function submitViaUi(win, note) {
   await win.evaluate(() => { document.getElementById("result").textContent = ""; }); // 清掉上一条结果，避免误判
   await win.fill("#note", note);
+  await win.click("#submit"); // 先不勾选确认：点击必须被确认 gate 本地拦截
+  await waitFor("未勾选确认显示拦截提示", async () => {
+    const gated = (await win.textContent("#result") || "").trim();
+    return /勾选|チェック/.test(gated);
+  }, { timeoutMs: 10000 });
+  const after = await win.evaluate(() => ({
+    note: document.getElementById("note").value, // 拦截必须保留原文
+    result: document.getElementById("result").textContent
+  }));
+  if (after.note !== note) throw new Error("未确认拦截后原文必须保留（e2e 前置断言失败）");
+  await win.check("#confirm");
   await win.click("#submit");
   await waitFor("UI 显示提交结果", async () => {
     const text = await win.textContent("#result");
-    return typeof text === "string" && text.trim().length > 0 && !/提交中/.test(text);
+    return typeof text === "string" && text.trim().length > 0 && !/保存中|提交中/.test(text);
   }, { timeoutMs: 30000 });
   return (await win.textContent("#result")).trim();
 }

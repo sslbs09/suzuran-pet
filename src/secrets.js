@@ -4,7 +4,7 @@ const fs = require("fs");
 const storage = require("./storage");
 
 // whitemoonIngressToken（Phase 11-E.1）：仅授权 WhiteMoon Runtime Host 的
-// POST /integration-input（记录观察 ingress 能力）。它不是、也绝不能是
+// POST /integration-input（「记住这次经历」ingress 能力）。它不是、也绝不能是
 // Runtime Host 的 master token（后者可写角色历史，本进程永远不持有）。
 const KEYS = ["chatApiKey", "ttsCosyApiKey", "agentBearerToken", "whitemoonIngressToken"];
 let safeStorage = null;

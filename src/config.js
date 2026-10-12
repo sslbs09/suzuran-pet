@@ -164,11 +164,11 @@ const DEFAULTS = {
     proactiveInterval: 8      // 主动搭话间隔（分钟）
   },
   whitemoonRuntime: {        // WhiteMoon Runtime Host 连接（Phase 11-E.1，默认关）
-    enabled: false,          // 开启后托盘出现「记录观察…」，提交走 Runtime Host 集成 ingress
+    enabled: false,          // 开启后托盘出现「记住这次经历…」，提交走 Runtime Host 集成 ingress
     baseUrl: "http://127.0.0.1:8790",
     // ingress 能力 token 不落 config.json：DPAPI 密钥槽 whitemoonIngressToken
     // （或环境变量 WHITEMOON_INGRESS_TOKEN）。本进程绝不持有 Runtime Host 的
-    // master token —— 那是通用写能力，本进程只需要「记录观察」这一种能力。
+    // master token —— 那是通用写能力，本进程只需要「记住这次经历」这一种能力。
     ingressToken: ""
   }
 };

@@ -20,7 +20,7 @@ function buildTrayItems(deps) {
     setDimMode, sitOnTaskbar, setWalkSpeed, setCatToy,
     setFileGuard,
     diagClick, openDocs, openSchedule, openSettings, openMoodManager, openVoiceStudio, openTtsGuide, openQuickstart, openHelp, openAddChar, checkUpdate,
-    openObservation, whitemoonEnabled = false, // Phase 11-E.1：记录观察（WhiteMoon 连接开启时才显示）
+    openObservation, whitemoonEnabled = false, // Phase 11-E.1：记住这次经历（WhiteMoon 连接开启时才显示）
     reloadPersona, openConfigPath, openPersonaPath, quitApp
   } = deps;
 

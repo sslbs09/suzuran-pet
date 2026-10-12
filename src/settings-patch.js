@@ -42,7 +42,7 @@ function filterSettingsPatch(patch) {
     else if (!ALLOWED_TOP.has(key)) { delete out[key]; unknown.push(key); }
   }
   // secrets 提取：只认四个已知槽位 + replace action，其余忽略（不落盘不入 config）。
-  // whitemoonIngressToken（E.1）只授权 Runtime Host 的「记录观察」ingress，
+  // whitemoonIngressToken（E.1）只授权 Runtime Host 的「记住这次经历」ingress，
   // 绝不承载 Host master token。
   const secretPatch = out.secrets && typeof out.secrets === "object" ? out.secrets : {};
   delete out.secrets;
