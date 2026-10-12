@@ -117,7 +117,7 @@ function createWhitemoonHost(deps) {
     if (markerValid()) {
       return { token, instanceId, created: false, reused: true };
     }
-    const result = await runCli(["create-instance", "--config", configPath]);
+    const result = await runCli(["create-instance", "--config", configPath], token);
     const reused = result.exitCode !== 0 && /already exists/i.test(result.stderrText);
     if (result.exitCode !== 0 && !reused) {
       throw new Error(`create-instance 失败（exit ${result.exitCode}）: ${redact(safeTail(result.stderrText), token)}`);
@@ -142,10 +142,13 @@ function createWhitemoonHost(deps) {
     return s.length > 300 ? "…" + s.slice(-300) : s;
   }
 
-  /** 短命 CLI 子进程（create-instance）：stdout 是机器 JSON，stderr 只取尾部供错误。 */
-  function runCli(cliArgs) {
+  /** 短命 CLI 子进程（create-instance）：stdout 是机器 JSON，stderr 只取尾部供错误。
+   *  必须同样携带 WHITEMOON_INGRESS_TOKEN：Host loadConfig 在 env 缺失时会生成
+   *  .ingress-token 兜底文件——那会留下与 DPAPI 槽不同的第二个 token（serve 用 env
+   *  不受影响，但多余 secret 文件不该存在）。 */
+  function runCli(cliArgs, token) {
     return new Promise((resolve, reject) => {
-      const child2 = spawnChild(cliArgs);
+      const child2 = spawnChild(cliArgs, token ? { WHITEMOON_INGRESS_TOKEN: token } : undefined);
       let out = "";
       let err = "";
       child2.stdout.on("data", (d) => { out += String(d); });
