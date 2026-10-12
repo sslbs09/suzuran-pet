@@ -45,6 +45,9 @@ function boot(agreed, options = {}) {
     features: { setProactiveEnabled() {}, startProactive: stub("proactive"), startJaPrewarm: stub("translation"),
       startClipboardWatch: stub("clipboard"), startSystemMonitor: stub("system") },
     tts: { ensureGenieServer() { hit("tts"); return Promise.resolve(true); } },
+    // DAILY BOOTSTRAP：Host 子进程属外部服务效果（本测试不验其内部），startup 切片引用
+    // 它——以 resolved no-op stub 替换，绝不在 harness 里 spawn 真实子进程。
+    whitemoonHost: { maybeStart: () => Promise.resolve({ started: false, reason: "harness-stub" }), stop: () => Promise.resolve({ stopped: false }) },
     setTimeout(fn, delay) { timers.push({ fn, delay }); return timers.length; },
     setInterval() { hit("interval"); return calls.interval; }, clearInterval() {},
     require(name) {

@@ -890,6 +890,34 @@ const formalProjection = whitemoonProjection && typeof whitemoonProjection.creat
     })
   : null;
 
+/* ---------- DAILY BOOTSTRAP v0.1：WhiteMoon Runtime Host 子进程生命周期 ----------
+ * 边界（任务 §0）：本进程只做编排——Formal enabled 时 provisioning（一次性、幂等）
+ * → spawn Host serve child → 有界等待就绪；quit 时只终止本 Body 拥有的 child。
+ * Core 数据/Character Instance/正式记忆全部独立存放在 userData/whitemoon-runtime
+ * 下，由 Host→Core 拥有；Body 不读取、不迁移、不拥有任何 Character 事实。
+ * secret 纪律：ingress token 走 DPAPI 槽 whitemoonIngressToken，spawn 时经 child
+ * env（WHITEMOON_INGRESS_TOKEN/SUZURRO_AGENT_TOKEN）传入——Host 原生 env 优先合同；
+ * Host config.json 与所有日志都不含 secret。失败语义：单次尝试、不重试、无
+ * watchdog；Host 不可达时聊天/观察继续走既有 FORMAL_PROJECTION_UNAVAILABLE 诚实失败。 */
+const whitemoonHost = require("./src/whitemoon-host").createWhitemoonHost({
+  runtimeDir: path.join(app.getPath("userData"), "whitemoon-runtime"),
+  hostCli: process.env.WHITEMOON_HOST_DIR
+    ? path.join(process.env.WHITEMOON_HOST_DIR, "src", "main.js")
+    : path.resolve(__dirname, "..", "whitemoon-runtime-host", "src", "main.js"),
+  getEnabled: () => ((config.getConfig() || {}).whitemoonRuntime || {}).enabled === true,
+  getRuntimePorts: () => {
+    const wm = (config.getConfig() || {}).whitemoonRuntime || {};
+    let hostPort = 8790;
+    try { const p = new URL(String(wm.baseUrl || "")).port; if (p) hostPort = Number(p); } catch { /* 保持默认 */ }
+    const agentPort = Number(((config.getConfig() || {}).agentApi || {}).port) || 8765;
+    return { hostPort, agentPort };
+  },
+  getIngressToken: () => String(((config.getConfig() || {}).whitemoonRuntime || {}).ingressToken || ""),
+  setIngressToken: (token) => { config.replaceSecrets({ whitemoonIngressToken: token }); },
+  getAgentToken: () => String(((config.getConfig() || {}).agentApi || {}).bearerToken || ""),
+  log: (line) => logTts("wm-host", line)
+});
+
 /* ---------- P0-B2 MINIMUM ALIVE STATUS（最小健康真相，任务 §6/§7/§8/§30/§31） ----------
  * 四态分层互不掩盖：BODY / FORMAL CHARACTER / COGNITION / VOICE。
  * 每个字段只有真实 observation 才能推进——API key 存在、Host 进程起过、上周成功
@@ -6686,6 +6714,15 @@ function initializeNormalRuntime() {
     // 本地 Agent 调用接口（其他 agent / 脚本可调用，仅 127.0.0.1）
     startAgentApi();
 
+    // DAILY BOOTSTRAP：Formal enabled 时拉起并持有 Host 子进程（Agent API 之后，
+    // Host→Body 执行路径依赖其已在监听）。异步不阻塞开窗；disabled 时零动作。
+    // 失败只记录（单次尝试、不重试）：聊天走既有诚实失败，绝不回退 legacy。
+    whitemoonHost.maybeStart().then((r) => {
+      if (r && r.started) logTts("wm-host", "daily Host child 就绪（pid " + r.pid + "，port " + r.port + "）");
+    }).catch((e) => {
+      logTts("wm-host", "daily bootstrap 失败: " + (e && e.message || e) + "（Formal 诚实失败，不回退 legacy）");
+    });
+
     // 主动搭话（v2.3 增强）：闲置后 35% 概率开口；设置页 proactiveChat 可单独关闭
     features.setProactiveEnabled(_cfg.proactiveChat !== false);
     const _proactiveMin = (_cfg.features && _cfg.features.proactiveMin) || PROACTIVE_DEFAULTS.intervalMin;
@@ -6791,6 +6828,9 @@ const quitLifecycle = createQuitLifecycle({
     { name: "schedules.stop", run: () => schedules.stop() },
     { name: "barrier timer", run: () => { clearInterval(barrierTimer); barrierTimer = null; } },
     { name: "save position", run: savePosSafe },
+    // DAILY BOOTSTRAP：只终止本 Body spawn 的 Host child（stdin-end 优雅合同 +
+    // grace 后 kill）；手动启动的 Host 与其他进程绝不误伤。
+    { name: "WhiteMoon Host", run: () => whitemoonHost.stop() },
     { name: "Agent API", run: () => stopAgentApi({ timeoutMs: 5000 }) },
     { name: "Genie", run: () => tts.shutdownGenieServer() },
     { name: "GSV processes", run: () => tts.killGsvProcesses(config.getConfig().ttsGsv || {}) },
