@@ -1,133 +1,485 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>苏苏洛桌宠 · SuzuranPet — 会聊天、会散步的桌面狐狸医师</title>
-  <meta name="description" content="罗德岛医疗干员苏苏洛住进你的桌面：OpenAI 兼容 API 聊天、长期记忆、本地真人音色（中/日）、任务栏散步、Spine/Live2D 渲染、深浅双主题。">
-  <meta property="og:title" content="苏苏洛桌宠 · SuzuranPet">
-  <meta property="og:description" content="陪你聊天、记住你的事、用真人音色说话、在任务栏上散步。">
-  <meta property="og:type" content="website">
-  <link rel="icon" href="assets/icon.png">
-  <link rel="stylesheet" href="assets/site.css">
-  <script src="assets/site.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#121514" />
+  <meta name="description" content="苏苏洛桌宠：住在 Windows 桌面上的苏苏洛。会聊天、会记住你的事、会在任务栏散步，也可以用中文或日语音色开口。支持 GIF、Spine、2.5D 与 Live2D。" />
+  <title>苏苏洛桌宠｜她住在你关掉所有窗口之后</title>
+  <link rel="icon" href="assets/icon.png" type="image/png" />
+  <link rel="stylesheet" href="styles.css" />
+  <script src="app.js" defer></script>
 </head>
-<body class="site-home">
-  <a class="skip-link" href="#main">跳到主要内容</a>
-  <div class="shell">
-    <header class="site-header">
-      <a class="brand" href="./" aria-label="苏苏洛桌宠官网首页">
-        <img src="assets/icon.png" width="34" height="34" alt="">
-        <span>苏苏洛桌宠<small>SuzuranPet</small></span>
-      </a>
-      <nav class="main-nav" aria-label="主导航">
-        <a href="#features">陪伴日常</a><a href="#download">下载</a><a href="#guides">上手指南</a>
-      </nav>
-      <button class="theme" id="theme" type="button" aria-label="切换主题">◐</button>
-    </header>
-    <main id="main" tabindex="-1">
-      <section class="hero" aria-labelledby="hero-title">
+<body>
+  <a class="skip-link" href="#main">跳到正文</a>
+  <div class="scroll-progress" aria-hidden="true"><span data-scroll-progress></span></div>
+
+  <header class="site-header" data-header>
+    <a class="brand" href="#top" aria-label="苏苏洛桌宠首页">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" fill="none">
+          <path d="M13 4h6v9h9v6h-9v9h-6v-9H4v-6h9V4Z" fill="currentColor"/>
+          <path d="M8 8 5 5M24 8l3-3M8 24l-3 3M24 24l3 3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </span>
+      <span class="brand-type">
+        <span class="brand-cn">苏苏洛桌宠</span>
+        <span class="brand-en">SUSURRO / DESKTOP RESIDENT</span>
+      </span>
+    </a>
+
+    <nav class="site-nav" id="site-nav" aria-label="主导航">
+      <a href="#day"><span>她的一天</span><sup>01</sup></a>
+      <a href="#anatomy"><span>相处机制</span><sup>02</sup></a>
+      <a href="#forms"><span>形态档案</span><sup>03</sup></a>
+      <a href="#download"><span>下载</span><sup>04</sup></a>
+      <a href="#guides"><span>指南</span><sup>05</sup></a>
+    </nav>
+
+    <a class="header-cta" href="#download">带她回家 <span aria-hidden="true">↘</span></a>
+    <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false" aria-label="打开菜单">
+      <span></span><span></span>
+    </button>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top" aria-labelledby="hero-title">
+      <div class="hero-noise" aria-hidden="true"></div>
+      <div class="hero-inner shell">
         <div class="hero-copy">
-          <p class="eyebrow"><span class="status-dot" aria-hidden="true"></span>罗德岛医疗干员 · 桌面陪伴</p>
-          <h1 id="hero-title">桌面留个位置，<br><span>让苏苏洛陪你。</span></h1>
-          <p class="hero-description">Q 版狐狸医师从终端走出来，住进你的桌面。陪你聊天、记住你的事，用熟悉的声音说话，还会在任务栏上散步、坐下、打盹。</p>
-          <div class="actions">
-            <a class="button primary" href="https://github.com/sslbs09/suzuran-pet/releases/latest"><span aria-hidden="true">↓</span> 下载最新版</a>
-            <a class="button secondary" href="#guides">先看看上手指南 <span aria-hidden="true">↗</span></a>
+          <p class="eyebrow hero-eyebrow">
+            <span class="live-dot" aria-hidden="true"></span>
+            <span>WINDOWS DESKTOP RESIDENT</span>
+            <span class="eyebrow-rule" aria-hidden="true"></span>
+            <span>V2.5.30</span>
+          </p>
+
+          <h1 id="hero-title">
+            <span class="hero-line hero-line-one">关掉所有窗口</span>
+            <span class="hero-line hero-line-two">以后，<em>她还在。</em></span>
+          </h1>
+
+          <p class="hero-lede">苏苏洛桌宠，是住进 Windows 桌面的苏苏洛。她会和你聊天、记住你说过的事，在你工作的时候沿着任务栏散步，也会用你为她准备的声音开口。</p>
+
+          <div class="hero-actions">
+            <a class="button button-primary" href="#download">
+              <span>下载 Windows 版</span>
+              <span class="button-arrow" aria-hidden="true">↓</span>
+            </a>
+            <a class="text-link" href="#day">先看她的一天 <span aria-hidden="true">↘</span></a>
           </div>
-          <p class="utility">Windows 桌面<span aria-hidden="true"> / </span> 自由聊天<span aria-hidden="true"> / </span> 本地语音</p>
-        </div>
-        <figure class="stage">
-          <div class="stage-art">
-            <div class="stage-arch" aria-hidden="true"></div>
-            <p class="speech">今天也辛苦了。</p>
-            <picture>
-              <source media="(prefers-reduced-motion: reduce)" srcset="assets/wave-still.png">
-              <img id="mascot" src="assets/wave.gif" width="500" height="500" alt="苏苏洛挥手的 Q 版角色动画" fetchpriority="high">
-            </picture>
-            <div class="desk-line" aria-hidden="true"><span></span></div>
+
+          <div class="hero-facts" aria-label="产品概要">
+            <div><span class="fact-key">PLATFORM</span><span class="fact-value">Windows</span></div>
+            <div><span class="fact-key">CHAT</span><span class="fact-value">自备 API Key</span></div>
+            <div><span class="fact-key">MEMORY</span><span class="fact-value">本机加密</span></div>
           </div>
-          <figcaption><span>桌面陪伴 · 动画展示</span><button id="motion-toggle" class="motion-toggle" type="button" aria-pressed="false">暂停动画</button></figcaption>
-        </figure>
-      </section>
-      <div class="capability-strip" aria-label="陪伴特色">
-        <span><i aria-hidden="true">✧</i> 会回应你的聊天</span>
-        <span><i aria-hidden="true">✧</i> 记得相处的日常</span>
-        <span><i aria-hidden="true">✧</i> 熟悉的声音陪伴</span>
-      </div>
-      <section id="features" class="section" aria-labelledby="features-title">
-        <div class="section-heading">
-          <div><p class="eyebrow">相处，从一点一滴开始</p><h2 id="features-title">小小的她，<br>让日常多一点回应。</h2></div>
-          <p class="section-description">不只是立绘，是一个会回应你的桌面伙伴。<br>自由配置 API 与人设，用你喜欢的方式相处。</p>
         </div>
-        <div class="feature-layout">
-          <article class="feature feature-conversation">
-            <span class="feature-label">聊天 &amp; 记忆</span>
-            <h3>聊过的日常，<br>慢慢成为共同的记忆。</h3>
-            <div class="conversation-topics" aria-hidden="true"><span>聊天</span><span class="topic-line"></span><span>记忆</span><span class="topic-line"></span><span>羁绊</span></div>
-            <div class="feature-details">
-              <div><h4>自由聊天</h4><p>接入任意 OpenAI 兼容 API：DeepSeek、Kimi、GLM、百炼、本地 Ollama。也可以自由编辑人设。</p></div>
-              <div><h4>长期记忆</h4><p>记得你说过的事，相处越久越亲密，还有羁绊系统。</p></div>
+
+        <div class="hero-stage-wrap" data-parallax-stage>
+          <div class="stage-caption stage-caption-top" aria-hidden="true">SPECIMEN_001 / DESKTOP HABITAT</div>
+          <div class="desktop-stage">
+            <div class="stage-window">
+              <div class="window-bar">
+                <div class="window-dots" aria-hidden="true"><i></i><i></i><i></i></div>
+                <span class="window-title">desktop / 苏苏洛桌宠</span>
+                <span class="window-clock">23:48</span>
+              </div>
+
+              <div class="stage-field">
+                <div class="field-grid" aria-hidden="true"></div>
+                <div class="stage-note" aria-hidden="true">这里<br />可以发呆。</div>
+
+                <div class="chat-stack" aria-label="角色对话示意">
+                  <p class="chat-bubble chat-bubble-one">今天也辛苦了。</p>
+                  <p class="chat-bubble chat-bubble-two">要先喝口水吗？</p>
+                </div>
+
+                <button class="hero-character" type="button" aria-label="和苏苏洛打个招呼">
+                  <img src="assets/wave.webp" alt="苏苏洛挥手的动画" width="420" height="420" fetchpriority="high" decoding="async" />
+                </button>
+
+                <div class="ground-shadow" aria-hidden="true"></div>
+                <div class="memory-pill"><span class="memory-mark" aria-hidden="true">+</span> 刚刚，她记住了一件事</div>
+                <div class="character-id">
+                  <span class="character-id-name">苏苏洛</span>
+                  <span class="character-id-role">医疗干员 / 桌面居民</span>
+                  <span class="character-online"><i aria-hidden="true"></i> HERE</span>
+                </div>
+              </div>
+
+              <div class="stage-taskbar" aria-hidden="true">
+                <span class="taskbar-start">⊞</span>
+                <span class="taskbar-app"><img src="assets/icon.png" alt="" width="18" height="18" /> 苏苏洛桌宠</span>
+                <span class="taskbar-spacer"></span>
+                <span class="taskbar-status">23:48<br />在桌面</span>
+              </div>
             </div>
+            <span class="stage-pin" aria-hidden="true"></span>
+            <span class="stage-stamp" aria-hidden="true">24H<br /><b>RESIDENT</b></span>
+          </div>
+          <div class="stage-caption stage-caption-bottom" aria-hidden="true">不是小组件／是一个住下来的存在</div>
+          <div class="poke-hint" data-poke-hint>试着碰碰她 <span aria-hidden="true">↗</span></div>
+        </div>
+      </div>
+
+      <div class="hero-bottom shell" aria-label="苏苏洛桌宠的特征摘要">
+        <span><b>01</b> 会聊天</span>
+        <span><b>02</b> 会记住</span>
+        <span><b>03</b> 会走动</span>
+        <span><b>04</b> 会开口</span>
+        <span class="hero-bottom-tail">一个角色，不是一张皮肤</span>
+      </div>
+    </section>
+
+    <div class="ticker" aria-hidden="true">
+      <div class="ticker-track">
+        <span>聊天陪伴</span><i></i><span>长期记忆</span><i></i><span>中／日语音</span><i></i><span>任务栏散步</span><i></i><span>四种渲染形态</span><i></i><span>点击穿透</span><i></i><span>本地加密</span><i></i>
+        <span>聊天陪伴</span><i></i><span>长期记忆</span><i></i><span>中／日语音</span><i></i><span>任务栏散步</span><i></i><span>四种渲染形态</span><i></i><span>点击穿透</span><i></i><span>本地加密</span><i></i>
+      </div>
+    </div>
+
+    <section class="section day" id="day" aria-labelledby="day-title">
+      <div class="shell">
+        <div class="section-intro">
+          <p class="section-kicker"><span>01</span> OBSERVATION / A DAY WITH HER</p>
+          <h2 id="day-title">陪伴不是功能。<br /><em>是你一天里的几次停顿。</em></h2>
+          <p class="section-lede">她不会占满你的屏幕，也不会要求你一直看着她。她只是在你打开电脑、写着方案、忘了时间的时候，出现在任务栏的边缘。</p>
+        </div>
+
+        <div class="day-log">
+          <article class="log-entry log-entry-morning reveal">
+            <div class="log-head">
+              <time datetime="08:12">08:12</time>
+              <span class="log-label">开机 / BOOT</span>
+            </div>
+            <div class="log-copy">
+              <h3>你打开电脑。<br />她已经在那里。</h3>
+              <p>她从桌面边缘出现，点一下就能叫出聊天框。透明区域完全点击穿透，不挡你正在用的软件；按住拖动，她会记住自己新的位置。</p>
+              <ul class="inline-list">
+                <li>单击聊天</li>
+                <li>拖拽移动</li>
+                <li>右键唤出菜单</li>
+              </ul>
+            </div>
+            <figure class="log-figure log-figure-work">
+              <img src="assets/work.png" alt="苏苏洛抱着笔记本电脑工作的角色帧" width="496" height="446" loading="lazy" />
+              <figcaption>她也有自己的「工作」。</figcaption>
+            </figure>
           </article>
-          <div class="feature-side">
-            <article class="feature feature-voice">
-              <div class="feature-heading"><span class="feature-label">本地语音</span><span class="language-tag">中文 / 日本語</span></div>
-              <h3>文字之外，<br>还有熟悉的声音。</h3>
-              <p>中文 + 日语本地真人音色推理，可克隆苏苏洛音色；完整版内置双引擎，解压就能听见她说话。</p>
-              <svg class="sound-wave" viewBox="0 0 360 48" aria-hidden="true"><path d="M10 21v6 M30 16v16 M50 20v8 M70 8v32 M90 15v18 M110 4v40 M130 13v22 M150 18v12 M170 9v30 M190 3v42 M210 14v20 M230 19v10 M250 12v24 M270 7v34 M290 16v16 M310 20v8 M330 14v20 M350 21v6"/></svg>
+
+          <article class="log-entry log-entry-afternoon reveal">
+            <div class="log-head">
+              <time datetime="14:36">14:36</time>
+              <span class="log-label">散步 / WALK</span>
+            </div>
+            <div class="log-copy">
+              <h3>你忙你的。<br />她沿着任务栏，走她自己的路。</h3>
+              <p>任务栏上沿是她的地面。她会散步、坐下休息，偶尔跳到程序窗口顶上歇一会儿。把她拖起来再抛出去，她会用一阵眩晕表达抗议。</p>
+              <ul class="inline-list">
+                <li>任务栏行走</li>
+                <li>窗口跳跃</li>
+                <li>物理拖拽反馈</li>
+              </ul>
+            </div>
+            <figure class="log-figure log-figure-sleep">
+              <img src="assets/sleep.png" alt="苏苏洛趴在桌面边缘睡觉的角色帧" width="500" height="500" loading="lazy" />
+              <figcaption>她会在你身边，找一个舒服的位置。</figcaption>
+            </figure>
+          </article>
+
+          <article class="log-entry log-entry-night reveal">
+            <div class="log-head">
+              <time datetime="23:48">23:48</time>
+              <span class="log-label">夜班 / NIGHT SHIFT</span>
+            </div>
+            <div class="log-copy">
+              <h3>你以为她只记得台词。<br />她记得的是你。</h3>
+              <p>重要的事会被留在本机记忆里；聊得越久，羁绊等级会一起长大。到点了，她还能用气泡、语音和通知提醒你。不是冷冰冰的闹钟，是一个会催你休息的人。</p>
+              <ul class="inline-list">
+                <li>事实记忆</li>
+                <li>对话摘要</li>
+                <li>羁绊等级 1–10</li>
+              </ul>
+            </div>
+            <figure class="log-figure log-figure-coffee">
+              <img src="assets/idle4.png" alt="苏苏洛捧着饮料休息的角色帧" width="474" height="500" loading="lazy" />
+              <figcaption>「今天也辛苦了。」</figcaption>
+            </figure>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section anatomy" id="anatomy" aria-labelledby="anatomy-title">
+      <div class="shell anatomy-layout">
+        <div class="anatomy-main">
+          <div class="section-intro anatomy-intro">
+            <p class="section-kicker"><span>02</span> ANATOMY / HOW SHE LIVES</p>
+            <h2 id="anatomy-title">她不是一堆功能。<br /><em>她是一套会回应的机制。</em></h2>
+          </div>
+
+          <div class="ledger">
+            <article class="ledger-row reveal">
+              <span class="ledger-number">01</span>
+              <div class="ledger-title">
+                <p class="ledger-tag">CHAT / MEMORY</p>
+                <h3>她会记得，<br />但不是替你保管一切。</h3>
+              </div>
+              <div class="ledger-body">
+                <p>聊天支持任意 OpenAI 兼容接口，也支持 Anthropic 协议。DeepSeek 是默认端点，Kimi、GLM、Qwen、Ollama 等都可以在设置里接上。模型由你选择，Key 存在本机。</p>
+                <p>记忆分为事实、摘要和羁绊三层：她记住你的喜好与安排，每 20 轮对话生成一次印象摘要，互动会积累羁绊等级。所有内容都可以在设置里查看、编辑或删除。</p>
+              </div>
             </article>
-            <article class="feature feature-walk">
-              <span class="feature-label">桌面行走</span><h3>在你的任务栏，散个步。</h3>
-              <p>散步、坐下打盹、跳跃，拖拽抛掷有物理反馈。工作间隙，看看她又走到了哪里。</p>
-              <div class="walking-trail" aria-hidden="true"><span>· · · · ·</span><span>✦</span><span>· · · · ·</span></div>
+
+            <article class="ledger-row reveal">
+              <span class="ledger-number">02</span>
+              <div class="ledger-title">
+                <p class="ledger-tag">VOICE / 5-LEVEL FALLBACK</p>
+                <h3>可以只是文字。<br />也可以真的开口。</h3>
+              </div>
+              <div class="ledger-body">
+                <p>语音链路会从本地克隆音色，按顺序回退到百炼 CosyVoice、edge-tts 与 Windows 系统语音。完整版随包带中文和日语引擎；轻量版可以先部署引擎再打开语音。</p>
+                <p>想让她说日语，打开日语模式即可。回复会先翻译成日语，再用日语音色合成；文字气泡仍保留中文。</p>
+              </div>
+            </article>
+
+            <article class="ledger-row reveal">
+              <span class="ledger-number">03</span>
+              <div class="ledger-title">
+                <p class="ledger-tag">BODY / DESKTOP AS A MAP</p>
+                <h3>桌面不是背景。<br />是她可以生活的地方。</h3>
+              </div>
+              <div class="ledger-body">
+                <p>GIF、Spine、2.5D、Live2D 四种渲染形态，从最稳的经典表情到可以行走的小人。透明区域点击穿透，不挡正常操作；置顶层级会周期重断言，全屏游戏后也能回来。</p>
+                <p>她可以换皮肤、换人设、自定义情绪，也可以让本机其他 AI 或脚本通过 <code>127.0.0.1</code> 的 Agent 接口找她聊天。接口可关闭，也可加 Bearer Token。</p>
+              </div>
+            </article>
+
+            <article class="ledger-row reveal">
+              <span class="ledger-number">04</span>
+              <div class="ledger-title">
+                <p class="ledger-tag">BOUNDARY / LOCAL FIRST</p>
+                <h3>亲近不等于越界。<br />她的默认设置会守住边界。</h3>
+              </div>
+              <div class="ledger-body">
+                <p>程序不内置任何 AI 模型，聊天回复来自你自配的第三方接口。API Key 使用 DPAPI 加密存储在本机；本地 TTS 与 Agent 服务只监听 loopback。</p>
+                <p>需要联网时，是你主动选择的模型服务；需要被调用时，接口默认在本机，也能关闭。这是她住进来的前提，不是一句宣传语。</p>
+              </div>
             </article>
           </div>
         </div>
-        <div class="feature-extras">
-          <article><span class="extra-symbol" aria-hidden="true">◈</span><h3>形象，随心切换</h3><p>Spine 2D / 2.5D 摆件 / Live2D / 经典 GIF 四套渲染，38 款皮肤可换。</p></article>
-          <article><span class="extra-symbol" aria-hidden="true">⌘</span><h3>与其他 AI 协作</h3><p>Agent 接口支持其他 AI 与脚本通过 <code>127.0.0.1</code> 调用，可关闭、可鉴权。</p></article>
-          <article><span class="extra-symbol" aria-hidden="true">◐</span><h3>白天与夜晚，都合适</h3><p>全部窗口支持深浅双主题，夜间自动切换，也可手动固定。</p></article>
-          <article><span class="extra-symbol" aria-hidden="true">文</span><h3>用熟悉的语言</h3><p>中文 / English / 日本語，三语界面一键切换。</p></article>
+
+        <aside class="anatomy-aside" aria-label="角色状态与记忆说明">
+          <figure class="anatomy-portrait">
+            <div class="portrait-grid" aria-hidden="true"></div>
+            <img src="assets/think.png" alt="苏苏洛思考的角色帧" width="476" height="463" loading="lazy" />
+            <figcaption><span>MEMORY / LOCAL</span><span>03 LAYERS</span></figcaption>
+          </figure>
+          <div class="aside-note">
+            <span class="aside-plus" aria-hidden="true">+</span>
+            <p><b>她会记住你说过的事。</b><br />记忆加密保存在本机；生成回复时，相关记忆会随对话发送给你配置的模型服务。</p>
+          </div>
+          <div class="aside-specs">
+            <div><span>CHAT API</span><b>OpenAI 兼容 / Anthropic</b></div>
+            <div><span>MEMORY</span><b>DPAPI 本机加密</b></div>
+            <div><span>AGENT</span><b>127.0.0.1 / 可选 Token</b></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section expressions" id="forms" aria-labelledby="forms-title">
+      <div class="shell">
+        <div class="expression-layout">
+          <div class="expression-demo reveal">
+            <div class="demo-topline">
+              <span>EXPRESSION LAB / 情绪档案</span>
+              <span data-mood-index>01 / 05</span>
+            </div>
+            <div class="mood-stage" id="mood-panel" role="tabpanel" aria-live="polite">
+              <div class="mood-grid" aria-hidden="true"></div>
+              <span class="mood-cross mood-cross-one" aria-hidden="true">+</span>
+              <span class="mood-cross mood-cross-two" aria-hidden="true">+</span>
+              <img
+                class="mood-image"
+                data-mood-image
+                src="assets/happy.png"
+                alt="苏苏洛开心的角色帧"
+                width="448"
+                height="482"
+                loading="lazy"
+              />
+              <span class="mood-stamp" data-mood-stamp>HAPPY</span>
+              <p class="mood-caption" data-mood-caption>「今天也辛苦了。」</p>
+            </div>
+            <div class="mood-controls" role="tablist" aria-label="切换苏苏洛的情绪">
+              <button type="button" role="tab" aria-controls="mood-panel" aria-selected="true" class="is-active" data-mood="happy" data-label="HAPPY" data-caption="「今天也辛苦了。」" data-alt="苏苏洛开心的角色帧">开心</button>
+              <button type="button" role="tab" aria-controls="mood-panel" aria-selected="false" data-mood="think" data-label="THINKING" data-caption="「让我想想……」" data-alt="苏苏洛思考的角色帧">思考</button>
+              <button type="button" role="tab" aria-controls="mood-panel" aria-selected="false" data-mood="surprised" data-label="SURPRISED" data-caption="「诶？你还在呀。」" data-alt="苏苏洛惊讶的角色帧">惊讶</button>
+              <button type="button" role="tab" aria-controls="mood-panel" aria-selected="false" data-mood="angry" data-label="ANGRY" data-caption="「再熬夜，我要生气了。」" data-alt="苏苏洛生气的角色帧">生气</button>
+              <button type="button" role="tab" aria-controls="mood-panel" aria-selected="false" data-mood="kiss" data-label="AFFECTION" data-caption="「知道啦，陪着你。」" data-alt="苏苏洛害羞的角色帧">害羞</button>
+            </div>
+            <p class="demo-note">角色画面来自客户端经典 GIF 模式；其他渲染形态以实机为准。</p>
+          </div>
+
+          <div class="expression-copy reveal">
+            <p class="section-kicker"><span>03</span> FORMS / THE FACE</p>
+            <h2 id="forms-title">情绪不是装饰。<br /><em>是她回应你的方式。</em></h2>
+            <p class="section-lede">苏苏洛会根据回复自动选择最贴近的情绪表现。你也可以在表情管理里，为每一种情绪换一张 GIF，甚至加上只属于你们的名字。</p>
+
+            <div class="forms-list">
+              <div class="form-item"><span class="form-no">A</span><div><h3>经典 GIF</h3><p>最稳、最轻，任何机器都能跑。也是现在这个页面里的她。</p></div></div>
+              <div class="form-item"><span class="form-no">B</span><div><h3>Spine 小人</h3><p>会走动、会坐下，适合把桌面变成她的活动范围。</p></div></div>
+              <div class="form-item"><span class="form-no">C</span><div><h3>2.5D 摆件</h3><p>更接近立体摆件的贴底形态，可以安静待在屏幕一角。</p></div></div>
+              <div class="form-item"><span class="form-no">D</span><div><h3>Live2D</h3><p>自带示例模型，也可以把自己的模型放进 assets/live2d。</p></div></div>
+            </div>
+
+            <div class="mini-cta">
+              <span class="mini-cta-mark" aria-hidden="true">+</span>
+              <p><b>38 款皮肤，四种形态。</b><br />她可以是今天这个样子，也可以是明天的另一个样子。</p>
+            </div>
+          </div>
         </div>
-      </section>
-      <section id="download" class="download-section section" aria-labelledby="download-title">
-        <div class="section-heading"><div><p class="eyebrow">把陪伴带回桌面</p><h2 id="download-title">从今天开始作伴。</h2></div><p class="section-description">先选择是否需要内置语音引擎，<br>再为她挑选喜欢的皮肤。</p></div>
-        <div class="versions">
-          <article class="version recommended">
-            <div class="version-top"><h3>轻量版</h3><span class="recommendation">推荐开始</span></div>
-            <p class="version-size"><small>约</small> 220 <span>MB</span></p>
-            <p>聊天功能完整，不含语音引擎。想听她说话时，可按指南自行部署 GenieTTS / GPT-SoVITS / edge。</p>
-            <div class="version-action"><a class="button primary" href="https://github.com/sslbs09/suzuran-pet/releases/latest">GitHub Releases 下载 <span aria-hidden="true">↗</span></a><span class="version-caption">先聊天，再慢慢探索</span></div>
-          </article>
-          <article class="version">
-            <div class="version-top"><h3>完整版</h3><span class="version-kind">内置语音</span></div>
-            <p class="version-size"><small>约</small> 16 <span>GB</span></p>
-            <p>内置中文 + 日语双引擎，解压就能听见她说话。通过邮箱联系获取。</p>
-            <div class="version-action"><a class="button secondary" href="mailto:1598184627@qq.com">联系邮箱获取 <span aria-hidden="true">↗</span></a><span class="version-caption">1598184627@qq.com</span></div>
-          </article>
-          <article class="version">
-            <div class="version-top"><h3>皮肤包</h3><span class="version-kind">形象扩展</span></div>
-            <p class="version-size"><small>约</small> 96 <span>MB</span></p>
-            <p>补装 38 款皮肤。解压到 <code>resources/app/renderer/sprites/</code> 即可；作为桌宠的扩展使用。</p>
-            <div class="version-action"><a class="button secondary" href="https://github.com/sslbs09/suzuran-pet/releases">Releases 资产下载 <span aria-hidden="true">↗</span></a><span class="version-caption">给日常换一个新模样</span></div>
-          </article>
+      </div>
+    </section>
+
+    <section class="section download" id="download" aria-labelledby="download-title">
+      <div class="shell">
+        <div class="download-head">
+          <div>
+            <p class="section-kicker"><span>04</span> DOWNLOAD / TAKE HER HOME</p>
+            <h2 id="download-title">把她<br /><em>带回去。</em></h2>
+          </div>
+          <div class="download-aside">
+            <p>Windows 绿色版，解压即用。聊天功能两个版本完全一致；差别只在语音引擎是否随包。</p>
+            <span class="download-stamp">WINDOWS<br /><b>READY</b></span>
+          </div>
         </div>
-      </section>
-      <section id="guides" class="section guide-section" aria-labelledby="guides-title">
-        <div class="section-heading"><div><p class="eyebrow">你的随身使用手册</p><h2 id="guides-title">第一次见面，<br>也不用手忙脚乱。</h2></div><p class="section-description">从第一次启动，到探索更多玩法。<br>需要时，回来翻一翻就好。</p></div>
-        <div class="guide-links">
-          <a class="guide-link" href="guide/开箱必读.html"><span class="guide-symbol" aria-hidden="true">✦</span><div><h3>开箱必读</h3><p>从解压、启动、填 Key 到开口说话，三步上手。</p></div><span class="arrow" aria-hidden="true">↗</span></a>
-          <a class="guide-link" href="guide/使用说明.html"><span class="guide-symbol" aria-hidden="true">☷</span><div><h3>使用说明</h3><p>聊天、记忆、语音、行走、渲染模式与托盘菜单全览。</p></div><span class="arrow" aria-hidden="true">↗</span></a>
-          <a class="guide-link" href="guide/API接入指南.html"><span class="guide-symbol" aria-hidden="true">⌁</span><div><h3>API 接入指南</h3><p>OpenAI 兼容服务与本地 Ollama 的完整接入步骤。</p></div><span class="arrow" aria-hidden="true">↗</span></a>
-          <a class="guide-link" href="guide/语音部署总览.html"><span class="guide-symbol" aria-hidden="true">≋</span><div><h3>语音部署与训练</h3><p>克隆苏苏洛音色（中/日）：GenieTTS + GPT-SoVITS。</p></div><span class="arrow" aria-hidden="true">↗</span></a>
+
+        <div class="download-list">
+          <a class="download-row download-row-primary" href="https://github.com/sslbs09/suzuran-pet/releases/latest" target="_blank" rel="noopener">
+            <span class="download-no">01</span>
+            <span class="download-name"><b>轻量版</b><small>LIGHT / RECOMMENDED START</small></span>
+            <span class="download-spec">约 220 MB<br />不含语音引擎，可自行部署</span>
+            <span class="download-action">GitHub Releases <span aria-hidden="true">↗</span></span>
+          </a>
+          <a class="download-row" href="mailto:1598184627@qq.com?subject=%E7%B4%A2%E5%8F%96%E8%8B%8F%E8%8B%8F%E6%B4%9B%E6%A1%8C%E5%AE%A0%E5%AE%8C%E6%95%B4%E7%89%88">
+            <span class="download-no">02</span>
+            <span class="download-name"><b>完整版</b><small>FULL / CN + JP VOICE</small></span>
+            <span class="download-spec">约 16 GB<br />含中文 + 日语引擎，开箱即说</span>
+            <span class="download-action">邮件联系获取 <span aria-hidden="true">↗</span></span>
+          </a>
+          <a class="download-row" href="https://github.com/sslbs09/suzuran-pet/releases/download/v2.5.24/SuzuranPet-v2.5.24-SkinPack.zip" target="_blank" rel="noopener">
+            <span class="download-no">03</span>
+            <span class="download-name"><b>皮肤包</b><small>SKIN PACK / 38 LOOKS</small></span>
+            <span class="download-spec">约 96 MB<br />解压到 sprites 目录即可补装</span>
+            <span class="download-action">下载皮肤包 <span aria-hidden="true">↗</span></span>
+          </a>
         </div>
-      </section>
-    </main>
-    <footer class="site-footer">
-      <div><a class="footer-brand" href="./">苏苏洛桌宠 <small>SuzuranPet</small></a><p>BUSL-1.1（源代码可得，非商业）</p></div>
-      <div><nav aria-label="项目链接"><a href="https://github.com/sslbs09/suzuran-pet">GitHub ↗</a><a href="https://github.com/sslbs09/suzuran-pet/releases">Releases ↗</a><a href="https://sslbs09.github.io/suzuran-pet/">官网 ↗</a></nav><p>完整版请联系 <a href="mailto:1598184627@qq.com">1598184627@qq.com</a></p></div>
-    </footer>
-  </div>
+
+        <div class="download-notes">
+          <p><span class="note-mark">!</span> GitHub 单文件上限为 2 GB，因此完整版通过邮箱获取。完整版与轻量版的聊天功能一致，差别只在语音引擎。</p>
+          <p><span class="note-mark">!</span> 首次运行若被 Windows SmartScreen 拦截：点「更多信息」→「仍要运行」。程序未购买微软商业签名证书。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section start" id="guides" aria-labelledby="guides-title">
+      <div class="shell">
+        <div class="start-head">
+          <p class="section-kicker"><span>05</span> FIRST NIGHT / FIELD MANUAL</p>
+          <h2 id="guides-title">第一次见她，<br /><em>从这里开始。</em></h2>
+          <p>不用先研究所有功能。下载、解压、填一个 Key，再和她说一句话，就够了。</p>
+        </div>
+
+        <ol class="steps">
+          <li class="step reveal">
+            <span class="step-no">01</span>
+            <div class="step-body">
+              <h3>下载并解压</h3>
+              <p>选择轻量版或完整版，解压整个文件夹。不要把 exe 单独拖出来运行，也不要把整个包放进快满的磁盘。</p>
+            </div>
+            <span class="step-meta">DOWNLOAD / UNZIP</span>
+          </li>
+          <li class="step reveal">
+            <span class="step-no">02</span>
+            <div class="step-body">
+              <h3>启动，并同意使用条款</h3>
+              <p>双击解压后的 exe。第一次启动若出现 SmartScreen，点「更多信息」→「仍要运行」。同意条款后，她会出现在桌面上。</p>
+            </div>
+            <span class="step-meta">RUN / ACCEPT</span>
+          </li>
+          <li class="step reveal">
+            <span class="step-no">03</span>
+            <div class="step-body">
+              <h3>填一个 API Key</h3>
+              <p>托盘图标右键 → 设置 → 聊天设置，填入服务商、端点、Key 和模型名，测试连接后保存。没有 Key？API 指南里整理了免费渠道。</p>
+            </div>
+            <span class="step-meta">CONNECT / SAVE</span>
+          </li>
+          <li class="step reveal">
+            <span class="step-no">04</span>
+            <div class="step-body">
+              <h3>单击她，开始聊天</h3>
+              <p>单击小狐狸打开输入框，回车发送。第一次回复成功之后，剩下的就交给她和你自己慢慢摸索。</p>
+            </div>
+            <span class="step-meta">CLICK / TALK</span>
+          </li>
+        </ol>
+
+        <div class="guide-index" aria-label="使用指南">
+          <a class="guide-link" href="guide/开箱必读.html">
+            <span class="guide-no">A</span><span class="guide-name">开箱必读</span><span class="guide-desc">两分钟看懂第一次启动</span><span class="guide-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="guide-link" href="guide/使用说明.html">
+            <span class="guide-no">B</span><span class="guide-name">使用说明</span><span class="guide-desc">日常操作、设置与表情管理</span><span class="guide-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="guide-link" href="guide/API接入指南.html">
+            <span class="guide-no">C</span><span class="guide-name">API 接入指南</span><span class="guide-desc">从拿 Key 到发出第一句话</span><span class="guide-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="guide-link" href="guide/语音部署总览.html">
+            <span class="guide-no">D</span><span class="guide-name">语音部署</span><span class="guide-desc">系统语音、克隆音色与日语模式</span><span class="guide-arrow" aria-hidden="true">↗</span>
+          </a>
+        </div>
+
+        <div class="disclosure">
+          <p><b>在下载之前，需要知道：</b>这是《明日方舟》角色苏苏洛的同人二创项目，非商业目的，与鹰角网络无关；角色版权归原作者及鹰角网络所有。项目源码以 BUSL-1.1 许可发布，禁止商用。</p>
+          <p>聊天回复来自你自配的第三方模型服务，程序本身不内置 AI 模型。遇到问题可先查内置文档或 <a href="https://github.com/sslbs09/suzuran-pet/issues" target="_blank" rel="noopener">GitHub Issues</a>。</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="shell footer-top">
+      <div class="footer-wordmark" aria-hidden="true">SUSURRO</div>
+      <div class="footer-cta">
+        <p>她会记得你回来过。</p>
+        <a class="button button-light" href="#download">下载 Windows 版 <span aria-hidden="true">↘</span></a>
+      </div>
+    </div>
+
+    <div class="shell footer-grid">
+      <div class="footer-brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none">
+            <path d="M13 4h6v9h9v6h-9v9h-6v-9H4v-6h9V4Z" fill="currentColor"/>
+          </svg>
+        </span>
+        <p>苏苏洛桌宠<br /><span>Windows desktop resident</span></p>
+      </div>
+      <nav class="footer-links" aria-label="页脚导航">
+        <a href="https://github.com/sslbs09/suzuran-pet" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/sslbs09/suzuran-pet/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/sslbs09/suzuran-pet/issues" target="_blank" rel="noopener">Issues</a>
+        <a href="mailto:1598184627@qq.com">Contact</a>
+      </nav>
+      <p class="footer-legal">非商业同人作品 / 与鹰角网络无关<br />BUSL-1.1 · <span data-year>2026</span></p>
+    </div>
+  </footer>
+
+  <div class="heart-layer" aria-hidden="true" data-heart-layer></div>
+  <div class="toast" role="status" aria-live="polite" data-toast></div>
 </body>
 </html>
